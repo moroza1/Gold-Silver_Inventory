@@ -1,0 +1,135 @@
+version: "2"
+type: frontend
+tech_stack:
+  - TypeScript
+  - React
+  - Vite
+  - TailwindCSS
+routes:
+  - path: /
+    file: src/App.tsx
+    auth_required: false
+    description: Login page (default route)
+  - path: /dashboard
+    file: src/App.tsx
+    auth_required: true
+    description: Treasury Dashboard with summary metrics
+  - path: /spatial-map
+    file: src/App.tsx
+    auth_required: true
+    description: Spatial coordinate map for vaults
+  - path: /procurement
+    file: src/App.tsx
+    auth_required: true
+    description: Maker/Checker gold bar procurement and tracking
+  - path: /transfers
+    file: src/App.tsx
+    auth_required: true
+    description: Maker/Checker inventory transfers between vaults
+  - path: /reservations
+    file: src/App.tsx
+    auth_required: true
+    description: Pessimistic inventory reservations
+  - path: /custody
+    file: src/App.tsx
+    auth_required: true
+    description: Customer custody management and bar tracking
+  - path: /withdrawals
+    file: src/App.tsx
+    auth_required: true
+    description: Customer gold bar withdrawals
+  - path: /stocktake
+    file: src/App.tsx
+    auth_required: true
+    description: Inventory stocktake and audits
+  - path: /reports
+    file: src/App.tsx
+    auth_required: true
+    description: Valuation and stock reports
+  - path: /copilot
+    file: src/App.tsx
+    auth_required: true
+    description: AI Copilot Natural Language Query
+  - path: /settings
+    file: src/App.tsx
+    auth_required: true
+    description: System Settings
+  - path: /admin
+    file: src/App.tsx
+    auth_required: true
+    description: Admin setup (Users, Groups, Permissions)
+features:
+  - name: User Authentication
+    description: Login with credentials matching mock Active Directory users
+    files:
+      - src/App.tsx
+    entry_route: /
+    user_interactions:
+      - Fill username input
+      - Fill password input
+      - Select language (English/Arabic)
+      - Click Sign In button
+      - View validation errors or redirect to dashboard
+    api_calls:
+      - method: POST
+        endpoint: /api/auth/login
+    auth_required: false
+
+  - name: Spatial Vault Map
+    description: Interactive visualization of vault zones, shelves, and slots
+    files:
+      - src/App.tsx
+    entry_route: /spatial-map
+    user_interactions:
+      - View vault zones grid
+      - Select a zone to view shelves
+      - Select a shelf to view slots
+      - Click slot to view bar inventory details
+    api_calls:
+      - method: GET
+        endpoint: /api/inventory/spatial-map
+    auth_required: true
+
+  - name: Procurement workflow
+    description: Create and check precious metals procurement transactions
+    files:
+      - src/App.tsx
+    entry_route: /procurement
+    user_interactions:
+      - Click "New Procurement Order" (Maker)
+      - Fill supplier, bar quantity, metal type (gold/silver), purity, weight, serial numbers
+      - Submit for verification
+      - Click "Approve/Reject" (Checker) on pending procurement requests
+    api_calls:
+      - method: GET
+        endpoint: /api/inventory/procurement
+      - method: POST
+        endpoint: /api/inventory/procurement
+      - method: POST
+        endpoint: /api/inventory/procurement/approve
+      - method: POST
+        endpoint: /api/inventory/procurement/reject
+    auth_required: true
+
+  - name: Inventory Transfers
+    description: Transfer bars between vaults with Maker-Checker verification
+    files:
+      - src/App.tsx
+    entry_route: /transfers
+    user_interactions:
+      - Click "New Transfer Request" (Maker)
+      - Select source vault, destination vault, and bars to transfer
+      - Submit for approval
+      - Click "Approve/Reject" (Checker) on pending transfer requests
+    api_calls:
+      - method: GET
+        endpoint: /api/inventory/transfers
+      - method: POST
+        endpoint: /api/inventory/transfers
+      - method: POST
+        endpoint: /api/inventory/transfers/approve
+      - method: POST
+        endpoint: /api/inventory/transfers/reject
+    auth_required: true
+
+known_limitations: []

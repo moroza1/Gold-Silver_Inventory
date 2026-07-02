@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="PMIMS.Application/PMIMS.Application.csproj" />
+  <Project Path="PMIMS.Domain/PMIMS.Domain.csproj" />
+  <Project Path="PMIMS.Infrastructure/PMIMS.Infrastructure.csproj" />
+  <Project Path="PMIMS.Tests/PMIMS.Tests.csproj" />
+  <Project Path="PMIMS.WebAPI/PMIMS.WebAPI.csproj" />
+</Solution>

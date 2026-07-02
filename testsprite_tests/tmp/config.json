@@ -1,0 +1,19 @@
+{
+  "status": "commited",
+  "type": "frontend",
+  "serverMode": "development",
+  "localEndpoint": "http://localhost:5173/",
+  "loginUser": "system-admin",
+  "loginPassword": "Password123",
+  "executionArgs": {
+    "projectName": "Gold2",
+    "projectPath": "d:\\Projects\\Gold2",
+    "testIds": [],
+    "additionalInstruction": "",
+    "serverMode": "development",
+    "envs": {
+      "API_KEY": "sk-user-dnkTUTWFIUSlthV-VdbsU3UEFVvktfi4sjKvHT3M1KZlOOU384bgWFTS6TAUqBhoCOHsD-YCjQA0WjGBklVsD9w0DhksAiPZeI5OMGF8tF7NoggXnzfhvd_4x70RwihdWI4"
+    }
+  },
+  "serverPort": 58139
+}

@@ -1,0 +1,39 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v10.0",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v10.0": {
+      "PMIMS.Application/1.0.0": {
+        "dependencies": {
+          "PMIMS.Domain": "1.0.0"
+        },
+        "runtime": {
+          "PMIMS.Application.dll": {}
+        }
+      },
+      "PMIMS.Domain/1.0.0": {
+        "runtime": {
+          "PMIMS.Domain.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
+      }
+    }
+  },
+  "libraries": {
+    "PMIMS.Application/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "PMIMS.Domain/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    }
+  }
+}

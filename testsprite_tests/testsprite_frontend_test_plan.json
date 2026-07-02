@@ -1,0 +1,1338 @@
+[
+  {
+    "id": "TC001",
+    "title": "Sign in and reach the dashboard",
+    "description": "This verifies a user can sign in with valid mock credentials and land on the treasury dashboard with the expected overview available.",
+    "category": "User Authentication",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the username field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Select the English interface language"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the treasury dashboard is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify stock summary and pending authorization information are displayed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC002",
+    "title": "Create a procurement order and submit it for approval",
+    "description": "A maker can create a procurement order with required bar details and submit it so it appears in the pending procurement list.",
+    "category": "Procurement Workflow",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the username field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "action",
+        "description": "Navigate to /procurement"
+      },
+      {
+        "type": "action",
+        "description": "Start a new procurement order"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the supplier details"
+      },
+      {
+        "type": "action",
+        "description": "Fill in a valid bar quantity"
+      },
+      {
+        "type": "action",
+        "description": "Select a metal type"
+      },
+      {
+        "type": "action",
+        "description": "Fill in a valid purity value"
+      },
+      {
+        "type": "action",
+        "description": "Fill in a valid weight"
+      },
+      {
+        "type": "action",
+        "description": "Fill in serial numbers"
+      },
+      {
+        "type": "action",
+        "description": "Submit the order for verification"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the procurement request is listed as pending"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the procurement order status indicates it is awaiting approval"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC003",
+    "title": "Review dashboard stock and pending authorizations after sign-in",
+    "description": "This verifies a signed-in user can open the dashboard and review the core stock summary and pending authorization counts.",
+    "category": "Treasury Dashboard",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the username field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Select the English interface language"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "action",
+        "description": "Click the dashboard navigation link"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify stock summary metrics are displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify pending authorization counts are displayed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC004",
+    "title": "Create an inventory transfer and submit it for approval",
+    "description": "A maker can create a transfer between vaults with selected bars and submit it so it appears in the pending transfers list.",
+    "category": "Inventory Transfers",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the username field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "action",
+        "description": "Navigate to /transfers"
+      },
+      {
+        "type": "action",
+        "description": "Start a new transfer request"
+      },
+      {
+        "type": "action",
+        "description": "Select a source vault"
+      },
+      {
+        "type": "action",
+        "description": "Select a destination vault"
+      },
+      {
+        "type": "action",
+        "description": "Select bars to transfer"
+      },
+      {
+        "type": "action",
+        "description": "Submit the request for approval"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the transfer request is listed as pending"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the transfer status indicates it is awaiting approval"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC005",
+    "title": "Approve a pending procurement order",
+    "description": "A checker can open a pending procurement request and approve it so the request status is updated.",
+    "category": "Procurement Workflow",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the username field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "action",
+        "description": "Navigate to /procurement"
+      },
+      {
+        "type": "action",
+        "description": "Open a pending procurement request"
+      },
+      {
+        "type": "action",
+        "description": "Approve the request"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the procurement status is updated to approved"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the approved procurement is no longer shown as pending"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC006",
+    "title": "Approve a pending inventory transfer",
+    "description": "A checker can open a pending transfer request and approve it so the transfer status is updated.",
+    "category": "Inventory Transfers",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the username field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "action",
+        "description": "Navigate to /transfers"
+      },
+      {
+        "type": "action",
+        "description": "Open a pending transfer request"
+      },
+      {
+        "type": "action",
+        "description": "Approve the request"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the transfer status is updated to approved"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the approved transfer is no longer shown as pending"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC007",
+    "title": "Sign in with Arabic selected before entering the app",
+    "description": "This verifies a user can switch to Arabic on the sign-in screen and still enter the application successfully.",
+    "category": "User Authentication",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the username field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Select the Arabic interface language"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the treasury dashboard is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the selected interface language is reflected in the application"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC008",
+    "title": "Drill from vault zones to bar details",
+    "description": "This verifies a user can navigate the spatial vault map from zone to shelf to slot and open serialized bar inventory details.",
+    "category": "Spatial Vault Map",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the username field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "action",
+        "description": "Click the spatial vault map navigation link"
+      },
+      {
+        "type": "action",
+        "description": "Select a vault zone"
+      },
+      {
+        "type": "action",
+        "description": "Select a shelf within the zone"
+      },
+      {
+        "type": "action",
+        "description": "Select a slot within the shelf"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify bar inventory details are displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the selected inventory location context is displayed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC009",
+    "title": "Reject a pending procurement order",
+    "description": "A checker can open a pending procurement request and reject it so the request status is updated.",
+    "category": "Procurement Workflow",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the username field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "action",
+        "description": "Navigate to /procurement"
+      },
+      {
+        "type": "action",
+        "description": "Open a pending procurement request"
+      },
+      {
+        "type": "action",
+        "description": "Reject the request"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the procurement status is updated to rejected"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the rejected procurement is no longer shown as pending"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC010",
+    "title": "Create a customer withdrawal request",
+    "description": "A user can start a withdrawal, choose customer bars, submit it, and see the withdrawal recorded.",
+    "category": "Customer Withdrawals",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the login credentials with {{LOGIN_USER}} and {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "action",
+        "description": "Navigate to /withdrawals"
+      },
+      {
+        "type": "action",
+        "description": "Start a new withdrawal request"
+      },
+      {
+        "type": "action",
+        "description": "Select a customer for the withdrawal"
+      },
+      {
+        "type": "action",
+        "description": "Select bars to withdraw"
+      },
+      {
+        "type": "action",
+        "description": "Submit the withdrawal request"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the withdrawal is recorded"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the pending or created withdrawal is visible"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC011",
+    "title": "Reject a pending inventory transfer",
+    "description": "A checker can open a pending transfer request and reject it so the transfer status is updated.",
+    "category": "Inventory Transfers",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the username field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "action",
+        "description": "Navigate to /transfers"
+      },
+      {
+        "type": "action",
+        "description": "Open a pending transfer request"
+      },
+      {
+        "type": "action",
+        "description": "Reject the request"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the transfer status is updated to rejected"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the rejected transfer is no longer shown as pending"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC012",
+    "title": "Browse shelves and slots within a vault zone",
+    "description": "This verifies a user can move through the map hierarchy and see the available shelves and slots for a chosen zone.",
+    "category": "Spatial Vault Map",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the username field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "action",
+        "description": "Click the spatial vault map navigation link"
+      },
+      {
+        "type": "action",
+        "description": "Select a vault zone"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify shelves for the selected zone are displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify slots are not yet displayed for the zone"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC013",
+    "title": "Drill down the spatial vault map to a serialized bar record",
+    "description": "A user can navigate the spatial vault map from zone to shelf to slot and open a serialized bar record for review.",
+    "category": "Spatial Vault Map",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the username field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "action",
+        "description": "Navigate to /spatial-map"
+      },
+      {
+        "type": "action",
+        "description": "Select a vault zone"
+      },
+      {
+        "type": "action",
+        "description": "Select a shelf within the zone"
+      },
+      {
+        "type": "action",
+        "description": "Select a slot within the shelf"
+      },
+      {
+        "type": "action",
+        "description": "Open the bar inventory details"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify serialized bar details are displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the selected location context is displayed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC014",
+    "title": "Create and save an access control entry",
+    "description": "An administrator can create or edit an access control entry and save the administrative changes.",
+    "category": "Admin Setup",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the login credentials for the required role"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "action",
+        "description": "Navigate to /admin"
+      },
+      {
+        "type": "action",
+        "description": "Create or edit an access control entry"
+      },
+      {
+        "type": "action",
+        "description": "Save the changes"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the administrative update is reflected"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC015",
+    "title": "Review and update a custody record",
+    "description": "A custody user can open a customer custody record, review the associated bars, and save an update to the custody information.",
+    "category": "Custody Management",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the username field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "action",
+        "description": "Navigate to /custody"
+      },
+      {
+        "type": "action",
+        "description": "Open a custody record"
+      },
+      {
+        "type": "action",
+        "description": "Review the associated bar tracking details"
+      },
+      {
+        "type": "action",
+        "description": "Update the custody information"
+      },
+      {
+        "type": "action",
+        "description": "Save the custody changes"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the custody record shows the updated information"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the bar tracking details remain visible for the record"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC016",
+    "title": "Create and complete a stocktake session",
+    "description": "A user can start a stocktake, record counted bars, complete the session, and see it marked as completed.",
+    "category": "Stocktake and Audits",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the login credentials with {{LOGIN_USER}} and {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "action",
+        "description": "Navigate to /stocktake"
+      },
+      {
+        "type": "action",
+        "description": "Start a stocktake session"
+      },
+      {
+        "type": "action",
+        "description": "Review counted bars by location"
+      },
+      {
+        "type": "action",
+        "description": "Record the audit results"
+      },
+      {
+        "type": "action",
+        "description": "Complete the stocktake"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the stocktake is marked as completed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the completed stocktake is visible in the session list"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC017",
+    "title": "Update a system setting and save it",
+    "description": "An authorized user can change an application setting and see the saved configuration reflected on the page.",
+    "category": "System Settings",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the login credentials for the required role"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "action",
+        "description": "Navigate to /settings"
+      },
+      {
+        "type": "action",
+        "description": "Change a configurable setting"
+      },
+      {
+        "type": "action",
+        "description": "Save the changes"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the updated setting is reflected"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC018",
+    "title": "Review a valuation report and export it",
+    "description": "A user can open a valuation report, review inventory value details, and export the report data.",
+    "category": "Reporting",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the login credentials with {{LOGIN_USER}} and {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "action",
+        "description": "Navigate to /reports"
+      },
+      {
+        "type": "action",
+        "description": "Open a valuation report"
+      },
+      {
+        "type": "action",
+        "description": "Review inventory value details"
+      },
+      {
+        "type": "action",
+        "description": "Export the report data"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the valuation report details are displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify an export confirmation or export action result is visible"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC019",
+    "title": "Review admin access control data",
+    "description": "An administrator can open the admin page and review existing users, groups, and permissions.",
+    "category": "Admin Setup",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the login credentials for the required role"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "action",
+        "description": "Navigate to /admin"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify users, groups, and permissions are displayed"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC020",
+    "title": "Keep procurement submission blocked until required details are entered",
+    "description": "A maker cannot submit a procurement order until the required supplier and bar fields are completed, and validation feedback remains visible.",
+    "category": "Procurement Workflow",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the username field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "action",
+        "description": "Navigate to /procurement"
+      },
+      {
+        "type": "action",
+        "description": "Start a new procurement order"
+      },
+      {
+        "type": "action",
+        "description": "Submit the order for verification"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify validation feedback is visible for the missing procurement details"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the procurement order is not added to pending items"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC021",
+    "title": "Review a stock report and its movement and balance details",
+    "description": "A user can open a stock report and verify movement and balance information for treasury review.",
+    "category": "Reporting",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the login credentials with {{LOGIN_USER}} and {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "action",
+        "description": "Navigate to /reports"
+      },
+      {
+        "type": "action",
+        "description": "Open a stock report"
+      },
+      {
+        "type": "action",
+        "description": "Review stock movement details"
+      },
+      {
+        "type": "action",
+        "description": "Review stock balance details"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the stock report details are displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify movement and balance information are visible"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC022",
+    "title": "Keep transfer submission blocked until source destination and bars are selected",
+    "description": "A maker cannot submit a transfer request until the required vault and bar selections are completed, and validation feedback remains visible.",
+    "category": "Inventory Transfers",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the username field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "action",
+        "description": "Navigate to /transfers"
+      },
+      {
+        "type": "action",
+        "description": "Start a new transfer request"
+      },
+      {
+        "type": "action",
+        "description": "Submit the request for approval"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify validation feedback is visible for the missing transfer details"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the transfer request is not added to pending items"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC023",
+    "title": "Ask the copilot a treasury question",
+    "description": "A user can submit a natural-language inventory question and receive a relevant copilot response.",
+    "category": "AI Copilot",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the login credentials for the required role"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "action",
+        "description": "Navigate to /copilot"
+      },
+      {
+        "type": "action",
+        "description": "Enter a natural-language question about inventory holdings"
+      },
+      {
+        "type": "action",
+        "description": "Submit the query"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify a copilot response is displayed"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC024",
+    "title": "Show validation feedback for invalid sign-in",
+    "description": "This verifies invalid credentials are rejected and the sign-in form shows validation feedback instead of entering the application.",
+    "category": "User Authentication",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the username field with invalid-user"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with invalid-password"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify validation errors are displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the dashboard is not displayed"
+      }
+    ],
+    "priority": "Low"
+  },
+  {
+    "id": "TC025",
+    "title": "Show an empty or unavailable map selection state",
+    "description": "This verifies the spatial map shows a clear empty or placeholder state when no deeper selection has been made yet.",
+    "category": "Spatial Vault Map",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the username field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "action",
+        "description": "Click the spatial vault map navigation link"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the default map overview is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify an empty or instructional selection state is displayed"
+      }
+    ],
+    "priority": "Low"
+  },
+  {
+    "id": "TC026",
+    "title": "Validate required fields when creating a withdrawal",
+    "description": "A user cannot submit a withdrawal with missing required details and sees validation feedback instead.",
+    "category": "Customer Withdrawals",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the login credentials with {{LOGIN_USER}} and {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "action",
+        "description": "Navigate to /withdrawals"
+      },
+      {
+        "type": "action",
+        "description": "Start a new withdrawal request"
+      },
+      {
+        "type": "action",
+        "description": "Submit the withdrawal request"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify validation errors are visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the withdrawal is not recorded"
+      }
+    ],
+    "priority": "Low"
+  },
+  {
+    "id": "TC027",
+    "title": "Review available settings before changing them",
+    "description": "A user can open the settings page and review the current configuration options before making changes.",
+    "category": "System Settings",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the login credentials for the required role"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "action",
+        "description": "Navigate to /settings"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify configuration options are displayed"
+      }
+    ],
+    "priority": "Low"
+  },
+  {
+    "id": "TC028",
+    "title": "Handle an incomplete admin entry",
+    "description": "An administrator sees validation feedback when attempting to save an incomplete access control entry.",
+    "category": "Admin Setup",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the login credentials for the required role"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "action",
+        "description": "Navigate to /admin"
+      },
+      {
+        "type": "action",
+        "description": "Attempt to save an access control entry without completing required inputs"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify an administrative validation error is visible"
+      }
+    ],
+    "priority": "Low"
+  },
+  {
+    "id": "TC029",
+    "title": "Show the reports empty state when no report is selected",
+    "description": "A user opening reports without choosing a report sees an empty or placeholder state and can select a report type.",
+    "category": "Reporting",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the login credentials with {{LOGIN_USER}} and {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "action",
+        "description": "Navigate to /reports"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify an empty or placeholder state is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify report selection options are visible"
+      }
+    ],
+    "priority": "Low"
+  },
+  {
+    "id": "TC030",
+    "title": "Handle an invalid settings change gracefully",
+    "description": "A user sees validation feedback when attempting to save an incomplete or invalid settings change.",
+    "category": "System Settings",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the login credentials for the required role"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "action",
+        "description": "Navigate to /settings"
+      },
+      {
+        "type": "action",
+        "description": "Attempt to save a configuration change without completing required inputs"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify a settings validation error is visible"
+      }
+    ],
+    "priority": "Low"
+  },
+  {
+    "id": "TC031",
+    "title": "Show the stocktake empty state when no session is active",
+    "description": "A user opening stocktake without an active session sees the empty or starting state and can begin a stocktake.",
+    "category": "Stocktake and Audits",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the login credentials with {{LOGIN_USER}} and {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "action",
+        "description": "Navigate to /stocktake"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify an empty or starting state is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the option to start a stocktake is visible"
+      }
+    ],
+    "priority": "Low"
+  },
+  {
+    "id": "TC032",
+    "title": "View an empty copilot conversation state",
+    "description": "A user sees an empty or initial state on the copilot page before asking any question.",
+    "category": "AI Copilot",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the login credentials for the required role"
+      },
+      {
+        "type": "action",
+        "description": "Submit the sign-in form"
+      },
+      {
+        "type": "action",
+        "description": "Navigate to /copilot"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify an empty copilot state is displayed"
+      }
+    ],
+    "priority": "Low"
+  }
+]
