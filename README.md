@@ -1,6 +1,6 @@
-# Kuwait Finance House (KFH) - Precious Metals Inventory Management System (PMIMS)
+# My Work - Precious Metals Inventory Management System (PMIMS)
 
-PMIMS is a production-grade, secure, and Sharia-compliant inventory ledger and tracking platform designed for the Treasury Operations and Precious Metals division of Kuwait Finance House (KFH). The platform replaces legacy spreadsheet-based operations with a serialized database ledger, vault spatial coordinate mapping, and a zero-trust Maker-Checker authorization engine.
+PMIMS is a production-grade, secure, and Sharia-compliant inventory ledger and tracking platform designed for the Treasury Operations and Precious Metals division of My Work. The platform replaces legacy spreadsheet-based operations with a serialized database ledger, vault spatial coordinate mapping, and a zero-trust Maker-Checker authorization engine.
 
 ---
 
