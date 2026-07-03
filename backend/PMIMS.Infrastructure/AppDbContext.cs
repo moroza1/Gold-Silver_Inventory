@@ -1,11 +1,71 @@
 using Microsoft.EntityFrameworkCore;
+using PMIMS.Application;
 using PMIMS.Domain;
 
 namespace PMIMS.Infrastructure;
 
 public class AppDbContext : DbContext
 {
-    public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
+    // Optional/nullable (default null) so every existing `new AppDbContext(options)` call
+    // site -- test fixtures included -- keeps compiling unchanged. When resolved through DI
+    // (Program.cs), the real-time monitoring notifier is supplied automatically.
+    private readonly IInventoryMonitoringNotifier? _monitoringNotifier;
+
+    public AppDbContext(DbContextOptions<AppDbContext> options, IInventoryMonitoringNotifier? monitoringNotifier = null) : base(options)
+    {
+        _monitoringNotifier = monitoringNotifier;
+    }
+
+    // =========================================================================
+    // Real-Time Inventory Monitoring
+    // ------------------------------------------------------------------------
+    // Single choke point for pushing live movement/balance-change events, instead
+    // of instrumenting every call site in InventoryRepository.cs that creates an
+    // InventoryTransaction or updates an InventoryBalance (there are many, across
+    // intake, transfers, withdrawals, sales, GDM dispense, and reconciliation).
+    // Every one of those call sites already ends in `await _dbContext.SaveChangesAsync()`,
+    // so capturing newly-tracked entities here before the save, then notifying
+    // after, covers all of them for free and can't drift out of sync as new
+    // movement types are added later.
+    // =========================================================================
+    public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        var newTransactions = _monitoringNotifier == null
+            ? null
+            : ChangeTracker.Entries<InventoryTransaction>()
+                .Where(e => e.State == EntityState.Added)
+                .Select(e => e.Entity)
+                .ToList();
+
+        var changedBalances = _monitoringNotifier == null
+            ? null
+            : ChangeTracker.Entries<InventoryBalance>()
+                .Where(e => e.State == EntityState.Added || e.State == EntityState.Modified)
+                .Select(e => e.Entity)
+                .ToList();
+
+        int result = await base.SaveChangesAsync(cancellationToken);
+
+        if (_monitoringNotifier != null)
+        {
+            if (newTransactions != null)
+            {
+                foreach (var tx in newTransactions)
+                {
+                    await _monitoringNotifier.NotifyMovementAsync(tx);
+                }
+            }
+            if (changedBalances != null)
+            {
+                foreach (var balance in changedBalances)
+                {
+                    await _monitoringNotifier.NotifyBalanceChangedAsync(balance);
+                }
+            }
+        }
+
+        return result;
+    }
 
     public DbSet<StatusCodes> StatusCodes { get; set; } = null!;
     public DbSet<ReasonCodes> ReasonCodes { get; set; } = null!;
@@ -58,6 +118,32 @@ public class AppDbContext : DbContext
     public DbSet<ReorderThreshold> ReorderThresholds { get; set; } = null!;
     public DbSet<BranchTransfer> BranchTransfers { get; set; } = null!;
     public DbSet<PendingIntake> PendingIntakes { get; set; } = null!;
+
+    // FIM Integration Module
+    public DbSet<FimUserAttribute> FimUserAttributes { get; set; } = null!;
+    public DbSet<FimRight> FimRights { get; set; } = null!;
+    public DbSet<FimUserRight> FimUserRights { get; set; } = null!;
+    public DbSet<FimSyncLog> FimSyncLogs { get; set; } = null!;
+
+    // Dynamic Business Validation Rules Engine
+    public DbSet<BusinessRule> BusinessRules { get; set; } = null!;
+    public DbSet<BusinessRuleEvaluation> BusinessRuleEvaluations { get; set; } = null!;
+
+    // Automatic Management Email Notifications
+    public DbSet<NotificationSubscription> NotificationSubscriptions { get; set; } = null!;
+    public DbSet<NotificationDelivery> NotificationDeliveries { get; set; } = null!;
+
+    // KFH Existing Monitoring Tool Integration
+    public DbSet<MonitoringEvent> MonitoringEvents { get; set; } = null!;
+    public DbSet<MonitoringAlertRoute> MonitoringAlertRoutes { get; set; } = null!;
+
+    // LBMA Chain-of-Custody & IFRS Valuation Disclosures
+    public DbSet<ChainOfCustodyEvent> ChainOfCustodyEvents { get; set; } = null!;
+    public DbSet<IfrsValuationDisclosure> IfrsValuationDisclosures { get; set; } = null!;
+
+    // Gold Dispensing Machine (GDM) Integration -- scalability hook
+    public DbSet<DispensingDevice> DispensingDevices { get; set; } = null!;
+    public DbSet<DispenseTransaction> DispenseTransactions { get; set; } = null!;
 
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -560,8 +646,150 @@ public class AppDbContext : DbContext
         {
             entity.HasKey(e => e.PendingIntakeId);
             entity.ToTable("pending_intakes");
-            entity.HasOne(e => e.PurchaseOrder).WithMany().HasForeignKey(e => e.PoId);
+            // Optional now -- a CUSTOMER-sourced receipt (buyback/custody deposit/return) has
+            // no Purchase Order at all. SUPPLIER receipts still always set PoId.
+            entity.HasOne(e => e.PurchaseOrder).WithMany().HasForeignKey(e => e.PoId).IsRequired(false);
             entity.HasOne(e => e.Location).WithMany().HasForeignKey(e => e.LocationId);
+            entity.HasOne(e => e.Customer).WithMany().HasForeignKey(e => e.CustomerId).IsRequired(false);
+        });
+
+        // ============================================================
+        // FIM Integration Module Configuration
+        // ============================================================
+
+        // FimUserAttribute Configuration
+        modelBuilder.Entity<FimUserAttribute>(entity =>
+        {
+            entity.HasKey(e => e.AttributeId);
+            entity.ToTable("fim_user_attributes");
+            entity.HasIndex(e => new { e.UserId, e.AttributeName }).IsUnique();
+            entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // FimRight Configuration
+        modelBuilder.Entity<FimRight>(entity =>
+        {
+            entity.HasKey(e => e.RightId);
+            entity.ToTable("fim_rights");
+            entity.HasIndex(e => e.RightCode).IsUnique();
+        });
+
+        // FimUserRight Configuration
+        modelBuilder.Entity<FimUserRight>(entity =>
+        {
+            entity.HasKey(e => e.UserRightId);
+            entity.ToTable("fim_user_rights");
+            entity.HasIndex(e => new { e.UserId, e.RightId }).IsUnique();
+            entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Right).WithMany().HasForeignKey(e => e.RightId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // FimSyncLog Configuration
+        modelBuilder.Entity<FimSyncLog>(entity =>
+        {
+            entity.HasKey(e => e.SyncLogId);
+            entity.ToTable("fim_sync_logs");
+            entity.HasIndex(e => e.ChangedAt);
+        });
+
+        // ============================================================
+        // Dynamic Business Validation Rules Engine Configuration
+        // ============================================================
+
+        modelBuilder.Entity<BusinessRule>(entity =>
+        {
+            entity.HasKey(e => e.RuleId);
+            entity.ToTable("business_rules");
+            entity.HasIndex(e => new { e.RuleCode, e.Version }).IsUnique();
+            entity.HasIndex(e => e.RuleType);
+        });
+
+        modelBuilder.Entity<BusinessRuleEvaluation>(entity =>
+        {
+            entity.HasKey(e => e.EvaluationId);
+            entity.ToTable("business_rule_evaluations");
+            entity.HasOne(e => e.Rule).WithMany().HasForeignKey(e => e.RuleId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ============================================================
+        // Automatic Management Email Notifications Configuration
+        // ============================================================
+
+        modelBuilder.Entity<NotificationSubscription>(entity =>
+        {
+            entity.HasKey(e => e.SubscriptionId);
+            entity.ToTable("notification_subscriptions");
+        });
+
+        modelBuilder.Entity<NotificationDelivery>(entity =>
+        {
+            entity.HasKey(e => e.DeliveryId);
+            entity.ToTable("notification_deliveries");
+            entity.HasOne(e => e.Subscription).WithMany().HasForeignKey(e => e.SubscriptionId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ============================================================
+        // KFH Existing Monitoring Tool Integration Configuration
+        // ============================================================
+
+        modelBuilder.Entity<MonitoringEvent>(entity =>
+        {
+            entity.HasKey(e => e.EventId);
+            entity.ToTable("monitoring_events");
+            entity.HasIndex(e => e.OccurredAt);
+        });
+
+        modelBuilder.Entity<MonitoringAlertRoute>(entity =>
+        {
+            entity.HasKey(e => e.RouteId);
+            entity.ToTable("monitoring_alert_routes");
+        });
+
+        // ============================================================
+        // LBMA Chain-of-Custody Configuration
+        // ============================================================
+        modelBuilder.Entity<ChainOfCustodyEvent>(entity =>
+        {
+            entity.HasKey(e => e.CustodyEventId);
+            entity.ToTable("chain_of_custody_events");
+            entity.HasIndex(e => e.ItemId);
+            entity.HasOne(e => e.Item).WithMany().HasForeignKey(e => e.ItemId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Location).WithMany().HasForeignKey(e => e.LocationId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ============================================================
+        // IFRS Valuation Disclosure Configuration
+        // ============================================================
+        modelBuilder.Entity<IfrsValuationDisclosure>(entity =>
+        {
+            entity.HasKey(e => e.DisclosureId);
+            entity.ToTable("ifrs_valuation_disclosures");
+            entity.HasIndex(e => e.SnapshotDate);
+            entity.HasOne(e => e.MetalType).WithMany().HasForeignKey(e => e.MetalTypeId);
+        });
+
+        // ============================================================
+        // Gold Dispensing Machine (GDM) Integration Configuration
+        // ============================================================
+        modelBuilder.Entity<DispensingDevice>(entity =>
+        {
+            entity.HasKey(e => e.DeviceId);
+            entity.ToTable("dispensing_devices");
+            entity.HasIndex(e => e.DeviceCode).IsUnique();
+            entity.HasOne(e => e.Location).WithMany().HasForeignKey(e => e.LocationId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<DispenseTransaction>(entity =>
+        {
+            entity.HasKey(e => e.DispenseId);
+            entity.ToTable("dispense_transactions");
+            entity.HasIndex(e => e.IdempotencyKey).IsUnique();
+            entity.HasOne(e => e.Device).WithMany().HasForeignKey(e => e.DeviceId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Product).WithMany().HasForeignKey(e => e.ProductId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Item).WithMany().HasForeignKey(e => e.ItemId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Customer).WithMany().HasForeignKey(e => e.CustomerId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Channel).WithMany().HasForeignKey(e => e.ChannelId).OnDelete(DeleteBehavior.Restrict);
         });
     }
 

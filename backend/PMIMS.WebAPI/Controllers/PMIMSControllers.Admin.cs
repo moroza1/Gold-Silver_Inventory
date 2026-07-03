@@ -277,6 +277,10 @@ public partial class PMIMSControllers
         return Ok(alerts);
     }
 
+    // Was missing [Authorize] entirely -- anonymous callers could create draft purchase
+    // orders. This creates a PurchaseOrder record the same way POST /api/purchase-orders
+    // does, so gate it with the same policy (Maker holds FULL on purchase_orders).
+    [Authorize(Policy = "purchase_orders.write")]
     [HttpPost("inventory/low-stock-alerts/{thresholdId}/draft-po")]
     public async Task<IActionResult> CreateDraftPO(int thresholdId, [FromBody] DraftPORequest req)
     {

@@ -184,9 +184,147 @@ public class InventoryItem
     public string StatusCode { get; set; } = "READY";
     public byte[] RowVersion { get; set; } = null!; // Concurrency lock
 
+    // ============================================================
+    // LBMA Good Delivery attributes (per-bar) -- captured at intake so every
+    // serialized bar carries the refiner/assay/fineness/hallmark data the LBMA
+    // Good Delivery List rules require for physical settlement and audit.
+    // Nullable/optional so existing rows (seeded or intake'd before this field
+    // existed) don't need a backfill migration -- GetLbmaComplianceReportAsync
+    // (IInventoryRepository) surfaces bars missing this data as a gap to close,
+    // rather than silently treating them as compliant.
+    // ============================================================
+    public string? RefinerName { get; set; }
+    public string? RefinerLbmaId { get; set; }          // LBMA-assigned Good Delivery refiner reference
+    public string? AssayCertificateNumber { get; set; }
+    public decimal? FinenessPpt { get; set; }            // Fineness in parts-per-thousand, e.g. 999.9
+    public string? HallmarkNumber { get; set; }
+    // NOT_ASSESSED (no data yet) | GDL_LISTED (refiner is on the current LBMA
+    // Good Delivery List) | NOT_LISTED (assessed and found not GDL-eligible)
+    public string GoodDeliveryStatus { get; set; } = "NOT_ASSESSED";
+
     public MetalProduct? Product { get; set; }
     public InventoryLot? Lot { get; set; }
     public InventoryLocation? Location { get; set; }
+}
+
+// ============================================================
+// LBMA Chain-of-Custody Log
+// ------------------------------------------------------------
+// Append-only ledger of every custody-relevant event for a serialized bar
+// (received, assayed, transferred, reserved, sold, withdrawn, dispensed via a
+// Gold Dispensing Machine, quarantined). This is distinct from the general
+// AuditLog (which is about "who did what in the system") and from
+// InventoryTransaction (which is about ledger postings) -- ChainOfCustodyEvent
+// is the LBMA-facing physical-custody narrative for a single bar, suitable for
+// an examiner or auditor to read top-to-bottom for one SerialNumber.
+// ============================================================
+public class ChainOfCustodyEvent
+{
+    public int CustodyEventId { get; set; }
+    public int ItemId { get; set; }
+    // RECEIVED, ASSAYED, TRANSFERRED, RESERVED, SOLD, WITHDRAWN, DISPENSED_GDM, QUARANTINED, RELEASED
+    public string EventType { get; set; } = null!;
+    public int? LocationId { get; set; }
+    public string RecordedBy { get; set; } = null!;
+    public DateTime RecordedAt { get; set; } = DateTime.UtcNow;
+    public string? ReferenceNumber { get; set; } // PO number, transfer/withdrawal/dispense number, etc.
+    public string? Notes { get; set; }
+
+    public InventoryItem? Item { get; set; }
+    public InventoryLocation? Location { get; set; }
+}
+
+// ============================================================
+// IFRS Valuation Disclosure Snapshot
+// ------------------------------------------------------------
+// Point-in-time accounting disclosure record, computed alongside (not instead
+// of) the existing per-item /reports/valuation view. Captures the IAS 2
+// "lower of cost and net realizable value" test and an IFRS 13 fair-value
+// hierarchy classification for the live spot-price mark, per metal type, so
+// Finance can attach a reproducible snapshot to the period-end GL package
+// without re-deriving it from raw item rows later.
+// ============================================================
+public class IfrsValuationDisclosure
+{
+    public int DisclosureId { get; set; }
+    public DateTime SnapshotDate { get; set; } = DateTime.UtcNow;
+    public int MetalTypeId { get; set; }
+    public string Currency { get; set; } = "KWD";
+    public decimal TotalWeightGrams { get; set; }
+    // IAS 2 cost: weighted-average acquisition cost of on-hand inventory.
+    public decimal CostBasisTotal { get; set; }
+    // Estimated selling price less costs to sell (IAS 2 para 6/28-33). This
+    // implementation uses live bid rate as a proxy for NRV in absence of a
+    // separately configured selling-cost rate -- see gap-analysis doc.
+    public decimal NetRealizableValueTotal { get; set; }
+    // IFRS 13 fair value (mark-to-market at spot/ask).
+    public decimal FairValueTotal { get; set; }
+    // IFRS 13 fair value hierarchy: 1 = quoted price in active market (LBMA
+    // spot), 2 = observable inputs, 3 = unobservable inputs. Physical bullion
+    // priced off the LBMA/360T live feed is Level 1.
+    public int FairValueHierarchyLevel { get; set; } = 1;
+    public decimal LowerOfCostOrNrvTotal { get; set; }
+    public decimal ImpairmentLossRecognized { get; set; }
+    public string GeneratedBy { get; set; } = null!;
+    public DateTime GeneratedAt { get; set; } = DateTime.UtcNow;
+
+    public MetalType? MetalType { get; set; }
+}
+
+// ============================================================
+// Gold Dispensing Machine (GDM) Integration -- Scalability Hook
+// ------------------------------------------------------------
+// Domain.Enums.LocationType already reserves a "GDM" location kind; this is
+// the concrete integration surface for it. A DispensingDevice is a physical
+// machine bound to one InventoryLocation (its internal cassette/hopper,
+// modeled like any other vault/branch location so existing balance and
+// transaction machinery applies unchanged). DispenseTransaction reuses the
+// same allocate -> confirm/fail lifecycle already proven by ReservationRequest,
+// so a machine vendor integration is "call these endpoints" rather than a
+// core rework. See IInventoryRepository.RequestDispenseAsync /
+// CompleteDispenseAsync / FailDispenseAsync and docs/PERMISSIONS.md for the
+// new `dispensing` (operational) / `device_integration` (admin) modules.
+// ============================================================
+public class DispensingDevice
+{
+    public int DeviceId { get; set; }
+    public string DeviceCode { get; set; } = null!;
+    public string DeviceName { get; set; } = null!;
+    public int LocationId { get; set; } // the machine's own cassette, modeled as an InventoryLocation (LocationType.GDM)
+    public int BranchId { get; set; }
+    public string? Manufacturer { get; set; }
+    public string? Model { get; set; }
+    public string? ApiEndpoint { get; set; }
+    public string StatusCode { get; set; } = "OFFLINE"; // ACTIVE, OFFLINE, MAINTENANCE, DECOMMISSIONED
+    public DateTime? LastHeartbeatAt { get; set; }
+    public DateTime RegisteredAt { get; set; } = DateTime.UtcNow;
+    public string RegisteredBy { get; set; } = "SYSTEM";
+    public bool IsActive { get; set; } = true;
+
+    public InventoryLocation? Location { get; set; }
+    public Branch? Branch { get; set; }
+}
+
+public class DispenseTransaction
+{
+    public int DispenseId { get; set; }
+    public int DeviceId { get; set; }
+    public int ProductId { get; set; }
+    public int? ItemId { get; set; } // bound once an available serialized bar is allocated
+    public int? CustomerId { get; set; }
+    public int ChannelId { get; set; }
+    public string IdempotencyKey { get; set; } = null!;
+    public string StatusCode { get; set; } = "REQUESTED"; // REQUESTED, DISPENSED, FAILED, CANCELLED
+    public string InitiatedBy { get; set; } = null!;
+    public DateTime RequestedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? DispensedAt { get; set; }
+    public string? FailureReason { get; set; }
+
+    public DispensingDevice? Device { get; set; }
+    public MetalProduct? Product { get; set; }
+    public InventoryItem? Item { get; set; }
+    public Customer? Customer { get; set; }
+    public Channel? Channel { get; set; }
 }
 
 public class InventoryBalance
@@ -463,6 +601,118 @@ public class AuditLog
     public string ModuleName { get; set; } = null!;
     public string ActionDescription { get; set; } = null!;
     public string? SqlExecuted { get; set; }
+
+    // Enhanced Audit Trail UI (RFP item 6) -- optional, backward-compatible with every
+    // existing SaveAuditLogAsync call site. EntityType/EntityId support drill-down from a
+    // search result to the specific record it concerns; RowHash is a SHA-256 tamper-detection
+    // fingerprint computed over the row's other fields at insert time (see
+    // AuditExportService.ComputeRowHash) -- recomputed on read and compared, a mismatch means
+    // the row was altered in place after insert. Rows written before this column existed have
+    // RowHash == null and are reported as "Unverified (pre-dates hashing)", not a false tamper flag.
+    public string? EntityType { get; set; }
+    public string? EntityId { get; set; }
+    public string? RowHash { get; set; }
+}
+
+// ============================================================
+// Dynamic Business Validation Rules Engine (RFP item 5)
+// ------------------------------------------------------------
+// Rules are stored as a structured predicate tree (ExpressionJson), never as executable code,
+// so there is no code-injection surface: {"all":[{"field":"weightGrams","op":"lte","value":5000}]}
+// or {"any":[...]} with leaf nodes {"field","op","value"}. Supported ops: eq, neq, gt, gte, lt,
+// lte, in, between. See IRuleEngineService / RuleEngineService.
+//
+// Versioning is append-only: UpdateRuleAsync inserts a new row with the same RuleCode and
+// Version+1, and marks the previous version's IsActive=false ("superseded") rather than
+// mutating it in place -- so GetRuleVersionsAsync always has a real history to show.
+// ============================================================
+public class BusinessRule
+{
+    public int RuleId { get; set; }
+    public string RuleCode { get; set; } = null!;
+    public string RuleName { get; set; } = null!;
+    public string RuleType { get; set; } = null!; // TRANSFER_LIMIT, RECEIPT_VALIDATION, CUSTOMER_ELIGIBILITY, RATE_THRESHOLD, INVENTORY_CHECK
+    public string ExpressionJson { get; set; } = null!;
+    public string Severity { get; set; } = "BLOCK"; // BLOCK (fails the operation) | WARN (logged only)
+    public int Version { get; set; } = 1;
+    public bool IsActive { get; set; } = true;
+    public DateTime EffectiveFrom { get; set; } = DateTime.UtcNow;
+    public DateTime? EffectiveTo { get; set; }
+    public string CreatedBy { get; set; } = "SYSTEM";
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
+public class BusinessRuleEvaluation
+{
+    public int EvaluationId { get; set; }
+    public int RuleId { get; set; }
+    public string EntityType { get; set; } = null!;
+    public string EntityId { get; set; } = null!;
+    public string Result { get; set; } = null!; // PASS, FAIL, WARN
+    public DateTime EvaluatedAt { get; set; } = DateTime.UtcNow;
+    public string? ContextJson { get; set; }
+
+    public BusinessRule? Rule { get; set; }
+}
+
+// ============================================================
+// Automatic Management Email Notifications (RFP item 7)
+// ============================================================
+public class NotificationSubscription
+{
+    public int SubscriptionId { get; set; }
+    public string DistributionListEmail { get; set; } = null!;
+    // Cron-scheduled batch: INVENTORY_BALANCE, LOW_STOCK, HIGH_VALUE_MOVEMENT.
+    // Event-triggered (immediate, ScheduleCron unused): TRANSFER_COMPLETED, INVENTORY_DISCREPANCY.
+    public string ReportType { get; set; } = null!;
+    public string ScheduleCron { get; set; } = null!; // e.g. "0 7 * * *" (daily 07:00)
+    public string Format { get; set; } = "PDF"; // PDF, XLSX, BOTH
+    public bool IsActive { get; set; } = true;
+    public DateTime? LastRunAt { get; set; }
+    public DateTime? UnsubscribedAt { get; set; }
+    public string CreatedBy { get; set; } = "SYSTEM";
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
+public class NotificationDelivery
+{
+    public int DeliveryId { get; set; }
+    public int SubscriptionId { get; set; }
+    public DateTime SentAt { get; set; } = DateTime.UtcNow;
+    public string StatusCode { get; set; } = "SENT"; // SENT, FAILED, BOUNCED
+    public string? MessageId { get; set; }
+    public string? FailureReason { get; set; }
+
+    public NotificationSubscription? Subscription { get; set; }
+}
+
+// ============================================================
+// KFH Existing Monitoring Tool Integration (RFP item 8)
+// ------------------------------------------------------------
+// Generic adapter model (IMonitoringAdapter) so PMIMS can push to whichever tool KFH already
+// runs without a vendor SDK baked into the core -- monitoring_events is the local
+// buffer/audit of everything pushed, independent of whether the push itself succeeded.
+// ============================================================
+public class MonitoringEvent
+{
+    public int EventId { get; set; }
+    public string EventType { get; set; } = null!; // HEALTH_CHECK, SLA_METRIC, ALERT
+    public string ServiceName { get; set; } = "PMIMS";
+    public string MetricName { get; set; } = null!;
+    public string MetricValue { get; set; } = null!;
+    public string Severity { get; set; } = "INFO"; // INFO, WARNING, CRITICAL
+    public DateTime OccurredAt { get; set; } = DateTime.UtcNow;
+    public DateTime? PushedAt { get; set; }
+    public string PushStatus { get; set; } = "PENDING"; // PENDING, SENT, FAILED, DISABLED
+}
+
+public class MonitoringAlertRoute
+{
+    public int RouteId { get; set; }
+    public string EventType { get; set; } = null!;
+    public string Severity { get; set; } = null!;
+    public string Destination { get; set; } = null!; // webhook URL, on-call group name, etc.
+    public bool IsActive { get; set; } = true;
 }
 
 public class DocumentUpload
@@ -550,6 +800,11 @@ public class AppUser
     public string DisplayName { get; set; } = null!;
     public string Email { get; set; } = null!;
     public string PasswordHash { get; set; } = null!;
+    // Algorithm used to produce PasswordHash: "SHA256" (legacy demo default),
+    // "BCRYPT" (FIM SetPassword default per RFP), or "AES256" (reversible,
+    // FIM-requested alternate). ActiveDirectoryService.AuthenticateAsync and
+    // PasswordHasher dispatch on this value -- never assume SHA256.
+    public string PasswordAlgorithm { get; set; } = "SHA256";
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public string CreatedBy { get; set; } = "SYSTEM";
@@ -628,10 +883,35 @@ public class BranchTransfer
     public Branch? DestinationBranch { get; set; }
 }
 
+// ============================================================
+// Receipt of precious metals -- supplier or customer sourced
+// ------------------------------------------------------------
+// A PendingIntake represents one Maker-initiated "receipt" request awaiting
+// Maker-Checker sign-off, regardless of where the metal is coming from:
+//   SourceType == "SUPPLIER" (the original/default flow): tied to an
+//   approved PurchaseOrder (PoId required). Received bars become KFH_OWNED.
+//   SourceType == "CUSTOMER": no Purchase Order -- CustomerId (required)
+//   identifies who physically presented the metal. ReceiptReason drives
+//   what happens to ownership once approved (see IntakeInventoryItemsAsync):
+//     BUYBACK        -- KFH purchases the customer's metal outright; bars
+//                        become KFH_OWNED, same as a supplier receipt.
+//     CUSTODY_DEPOSIT-- the customer's own metal is placed into vault
+//                        safekeeping; bars stay CUSTOMER_OWNED and a
+//                        CustomerHolding/CustomerAllocation pair is created,
+//                        mirroring ConfirmPurchaseWithCustodyAsync. Requires
+//                        AccountId (which CustomerAccount holds the metal).
+//     RETURN         -- a previously withdrawn/dispensed bar physically
+//                        comes back into KFH custody; treated like BUYBACK
+//                        (KFH_OWNED) for ledger purposes.
+// ============================================================
 public class PendingIntake
 {
     public int PendingIntakeId { get; set; }
-    public int PoId { get; set; }
+    public int? PoId { get; set; }
+    public string SourceType { get; set; } = "SUPPLIER"; // SUPPLIER | CUSTOMER
+    public int? CustomerId { get; set; }
+    public int? AccountId { get; set; } // CustomerAccount -- only meaningful when ReceiptReason == CUSTODY_DEPOSIT
+    public string? ReceiptReason { get; set; } // BUYBACK | CUSTODY_DEPOSIT | RETURN -- customer receipts only
     public string LotNumber { get; set; } = null!;
     public int LocationId { get; set; }
     public string ReceivedBy { get; set; } = null!;
@@ -641,5 +921,80 @@ public class PendingIntake
 
     public PurchaseOrder? PurchaseOrder { get; set; }
     public InventoryLocation? Location { get; set; }
+    public Customer? Customer { get; set; }
+}
+
+// ============================================================
+// FIM (Forefront Identity Manager) Integration Module
+// ------------------------------------------------------------
+// RFP-mandated identity provisioning / access management surface. Maps FIM's
+// "User" / "Profile" / "Right" concepts onto PMIMS's own identity store
+// (AppUser / PrivilegeGroup) so the module works standalone against the
+// "application-own identity list" scenario, while remaining swappable for a
+// real Active-Directory-backed FIM connector later (AD is preferred per RFP;
+// this is the fallback/local scenario). See IFimService (PMIMS.Application)
+// and FimService (PMIMS.Infrastructure) for the sync/provisioning logic, and
+// database/schema.sql + database/procedures.sql (sp_FIM_*) for the SQL
+// Server-side mirror of every function below.
+// ============================================================
+
+// Extension attribute bag for AppUser -- lets FIM push/pull arbitrary
+// mandatory/custom attributes (EmployeeId, Department, ADDistinguishedName,
+// CostCenter, ...) beyond the fixed AppUser columns, without a schema change
+// per new attribute. (AttributeName, UserId) is unique -- see AppDbContext.
+public class FimUserAttribute
+{
+    public int AttributeId { get; set; }
+    public int UserId { get; set; }
+    public string AttributeName { get; set; } = null!;
+    public string AttributeValue { get; set; } = null!;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    public AppUser? User { get; set; }
+}
+
+// A fine-grained "Right" in FIM terms: a named system privilege that can be
+// bound directly to a user (FimUserRight), independent of PrivilegeGroup/
+// GroupPermission ("Profile") membership. This is the layer RFP functions
+// AddUserToRight/RemoveUserFromRight/GetAllRightsForUser operate on.
+public class FimRight
+{
+    public int RightId { get; set; }
+    public string RightCode { get; set; } = null!;  // e.g. "PO_APPROVE", "USER_PROVISION"
+    public string RightName { get; set; } = null!;
+    public string? Description { get; set; }
+    public string? ModuleKey { get; set; }           // optional link to a PMIMS permission module
+    public bool IsActive { get; set; } = true;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
+public class FimUserRight
+{
+    public int UserRightId { get; set; }
+    public int UserId { get; set; }
+    public int RightId { get; set; }
+    public DateTime GrantedAt { get; set; } = DateTime.UtcNow;
+    public string GrantedBy { get; set; } = "SYSTEM";
+
+    public AppUser? User { get; set; }
+    public FimRight? Right { get; set; }
+}
+
+// Change-tracking ledger consumed by DetectDeltaChangesAsync: every FIM
+// provisioning mutation (user/profile/right create-update-delete, and
+// profile/right bindings) writes one row here, independent of the general
+// AuditLog table, so sync connectors can cheaply query
+// "WHERE changed_at > @LastSyncTime" without scanning free-text audit
+// descriptions.
+public class FimSyncLog
+{
+    public int SyncLogId { get; set; }
+    public string EntityType { get; set; } = null!;   // USER, PROFILE, RIGHT, USER_PROFILE, USER_RIGHT, PASSWORD
+    public string EntityKey { get; set; } = null!;     // e.g. the affected UserId/ProfileId as string
+    public string ChangeType { get; set; } = null!;    // CREATE, UPDATE, DELETE
+    public DateTime ChangedAt { get; set; } = DateTime.UtcNow;
+    public string ChangedBy { get; set; } = "SYSTEM";
+    public string Source { get; set; } = "APPLICATION"; // APPLICATION or FIM (which system originated the change)
+    public string? DetailsJson { get; set; }
 }
 

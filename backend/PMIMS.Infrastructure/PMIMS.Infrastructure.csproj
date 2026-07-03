@@ -6,11 +6,36 @@
 
   <ItemGroup>
     <PackageReference Include="Dapper" Version="2.1.79" />
+    <PackageReference Include="BCrypt.Net-Next" Version="4.0.3" />
     <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.2" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.9" />
+    <!-- NU1903: Microsoft.EntityFrameworkCore.Sqlite transitively pulls SQLitePCLRaw.lib.e_sqlite3
+         2.1.11 (GHSA-2m69-gcr7-jv3q / CVE-2025-6965, high). No patched SQLitePCLRaw release exists
+         yet as of this pass; this is a pre-existing transitive dependency of the SQLite dev
+         fallback path (unrelated to items 5-8) and not something a version bump here can resolve.
+         SQLite is DEV-ONLY in this project (DatabaseConfig:UseSqlServer=true in production), so
+         exposure is limited to local/dev environments; re-check for a fix before any production
+         use of the SQLite fallback. -->
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.9" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.9" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.9" />
+    <!-- Item 6 (Enhanced Audit Trail UI) export + Item 7 (scheduled report attachments):
+         ClosedXML (MIT, unrestricted) for Excel. QuestPDF for PDF: chosen for its reliable,
+         high-level Fluent table/report API (no manual font-resolver wiring, which is a common
+         cross-platform failure point with lower-level PDF libraries). IMPORTANT LICENSING NOTE:
+         QuestPDF's free "Community" license tier is capped at $1M USD annual gross revenue;
+         KFH will need a QuestPDF Commercial license before production use. Swap
+         AuditExportService's PDF methods to a different engine (e.g. PdfSharpCore, MIT) if that
+         license is not procured. See docs/FIM_INTEGRATION.md style note in
+         docs/PMIMS_RFP_Gap_Closure_Design_Document.docx item 6/7 sections. -->
+    <PackageReference Include="ClosedXML" Version="0.104.2" />
+    <PackageReference Include="QuestPDF" Version="2024.10.3" />
+    <!-- Item 7 (Automatic Management Email Notifications): SMTP client + cron schedule evaluation.
+         MailKit pinned to 4.16.0+ (not 4.9.0) to pick up the fix for GHSA-9j88-vvj5-vhgr
+         (STARTTLS response injection / SASL downgrade) and the corresponding fixed MimeKit
+         transitive dependency (GHSA-g7hc-96xr-gvvx). -->
+    <PackageReference Include="MailKit" Version="4.16.0" />
+    <PackageReference Include="Cronos" Version="0.9.0" />
   </ItemGroup>
 
   <PropertyGroup>

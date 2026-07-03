@@ -14,10 +14,16 @@ namespace PMIMS.Infrastructure;
 public class InventoryRepository : IInventoryRepository
 {
     private readonly AppDbContext _dbContext;
+    // Nullable/optional (default null) so every existing `new InventoryRepository(context)`
+    // call site -- test fixtures included -- keeps compiling; only
+    // GenerateIfrsValuationDisclosureAsync needs a live rate feed, and it fails fast with a
+    // clear error if none was supplied instead of silently pricing at zero.
+    private readonly IRateFeedService? _rateFeed;
 
-    public InventoryRepository(AppDbContext dbContext)
+    public InventoryRepository(AppDbContext dbContext, IRateFeedService? rateFeed = null)
     {
         _dbContext = dbContext;
+        _rateFeed = rateFeed;
     }
 
     private bool IsSqlServer => _dbContext.Database.ProviderName?.Contains("SqlServer") ?? false;
@@ -202,30 +208,97 @@ public class InventoryRepository : IInventoryRepository
         return true;
     }
 
-    // sp_IntakeInventoryItems execution / emulation
-    public async Task<string> IntakeInventoryItemsAsync(int poId, string lotNumber, int locationId, string receivedBy, string serialsJsonList)
+    // A customer-sourced receipt (buyback/custody deposit/return) has no vendor -- but
+    // InventoryLot.VendorId is a required column, so a dedicated internal "walk-in"
+    // vendor row stands in for "no vendor" without loosening that column's non-null
+    // constraint (which every other reporting/valuation query already assumes holds).
+    // Created lazily so existing seeded databases don't need a reseed just for this.
+    private async Task<int> GetOrCreateWalkInVendorIdAsync()
     {
+        var vendor = await _dbContext.Vendors.FirstOrDefaultAsync(v => v.VendorCode == "WALK-IN");
+        if (vendor != null) return vendor.VendorId;
+
+        vendor = new Vendor
+        {
+            VendorCode = "WALK-IN",
+            VendorName = "Walk-In Customer (Receipt Source)",
+            CountryOfOrigin = "KWT",
+            IsShariaCompliant = true,
+            ContactEmail = "n/a@kfh.internal",
+            CreatedAt = DateTime.UtcNow
+        };
+        _dbContext.Vendors.Add(vendor);
+        await _dbContext.SaveChangesAsync();
+        return vendor.VendorId;
+    }
+
+    // sp_IntakeInventoryItems execution / emulation -- receipt of precious metals into the
+    // vault ledger, from either a supplier (sourceType SUPPLIER, tied to an approved PO) or
+    // a customer (sourceType CUSTOMER). See the PendingIntake doc comment (Entities.cs) for
+    // what each receiptReason means.
+    public async Task<string> IntakeInventoryItemsAsync(int? poId, string lotNumber, int locationId, string receivedBy, string serialsJsonList,
+        string sourceType = "SUPPLIER", int? customerId = null, int? accountId = null, string? receiptReason = null)
+    {
+        sourceType = string.IsNullOrWhiteSpace(sourceType) ? "SUPPLIER" : sourceType.Trim().ToUpperInvariant();
+        bool isCustomerReceipt = sourceType == "CUSTOMER";
+
         if (IsSqlServer)
         {
             await _dbContext.Database.ExecuteSqlRawAsync(
-                "EXEC sp_IntakeInventoryItems @POID, @LotNumber, @LocationID, @ReceivedBy, @SerialsList",
-                new SqlParameter("@POID", poId),
+                "EXEC sp_IntakeInventoryItems @POID, @LotNumber, @LocationID, @ReceivedBy, @SerialsList, @SourceType, @CustomerID, @AccountID, @ReceiptReason",
+                new SqlParameter("@POID", (object?)poId ?? DBNull.Value),
                 new SqlParameter("@LotNumber", lotNumber),
                 new SqlParameter("@LocationID", locationId),
                 new SqlParameter("@ReceivedBy", receivedBy),
-                new SqlParameter("@SerialsList", serialsJsonList)
+                new SqlParameter("@SerialsList", serialsJsonList),
+                new SqlParameter("@SourceType", sourceType),
+                new SqlParameter("@CustomerID", (object?)customerId ?? DBNull.Value),
+                new SqlParameter("@AccountID", (object?)accountId ?? DBNull.Value),
+                new SqlParameter("@ReceiptReason", (object?)receiptReason ?? DBNull.Value)
             );
             return "SUCCESS";
         }
         else
         {
-            var po = await _dbContext.PurchaseOrders.Include(p => p.Items).FirstOrDefaultAsync(p => p.PoId == poId);
-            if (po != null && po.StatusCode != "APPROVED")
+            PurchaseOrder? po = null;
+            Customer? customer = null;
+            int vendorId;
+            decimal avgCost = 0;
+
+            if (isCustomerReceipt)
             {
-                throw new InvalidOperationException("Cannot receive shipment: The associated purchase order must be fully approved.");
+                if (customerId == null)
+                {
+                    throw new InvalidOperationException("Cannot receive from a customer: a customer must be specified.");
+                }
+                customer = await _dbContext.Customers.FindAsync(customerId.Value);
+                if (customer == null)
+                {
+                    throw new InvalidOperationException("Customer not found.");
+                }
+
+                receiptReason = string.IsNullOrWhiteSpace(receiptReason) ? "BUYBACK" : receiptReason.Trim().ToUpperInvariant();
+                if (receiptReason != "BUYBACK" && receiptReason != "CUSTODY_DEPOSIT" && receiptReason != "RETURN")
+                {
+                    throw new ArgumentException("receiptReason must be BUYBACK, CUSTODY_DEPOSIT, or RETURN for a customer receipt.");
+                }
+                if (receiptReason == "CUSTODY_DEPOSIT" && accountId == null)
+                {
+                    throw new InvalidOperationException("A customer account must be specified to hold a custody deposit.");
+                }
+
+                vendorId = await GetOrCreateWalkInVendorIdAsync();
             }
-            int vendorId = po?.VendorId ?? 1;
-            decimal avgCost = po != null && po.TotalWeightGrams > 0 ? po.TotalCost / po.TotalWeightGrams : 0;
+            else
+            {
+                po = poId.HasValue ? await _dbContext.PurchaseOrders.Include(p => p.Items).FirstOrDefaultAsync(p => p.PoId == poId.Value) : null;
+                if (po != null && po.StatusCode != "APPROVED")
+                {
+                    throw new InvalidOperationException("Cannot receive shipment: The associated purchase order must be fully approved.");
+                }
+                vendorId = po?.VendorId ?? 1;
+                avgCost = po != null && po.TotalWeightGrams > 0 ? po.TotalCost / po.TotalWeightGrams : 0;
+            }
 
             using var doc = JsonDocument.Parse(serialsJsonList);
             int totalItems = doc.RootElement.EnumerateArray().Count();
@@ -233,7 +306,7 @@ public class InventoryRepository : IInventoryRepository
             var lot = new InventoryLot
             {
                 LotNumber = lotNumber,
-                PoId = poId > 0 ? poId : null,
+                PoId = isCustomerReceipt ? null : poId,
                 VendorId = vendorId,
                 AcquisitionDate = DateTime.UtcNow,
                 TotalItems = totalItems,
@@ -243,12 +316,30 @@ public class InventoryRepository : IInventoryRepository
             _dbContext.InventoryLots.Add(lot);
             await _dbContext.SaveChangesAsync();
 
+            // A customer custody deposit stays CUSTOMER_OWNED (the bar never becomes KFH's
+            // stock, just its safekeeping responsibility); every other path (supplier receipt,
+            // customer buyback, customer return) becomes KFH_OWNED.
+            string ownershipType = isCustomerReceipt && receiptReason == "CUSTODY_DEPOSIT" ? "CUSTOMER_OWNED" : "KFH_OWNED";
+
             var affectedProducts = new HashSet<int>();
+            var newItems = new List<InventoryItem>();
             foreach (var element in doc.RootElement.EnumerateArray())
             {
                 string serial = element.GetProperty("serial").GetString() ?? "";
                 int productId = element.GetProperty("product_id").GetInt32();
                 affectedProducts.Add(productId);
+
+                // LBMA Good Delivery attributes -- optional per bar. Present if the intake
+                // form (IntakeItemDTO) supplied them; absent for callers that haven't been
+                // updated yet (e.g. the reconciliation-break re-intake calls above), which
+                // simply leaves GoodDeliveryStatus at its NOT_ASSESSED default.
+                string? refinerName = element.TryGetProperty("refiner_name", out var rn) ? rn.GetString() : null;
+                string? refinerLbmaId = element.TryGetProperty("refiner_lbma_id", out var rl) ? rl.GetString() : null;
+                string? assayCert = element.TryGetProperty("assay_certificate_number", out var ac) ? ac.GetString() : null;
+                decimal? fineness = element.TryGetProperty("fineness_ppt", out var fp) && fp.ValueKind is JsonValueKind.Number ? fp.GetDecimal() : (decimal?)null;
+                string? hallmark = element.TryGetProperty("hallmark_number", out var hm) ? hm.GetString() : null;
+                string? gdStatusRaw = element.TryGetProperty("good_delivery_status", out var gs) ? gs.GetString() : null;
+                bool hasLbmaData = !string.IsNullOrWhiteSpace(refinerName) || !string.IsNullOrWhiteSpace(assayCert) || fineness.HasValue;
 
                 var item = new InventoryItem
                 {
@@ -256,16 +347,84 @@ public class InventoryRepository : IInventoryRepository
                     ProductId = productId,
                     LotId = lot.LotId,
                     LocationId = locationId,
-                    OwnershipType = "KFH_OWNED",
-                    StatusCode = "READY"
+                    OwnershipType = ownershipType,
+                    StatusCode = "READY",
+                    RefinerName = refinerName,
+                    RefinerLbmaId = refinerLbmaId,
+                    AssayCertificateNumber = assayCert,
+                    FinenessPpt = fineness,
+                    HallmarkNumber = hallmark,
+                    GoodDeliveryStatus = !string.IsNullOrWhiteSpace(gdStatusRaw) ? gdStatusRaw! : (hasLbmaData ? "GDL_LISTED" : "NOT_ASSESSED")
                 };
                 _dbContext.InventoryItems.Add(item);
+                newItems.Add(item);
             }
             await _dbContext.SaveChangesAsync();
 
+            // One RECEIPT ledger transaction per bar -- the origin point of every serialized
+            // item's movement history. Previously intake created no InventoryTransaction row at
+            // all (TransactionType.RECEIPT was defined but never used anywhere), so a bar's
+            // trail effectively started mid-story at its first transfer/sale/withdrawal.
+            foreach (var item in newItems)
+            {
+                var receiptTx = new InventoryTransaction
+                {
+                    TransactionNumber = $"RCPT-{lotNumber}-{item.ItemId}",
+                    ItemId = item.ItemId,
+                    TransactionType = "RECEIPT",
+                    SourceLocationId = null, // external origin (vendor/refiner/customer) -- not yet a vault location
+                    DestinationLocationId = locationId,
+                    SourceOwnership = ownershipType,
+                    DestinationOwnership = ownershipType,
+                    InitiatedBy = receivedBy,
+                    TransactionTimestamp = DateTime.UtcNow
+                };
+                _dbContext.InventoryTransactions.Add(receiptTx);
+            }
+            await _dbContext.SaveChangesAsync();
+
+            string custodyNote = isCustomerReceipt
+                ? $"Received from customer {customer!.CustomerName} (Civil ID {customer.CivilId}) -- {receiptReason}. Lot {lotNumber}."
+                : "Intake into vault ledger.";
+            foreach (var item in newItems)
+            {
+                await RecordChainOfCustodyEventAsync(item.ItemId, "RECEIVED", receivedBy, locationId, lotNumber, custodyNote);
+            }
+
+            // Customer custody deposit: the bars physically sit in the vault but remain the
+            // customer's property -- create the same CustomerHolding/CustomerAllocation pair
+            // ConfirmPurchaseWithCustodyAsync creates for a sold-into-custody bar, just without
+            // the SalesOrder (no sale occurred; the customer already owned this metal).
+            if (isCustomerReceipt && receiptReason == "CUSTODY_DEPOSIT")
+            {
+                foreach (var item in newItems)
+                {
+                    item.StatusCode = "HELD_IN_CUSTODY";
+                    var holding = new CustomerHolding
+                    {
+                        CustomerId = customerId!.Value,
+                        AccountId = accountId!.Value,
+                        ItemId = item.ItemId,
+                        AllocationDate = DateTime.UtcNow,
+                        CustodyFeeRate = 0.005m, // 0.5% annual rate default, same as ConfirmPurchaseWithCustodyAsync
+                        StatusCode = "HELD_IN_CUSTODY"
+                    };
+                    _dbContext.CustomerHoldings.Add(holding);
+                    await _dbContext.SaveChangesAsync();
+
+                    _dbContext.CustomerAllocations.Add(new CustomerAllocation
+                    {
+                        HoldingId = holding.HoldingId,
+                        AssignedLocationId = locationId,
+                        AssignedAt = DateTime.UtcNow
+                    });
+                }
+                await _dbContext.SaveChangesAsync();
+            }
+
             foreach (var prodId in affectedProducts)
             {
-                await RecalculateInventoryBalanceAsync(locationId, prodId, "KFH_OWNED");
+                await RecalculateInventoryBalanceAsync(locationId, prodId, ownershipType);
             }
 
             if (po != null)
@@ -274,7 +433,15 @@ public class InventoryRepository : IInventoryRepository
                 await _dbContext.SaveChangesAsync();
             }
 
-            await SaveAuditLogAsync(receivedBy, "SYSTEM", "VAULT_OPS", $"Received and spatialized {totalItems} bars in Lot: {lotNumber}");
+            // Lot-level summary entry (one row per intake batch rather than per bar, to avoid
+            // flooding the audit log for large shipments) -- cross-referenced to the
+            // InventoryLot so GetTransactionTraceAsync can still resolve a RECEIPT
+            // transaction's audit trail via the lot even though it isn't logged per-item.
+            string auditMsg = isCustomerReceipt
+                ? $"Received {totalItems} bar(s) from customer {customer!.CustomerName} ({receiptReason}) in Lot: {lotNumber}"
+                : $"Received and spatialized {totalItems} bars in Lot: {lotNumber}";
+            await SaveAuditLogAsync(receivedBy, "SYSTEM", "VAULT_OPS", auditMsg,
+                entityType: "INVENTORY_LOT", entityId: lot.LotId.ToString());
             return "SUCCESS";
         }
     }
@@ -474,6 +641,15 @@ public class InventoryRepository : IInventoryRepository
             _dbContext.InventoryTransactions.Add(tx);
             await _dbContext.SaveChangesAsync();
 
+            // Previously this movement type -- a customer purchase, arguably the most
+            // financially significant event in the ledger -- wrote no audit log entry and no
+            // chain-of-custody event at all. Cross-reference it like every other movement.
+            await RecordChainOfCustodyEventAsync(item.ItemId, "SOLD", "CHANNEL_API", locationId, invoiceNumber ?? tx.TransactionNumber,
+                $"Sold to customer account {accountId}. Invoice: {invoiceNumber}.");
+            await SaveAuditLogAsync("CHANNEL_API", "SYSTEM", "CUSTODY",
+                $"Sale completed for serial {item.SerialNumber} to account {accountId}. Invoice: {invoiceNumber}. Sale price: {salePrice}.",
+                entityType: "INVENTORY_TRANSACTION", entityId: tx.TransactionId.ToString());
+
             return "SUCCESS";
         }
     }
@@ -559,6 +735,10 @@ public class InventoryRepository : IInventoryRepository
             await _dbContext.SaveChangesAsync();
 
             await RecalculateInventoryBalanceAsync(srcLoc, item.ProductId, item.OwnershipType);
+            await RecordChainOfCustodyEventAsync(itemId, "TRANSFERRED", initiatedBy, destLocationId, tx.TransactionNumber, courierInfo);
+            await SaveAuditLogAsync(initiatedBy, "SYSTEM", "TRANSFER",
+                $"Direct transfer initiated for serial {item.SerialNumber} to location #{destLocationId}. Courier: {courierInfo}.",
+                entityType: "INVENTORY_TRANSACTION", entityId: tx.TransactionId.ToString());
             return "SUCCESS";
         }
     }
@@ -622,6 +802,10 @@ public class InventoryRepository : IInventoryRepository
             };
             _dbContext.InventoryTransactions.Add(tx);
             await _dbContext.SaveChangesAsync();
+            await RecordChainOfCustodyEventAsync(item.ItemId, "WITHDRAWN", withdrawnBy, currentLoc, tx.TransactionNumber, $"Withdrawn to branch {branchId} for customer holding {holdingId}.");
+            await SaveAuditLogAsync(withdrawnBy, "SYSTEM", "CUSTODY",
+                $"Physical withdrawal completed for serial {item.SerialNumber} at branch #{branchId} (holding {holdingId}).",
+                entityType: "INVENTORY_TRANSACTION", entityId: tx.TransactionId.ToString());
 
             return "SUCCESS";
         }
@@ -929,7 +1113,7 @@ public class InventoryRepository : IInventoryRepository
         return product!;
     }
 
-    public async Task SaveAuditLogAsync(string username, string ipAddress, string moduleName, string actionDescription, string? sqlExecuted = null)
+    public async Task SaveAuditLogAsync(string username, string ipAddress, string moduleName, string actionDescription, string? sqlExecuted = null, string? entityType = null, string? entityId = null)
     {
         var log = new AuditLog
         {
@@ -938,10 +1122,27 @@ public class InventoryRepository : IInventoryRepository
             ModuleName = moduleName,
             ActionDescription = actionDescription,
             SqlExecuted = sqlExecuted,
+            EntityType = entityType,
+            EntityId = entityId,
             Timestamp = DateTime.UtcNow
         };
+        log.RowHash = ComputeAuditRowHash(log);
         _dbContext.AuditLogs.Add(log);
         await _dbContext.SaveChangesAsync();
+    }
+
+    // Tamper-detection fingerprint for Item 6 (Enhanced Audit Trail UI) -- SHA-256 over the
+    // row's other fields, computed at insert time. SearchAuditLogsAsync/GetAuditLogByIdAsync
+    // recompute this on read and compare; a mismatch surfaces as "Tampered" in the UI. This
+    // detects in-place edits, not deletions -- pair with normal DB access controls for that.
+    internal static string ComputeAuditRowHash(AuditLog log)
+    {
+        string material = string.Join("|",
+            log.Timestamp.ToString("O"), log.Username, log.IpAddress, log.ModuleName,
+            log.ActionDescription, log.SqlExecuted ?? "", log.EntityType ?? "", log.EntityId ?? "");
+        using var sha = System.Security.Cryptography.SHA256.Create();
+        var bytes = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(material));
+        return Convert.ToHexString(bytes).ToLowerInvariant();
     }
 
     // Workflow Engine
@@ -1086,6 +1287,12 @@ public class InventoryRepository : IInventoryRepository
         };
         _dbContext.ApprovalActions.Add(approval);
 
+        // Set below when a workflow-approved branch transfer creates its InventoryTransaction --
+        // TransactionId isn't assigned until the method's single final SaveChangesAsync, so the
+        // chain-of-custody/audit cross-reference (which needs that ID) has to happen after it,
+        // not inline where the transaction is constructed.
+        InventoryTransaction? approvedTransferTx = null;
+
         if (action == "REJECTED")
         {
             instance.StatusCode = "REJECTED";
@@ -1183,10 +1390,11 @@ public class InventoryRepository : IInventoryRepository
                                 TransactionTimestamp = DateTime.UtcNow
                             };
                             _dbContext.InventoryTransactions.Add(tx);
+                            approvedTransferTx = tx;
 
                             var move = new MovementTransaction
                             {
-                                TransactionId = tx.TransactionId,
+                                Transaction = tx,
                                 CourierDetails = transfer.CourierInfo,
                                 DepartureTime = DateTime.UtcNow
                             };
@@ -1203,7 +1411,8 @@ public class InventoryRepository : IInventoryRepository
                     if (pending != null)
                     {
                         pending.StatusCode = "APPROVED";
-                        string result = await IntakeInventoryItemsAsync(pending.PoId, pending.LotNumber, pending.LocationId, pending.ReceivedBy, pending.SerialsJsonList);
+                        string result = await IntakeInventoryItemsAsync(pending.PoId, pending.LotNumber, pending.LocationId, pending.ReceivedBy, pending.SerialsJsonList,
+                            pending.SourceType, pending.CustomerId, pending.AccountId, pending.ReceiptReason);
                         if (result != "SUCCESS")
                         {
                             throw new InvalidOperationException($"Intake execution failed: {result}");
@@ -1214,6 +1423,19 @@ public class InventoryRepository : IInventoryRepository
         }
 
         await _dbContext.SaveChangesAsync();
+
+        // Now that the transaction row has a real TransactionId, record its
+        // chain-of-custody event and cross-referenced audit entry -- this was previously
+        // missing entirely for maker-checker-approved transfers (the direct/non-workflow
+        // transfer path had both; this one, oddly, had neither).
+        if (approvedTransferTx != null)
+        {
+            await RecordChainOfCustodyEventAsync(approvedTransferTx.ItemId, "TRANSFERRED", username, approvedTransferTx.DestinationLocationId, approvedTransferTx.TransactionNumber, "Approved via Maker-Checker branch transfer workflow.");
+            await SaveAuditLogAsync(username, "SYSTEM", "TRANSFER",
+                $"Maker-Checker approved branch transfer completed (transaction {approvedTransferTx.TransactionNumber}).",
+                entityType: "INVENTORY_TRANSACTION", entityId: approvedTransferTx.TransactionId.ToString());
+        }
+
         return "SUCCESS";
     }
 
@@ -1224,6 +1446,9 @@ public class InventoryRepository : IInventoryRepository
             .OrderByDescending(i => i.CreatedAt)
             .ToListAsync();
     }
+
+    public async Task<WorkflowInstance?> GetWorkflowInstanceByIdAsync(int instanceId) =>
+        await _dbContext.WorkflowInstances.FindAsync(instanceId);
 
     public async Task<IEnumerable<ApprovalAction>> GetApprovalActionsForInstanceAsync(int instanceId)
     {
@@ -1270,13 +1495,24 @@ public class InventoryRepository : IInventoryRepository
         }).ToList();
     }
 
+    // Resolves a user's effective roles for Maker-Checker step gating purely from real
+    // AppUser -> PrivilegeGroup membership (PrivilegeGroup.GroupName strings, plus the
+    // "IT/Admin" alias for "IT Administrators"). This used to also unconditionally add
+    // "Operations Maker" / "Operations Checker" / "Reconciliation Officer" / "IT/Admin"
+    // whenever the *username itself* contained the matching substring ("maker", "checker",
+    // "reconciler", "admin") -- independent of actual group membership. That was a second,
+    // deeper instance of the same username-pattern hack removed from
+    // ActiveDirectoryService.AuthenticateAsync: it let any account get an unrelated approval
+    // role (including IT/Admin, which bypasses the role check entirely) just because of its
+    // username spelling, AND meant a real Checker/Reconciliation Officer whose username
+    // didn't happen to contain that substring would be wrongly rejected with
+    // UNAUTHORIZED_ROLE even though their PrivilegeGroup grants pending_actions.write. Don't
+    // reintroduce it -- WorkflowStep.RequiredRole values are seeded in DbSeeder.cs to match
+    // PrivilegeGroup.GroupName exactly, so this DB-only lookup is sufficient and correct for
+    // any properly-provisioned user, not just the demo accounts.
     private List<string> GetUserRoles(string username)
     {
         var roles = new List<string>();
-        if (username.Contains("maker")) roles.Add("Operations Maker");
-        if (username.Contains("checker")) roles.Add("Operations Checker");
-        if (username.Contains("reconciler")) roles.Add("Reconciliation Officer");
-        if (username.Contains("admin")) roles.Add("IT/Admin");
 
         try
         {
@@ -1295,10 +1531,8 @@ public class InventoryRepository : IInventoryRepository
                         // (see DbSeeder), but the superuser bypass checks throughout the app
                         // (here and the "IT/Admin" role claim in Program.cs) look for the
                         // literal "IT/Admin". Without this alias, any admin user added via the
-                        // User Admin screen (i.e. not the hard-coded "system-admin" demo login)
-                        // would be blocked from approving/rejecting a request whose current step
-                        // requires a different role -- only the demo account worked, by
-                        // accident, via the username.Contains("admin") hack above.
+                        // User Admin screen would be blocked from approving/rejecting a
+                        // request whose current step requires a different role.
                         if (m.Group.GroupName == "IT Administrators")
                         {
                             roles.Add("IT/Admin");
@@ -1709,6 +1943,15 @@ public class InventoryRepository : IInventoryRepository
             .ToListAsync();
     }
 
+    public async Task<BranchTransfer?> GetBranchTransferByIdAsync(int transferId)
+    {
+        return await _dbContext.BranchTransfers
+            .Include(t => t.Item).ThenInclude(i => i!.Product)
+            .Include(t => t.SourceBranch)
+            .Include(t => t.DestinationBranch)
+            .FirstOrDefaultAsync(t => t.TransferId == transferId);
+    }
+
     public async Task<BranchTransfer> InitiateWorkflowBranchTransferAsync(int itemId, int destinationBranchId, string courierInfo, string initiatedBy)
     {
         var item = await _dbContext.InventoryItems.FindAsync(itemId);
@@ -1801,16 +2044,56 @@ public class InventoryRepository : IInventoryRepository
         return "SUCCESS";
     }
 
-    public async Task<PendingIntake> InitiateWorkflowIntakeAsync(int poId, string lotNumber, int locationId, string receivedBy, string serialsJsonList)
+    public async Task<PendingIntake> InitiateWorkflowIntakeAsync(int? poId, string lotNumber, int locationId, string receivedBy, string serialsJsonList,
+        string sourceType = "SUPPLIER", int? customerId = null, int? accountId = null, string? receiptReason = null)
     {
-        var po = await _dbContext.PurchaseOrders.FindAsync(poId);
-        if (po == null)
+        sourceType = string.IsNullOrWhiteSpace(sourceType) ? "SUPPLIER" : sourceType.Trim().ToUpperInvariant();
+        if (sourceType != "SUPPLIER" && sourceType != "CUSTOMER")
         {
-            throw new InvalidOperationException("Associated Purchase Order not found.");
+            throw new ArgumentException("sourceType must be SUPPLIER or CUSTOMER.");
         }
-        if (po.StatusCode != "APPROVED")
+
+        if (sourceType == "SUPPLIER")
         {
-            throw new InvalidOperationException("Associated Purchase Order is not approved yet.");
+            if (poId == null)
+            {
+                throw new InvalidOperationException("A Purchase Order is required for a supplier receipt.");
+            }
+            var po = await _dbContext.PurchaseOrders.FindAsync(poId.Value);
+            if (po == null)
+            {
+                throw new InvalidOperationException("Associated Purchase Order not found.");
+            }
+            if (po.StatusCode != "APPROVED")
+            {
+                throw new InvalidOperationException("Associated Purchase Order is not approved yet.");
+            }
+        }
+        else // CUSTOMER
+        {
+            if (customerId == null)
+            {
+                throw new InvalidOperationException("A customer is required for a customer receipt.");
+            }
+            var customer = await _dbContext.Customers.FindAsync(customerId.Value);
+            if (customer == null)
+            {
+                throw new InvalidOperationException("Customer not found.");
+            }
+            if (!customer.IsActive)
+            {
+                throw new InvalidOperationException("Customer is not active.");
+            }
+
+            receiptReason = string.IsNullOrWhiteSpace(receiptReason) ? "BUYBACK" : receiptReason.Trim().ToUpperInvariant();
+            if (receiptReason != "BUYBACK" && receiptReason != "CUSTODY_DEPOSIT" && receiptReason != "RETURN")
+            {
+                throw new ArgumentException("receiptReason must be BUYBACK, CUSTODY_DEPOSIT, or RETURN.");
+            }
+            if (receiptReason == "CUSTODY_DEPOSIT" && accountId == null)
+            {
+                throw new InvalidOperationException("A customer account is required to hold a custody deposit.");
+            }
         }
 
         var template = await _dbContext.WorkflowTemplates.Include(t => t.Steps)
@@ -1822,7 +2105,11 @@ public class InventoryRepository : IInventoryRepository
 
         var pending = new PendingIntake
         {
-            PoId = poId,
+            PoId = sourceType == "SUPPLIER" ? poId : null,
+            SourceType = sourceType,
+            CustomerId = sourceType == "CUSTOMER" ? customerId : null,
+            AccountId = sourceType == "CUSTOMER" ? accountId : null,
+            ReceiptReason = sourceType == "CUSTOMER" ? receiptReason : null,
             LotNumber = lotNumber,
             LocationId = locationId,
             ReceivedBy = receivedBy,
@@ -1833,7 +2120,8 @@ public class InventoryRepository : IInventoryRepository
         _dbContext.PendingIntakes.Add(pending);
         await _dbContext.SaveChangesAsync();
 
-        // Spawn a workflow instance of type "INTAKE_SHIPMENT"
+        // Spawn a workflow instance of type "INTAKE_SHIPMENT" -- the same Maker-Checker
+        // approval workflow handles both supplier and customer sourced receipts.
         await StartWorkflowInstanceAsync("INTAKE_SHIPMENT", pending.PendingIntakeId, receivedBy);
 
         return pending;
@@ -1844,7 +2132,705 @@ public class InventoryRepository : IInventoryRepository
         return await _dbContext.PendingIntakes
             .Include(pi => pi.PurchaseOrder)
             .Include(pi => pi.Location)
+            .Include(pi => pi.Customer)
             .ToListAsync();
+    }
+
+    // =========================================================================
+    // Dynamic Business Validation Rules Engine (RFP item 5)
+    // =========================================================================
+
+    public async Task<IEnumerable<BusinessRule>> GetBusinessRulesAsync(string? ruleType = null, bool activeOnly = false)
+    {
+        var query = _dbContext.BusinessRules.AsQueryable();
+        if (!string.IsNullOrEmpty(ruleType)) query = query.Where(r => r.RuleType == ruleType);
+        if (activeOnly) query = query.Where(r => r.IsActive);
+        return await query.OrderBy(r => r.RuleCode).ThenByDescending(r => r.Version).ToListAsync();
+    }
+
+    public async Task<BusinessRule?> GetBusinessRuleByIdAsync(int ruleId) =>
+        await _dbContext.BusinessRules.FirstOrDefaultAsync(r => r.RuleId == ruleId);
+
+    public async Task<IEnumerable<BusinessRule>> GetBusinessRuleVersionsAsync(string ruleCode) =>
+        await _dbContext.BusinessRules.Where(r => r.RuleCode == ruleCode).OrderByDescending(r => r.Version).ToListAsync();
+
+    // Append-only versioning: supersedes the previous active version (if any) of the same
+    // RuleCode rather than mutating it, so GetBusinessRuleVersionsAsync always has real history.
+    public async Task<BusinessRule> AddBusinessRuleVersionAsync(BusinessRule rule)
+    {
+        var previous = await _dbContext.BusinessRules
+            .Where(r => r.RuleCode == rule.RuleCode)
+            .OrderByDescending(r => r.Version)
+            .FirstOrDefaultAsync();
+
+        rule.Version = (previous?.Version ?? 0) + 1;
+        if (previous != null) previous.IsActive = false;
+
+        _dbContext.BusinessRules.Add(rule);
+        await _dbContext.SaveChangesAsync();
+        return rule;
+    }
+
+    public async Task<bool> SetBusinessRuleActiveAsync(int ruleId, bool isActive)
+    {
+        var rule = await _dbContext.BusinessRules.FirstOrDefaultAsync(r => r.RuleId == ruleId);
+        if (rule == null) return false;
+        rule.IsActive = isActive;
+        await _dbContext.SaveChangesAsync();
+        return true;
+    }
+
+    public async Task SaveBusinessRuleEvaluationAsync(BusinessRuleEvaluation evaluation)
+    {
+        _dbContext.BusinessRuleEvaluations.Add(evaluation);
+        await _dbContext.SaveChangesAsync();
+    }
+
+    // =========================================================================
+    // Enhanced Audit Trail UI (RFP item 6)
+    // =========================================================================
+
+    public async Task<AuditLogSearchResult> SearchAuditLogsAsync(AuditLogFilter filter)
+    {
+        var query = _dbContext.AuditLogs.AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(filter.Query))
+            query = query.Where(a => a.ActionDescription.Contains(filter.Query));
+        if (!string.IsNullOrWhiteSpace(filter.Username))
+            query = query.Where(a => a.Username == filter.Username);
+        if (!string.IsNullOrWhiteSpace(filter.ModuleName))
+            query = query.Where(a => a.ModuleName == filter.ModuleName);
+        if (!string.IsNullOrWhiteSpace(filter.EntityType))
+            query = query.Where(a => a.EntityType == filter.EntityType);
+        if (filter.From.HasValue)
+            query = query.Where(a => a.Timestamp >= filter.From.Value);
+        if (filter.To.HasValue)
+            query = query.Where(a => a.Timestamp <= filter.To.Value);
+
+        int page = Math.Max(1, filter.Page);
+        int pageSize = Math.Clamp(filter.PageSize, 1, 500);
+
+        if (!string.IsNullOrWhiteSpace(filter.StatusFilter))
+        {
+            // TamperStatus is a computed value (row-hash recompute), not a persisted column, so
+            // it can't be pushed into the SQL WHERE clause. Applying it AFTER the count/paging
+            // (the previous approach) reported a `total_count` that didn't match the filtered
+            // rows and could skip/duplicate rows across pages. Instead, materialize everything
+            // matching the other filters, filter by tamper status in memory, then take the
+            // count and page from that already-filtered set.
+            string sf = filter.StatusFilter.Trim().ToLowerInvariant();
+            var allMatching = await query.OrderByDescending(a => a.Timestamp).ToListAsync();
+            var filteredItems = allMatching
+                .Select(MapAuditLogSearchResultItem)
+                .Where(i => i.TamperStatus.ToLowerInvariant() == sf)
+                .ToList();
+            var pagedItems = filteredItems.Skip((page - 1) * pageSize).Take(pageSize).ToList();
+            return new AuditLogSearchResult { Items = pagedItems, TotalCount = filteredItems.Count, Page = page, PageSize = pageSize };
+        }
+
+        int totalCount = await query.CountAsync();
+        var rows = await query
+            .OrderByDescending(a => a.Timestamp)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync();
+        var items = rows.Select(MapAuditLogSearchResultItem).ToList();
+
+        return new AuditLogSearchResult { Items = items, TotalCount = totalCount, Page = page, PageSize = pageSize };
+    }
+
+    public async Task<AuditLogSearchResultItem?> GetAuditLogByIdAsync(int logId)
+    {
+        var log = await _dbContext.AuditLogs.FirstOrDefaultAsync(a => a.LogId == logId);
+        return log == null ? null : MapAuditLogSearchResultItem(log);
+    }
+
+    private static AuditLogSearchResultItem MapAuditLogSearchResultItem(AuditLog log)
+    {
+        string tamperStatus;
+        if (string.IsNullOrEmpty(log.RowHash)) tamperStatus = "Unverified";
+        else tamperStatus = ComputeAuditRowHash(log) == log.RowHash ? "Verified" : "Tampered";
+
+        return new AuditLogSearchResultItem
+        {
+            LogId = log.LogId,
+            Timestamp = log.Timestamp,
+            Username = log.Username,
+            IpAddress = log.IpAddress,
+            ModuleName = log.ModuleName,
+            ActionDescription = log.ActionDescription,
+            EntityType = log.EntityType,
+            EntityId = log.EntityId,
+            TamperStatus = tamperStatus
+        };
+    }
+
+    // =========================================================================
+    // Automatic Management Email Notifications (RFP item 7)
+    // =========================================================================
+
+    public async Task<IEnumerable<NotificationSubscription>> GetNotificationSubscriptionsAsync() =>
+        await _dbContext.NotificationSubscriptions.OrderBy(s => s.DistributionListEmail).ToListAsync();
+
+    public async Task<NotificationSubscription?> GetNotificationSubscriptionByIdAsync(int subscriptionId) =>
+        await _dbContext.NotificationSubscriptions.FirstOrDefaultAsync(s => s.SubscriptionId == subscriptionId);
+
+    public async Task<NotificationSubscription> SaveNotificationSubscriptionAsync(NotificationSubscription subscription)
+    {
+        if (subscription.SubscriptionId == 0)
+        {
+            _dbContext.NotificationSubscriptions.Add(subscription);
+        }
+        else
+        {
+            var existing = await _dbContext.NotificationSubscriptions.FirstOrDefaultAsync(s => s.SubscriptionId == subscription.SubscriptionId);
+            if (existing == null) throw new InvalidOperationException("Subscription not found.");
+            existing.DistributionListEmail = subscription.DistributionListEmail;
+            existing.ReportType = subscription.ReportType;
+            existing.ScheduleCron = subscription.ScheduleCron;
+            existing.Format = subscription.Format;
+            existing.IsActive = subscription.IsActive;
+            subscription = existing;
+        }
+        await _dbContext.SaveChangesAsync();
+        return subscription;
+    }
+
+    public async Task<bool> DeleteNotificationSubscriptionAsync(int subscriptionId)
+    {
+        var existing = await _dbContext.NotificationSubscriptions.FirstOrDefaultAsync(s => s.SubscriptionId == subscriptionId);
+        if (existing == null) return false;
+        _dbContext.NotificationSubscriptions.Remove(existing);
+        await _dbContext.SaveChangesAsync();
+        return true;
+    }
+
+    public async Task<bool> UnsubscribeAsync(int subscriptionId)
+    {
+        var existing = await _dbContext.NotificationSubscriptions.FirstOrDefaultAsync(s => s.SubscriptionId == subscriptionId);
+        if (existing == null) return false;
+        existing.IsActive = false;
+        existing.UnsubscribedAt = DateTime.UtcNow;
+        await _dbContext.SaveChangesAsync();
+        return true;
+    }
+
+    public async Task RecordNotificationDeliveryAsync(NotificationDelivery delivery)
+    {
+        _dbContext.NotificationDeliveries.Add(delivery);
+        await _dbContext.SaveChangesAsync();
+    }
+
+    public async Task<IEnumerable<NotificationDelivery>> GetNotificationDeliveriesAsync(int? subscriptionId = null)
+    {
+        var query = _dbContext.NotificationDeliveries.AsQueryable();
+        if (subscriptionId.HasValue) query = query.Where(d => d.SubscriptionId == subscriptionId.Value);
+        return await query.OrderByDescending(d => d.SentAt).ToListAsync();
+    }
+
+    // =========================================================================
+    // KFH Existing Monitoring Tool Integration (RFP item 8)
+    // =========================================================================
+
+    public async Task<IEnumerable<MonitoringAlertRoute>> GetMonitoringAlertRoutesAsync() =>
+        await _dbContext.MonitoringAlertRoutes.ToListAsync();
+
+    public async Task<MonitoringAlertRoute> SaveMonitoringAlertRouteAsync(MonitoringAlertRoute route)
+    {
+        if (route.RouteId == 0)
+        {
+            _dbContext.MonitoringAlertRoutes.Add(route);
+        }
+        else
+        {
+            var existing = await _dbContext.MonitoringAlertRoutes.FirstOrDefaultAsync(r => r.RouteId == route.RouteId);
+            if (existing == null) throw new InvalidOperationException("Alert route not found.");
+            existing.EventType = route.EventType;
+            existing.Severity = route.Severity;
+            existing.Destination = route.Destination;
+            existing.IsActive = route.IsActive;
+            route = existing;
+        }
+        await _dbContext.SaveChangesAsync();
+        return route;
+    }
+
+    public async Task<MonitoringEvent> RecordMonitoringEventAsync(MonitoringEvent evt)
+    {
+        _dbContext.MonitoringEvents.Add(evt);
+        await _dbContext.SaveChangesAsync();
+        return evt;
+    }
+
+    public async Task<IEnumerable<MonitoringEvent>> GetRecentMonitoringEventsAsync(int hours = 24)
+    {
+        var cutoff = DateTime.UtcNow.AddHours(-Math.Abs(hours));
+        return await _dbContext.MonitoringEvents
+            .Where(e => e.OccurredAt >= cutoff)
+            .OrderByDescending(e => e.OccurredAt)
+            .ToListAsync();
+    }
+
+    // =========================================================================
+    // Real-Time Inventory Monitoring -- initial snapshot
+    // =========================================================================
+
+    public async Task<IEnumerable<InventoryBalance>> GetAllInventoryBalancesAsync() =>
+        await _dbContext.InventoryBalances
+            .Include(b => b.Location).ThenInclude(l => l!.Vault)
+            .Include(b => b.Location).ThenInclude(l => l!.Branch)
+            .Include(b => b.Product).ThenInclude(p => p!.MetalType)
+            .Include(b => b.Product).ThenInclude(p => p!.Denomination)
+            .ToListAsync();
+
+    // =========================================================================
+    // LBMA Good Delivery / Chain-of-Custody
+    // =========================================================================
+
+    public async Task<ChainOfCustodyEvent> RecordChainOfCustodyEventAsync(int itemId, string eventType, string recordedBy, int? locationId = null, string? referenceNumber = null, string? notes = null)
+    {
+        var evt = new ChainOfCustodyEvent
+        {
+            ItemId = itemId,
+            EventType = eventType,
+            RecordedBy = recordedBy,
+            LocationId = locationId,
+            ReferenceNumber = referenceNumber,
+            Notes = notes,
+            RecordedAt = DateTime.UtcNow
+        };
+        _dbContext.ChainOfCustodyEvents.Add(evt);
+        await _dbContext.SaveChangesAsync();
+        return evt;
+    }
+
+    public async Task<IEnumerable<ChainOfCustodyEvent>> GetChainOfCustodyEventsAsync(int itemId) =>
+        await _dbContext.ChainOfCustodyEvents
+            .Include(e => e.Location)
+            .Where(e => e.ItemId == itemId)
+            .OrderBy(e => e.RecordedAt)
+            .ToListAsync();
+
+    public async Task<IEnumerable<dynamic>> GetLbmaComplianceReportAsync()
+    {
+        var items = await _dbContext.InventoryItems
+            .Include(i => i.Product).ThenInclude(p => p!.MetalType)
+            .Include(i => i.Product).ThenInclude(p => p!.Denomination)
+            .Include(i => i.Location).ThenInclude(l => l!.Vault)
+            .Where(i => i.StatusCode != "INACTIVE" && i.StatusCode != "WITHDRAWN")
+            .Where(i => i.GoodDeliveryStatus != "GDL_LISTED"
+                        || i.RefinerName == null || i.AssayCertificateNumber == null || i.FinenessPpt == null)
+            .ToListAsync();
+
+        return items.Select(i => new
+        {
+            item_id = i.ItemId,
+            serial_number = i.SerialNumber,
+            metal_name = i.Product?.MetalType?.MetalName,
+            denomination = i.Product?.Denomination?.Label,
+            vault_name = i.Location?.Vault?.VaultName,
+            status_code = i.StatusCode,
+            good_delivery_status = i.GoodDeliveryStatus,
+            refiner_name = i.RefinerName,
+            refiner_lbma_id = i.RefinerLbmaId,
+            assay_certificate_number = i.AssayCertificateNumber,
+            fineness_ppt = i.FinenessPpt,
+            hallmark_number = i.HallmarkNumber,
+            gap_reason = i.RefinerName == null ? "Missing refiner identification"
+                       : i.AssayCertificateNumber == null ? "Missing assay certificate"
+                       : i.FinenessPpt == null ? "Missing fineness reading"
+                       : i.GoodDeliveryStatus == "NOT_LISTED" ? "Refiner not on current LBMA Good Delivery List"
+                       : "Not yet assessed"
+        });
+    }
+
+    // =========================================================================
+    // Auditable, traceable movement records
+    // ------------------------------------------------------------------------
+    // Replaces the previous pattern (ReconciliationService quarantine/resolve
+    // calling IntakeInventoryItemsAsync purely to trigger a balance recalc
+    // side-effect) which -- being an untested code path -- would re-Add an
+    // InventoryItem row for a serial number that already exists, throwing on
+    // the unique index the moment it actually ran. This produces a real
+    // ADJUSTMENT ledger transaction plus a cross-referenced, tamper-hashed
+    // audit log entry, exactly like every other movement type.
+    // =========================================================================
+    public async Task<InventoryTransaction> RecordInventoryAdjustmentAsync(int itemId, string reasonCode, string performedBy, string? notes = null)
+    {
+        var item = await _dbContext.InventoryItems.FindAsync(itemId);
+        if (item == null) throw new InvalidOperationException("Inventory item not found.");
+
+        if (item.LocationId.HasValue)
+        {
+            await RecalculateInventoryBalanceAsync(item.LocationId.Value, item.ProductId, item.OwnershipType);
+        }
+
+        var tx = new InventoryTransaction
+        {
+            TransactionNumber = $"ADJ-{item.ItemId}-{DateTime.UtcNow:yyyyMMddHHmmssfff}",
+            ItemId = item.ItemId,
+            TransactionType = "ADJUSTMENT",
+            SourceLocationId = item.LocationId,
+            DestinationLocationId = item.LocationId,
+            SourceOwnership = item.OwnershipType,
+            DestinationOwnership = item.OwnershipType,
+            InitiatedBy = performedBy,
+            ApprovedBy = performedBy,
+            TransactionTimestamp = DateTime.UtcNow
+        };
+        _dbContext.InventoryTransactions.Add(tx);
+        await _dbContext.SaveChangesAsync();
+
+        string custodyEventType = item.StatusCode switch
+        {
+            "QUARANTINED" => "QUARANTINED",
+            "READY" => "RELEASED",
+            _ => "ADJUSTED"
+        };
+        string custodyNotes = $"Status changed to {item.StatusCode}. Reason: {reasonCode}." + (string.IsNullOrWhiteSpace(notes) ? "" : $" {notes}");
+        await RecordChainOfCustodyEventAsync(item.ItemId, custodyEventType, performedBy, item.LocationId, tx.TransactionNumber, custodyNotes);
+        await SaveAuditLogAsync(performedBy, "SYSTEM", "RECONCILIATION",
+            $"Inventory adjustment for serial {item.SerialNumber}: status -> {item.StatusCode} (reason: {reasonCode}).{(string.IsNullOrWhiteSpace(notes) ? "" : " " + notes)}",
+            entityType: "INVENTORY_TRANSACTION", entityId: tx.TransactionId.ToString());
+
+        return tx;
+    }
+
+    // Best-effort assembly of everything traceable about one movement: the ledger
+    // row itself, its matched audit entry (tamper status included), courier detail
+    // if it's a TRANSFER, and the full custody timeline for the underlying bar.
+    public async Task<dynamic?> GetTransactionTraceAsync(int transactionId)
+    {
+        var tx = await _dbContext.InventoryTransactions
+            .Include(t => t.Item).ThenInclude(i => i!.Product).ThenInclude(p => p!.MetalType)
+            .Include(t => t.Item).ThenInclude(i => i!.Product).ThenInclude(p => p!.Denomination)
+            .Include(t => t.SourceLocation).ThenInclude(l => l!.Vault)
+            .Include(t => t.DestinationLocation).ThenInclude(l => l!.Vault)
+            .FirstOrDefaultAsync(t => t.TransactionId == transactionId);
+        if (tx == null) return null;
+
+        var auditEntry = await _dbContext.AuditLogs
+            .Where(a => a.EntityType == "INVENTORY_TRANSACTION" && a.EntityId == transactionId.ToString())
+            .OrderByDescending(a => a.Timestamp)
+            .FirstOrDefaultAsync();
+
+        // RECEIPT transactions are logged at the lot level (one audit row per intake batch,
+        // not per bar -- see IntakeInventoryItemsAsync), so fall back to the item's lot when
+        // there's no per-transaction entry.
+        if (auditEntry == null && tx.TransactionType == "RECEIPT" && tx.Item?.LotId > 0)
+        {
+            auditEntry = await _dbContext.AuditLogs
+                .Where(a => a.EntityType == "INVENTORY_LOT" && a.EntityId == tx.Item.LotId.ToString())
+                .OrderByDescending(a => a.Timestamp)
+                .FirstOrDefaultAsync();
+        }
+
+        var auditItem = auditEntry == null ? null : MapAuditLogSearchResultItem(auditEntry);
+
+        var movement = await _dbContext.MovementTransactions.FirstOrDefaultAsync(m => m.TransactionId == transactionId);
+
+        var custodyEvents = tx.ItemId > 0
+            ? await _dbContext.ChainOfCustodyEvents
+                .Include(e => e.Location)
+                .Where(e => e.ItemId == tx.ItemId)
+                .OrderBy(e => e.RecordedAt)
+                .ToListAsync()
+            : new List<ChainOfCustodyEvent>();
+
+        return new
+        {
+            transaction = new
+            {
+                transaction_id = tx.TransactionId,
+                transaction_number = tx.TransactionNumber,
+                transaction_type = tx.TransactionType,
+                serial_number = tx.Item?.SerialNumber,
+                metal_name = tx.Item?.Product?.MetalType?.MetalName,
+                denomination = tx.Item?.Product?.Denomination?.Label,
+                source_vault = tx.SourceLocation?.Vault?.VaultName,
+                source_location = tx.SourceLocation?.Description,
+                destination_vault = tx.DestinationLocation?.Vault?.VaultName,
+                destination_location = tx.DestinationLocation?.Description,
+                source_ownership = tx.SourceOwnership,
+                destination_ownership = tx.DestinationOwnership,
+                rate_used = tx.RateUsed,
+                fees_applied = tx.FeesApplied,
+                initiated_by = tx.InitiatedBy,
+                approved_by = tx.ApprovedBy,
+                timestamp = tx.TransactionTimestamp
+            },
+            audit_entry = auditItem == null ? null : new
+            {
+                log_id = auditItem.LogId,
+                username = auditItem.Username,
+                ip_address = auditItem.IpAddress,
+                module_name = auditItem.ModuleName,
+                action_description = auditItem.ActionDescription,
+                tamper_status = auditItem.TamperStatus,
+                timestamp = auditItem.Timestamp
+            },
+            courier = movement == null ? null : new
+            {
+                courier_details = movement.CourierDetails,
+                security_escort_name = movement.SecurityEscortName,
+                shipment_ref_number = movement.ShipmentRefNumber,
+                departure_time = movement.DepartureTime,
+                arrival_time = movement.ArrivalTime
+            },
+            custody_chain = custodyEvents.Select(e => new
+            {
+                custody_event_id = e.CustodyEventId,
+                event_type = e.EventType,
+                location = e.Location?.Description,
+                recorded_by = e.RecordedBy,
+                recorded_at = e.RecordedAt,
+                reference_number = e.ReferenceNumber,
+                notes = e.Notes
+            })
+        };
+    }
+
+    // =========================================================================
+    // IFRS Valuation Disclosures (IAS 2 lower-of-cost-or-NRV, IFRS 13 fair value)
+    // =========================================================================
+
+    public async Task<IfrsValuationDisclosure> GenerateIfrsValuationDisclosureAsync(string generatedBy)
+    {
+        if (_rateFeed == null) throw new InvalidOperationException("No live rate feed configured -- cannot mark inventory to fair value for an IFRS disclosure.");
+
+        var items = await _dbContext.InventoryItems
+            .Include(i => i.Product).ThenInclude(p => p!.MetalType)
+            .Include(i => i.Product).ThenInclude(p => p!.Denomination)
+            .Include(i => i.Lot)
+            .Where(i => i.StatusCode != "INACTIVE" && i.StatusCode != "WITHDRAWN")
+            .ToListAsync();
+
+        var byMetal = items.GroupBy(i => i.Product?.MetalTypeId ?? 0);
+        IfrsValuationDisclosure? last = null;
+
+        foreach (var group in byMetal)
+        {
+            var metalType = await _dbContext.MetalTypes.FindAsync(group.Key);
+            if (metalType == null) continue;
+
+            var (bid, ask, _) = await _rateFeed.GetLiveRatesAsync(metalType.MetalName);
+            decimal pricePerGram = ask / 31.1034768m; // ask = cost to replace, conservative for fair value mark
+            decimal nrvPricePerGram = bid / 31.1034768m; // bid = net proceeds on disposal, proxy for NRV
+
+            decimal totalWeight = 0, costBasis = 0, fairValue = 0, nrv = 0;
+            foreach (var item in group)
+            {
+                decimal weight = item.Product?.Denomination?.WeightGrams ?? 0;
+                decimal unitCost = item.Lot?.AverageUnitCost ?? 0;
+                totalWeight += weight;
+                costBasis += weight * unitCost;
+                fairValue += weight * pricePerGram;
+                nrv += weight * nrvPricePerGram;
+            }
+
+            decimal lowerOfCostOrNrv = Math.Min(costBasis, nrv);
+            decimal impairment = Math.Max(0, costBasis - nrv); // IAS 2 para 34: write-down when cost > NRV
+
+            var disclosure = new IfrsValuationDisclosure
+            {
+                SnapshotDate = DateTime.UtcNow,
+                MetalTypeId = group.Key,
+                Currency = "KWD",
+                TotalWeightGrams = totalWeight,
+                CostBasisTotal = Math.Round(costBasis, 2),
+                NetRealizableValueTotal = Math.Round(nrv, 2),
+                FairValueTotal = Math.Round(fairValue, 2),
+                FairValueHierarchyLevel = 1, // LBMA/exchange-quoted spot -- Level 1 input
+                LowerOfCostOrNrvTotal = Math.Round(lowerOfCostOrNrv, 2),
+                ImpairmentLossRecognized = Math.Round(impairment, 2),
+                GeneratedBy = generatedBy,
+                GeneratedAt = DateTime.UtcNow
+            };
+            _dbContext.IfrsValuationDisclosures.Add(disclosure);
+            last = disclosure;
+        }
+
+        await _dbContext.SaveChangesAsync();
+        await SaveAuditLogAsync(generatedBy, "SYSTEM", "IFRS_DISCLOSURE", $"Generated IFRS valuation disclosure snapshot covering {byMetal.Count()} metal type(s).", entityType: "IFRS_VALUATION_DISCLOSURE");
+
+        // Every relevant metal type produces its own row; return the last one generated
+        // (callers wanting the full set should use GetIfrsValuationDisclosuresAsync).
+        return last ?? new IfrsValuationDisclosure { MetalTypeId = 0, GeneratedBy = generatedBy };
+    }
+
+    public async Task<IEnumerable<IfrsValuationDisclosure>> GetIfrsValuationDisclosuresAsync() =>
+        await _dbContext.IfrsValuationDisclosures
+            .Include(d => d.MetalType)
+            .OrderByDescending(d => d.SnapshotDate)
+            .ToListAsync();
+
+    // =========================================================================
+    // Gold Dispensing Machine (GDM) Integration -- scalability hook
+    // =========================================================================
+
+    public async Task<IEnumerable<DispensingDevice>> GetDispensingDevicesAsync() =>
+        await _dbContext.DispensingDevices
+            .Include(d => d.Location)
+            .Include(d => d.Branch)
+            .ToListAsync();
+
+    public async Task<DispensingDevice> SaveDispensingDeviceAsync(DispensingDevice device)
+    {
+        if (device.DeviceId == 0)
+        {
+            _dbContext.DispensingDevices.Add(device);
+        }
+        else
+        {
+            var existing = await _dbContext.DispensingDevices.FirstOrDefaultAsync(d => d.DeviceId == device.DeviceId);
+            if (existing == null) throw new InvalidOperationException("Device not found.");
+            existing.DeviceCode = device.DeviceCode;
+            existing.DeviceName = device.DeviceName;
+            existing.LocationId = device.LocationId;
+            existing.BranchId = device.BranchId;
+            existing.Manufacturer = device.Manufacturer;
+            existing.Model = device.Model;
+            existing.ApiEndpoint = device.ApiEndpoint;
+            existing.StatusCode = device.StatusCode;
+            existing.IsActive = device.IsActive;
+            device = existing;
+        }
+        await _dbContext.SaveChangesAsync();
+        return device;
+    }
+
+    public async Task<bool> DeleteDispensingDeviceAsync(int deviceId)
+    {
+        var device = await _dbContext.DispensingDevices.FindAsync(deviceId);
+        if (device == null) return false;
+        bool hasActivity = await _dbContext.DispenseTransactions.AnyAsync(t => t.DeviceId == deviceId && t.StatusCode == "REQUESTED");
+        if (hasActivity) return false; // block delete while a dispense is in flight
+        _dbContext.DispensingDevices.Remove(device);
+        await _dbContext.SaveChangesAsync();
+        return true;
+    }
+
+    public async Task<DispensingDevice?> RecordDeviceHeartbeatAsync(int deviceId, string statusCode)
+    {
+        var device = await _dbContext.DispensingDevices.FindAsync(deviceId);
+        if (device == null) return null;
+        device.StatusCode = statusCode;
+        device.LastHeartbeatAt = DateTime.UtcNow;
+        await _dbContext.SaveChangesAsync();
+        return device;
+    }
+
+    public async Task<IEnumerable<DispenseTransaction>> GetDispenseTransactionsAsync(int? deviceId = null)
+    {
+        var query = _dbContext.DispenseTransactions
+            .Include(t => t.Device)
+            .Include(t => t.Product).ThenInclude(p => p!.Denomination)
+            .Include(t => t.Item)
+            .Include(t => t.Channel)
+            .AsQueryable();
+        if (deviceId.HasValue) query = query.Where(t => t.DeviceId == deviceId.Value);
+        return await query.OrderByDescending(t => t.RequestedAt).ToListAsync();
+    }
+
+    // Allocates one available serialized bar of `productId` sitting in the
+    // device's own cassette location to a dispense request. Mirrors the
+    // allocate-then-confirm/fail shape of ReserveStockAsync /
+    // ConfirmPurchaseWithCustodyAsync / CancelReservationAsync so a machine
+    // integration is "call these three endpoints", not a new core pattern.
+    public async Task<(DispenseTransaction? txn, string result)> RequestDispenseAsync(int deviceId, int productId, int? customerId, int channelId, string idempotencyKey, string initiatedBy)
+    {
+        var existing = await _dbContext.DispenseTransactions.FirstOrDefaultAsync(t => t.IdempotencyKey == idempotencyKey);
+        if (existing != null) return (existing, "IDEMPOTENT_REPLAY");
+
+        var device = await _dbContext.DispensingDevices.FindAsync(deviceId);
+        if (device == null) return (null, "DEVICE_NOT_FOUND");
+        if (!device.IsActive || device.StatusCode != "ACTIVE") return (null, "DEVICE_NOT_ACTIVE");
+
+        var item = await _dbContext.InventoryItems
+            .FirstOrDefaultAsync(i => i.LocationId == device.LocationId && i.ProductId == productId && i.StatusCode == "READY");
+        if (item == null) return (null, "NO_STOCK_AT_DEVICE");
+
+        item.StatusCode = "RESERVED";
+
+        var txn = new DispenseTransaction
+        {
+            DeviceId = deviceId,
+            ProductId = productId,
+            ItemId = item.ItemId,
+            CustomerId = customerId,
+            ChannelId = channelId,
+            IdempotencyKey = idempotencyKey,
+            StatusCode = "REQUESTED",
+            InitiatedBy = initiatedBy,
+            RequestedAt = DateTime.UtcNow
+        };
+        _dbContext.DispenseTransactions.Add(txn);
+        await _dbContext.SaveChangesAsync();
+
+        await RecalculateInventoryBalanceAsync(device.LocationId, productId, item.OwnershipType);
+        await RecordChainOfCustodyEventAsync(item.ItemId, "RESERVED", initiatedBy, device.LocationId, $"GDM-DISPENSE-{txn.DispenseId}", $"Allocated to dispensing device {device.DeviceCode} for GDM dispatch.");
+
+        return (txn, "SUCCESS");
+    }
+
+    public async Task<(bool success, string result)> CompleteDispenseAsync(int dispenseId, string completedBy)
+    {
+        var txn = await _dbContext.DispenseTransactions.Include(t => t.Item).Include(t => t.Device).FirstOrDefaultAsync(t => t.DispenseId == dispenseId);
+        if (txn == null) return (false, "NOT_FOUND");
+        if (txn.StatusCode != "REQUESTED") return (false, "NOT_IN_REQUESTED_STATE");
+        if (txn.Item == null) return (false, "ITEM_NOT_FOUND");
+
+        txn.StatusCode = "DISPENSED";
+        txn.DispensedAt = DateTime.UtcNow;
+        txn.Item.StatusCode = "INACTIVE"; // physically dispensed out of vault custody
+
+        var transaction = new InventoryTransaction
+        {
+            TransactionNumber = $"GDM-{txn.DispenseId}-{DateTime.UtcNow:yyyyMMddHHmmss}",
+            ItemId = txn.Item.ItemId,
+            TransactionType = "DISPATCH",
+            SourceLocationId = txn.Item.LocationId,
+            DestinationLocationId = null,
+            SourceOwnership = txn.Item.OwnershipType,
+            DestinationOwnership = "CUSTOMER_OWNED",
+            InitiatedBy = completedBy,
+            ApprovedBy = completedBy,
+            TransactionTimestamp = DateTime.UtcNow
+        };
+        _dbContext.InventoryTransactions.Add(transaction);
+
+        await _dbContext.SaveChangesAsync();
+
+        if (txn.Item.LocationId.HasValue)
+            await RecalculateInventoryBalanceAsync(txn.Item.LocationId.Value, txn.Item.ProductId, txn.Item.OwnershipType);
+
+        await RecordChainOfCustodyEventAsync(txn.Item.ItemId, "DISPENSED_GDM", completedBy, txn.Item.LocationId, $"GDM-DISPENSE-{txn.DispenseId}", $"Dispensed via device {txn.Device?.DeviceCode}.");
+        await SaveAuditLogAsync(completedBy, "SYSTEM", "DISPENSING", $"GDM dispense {dispenseId} completed for serial {txn.Item.SerialNumber} via device {txn.Device?.DeviceCode}.", entityType: "DISPENSE_TRANSACTION", entityId: dispenseId.ToString());
+        // Cross-referenced a second time under INVENTORY_TRANSACTION (the ledger row just
+        // created above) so GetTransactionTraceAsync's Reports -> Transactions drill-down
+        // finds it the same way it finds every other movement type's audit entry.
+        await SaveAuditLogAsync(completedBy, "SYSTEM", "DISPENSING", $"GDM dispense {dispenseId} completed for serial {txn.Item.SerialNumber} via device {txn.Device?.DeviceCode}.", entityType: "INVENTORY_TRANSACTION", entityId: transaction.TransactionId.ToString());
+
+        return (true, "SUCCESS");
+    }
+
+    public async Task<bool> FailDispenseAsync(int dispenseId, string reason)
+    {
+        var txn = await _dbContext.DispenseTransactions.Include(t => t.Item).FirstOrDefaultAsync(t => t.DispenseId == dispenseId);
+        if (txn == null || txn.StatusCode != "REQUESTED") return false;
+
+        txn.StatusCode = "FAILED";
+        txn.FailureReason = reason;
+        if (txn.Item != null)
+        {
+            txn.Item.StatusCode = "READY"; // release the allocation back to available stock
+        }
+        await _dbContext.SaveChangesAsync();
+
+        if (txn.Item?.LocationId != null)
+            await RecalculateInventoryBalanceAsync(txn.Item.LocationId.Value, txn.Item.ProductId, txn.Item.OwnershipType);
+
+        return true;
     }
 }
 

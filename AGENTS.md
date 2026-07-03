@@ -41,6 +41,7 @@ backend/
                           - Controllers/
                               PMIMSControllers.cs        (OPERATIONAL endpoints — partial class)
                               PMIMSControllers.Admin.cs  (ADMIN/GOVERNANCE endpoints — partial class)
+                              PMIMSControllers.Fim.cs    (FIM INTEGRATION MODULE endpoints — partial class)
                           - appsettings.json          (DB + JWT config; dev-only signing key)
   PMIMS.Tests/            xUnit tests (PMIMSTests.cs).
 frontend/
@@ -118,9 +119,16 @@ services, no behavioural difference, just organization:
   workflow-instance actions. Also holds the shared helpers
   (`GenerateJwt`, `BuildPermissionMap`, `AllModuleKeys`, `ComputeSha256`) and all request DTOs.
 - **`PMIMSControllers.Admin.cs`** — administration/governance: users, groups, permissions,
-  FIM provisioning, branches, reorder thresholds.
+  branches, reorder thresholds.
+- **`PMIMSControllers.Fim.cs`** — the full FIM (Forefront Identity Manager) Integration
+  Module: identity provisioning (users/profiles), access management (rights), password
+  management, and delta-sync change detection. All 29 RFP-mandated functions, gated by the
+  same `user_admin` policy as the rest of governance (see `docs/PERMISSIONS.md` and
+  `docs/FIM_INTEGRATION.md`). Backed by `FimService` (`PMIMS.Infrastructure/FimService.cs`)
+  against `AppUser`/`PrivilegeGroup`/`FimRight` — real persistence, not a mock.
 
-Put new **operational** endpoints in the first file, new **admin/setup** endpoints in the second.
+Put new **operational** endpoints in the first file, new **admin/setup** endpoints in the
+second, and any further FIM-surface endpoints in the third.
 
 > **Note:** this system previously included a natural-language "AI Copilot" (NL→SQL query
 > assistant with a Web Speech voice mode). It has been removed — do not re-add
@@ -151,8 +159,16 @@ A module key must be wired in **four** places to be consistent:
   unterminated string" errors. These are **not real** — they are a known scanner desync caused by
   the Arabic (RTL) string literals, and they vanish entirely if the Arabic characters are removed.
   The app compiles and runs fine through Vite/esbuild. **Don't chase these as bugs.**
-- **Mock externals:** Active Directory, FIM, and the live rate feed in `ExternalServices.cs` are
-  mocks for local/dev. Treat them as integration seams, not real services.
+- **Mock externals:** Active Directory (login) and the live rate feed in `ExternalServices.cs`
+  are mocks/simulations for local/dev — treat them as integration seams, not real services.
+  **FIM is no longer mocked:** `FimService` (`PMIMS.Infrastructure/FimService.cs`) is a real
+  implementation against `AppUser`/`PrivilegeGroup`/`FimRight`/`FimUserAttribute`/
+  `FimUserRight`/`FimSyncLog` — it's the "application-own identity list" scenario the RFP
+  calls out as a supported fallback to a real AD-backed FIM connector, not a stub. Password
+  verification (`ActiveDirectoryService.AuthenticateAsync`) is algorithm-aware
+  (`AppUser.PasswordAlgorithm`) because FIM's `SetPassword` can write BCRYPT or AES-256
+  credentials, not just the legacy SHA-256 demo-seed hash — don't reintroduce a hard-coded
+  SHA-256 comparison there.
 - **Editing a workflow template while requests are in flight.** `SaveWorkflowTemplateAsync`
   (`InventoryRepository.cs`) used to delete-and-recreate the `WorkflowTemplate` row on every
   save, which changed its `TemplateId` and silently orphaned any in-progress
@@ -179,14 +195,32 @@ A module key must be wired in **four** places to be consistent:
   verify the policy exists in `Program.cs` **and** the attribute is on the action.
 - **Policy ↔ module map (current state, all registered in `Program.cs`):**
   `user_admin.{read,write}`, `migration.{read,write}`, `purchase_orders.{read,write}`,
-  `custody.{read,write}`, `stocktake.{read,write}`, `workflows.read`, `reports.read`,
+  `custody.{read,write}`, `stocktake.{read,write}`, `workflows.read`, `reports.{read,write}`,
   `pending_actions.{read,write}`, `vault_location.{read,write}`, `master_data.{read,write}`,
-  `workflow_design.{read,write}`, `intake.{read,write}`. Note `workflows.write` deliberately
-  does **not** exist — approving/rejecting a workflow instance
+  `workflow_design.{read,write}`, `intake.{read,write}`, `dashboard.read`,
+  `rules_engine.{read,write}`, `notifications.{read,write}`, `monitoring.{read,write}`,
+  `dispensing.{read,write}`, `device_integration.{read,write}`. Note `workflows.write`
+  deliberately does **not** exist — approving/rejecting a workflow instance
   (`POST /api/workflows/instances/{id}/action`) is gated by `pending_actions.write`, because
   that's the module Checker/Reconciliation actually hold `FULL` on (`workflows` itself is
   `READ_ONLY` for every non-admin role — it's just the browse/list view). Don't "fix" that by
   switching it to `workflows.write`, that would lock the checker out of approvals again.
+  `GET /api/dashboard/executive-board` (`dashboard.read`), `POST /api/catalog/products`
+  (`master_data.write`), and `POST /api/inventory/low-stock-alerts/{id}/draft-po`
+  (`purchase_orders.write`) were the three remaining endpoints with no `[Authorize]` at all —
+  fixed; see `docs/PERMISSIONS.md` §4 for the full endpoint→policy map.
+- **No username-pattern-based authentication or role inference, anywhere.** There used to be a
+  "legacy fallback" in `ActiveDirectoryService.AuthenticateAsync` that logged in *any* username
+  not present in `AppUsers` — granting `IT/Admin` for any name containing `"admin"` — as long as
+  the password was the literal demo string `Password123`. There was a second, independent copy
+  of the same pattern in `InventoryRepository.GetUserRoles`, which derived Maker-Checker
+  approval roles from substrings in the *username* rather than real `PrivilegeGroup`
+  membership. Both are removed. Roles now come exclusively from `AppUser` → `UserGroupMembership`
+  → `PrivilegeGroup.GroupName`, and `WorkflowStep.RequiredRole` (seeded in `DbSeeder.cs`) is
+  kept equal to the literal `PrivilegeGroup.GroupName` of the group meant to act on that step —
+  if you add a new workflow step, its `RequiredRole` has to match a real group name or every
+  approval attempt on that step will fail with `UNAUTHORIZED_ROLE`. Do not reintroduce any
+  `username.Contains(...)`-style role or auth shortcut.
 
 ---
 

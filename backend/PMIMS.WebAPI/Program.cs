@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using PMIMS.Application;
 using PMIMS.Infrastructure;
+using PMIMS.WebAPI.Realtime;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -34,8 +35,31 @@ builder.Services.AddScoped<IRateFeedService, RateFeedService>();
 builder.Services.AddScoped<IReconciliationService, ReconciliationService>();
 builder.Services.AddScoped<IBulkMigrationService, BulkMigrationService>();
 
-// 3. Register Background Task Cleanup Hosted Service
+// 2a. RFP items 5-8: Rules Engine, Enhanced Audit Trail export, Email
+// Notifications, KFH Monitoring Integration.
+builder.Services.AddScoped<IRuleEngineService, RuleEngineService>();
+builder.Services.AddScoped<IAuditExportService, AuditExportService>();
+builder.Services.AddScoped<IEmailSenderService, EmailSenderService>();
+builder.Services.AddScoped<IMonitoringAdapter, GenericWebhookMonitoringAdapter>();
+// Item 7 extension -- immediate event-triggered notifications (transfer completed,
+// inventory discrepancy found), shared by ReconciliationService and PMIMSControllers.
+builder.Services.AddScoped<INotificationDispatchService, NotificationDispatchService>();
+
+// 2b. Real-Time Inventory Monitoring (precious-metal quantities & movements --
+// to/from main vault, between branches, and with customers). AppDbContext pushes
+// through this notifier from a single choke point in SaveChangesAsync; see
+// PMIMS.Infrastructure/AppDbContext.cs and PMIMS.WebAPI/Realtime/*.
+builder.Services.AddSignalR();
+builder.Services.AddScoped<IInventoryMonitoringNotifier, SignalRInventoryMonitoringNotifier>();
+
+// QuestPDF (used by AuditExportService) requires the license type to be set once at
+// startup. LICENSING NOTE: Community is free only under $1M USD annual gross revenue --
+// KFH will need a Commercial license before production use (see PMIMS.Infrastructure.csproj).
+QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
+
+// 3. Register Background Task Cleanup Hosted Services
 builder.Services.AddHostedService<ReservationCleanupService>();
+builder.Services.AddHostedService<NotificationSchedulerService>();
 
 // 4. Add MVC Controllers and Session middleware
 builder.Services.AddControllers();
@@ -78,6 +102,24 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
             ClockSkew = TimeSpan.FromMinutes(1)
         };
+
+        // SignalR's browser client can't set an Authorization header on the WebSocket/SSE
+        // upgrade request, so it sends the JWT as an "access_token" query string parameter
+        // instead (standard ASP.NET Core SignalR pattern). Only honor that for the
+        // real-time monitoring hub path -- every normal REST call still must use the
+        // Authorization header.
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var accessToken = context.Request.Query["access_token"];
+                if (!string.IsNullOrEmpty(accessToken) && context.HttpContext.Request.Path.StartsWithSegments("/hubs"))
+                {
+                    context.Token = accessToken;
+                }
+                return Task.CompletedTask;
+            }
+        };
     });
 
 // 5b. Authorization policies (Phase 1 -- module-key + write-level enforcement).
@@ -106,6 +148,14 @@ builder.Services.AddAuthorization(options =>
     Read("user_admin.read", "user_admin");
     Write("user_admin.write", "user_admin");
     Write("migration.write", "migration");
+
+    // "dashboard" -- the module was seeded with a permission level for every role (RO for
+    // Maker/Checker/Recon, FULL for IT/Admin) but had no registered policy anywhere, so it
+    // was purely decorative: GET /api/dashboard/executive-board had no [Authorize] at all
+    // (fully anonymous) and /api/dashboard/my-activity only required plain [Authorize]. Give
+    // the executive board a real read gate; "my-activity" intentionally stays a personal
+    // any-authenticated-user read (see comment at that endpoint), not a module-level one.
+    Read("dashboard.read", "dashboard");
 
     // Purchase orders (operational module) -- was missing, which left the
     // create/update PO endpoints unprotected regardless of the caller's
@@ -147,6 +197,35 @@ builder.Services.AddAuthorization(options =>
     // Intake module policies
     Read("intake.read", "intake");
     Write("intake.write", "intake");
+
+    // RFP items 5-8. Rules Engine and Notifications are administrative/governance
+    // modules (rule authoring, distribution-list configuration are sensitive --
+    // same tier as workflow_design/master_data). Monitoring alert-route config is
+    // likewise admin-tier; GET /api/health/detailed and the existing GET /api/health
+    // stay anonymous since external monitoring tools poll them without a user JWT.
+    Read("rules_engine.read", "rules_engine");
+    Write("rules_engine.write", "rules_engine");
+    Read("notifications.read", "notifications");
+    Write("notifications.write", "notifications");
+    Read("monitoring.read", "monitoring");
+    Write("monitoring.write", "monitoring");
+
+    // "reports" previously only had a .read policy (the report views themselves are
+    // read-only). Generating a persisted IFRS valuation disclosure snapshot is a write
+    // action layered on the same module -- gate it so only roles with FULL on `reports`
+    // (Reconciliation Officers, IT/Admin) can produce a disclosure of record, while
+    // everyone with reports.read can still list/view previously generated ones.
+    Write("reports.write", "reports");
+
+    // Gold Dispensing Machine (GDM) integration -- scalability hook (RFP-adjacent
+    // enhancement). `dispensing` is the operational module (view/operate dispense
+    // transactions, mirrors intake/custody); `device_integration` is the administrative
+    // module that governs registering/decommissioning physical machines, same tier as
+    // vault_location/master_data.
+    Read("dispensing.read", "dispensing");
+    Write("dispensing.write", "dispensing");
+    Read("device_integration.read", "device_integration");
+    Write("device_integration.write", "device_integration");
 });
 
 var app = builder.Build();
@@ -166,6 +245,11 @@ app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
+
+// Real-Time Inventory Monitoring hub (precious-metal quantities & movements).
+// Gated by the `reports.read` policy on the hub class itself (see
+// PMIMS.WebAPI/Realtime/InventoryMonitoringHub.cs).
+app.MapHub<InventoryMonitoringHub>("/hubs/inventory-monitoring");
 
 // Simple Health Endpoint
 app.MapGet("/api/health", () => Results.Ok(new { status = "Healthy", environment = useSqlServer ? "SQL Server" : "SQLite Local Fallback", timestamp = DateTime.UtcNow }));

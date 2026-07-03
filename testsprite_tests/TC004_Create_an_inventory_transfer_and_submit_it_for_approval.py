@@ -93,13 +93,13 @@ async def run_test():
         
         # --> Verify the transfer request is listed as pending
         # Assert: The transfer serial CH-88371-92 appears in the Branch Transfers list.
-        await expect(page.locator("xpath=/html/body/div[1]/div/main/section[3]/div/div[1]/div/table/tbody/tr[1]/td[1]").nth(0)).to_have_text("CH-88371-92", timeout=15000), "The transfer serial CH-88371-92 appears in the Branch Transfers list."
+        await expect(page.locator("xpath=//section[contains(@class, \"active\")]/div/div[1]/div/table/tbody/tr[1]/td[1]").nth(0)).to_have_text("CH-88371-92", timeout=15000), "The transfer serial CH-88371-92 appears in the Branch Transfers list."
         # Assert: The transfer's status is PENDING_APPROVAL, indicating it is pending approval.
-        await expect(page.locator("xpath=/html/body/div[1]/div/main/section[3]/div/div[1]/div/table/tbody/tr[1]/td[6]").nth(0)).to_have_text("PENDING_APPROVAL", timeout=15000), "The transfer's status is PENDING_APPROVAL, indicating it is pending approval."
+        await expect(page.locator("xpath=//section[contains(@class, \"active\")]/div/div[1]/div/table/tbody/tr[1]/td[6]").nth(0)).to_have_text("PENDING_APPROVAL", timeout=15000), "The transfer's status is PENDING_APPROVAL, indicating it is pending approval."
         
         # --> Verify the transfer status indicates it is awaiting approval
         # Assert: Transfer status is awaiting approval (shows 'PENDING_APPROVAL').
-        await expect(page.locator("xpath=/html/body/div[1]/div/main/section[3]/div/div[1]/div/table/tbody/tr[1]/td[6]").nth(0)).to_have_text("PENDING_APPROVAL", timeout=15000), "Transfer status is awaiting approval (shows 'PENDING_APPROVAL')."
+        await expect(page.locator("xpath=//section[contains(@class, \"active\")]/div/div[1]/div/table/tbody/tr[1]/td[6]").nth(0)).to_have_text("PENDING_APPROVAL", timeout=15000), "Transfer status is awaiting approval (shows 'PENDING_APPROVAL')."
         await asyncio.sleep(5)
 
     finally:

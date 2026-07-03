@@ -33,9 +33,11 @@ public class ActiveDirectoryService : IActiveDirectoryService
         {
             if (!user.IsActive) return (false, null, new List<string>());
 
-            // Validate SHA-256 password hash
-            string hash = ComputeSha256(password);
-            if (hash != user.PasswordHash) return (false, null, new List<string>());
+            // Algorithm-aware verification -- accounts provisioned/reset via the
+            // FIM SetPassword function may carry BCRYPT or AES256 hashes instead
+            // of the legacy SHA-256 demo-seed default (AppUser.PasswordAlgorithm).
+            if (!PasswordHasher.Verify(password, user.PasswordHash, user.PasswordAlgorithm))
+                return (false, null, new List<string>());
 
             var roles = user.Memberships
                 .Where(m => m.Group != null && m.Group.IsActive)
@@ -44,9 +46,7 @@ public class ActiveDirectoryService : IActiveDirectoryService
 
             // Alias the seeded superuser group name to the canonical "IT/Admin" role used
             // by the authorization policies' IsInRole("IT/Admin") superuser bypass
-            // (Program.cs) so any member of "IT Administrators" gets it -- not just the
-            // hard-coded "system-admin" demo login that happened to satisfy the legacy
-            // username-based fallback below.
+            // (Program.cs) so any member of "IT Administrators" gets it.
             if (roles.Contains("IT Administrators") && !roles.Contains("IT/Admin"))
             {
                 roles.Add("IT/Admin");
@@ -55,24 +55,15 @@ public class ActiveDirectoryService : IActiveDirectoryService
             return (true, user.DisplayName, roles);
         }
 
-        // Legacy fallback for backward compatibility (hard-coded demo accounts)
-        if ((username.EndsWith("maker", StringComparison.OrdinalIgnoreCase) || username.Contains("maker", StringComparison.OrdinalIgnoreCase)) && password == "Password123")
-        {
-            return (true, "KFH Treasury Maker User", new List<string> { "Operations Maker", "Branch Operator" });
-        }
-        if ((username.EndsWith("checker", StringComparison.OrdinalIgnoreCase) || username.Contains("checker", StringComparison.OrdinalIgnoreCase)) && password == "Password123")
-        {
-            return (true, "KFH Treasury Checker User", new List<string> { "Operations Checker", "Branch Checker" });
-        }
-        if ((username.EndsWith("reconciler", StringComparison.OrdinalIgnoreCase) || username.Contains("reconciler", StringComparison.OrdinalIgnoreCase)) && password == "Password123")
-        {
-            return (true, "KFH Reconciliation Officer", new List<string> { "Reconciliation Officer" });
-        }
-        if ((username.EndsWith("admin", StringComparison.OrdinalIgnoreCase) || username.Contains("admin", StringComparison.OrdinalIgnoreCase)) && password == "Password123")
-        {
-            return (true, "KFH Admin User", new List<string> { "IT/Admin" });
-        }
-
+        // NOTE: there used to be a "legacy fallback" here that granted a successful login
+        // (including, for any username containing "admin", the IT/Admin superuser role) to
+        // ANY username not found in AppUsers, as long as the password was the literal demo
+        // string "Password123" -- e.g. "backdoor-admin" or "not-a-real-admin" with that
+        // password would authenticate as a full superuser without ever being provisioned.
+        // It predates the DB-backed AppUser/PrivilegeGroup model and is redundant with it:
+        // every demo login (treasury-maker, treasury-checker, reconciliation-reconciler,
+        // system-admin) is seeded as a real AppUser row by DbSeeder and is handled by the
+        // lookup above. Do not reintroduce a username-pattern-based authentication bypass.
         return (false, null, new List<string>());
     }
 
@@ -133,149 +124,8 @@ public class RateFeedService : IRateFeedService
     }
 }
 
-// FIM Identity Synchronization provisioning API mapping
-public class FimService : IFimService
-{
-    private readonly AppDbContext _dbContext;
-
-    public FimService(AppDbContext dbContext)
-    {
-        _dbContext = dbContext;
-    }
-
-    public async Task<IEnumerable<string>> GetUsersAsync() => 
-        await _dbContext.AuditLogs.Select(a => a.Username).Distinct().ToListAsync();
-
-    public async Task<int> GetNumberOfUsersAsync() => 
-        (await GetUsersAsync()).Count();
-
-    public async Task<dynamic> GetUserInfoAsync(string username) => 
-        new { Username = username, Domain = "kfh.com.kw", LastAction = "Active" };
-
-    public async Task<IEnumerable<string>> GetProfilesAsync() => 
-        await _dbContext.UserRoles.Select(r => r.RoleName).ToListAsync();
-
-    public async Task<int> GetNumberOfProfilesAsync() => 
-        await _dbContext.UserRoles.CountAsync();
-
-    public async Task<dynamic> GetProfileInfoAsync(string profileName) => 
-        await _dbContext.UserRoles.FirstOrDefaultAsync(r => r.RoleName == profileName) ?? new object();
-
-    public async Task<IEnumerable<string>> GetUsersFromProfileAsync(string profileName)
-    {
-        // AD Mapped query emulation
-        return new List<string> { $"mock-{profileName}-user@kfh.com" };
-    }
-
-    public async Task<int> GetNumberOfUsersFromProfileAsync(string profileName) => 1;
-
-    public async Task<IEnumerable<string>> GetProfilesFromUserAsync(string username)
-    {
-        if (username.Contains("maker")) return new[] { "Operations Maker" };
-        if (username.Contains("checker")) return new[] { "Operations Checker" };
-        return new[] { "Audit/Compliance" };
-    }
-
-    public async Task<int> GetNumberOfProfilesFromUserAsync(string username) => 
-        (await GetProfilesFromUserAsync(username)).Count();
-
-    public async Task<bool> AddUserAsync(string username, string email, string passwordHash)
-    {
-        var log = new AuditLog
-        {
-            Username = "FIM_PROVISIONER",
-            IpAddress = "127.0.0.1",
-            ModuleName = "FIM_SYNC",
-            ActionDescription = $"Created user '{username}' via FIM Provisioning API",
-            Timestamp = DateTime.UtcNow
-        };
-        _dbContext.AuditLogs.Add(log);
-        await _dbContext.SaveChangesAsync();
-        return true;
-    }
-
-    public async Task<bool> AddProfileAsync(string profileName, string description)
-    {
-        if (await _dbContext.UserRoles.AnyAsync(r => r.RoleName == profileName)) return false;
-        
-        _dbContext.UserRoles.Add(new UserRole { RoleName = profileName, Description = description });
-        await _dbContext.SaveChangesAsync();
-        return true;
-    }
-
-    public async Task<bool> AddUserToProfileAsync(string username, string profileName)
-    {
-        await _dbContext.Database.ExecuteSqlRawAsync(
-            "INSERT INTO audit_logs (username, ip_address, module_name, action_description) VALUES ({0}, {1}, {2}, {3})",
-            "FIM_PROVISIONER", "127.0.0.1", "FIM_SYNC", $"Assigned user '{username}' to role profile '{profileName}'");
-        return true;
-    }
-
-    public async Task<bool> UpdateProfileInfoAsync(string profileName, string description)
-    {
-        var role = await _dbContext.UserRoles.FirstOrDefaultAsync(r => r.RoleName == profileName);
-        if (role == null) return false;
-        role.Description = description;
-        await _dbContext.SaveChangesAsync();
-        return true;
-    }
-
-    public async Task<bool> UpdateUserInfoAsync(string username, string email) => true;
-
-    public async Task<bool> RemoveUserAsync(string username) => true;
-
-    public async Task<bool> RemoveProfileAsync(string profileName)
-    {
-        var role = await _dbContext.UserRoles.FirstOrDefaultAsync(r => r.RoleName == profileName);
-        if (role == null) return false;
-        _dbContext.UserRoles.Remove(role);
-        await _dbContext.SaveChangesAsync();
-        return true;
-    }
-
-    public async Task<bool> RemoveUserFromProfileAsync(string username, string profileName) => true;
-
-    // Rights mapping
-    public async Task<IEnumerable<string>> GetAllRightsAsync() => 
-        await _dbContext.UserPermissions.Select(p => p.PermissionName).Distinct().ToListAsync();
-
-    public async Task<int> GetNumberOfRightsAsync() => 
-        (await GetAllRightsAsync()).Count();
-
-    public async Task<dynamic> GetRightInfoAsync(string rightName) => 
-        new { Right = rightName, Description = "Dynamic fine-grained system privilege" };
-
-    public async Task<IEnumerable<string>> GetAllRightsForUserAsync(string username)
-    {
-        if (username.Contains("maker")) return new[] { "po_create", "intake_make", "transfer_make" };
-        if (username.Contains("checker")) return new[] { "po_approve", "intake_approve", "transfer_approve" };
-        return new[] { "view_dashboard" };
-    }
-
-    public async Task<int> GetNumberOfRightsForUserAsync(string username) => 
-        (await GetAllRightsForUserAsync(username)).Count();
-
-    public async Task<IEnumerable<string>> GetAllUsersForRightAsync(string rightName) => 
-        new[] { "treasury-user@kfh.com", "vault-user@kfh.com" };
-
-    public async Task<int> GetNumberOfUsersForRightAsync(string rightName) => 2;
-
-    public async Task<bool> AddUserToRightAsync(string username, string rightName) => true;
-
-    public async Task<bool> RemoveUserFromRightAsync(string username, string rightName) => true;
-
-    public async Task<IEnumerable<dynamic>> DetectDeltaChangesAsync(DateTime lastSyncTime)
-    {
-        // Returns audit log revisions since last synchronization to detect changes
-        var changes = await _dbContext.AuditLogs
-            .Where(a => a.Timestamp > lastSyncTime && a.ModuleName == "FIM_SYNC")
-            .ToListAsync();
-
-        return changes.Select(c => new
-        {
-            Timestamp = c.Timestamp,
-            User = c.Username,
-            Action = c.ActionDescription
-        });
-    }
-}
+// The real FIM Integration Module implementation (IFimService) now lives in
+// its own file, FimService.cs, backed by AppUser/PrivilegeGroup/FimRight/
+// FimUserAttribute/FimUserRight/FimSyncLog rather than mock data -- see that
+// file for the full identity-provisioning / access-management / password
+// implementation covering every function in the RFP's FIM Integration Module.

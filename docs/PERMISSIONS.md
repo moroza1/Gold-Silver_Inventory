@@ -27,7 +27,7 @@ without `vault_location` (create/delete shelves).
 
 Stored in `group_permissions(group_id, module_key, access_level)` (unique on `group_id+module_key`).
 
-## 3. Module catalog (14)
+## 3. Module catalog (20)
 
 ### Operational tier (day-to-day view / transactions)
 
@@ -41,6 +41,8 @@ Stored in `group_permissions(group_id, module_key, access_level)` (unique on `gr
 | `stocktake` | Stocktake sessions & scans |
 | `reports` | Reporting & analytics (valuation, holdings, transactions, audit) |
 | `workflows` | Act on workflow instances (approve/reject) |
+| `intake` | Receive/verify incoming shipments (Maker-Checker) |
+| `dispensing` | Gold Dispensing Machine (GDM) — view/operate dispense transactions |
 
 ### Administrative tier (manage / setup / governance)
 
@@ -52,6 +54,10 @@ Stored in `group_permissions(group_id, module_key, access_level)` (unique on `gr
 | `migration` | Bulk Excel ingestion | — |
 | `settings` | System settings screen | — |
 | `user_admin` | Users, groups, permissions, FIM provisioning | — |
+| `rules_engine` | Author/version Dynamic Business Validation Rules (RFP item 5) | operational workflows that the rules gate (e.g. `purchase_orders` transfer) |
+| `notifications` | Configure management email distribution lists & schedules (RFP item 7) | `reports` (the data being emailed) |
+| `monitoring` | KFH monitoring-tool alert-route configuration (RFP item 8) | `GET /api/health*` (anonymous, polled by external tools) |
+| `device_integration` | Register/decommission physical GDM machines | `dispensing` (day-to-day dispense operation) |
 
 ## 4. Endpoint → policy map (server-side enforcement)
 
@@ -63,13 +69,52 @@ Declared with `[Authorize(Policy = …)]`; policies are registered in `Program.c
 | `POST /api/workflows/templates` | `workflow_design.write` | author templates |
 | `POST/DELETE /api/catalog/branches` | `master_data.write` | master data |
 | `POST/DELETE /api/inventory/reorder-thresholds` | `master_data.write` | master data |
+| `POST /api/inventory/low-stock-alerts/{id}/draft-po` | `purchase_orders.write` | creates a `PurchaseOrder` record from a threshold alert |
+| `POST /api/catalog/products` | `master_data.write` | create product/denomination catalog entries |
+| `GET /api/dashboard/executive-board` | `dashboard.read` | executive KPIs |
 | `POST /api/migration/upload`, `/commit` | `migration.write` | bulk ingestion |
 | `GET /api/admin/*`, `GET /api/fim/*` | `user_admin.read` | governance (read) |
-| `POST/PUT/DELETE /api/admin/*`, `POST /api/fim/*` | `user_admin.write` | governance (write) |
+| `POST/PUT/DELETE /api/admin/*`, `POST/PUT/DELETE /api/fim/*` | `user_admin.write` | governance (write) |
+
+`/api/fim/*` (`PMIMSControllers.Fim.cs`) is the full FIM Integration Module surface -- all
+29 RFP-mandated identity-provisioning / access-management(rights) / password-management /
+delta-sync functions, same `user_admin` policy as the rest of governance. See
+[`FIM_INTEGRATION.md`](./FIM_INTEGRATION.md) for the function → endpoint → `sp_FIM_*`
+stored-procedure mapping and connectivity support (DB / SOAP / CLI / IIS7).
 
 Every policy also passes for role `IT/Admin` (superuser). Operational read endpoints
 (e.g. `GET /api/catalog/locations`, `GET /api/catalog/branches`) are intentionally open so
 dropdowns/views work; mutations are what require a grant.
+
+### RFP items 5-8 (`PMIMSControllers.Rules.cs` / `.Audit.cs` / `.Notifications.cs` / `.Monitoring.cs`)
+
+| Endpoint(s) | Policy | Module / level |
+| :-- | :-- | :-- |
+| `GET /api/rules`, `/api/rules/{id}`, `/api/rules/{ruleCode}/versions` | `rules_engine.read` | view rules & version history |
+| `POST /api/rules`, `PUT /api/rules/{ruleCode}`, `POST /api/rules/{id}/activate`\|`/deactivate` | `rules_engine.write` | author/version rules (append-only) |
+| `POST /api/rules/evaluate` | `rules_engine.read` | ad-hoc rule evaluation (read-only operation) |
+| `GET /api/reports/audit-logs/search`, `/{id}`, `/export` | `reports.read` | tamper-evident audit search/export (extends existing `reports` module, not a new one) |
+| `GET /api/notifications/subscriptions`, `/deliveries` | `notifications.read` | view distribution lists & send history |
+| `POST/PUT/DELETE /api/notifications/subscriptions*`, `POST .../test-send` | `notifications.write` | manage distribution lists |
+| `GET /api/notifications/unsubscribe` | *(anonymous)* | recipient self-service unsubscribe link (see hardening note in code) |
+| `GET /api/health/detailed` | *(anonymous)* | matches existing anonymous `GET /api/health`; polled by external monitoring tools without a JWT |
+| `GET /api/monitoring/sla-metrics`, `/events`, `/alert-routes` | `monitoring.read` | view SLA metrics & alert routing |
+| `POST /api/monitoring/alert-routes` | `monitoring.write` | configure alert routing |
+
+`TransferStockWorkflow` (`purchase_orders`/`custody` write path) also runs a `TRANSFER_LIMIT`
+rule pre-check via `IRuleEngineService.EvaluateAsync` before the transfer is initiated —
+this is a rule *evaluation* (read of the rules module), not a change to the `purchase_orders`
+policy itself.
+
+### Gold Dispensing Machine (GDM) integration (`PMIMSControllers.Devices.cs`)
+
+| Endpoint(s) | Policy | Module / level |
+| :-- | :-- | :-- |
+| `GET /api/admin/devices` | `device_integration.read` | view registered machines |
+| `POST /api/admin/devices`, `DELETE /api/admin/devices/{id}` | `device_integration.write` | register/decommission machines |
+| `POST /api/admin/devices/{id}/heartbeat` | `dispensing.write` | device status ping |
+| `GET /api/dispensing/transactions` | `dispensing.read` | view dispense activity |
+| `POST /api/dispensing/request`, `/{id}/complete`, `/{id}/fail` | `dispensing.write` | operate dispense transactions |
 
 ## 5. Seeded role → module matrix
 
@@ -87,15 +132,28 @@ Demo users (password `Password123`): `treasury-maker`, `treasury-checker`,
 | stocktake | RO | RW | F | F |
 | reports | RO | RO | F | F |
 | workflows (act) | RO | RO | RO | F |
+| intake | F | RO | RO | F |
+| dispensing | F | RO | RO | F |
 | **vault_location** (manage) | — | — | — | F |
 | **master_data** (manage) | — | — | — | F |
 | **workflow_design** (manage) | — | — | — | F |
 | migration | RW | RO | RO | F |
 | settings | — | — | — | F |
 | user_admin | — | — | — | F |
+| **rules_engine** (manage) | — | — | RO | F |
+| **notifications** (manage) | — | — | — | F |
+| **monitoring** (manage) | — | — | RO | F |
+| **device_integration** (manage) | — | — | — | F |
 
-The three manage modules are `HIDDEN` for all operational roles and `FULL` only for IT
-Administrators — this is the concrete realization of the view-vs-manage segregation.
+The manage-tier modules are `HIDDEN` for Maker/Checker and `FULL` only for IT Administrators —
+the concrete realization of the view-vs-manage segregation. Reconciliation Officers are the one
+exception: they get `READ_ONLY` on `rules_engine` and `monitoring` (relevant to break
+investigation — seeing which rule fired, checking SLA/monitoring metrics) but stay `HIDDEN` on
+`notifications` (email distribution-list configuration is not part of their job).
+
+`dashboard` now has a registered `dashboard.read` policy (`GET /api/dashboard/executive-board`)
+— previously the module's seeded permission level was never enforced anywhere (the endpoint had
+no `[Authorize]` attribute at all).
 
 ## 6. Request-time flow
 
@@ -111,6 +169,21 @@ API ─► validate JWT ─► [Authorize(Policy)] ─► HasWrite/CanRead(user,
 
 Frontend `canAccess(module)` / `canModify(module)` mirror this for UX (hide/disable), but are
 **not** the security boundary — the policy on the endpoint is.
+
+### Maker-Checker step-level gating
+
+The module policies above gate *which endpoints* a user can call (e.g. `pending_actions.write`
+lets Checker/Reconciliation/IT-Admin call `POST /api/workflows/instances/{id}/action` at all).
+A second, finer-grained check inside `InventoryRepository.ProcessWorkflowActionAsync` then asks
+whether *this specific user* holds the role required by the workflow instance's *current step*
+(`WorkflowStep.RequiredRole`) — this is what actually enforces 4-eyes segregation between the
+PO-review step and the reconciliation step, for example. That check
+(`InventoryRepository.GetUserRoles`) resolves roles solely from real `AppUser` →
+`PrivilegeGroup` membership, and `WorkflowStep.RequiredRole` is seeded to match
+`PrivilegeGroup.GroupName` exactly (`DbSeeder.cs`). There is intentionally no
+username-pattern-based role inference anywhere in the login or role-resolution path — a
+username merely containing "checker" or "admin" grants nothing; only real group membership
+does.
 
 ## 7. Adding a new module (checklist)
 

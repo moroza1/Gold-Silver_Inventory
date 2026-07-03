@@ -69,7 +69,7 @@ async def run_test():
         
         # -> Change the Display Name for the user 'system-admin' to 'KFH IT Administrator Edited' and commit the change by clicking the page header to trigger save/blur.
         # text field
-        elem = page.locator('xpath=/html/body/div/div/main/section[11]/div/div[3]/div/table/tbody/tr[2]/td[3]/input')
+        elem = page.locator('xpath=//section[contains(@class, \"active\")]/div/div[3]/div/table/tbody/tr[2]/td[3]/input')
         await elem.wait_for(state="visible", timeout=10000)
         await elem.fill("KFH IT Administrator Edited")
         
@@ -92,7 +92,7 @@ async def run_test():
         
         # --> Verify the administrative update is reflected
         # Assert: The system-admin Display Name input value is 'KFH IT Administrator Edited'.
-        await expect(page.locator("xpath=/html/body/div/div/main/section[11]/div/div[3]/div/table/tbody/tr[2]/td[3]/input").nth(0)).to_have_value("KFH IT Administrator Edited", timeout=15000), "The system-admin Display Name input value is 'KFH IT Administrator Edited'."
+        await expect(page.locator("xpath=//section[contains(@class, \"active\")]/div/div[3]/div/table/tbody/tr[2]/td[3]/input").nth(0)).to_have_value("KFH IT Administrator Edited", timeout=15000), "The system-admin Display Name input value is 'KFH IT Administrator Edited'."
         await asyncio.sleep(5)
 
     finally:

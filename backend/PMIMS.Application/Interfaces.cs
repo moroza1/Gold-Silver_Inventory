@@ -10,7 +10,10 @@ public interface IInventoryRepository
     // Stored Procedure operations
     Task<(int poId, string result)> CreatePurchaseOrderAsync(string poNumber, int vendorId, decimal totalWeightGrams, decimal totalCost, string currency, string createdBy, string poItemJsonList);
     Task<bool> UpdatePurchaseOrderAsync(int poId, int vendorId, decimal totalWeightGrams, decimal totalCost, string currency, string username, string poItemJsonList);
-    Task<string> IntakeInventoryItemsAsync(int poId, string lotNumber, int locationId, string receivedBy, string serialsJsonList);
+    // sourceType: "SUPPLIER" (default, requires poId) or "CUSTOMER" (requires customerId;
+    // receiptReason of BUYBACK/RETURN -> KFH_OWNED, CUSTODY_DEPOSIT -> CUSTOMER_OWNED + custody holding).
+    Task<string> IntakeInventoryItemsAsync(int? poId, string lotNumber, int locationId, string receivedBy, string serialsJsonList,
+        string sourceType = "SUPPLIER", int? customerId = null, int? accountId = null, string? receiptReason = null);
     Task<IEnumerable<dynamic>> QueryAvailableStockAsync(int? branchId, int? metalTypeId, string? originCountry, int? denominationId);
     Task<Guid?> ReserveStockAsync(int customerId, int productId, int branchId, int channelId, string idempotencyKey, int ttlSeconds);
     Task<string> ConfirmPurchaseWithCustodyAsync(Guid reservationToken, int accountId, decimal salePrice, decimal markupAmount, string invoiceNumber, string? custodyAgreementNumber);
@@ -42,7 +45,7 @@ public interface IInventoryRepository
     Task AddProductAsync(MetalProduct product);
     Task AddDenominationAsync(MetalDenomination denomination);
     Task<MetalProduct> CreateDenominationProductAsync(string label, string metalName, decimal weightGrams);
-    Task SaveAuditLogAsync(string username, string ipAddress, string moduleName, string actionDescription, string? sqlExecuted = null);
+    Task SaveAuditLogAsync(string username, string ipAddress, string moduleName, string actionDescription, string? sqlExecuted = null, string? entityType = null, string? entityId = null);
     
     // Workflow Engine
     Task<IEnumerable<WorkflowTemplate>> GetWorkflowTemplatesAsync();
@@ -50,6 +53,12 @@ public interface IInventoryRepository
     Task<WorkflowInstance> StartWorkflowInstanceAsync(string workflowType, int entityId, string username);
     Task<string> ProcessWorkflowActionAsync(int instanceId, string username, string action, string? comments);
     Task<IEnumerable<WorkflowInstance>> GetActiveWorkflowInstancesAsync();
+    // Post-hoc lookup for a single instance -- used by the controller after
+    // ProcessWorkflowActionAsync succeeds, to detect a just-completed BRANCH_TRANSFER and
+    // fire a TRANSFER_COMPLETED notification (see PMIMSControllers.Notifications.cs). Kept
+    // separate from ProcessWorkflowActionAsync's own "SUCCESS"/error-string return contract
+    // so existing callers/tests are unaffected.
+    Task<WorkflowInstance?> GetWorkflowInstanceByIdAsync(int instanceId);
     Task<IEnumerable<ApprovalAction>> GetApprovalActionsForInstanceAsync(int instanceId);
 
     // Per-user activity dashboard: every approve/reject/return decision the user has made,
@@ -100,10 +109,100 @@ public interface IInventoryRepository
     Task<Branch> SaveBranchAsync(int? branchId, string branchCode, string branchName, int vaultId, bool isActive);
     Task<bool> DeleteBranchAsync(int branchId);
     Task<IEnumerable<BranchTransfer>> GetBranchTransfersAsync();
+    Task<BranchTransfer?> GetBranchTransferByIdAsync(int transferId);
     Task<BranchTransfer> InitiateWorkflowBranchTransferAsync(int itemId, int destinationBranchId, string courierInfo, string initiatedBy);
     Task<string> ReceiveBranchTransferAsync(int transferId, string receivedBy);
-    Task<PendingIntake> InitiateWorkflowIntakeAsync(int poId, string lotNumber, int locationId, string receivedBy, string serialsJsonList);
+    Task<PendingIntake> InitiateWorkflowIntakeAsync(int? poId, string lotNumber, int locationId, string receivedBy, string serialsJsonList,
+        string sourceType = "SUPPLIER", int? customerId = null, int? accountId = null, string? receiptReason = null);
     Task<IEnumerable<PendingIntake>> GetPendingIntakesAsync();
+
+    // =========================================================================
+    // Dynamic Business Validation Rules Engine (RFP item 5) -- pure data access;
+    // predicate-tree evaluation logic lives in IRuleEngineService.
+    // =========================================================================
+    Task<IEnumerable<BusinessRule>> GetBusinessRulesAsync(string? ruleType = null, bool activeOnly = false);
+    Task<BusinessRule?> GetBusinessRuleByIdAsync(int ruleId);
+    Task<IEnumerable<BusinessRule>> GetBusinessRuleVersionsAsync(string ruleCode);
+    Task<BusinessRule> AddBusinessRuleVersionAsync(BusinessRule rule);
+    Task<bool> SetBusinessRuleActiveAsync(int ruleId, bool isActive);
+    Task SaveBusinessRuleEvaluationAsync(BusinessRuleEvaluation evaluation);
+
+    // =========================================================================
+    // Enhanced Audit Trail UI (RFP item 6)
+    // =========================================================================
+    Task<AuditLogSearchResult> SearchAuditLogsAsync(AuditLogFilter filter);
+    Task<AuditLogSearchResultItem?> GetAuditLogByIdAsync(int logId);
+
+    // =========================================================================
+    // Automatic Management Email Notifications (RFP item 7)
+    // =========================================================================
+    Task<IEnumerable<NotificationSubscription>> GetNotificationSubscriptionsAsync();
+    Task<NotificationSubscription?> GetNotificationSubscriptionByIdAsync(int subscriptionId);
+    Task<NotificationSubscription> SaveNotificationSubscriptionAsync(NotificationSubscription subscription);
+    Task<bool> DeleteNotificationSubscriptionAsync(int subscriptionId);
+    Task<bool> UnsubscribeAsync(int subscriptionId);
+    Task RecordNotificationDeliveryAsync(NotificationDelivery delivery);
+    Task<IEnumerable<NotificationDelivery>> GetNotificationDeliveriesAsync(int? subscriptionId = null);
+
+    // =========================================================================
+    // KFH Existing Monitoring Tool Integration (RFP item 8)
+    // =========================================================================
+    Task<IEnumerable<MonitoringAlertRoute>> GetMonitoringAlertRoutesAsync();
+    Task<MonitoringAlertRoute> SaveMonitoringAlertRouteAsync(MonitoringAlertRoute route);
+    Task<MonitoringEvent> RecordMonitoringEventAsync(MonitoringEvent evt);
+    Task<IEnumerable<MonitoringEvent>> GetRecentMonitoringEventsAsync(int hours = 24);
+
+    // =========================================================================
+    // Real-Time Inventory Monitoring -- initial snapshot (live patches arrive over
+    // InventoryMonitoringHub's "BalanceChanged"/"MovementOccurred" events; this is
+    // just what the frontend fetches once on mount to seed its state before those
+    // patches start arriving).
+    // =========================================================================
+    Task<IEnumerable<InventoryBalance>> GetAllInventoryBalancesAsync();
+
+    // =========================================================================
+    // LBMA Good Delivery / Chain-of-Custody
+    // =========================================================================
+    Task<ChainOfCustodyEvent> RecordChainOfCustodyEventAsync(int itemId, string eventType, string recordedBy, int? locationId = null, string? referenceNumber = null, string? notes = null);
+    Task<IEnumerable<ChainOfCustodyEvent>> GetChainOfCustodyEventsAsync(int itemId);
+    // Bars missing refiner/assay/fineness data, or explicitly NOT_LISTED -- the
+    // gap list LBMA/internal audit would want ahead of a Good Delivery review.
+    Task<IEnumerable<dynamic>> GetLbmaComplianceReportAsync();
+
+    // =========================================================================
+    // Auditable, traceable movement records
+    // ------------------------------------------------------------------------
+    // Every status-changing adjustment to an item that ISN'T already a
+    // sale/transfer/withdrawal/receipt (i.e. reconciliation quarantine and
+    // resolution) gets a proper ADJUSTMENT InventoryTransaction row, a
+    // chain-of-custody event, and a cross-referenced AuditLog entry -- instead
+    // of the previous approach of silently recalculating the balance with no
+    // ledger trace at all.
+    // =========================================================================
+    Task<InventoryTransaction> RecordInventoryAdjustmentAsync(int itemId, string reasonCode, string performedBy, string? notes = null);
+
+    // Assembles one InventoryTransaction with everything needed to trace it end-to-end:
+    // its matched AuditLog entry (tamper-status included), courier/MovementTransaction
+    // detail if it's a TRANSFER, and the full chain-of-custody timeline for the item.
+    Task<dynamic?> GetTransactionTraceAsync(int transactionId);
+
+    // =========================================================================
+    // IFRS Valuation Disclosures (IAS 2 lower-of-cost-or-NRV, IFRS 13 fair value)
+    // =========================================================================
+    Task<IfrsValuationDisclosure> GenerateIfrsValuationDisclosureAsync(string generatedBy);
+    Task<IEnumerable<IfrsValuationDisclosure>> GetIfrsValuationDisclosuresAsync();
+
+    // =========================================================================
+    // Gold Dispensing Machine (GDM) Integration -- scalability hook
+    // =========================================================================
+    Task<IEnumerable<DispensingDevice>> GetDispensingDevicesAsync();
+    Task<DispensingDevice> SaveDispensingDeviceAsync(DispensingDevice device);
+    Task<bool> DeleteDispensingDeviceAsync(int deviceId);
+    Task<DispensingDevice?> RecordDeviceHeartbeatAsync(int deviceId, string statusCode);
+    Task<IEnumerable<DispenseTransaction>> GetDispenseTransactionsAsync(int? deviceId = null);
+    Task<(DispenseTransaction? txn, string result)> RequestDispenseAsync(int deviceId, int productId, int? customerId, int channelId, string idempotencyKey, string initiatedBy);
+    Task<(bool success, string result)> CompleteDispenseAsync(int dispenseId, string completedBy);
+    Task<bool> FailDispenseAsync(int dispenseId, string reason);
 }
 
 public interface IActiveDirectoryService
@@ -111,41 +210,56 @@ public interface IActiveDirectoryService
     Task<(bool success, string? displayName, List<string> roles)> AuthenticateAsync(string username, string password);
 }
 
+// FIM (Forefront Identity Manager) integration surface -- implements every
+// function mandated by the RFP's "FIM Integration Module" section. IDs are
+// the PMIMS-native primary keys (AppUser.UserId as "userId", PrivilegeGroup.
+// GroupId as "profileId", FimRight.RightId as "rightId") since this
+// implementation targets the "application-own identity list" scenario;
+// swapping in real Active-Directory-backed identifiers (SIDs/DNs) is a
+// same-shape change confined to FimService. See PMIMS.Domain.FimUserAttribute/
+// FimRight/FimUserRight/FimSyncLog and database/procedures.sql (sp_FIM_*).
 public interface IFimService
 {
-    // Identity Provisioning Functions
-    Task<IEnumerable<string>> GetUsersAsync();
+    // ---- Identity Provisioning Functions ----
+    Task<IEnumerable<FimUserDto>> GetUsersAsync();
     Task<int> GetNumberOfUsersAsync();
-    Task<dynamic> GetUserInfoAsync(string username);
-    Task<IEnumerable<string>> GetProfilesAsync();
+    Task<FimUserDto?> GetUserInfoAsync(int userId);
+    Task<IEnumerable<FimProfileDto>> GetProfilesAsync();
     Task<int> GetNumberOfProfilesAsync();
-    Task<dynamic> GetProfileInfoAsync(string profileName);
-    Task<IEnumerable<string>> GetUsersFromProfileAsync(string profileName);
-    Task<int> GetNumberOfUsersFromProfileAsync(string profileName);
-    Task<IEnumerable<string>> GetProfilesFromUserAsync(string username);
-    Task<int> GetNumberOfProfilesFromUserAsync(string username);
-    Task<bool> AddUserAsync(string username, string email, string passwordHash);
-    Task<bool> AddProfileAsync(string profileName, string description);
-    Task<bool> AddUserToProfileAsync(string username, string profileName);
-    Task<bool> UpdateProfileInfoAsync(string profileName, string description);
-    Task<bool> UpdateUserInfoAsync(string username, string email);
-    Task<bool> RemoveUserAsync(string username);
-    Task<bool> RemoveProfileAsync(string profileName);
-    Task<bool> RemoveUserFromProfileAsync(string username, string profileName);
+    Task<FimProfileDto?> GetProfileInfoAsync(int profileId);
+    Task<IEnumerable<FimUserDto>> GetUsersFromProfileAsync(int profileId);
+    Task<int> GetNumberOfUsersFromProfileAsync(int profileId);
+    Task<IEnumerable<FimProfileDto>> GetProfilesFromUserAsync(int userId);
+    Task<int> GetNumberOfProfilesFromUserAsync(int userId);
+    Task<FimUserDto> AddUserAsync(Dictionary<string, string> attributes, string createdBy);
+    Task<FimProfileDto> AddProfileAsync(Dictionary<string, string> attributes, string createdBy);
+    Task<bool> AddUserToProfileAsync(int userId, int profileId, string assignedBy);
+    Task<FimProfileDto?> UpdateProfileInfoAsync(int profileId, Dictionary<string, string> attributes);
+    Task<FimUserDto?> UpdateUserInfoAsync(int userId, Dictionary<string, string> attributes);
+    Task<bool> RemoveUserAsync(int userId);
+    Task<bool> RemoveProfileAsync(int profileId);
+    Task<bool> RemoveUserFromProfileAsync(int userId, int profileId);
+    Task<int> RemoveUsersFromProfileAsync(IEnumerable<int> userIds, int profileId);
 
-    // Access Management Functions
-    Task<IEnumerable<string>> GetAllRightsAsync();
+    // ---- Access Management Functions ----
+    Task<IEnumerable<FimRightDto>> GetAllRightsAsync();
     Task<int> GetNumberOfRightsAsync();
-    Task<dynamic> GetRightInfoAsync(string rightName);
-    Task<IEnumerable<string>> GetAllRightsForUserAsync(string username);
-    Task<int> GetNumberOfRightsForUserAsync(string username);
-    Task<IEnumerable<string>> GetAllUsersForRightAsync(string rightName);
-    Task<int> GetNumberOfUsersForRightAsync(string rightName);
-    Task<bool> AddUserToRightAsync(string username, string rightName);
-    Task<bool> RemoveUserFromRightAsync(string username, string rightName);
+    Task<FimRightDto?> GetRightInfoAsync(int rightId);
+    Task<IEnumerable<FimRightDto>> GetAllRightsForUserAsync(int userId);
+    Task<int> GetNumberOfRightsForUserAsync(int userId);
+    Task<IEnumerable<FimUserDto>> GetAllUsersForRightAsync(int rightId);
+    Task<int> GetNumberOfUsersForRightAsync(int rightId);
+    Task<bool> AddUserToRightAsync(int userId, int rightId, string grantedBy);
+    Task<bool> RemoveUserFromRightAsync(int userId, int rightId);
 
-    // Connection support & Sync change detection
-    Task<IEnumerable<dynamic>> DetectDeltaChangesAsync(DateTime lastSyncTime);
+    // ---- Password Management Functions ----
+    // encryptionAlgorithm: "BCRYPT" (default, one-way hash) or "AES256"
+    // (reversible, for scenarios where FIM needs to push a recoverable
+    // credential into a downstream system). Unknown values throw.
+    Task<bool> SetPasswordAsync(int userId, string password, string encryptionAlgorithm = "BCRYPT");
+
+    // ---- Connectivity support & delta-sync change detection ----
+    Task<IEnumerable<FimSyncChangeDto>> DetectDeltaChangesAsync(DateTime lastSyncTime);
 }
 
 public interface IRateFeedService
@@ -163,4 +277,21 @@ public interface IBulkMigrationService
 {
     Task<dynamic> StageMigrationExcelAsync(string fileName, string fileContentBase64, string uploadedBy);
     Task<string> CommitMigrationAsync(int migrationId, string approvedBy);
+}
+
+// =========================================================================
+// Real-Time Inventory Monitoring -- push notifications for precious-metal
+// quantity/movement changes (to/from main vault, between branches, and with
+// customers). Implemented as a DIP boundary: PMIMS.Infrastructure (AppDbContext)
+// raises these events from a single choke point (SaveChangesAsync) without
+// knowing or caring that PMIMS.WebAPI's SignalRInventoryMonitoringNotifier is
+// what actually pushes them over a Hub -- Infrastructure only depends on this
+// Application-layer interface, same as every other service abstraction here.
+// Optional (nullable) at every injection point so this is purely additive: a
+// caller/test that never supplies an implementation just doesn't get pushes.
+// =========================================================================
+public interface IInventoryMonitoringNotifier
+{
+    Task NotifyMovementAsync(PMIMS.Domain.InventoryTransaction transaction);
+    Task NotifyBalanceChangedAsync(PMIMS.Domain.InventoryBalance balance);
 }

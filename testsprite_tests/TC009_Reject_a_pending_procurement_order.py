@@ -64,7 +64,7 @@ async def run_test():
         
         # -> Open the pending procurement request titled 'PO-KFH-2026-002' by clicking its PO code to view request details.
         # PO-KFH-2026-002
-        elem = page.locator('xpath=/html/body/div/div/main/section[2]/div/div/div/table/tbody/tr[2]/td')
+        elem = page.locator('xpath=//section[contains(@class, \"active\")]/div/div/div/table/tbody/tr[2]/td')
         await elem.click(timeout=10000)
         
         # -> Click the 'Approve' button in the Action column for the PO-KFH-2026-002 row to reveal approval/rejection options or open the approval modal so the 'Reject' action can be selected.
@@ -74,7 +74,7 @@ async def run_test():
         
         # -> Open the 'PO-KFH-2026-002' purchase order row to view its actions/details and check whether a 'Reject' option is available.
         # PO-KFH-2026-002
-        elem = page.locator('xpath=/html/body/div/div/main/section[2]/div/div/div/table/tbody/tr[2]/td')
+        elem = page.locator('xpath=//section[contains(@class, \"active\")]/div/div/div/table/tbody/tr[2]/td')
         await elem.click(timeout=10000)
         
         # -> Click the 'Intake Shipment' button for PO-KFH-2026-002 to open its actions/details and check whether a 'Reject' option is available.

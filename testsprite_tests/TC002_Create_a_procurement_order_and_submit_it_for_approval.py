@@ -57,7 +57,7 @@ async def run_test():
         
         # -> Fill a new unique Purchase Order Number 'PO-KFH-2026-003' in the Purchase Order Number field and click the 'Create P.O. & Submit' button to create the order.
         # text field
-        elem = page.locator('xpath=/html/body/div/div/main/section[2]/div/div[2]/div/input')
+        elem = page.locator('xpath=//section[contains(@class, \"active\")]/div/div[2]/div/input')
         await elem.wait_for(state="visible", timeout=10000)
         await elem.fill("PO-KFH-2026-003")
         
@@ -70,13 +70,13 @@ async def run_test():
         
         # --> Verify the procurement request is listed as pending
         # Assert: The Active Purchase Orders table contains the procurement request PO-KFH-2026-003.
-        await expect(page.locator("xpath=/html/body/div/div/main/section[2]/div/div[1]/div/table/tbody/tr[3]/td[1]").nth(0)).to_have_text("PO-KFH-2026-003", timeout=15000), "The Active Purchase Orders table contains the procurement request PO-KFH-2026-003."
+        await expect(page.locator("xpath=//section[contains(@class, \"active\")]/div/div[1]/div/table/tbody/tr[3]/td[1]").nth(0)).to_have_text("PO-KFH-2026-003", timeout=15000), "The Active Purchase Orders table contains the procurement request PO-KFH-2026-003."
         # Assert: The procurement request PO-KFH-2026-003 has status PENDING_APPROVAL, indicating it is pending.
-        await expect(page.locator("xpath=/html/body/div/div/main/section[2]/div/div[1]/div/table/tbody/tr[3]/td[5]").nth(0)).to_have_text("PENDING_APPROVAL", timeout=15000), "The procurement request PO-KFH-2026-003 has status PENDING_APPROVAL, indicating it is pending."
+        await expect(page.locator("xpath=//section[contains(@class, \"active\")]/div/div[1]/div/table/tbody/tr[3]/td[5]").nth(0)).to_have_text("PENDING_APPROVAL", timeout=15000), "The procurement request PO-KFH-2026-003 has status PENDING_APPROVAL, indicating it is pending."
         
         # --> Verify the procurement order status indicates it is awaiting approval
         # Assert: The procurement order status is 'PENDING_APPROVAL', indicating it is awaiting approval.
-        await expect(page.locator("xpath=/html/body/div/div/main/section[2]/div/div[1]/div/table/tbody/tr[3]/td[5]").nth(0)).to_have_text("PENDING_APPROVAL", timeout=15000), "The procurement order status is 'PENDING_APPROVAL', indicating it is awaiting approval."
+        await expect(page.locator("xpath=//section[contains(@class, \"active\")]/div/div[1]/div/table/tbody/tr[3]/td[5]").nth(0)).to_have_text("PENDING_APPROVAL", timeout=15000), "The procurement order status is 'PENDING_APPROVAL', indicating it is awaiting approval."
         await asyncio.sleep(5)
 
     finally:

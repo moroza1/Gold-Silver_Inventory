@@ -87,7 +87,7 @@ async def run_test():
         
         # --> Verify the approved transfer is no longer shown as pending
         # Assert: Verified the transfer row's status is 'REJECTED', so it is not shown as pending.
-        await expect(page.locator("xpath=/html/body/div/div/main/section[3]/div/div[1]/div/table/tbody/tr/td[6]").nth(0)).to_have_text("REJECTED", timeout=15000), "Verified the transfer row's status is 'REJECTED', so it is not shown as pending."
+        await expect(page.locator("xpath=//section[contains(@class, \"active\")]/div/div[1]/div/table/tbody/tr/td[6]").nth(0)).to_have_text("REJECTED", timeout=15000), "Verified the transfer row's status is 'REJECTED', so it is not shown as pending."
         current_url = await page.evaluate("() => window.location.href")
         # Assert: page loaded with a URL (final outcome verified by the AI judge during the run)
         assert current_url, 'Page should have loaded with a URL'

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 const API_BASE = 'http://localhost:8080/api';
 
@@ -13,6 +13,60 @@ const getCurrentMonthRange = () => {
   const start = new Date(now.getFullYear(), now.getMonth(), 1);
   const end = new Date(now.getFullYear(), now.getMonth() + 1, 0); // day 0 of next month = last day of this month
   return { start: toDateInputValue(start), end: toDateInputValue(end) };
+};
+
+// --- GS1 and ISO/IEC 18004 barcode/QR code parser -------------------------
+export const parseGs1Barcode = (rawInput: string): { serial: string; gtin: string; lot: string } => {
+  if (!rawInput) return { serial: '', gtin: '', lot: '' };
+  
+  // Standard GS1 string with parentheses e.g. (01)06291100000017(21)SN12345(10)LOT999
+  const parenRegex = /^(?:\(01\)(\d{14}))?(?:\(21\)([^()]+))?(?:\(10\)([^()]+))?$/;
+  let match = rawInput.match(parenRegex);
+  if (match && (match[1] || match[2] || match[3])) {
+    return {
+      gtin: match[1] || '',
+      serial: match[2] || '',
+      lot: match[3] || ''
+    };
+  }
+
+  // FNC1/raw GS1 syntax parsing (e.g. without parentheses but with AI prefixes)
+  // Simple heuristic parser for GS1 key-value pairs
+  // e.g. 010629110000001721SN12345 or similar
+  let clean = rawInput.replace(/^\]Q3|^\]C1/, ''); // Strip ISO/IEC 18004 / GS1-128 symbology identifiers
+  let serial = '';
+  let gtin = '';
+  let lot = '';
+  
+  let i = 0;
+  while (i < clean.length) {
+    if (clean.substring(i).startsWith('01') && clean.length >= i + 16) {
+      gtin = clean.substring(i + 2, i + 16);
+      i += 16;
+    } else if (clean.substring(i).startsWith('21')) {
+      let sub = clean.substring(i + 2);
+      let gsIdx = sub.indexOf('\u001d');
+      if (gsIdx === -1) gsIdx = sub.indexOf('|');
+      let len = gsIdx !== -1 ? gsIdx : sub.length;
+      serial = sub.substring(0, Math.min(len, 20));
+      i += 2 + len + 1;
+    } else if (clean.substring(i).startsWith('10')) {
+      let sub = clean.substring(i + 2);
+      let gsIdx = sub.indexOf('\u001d');
+      if (gsIdx === -1) gsIdx = sub.indexOf('|');
+      let len = gsIdx !== -1 ? gsIdx : sub.length;
+      lot = sub.substring(0, Math.min(len, 20));
+      i += 2 + len + 1;
+    } else {
+      i++; // skip unrecognized/filler
+    }
+  }
+
+  return {
+    gtin,
+    serial: serial || rawInput, // fallback to raw input if no serial AI matched
+    lot
+  };
 };
 
 // --- Auth token plumbing -------------------------------------------------
@@ -165,6 +219,8 @@ const Translations: Record<string, Record<string, string>> = {
     btn_log_scan: "Log Scan Event",
     stocktake_disc_title: "Discrepancy & breaks Report",
     stocktake_disc_sub: "Comparison match between ledger expectations and scans",
+    btn_run_reconciliation: "Run Reconciliation Against Core Banking GL",
+    btn_running_reconciliation: "Running Reconciliation...",
     th_expected_coords: "Expected Coordinate",
     th_owner: "Owner",
     th_mismatch: "Mismatch Type",
@@ -228,6 +284,8 @@ const Translations: Record<string, Record<string, string>> = {
     rep_occupancy: "Vault Spatial Coordinate Occupancy",
     rep_audit: "Maker-Checker Audit Logs",
     rep_transactions: "Transaction Ledger History",
+    rep_inventory_balance: "Inventory Balance Report",
+    rep_reconciliation: "Reconciliation Differences Report",
     th_cost_basis: "Cost Basis (USD)",
     th_market_val: "Market Value (USD)",
     th_unrealized_pnl: "Unrealized P&L",
@@ -243,6 +301,13 @@ const Translations: Record<string, Record<string, string>> = {
     th_source_loc: "Source Location",
     th_dest_loc: "Destination Location",
     th_ownership: "Ownership",
+    th_vault: "Vault",
+    th_ready_qty: "Ready Qty",
+    th_total_weight_g: "Total Weight (g)",
+    th_case_id: "Case ID",
+    th_reason_code: "Reason Code",
+    th_resolved_by: "Resolved By",
+    th_resolved_at: "Resolved At",
     menu_workflows: "Workflow Designer",
     menu_workflows_queue: "Pending Queue",
     title_workflows: "Workflow Path Designer & Pending Queue",
@@ -272,6 +337,31 @@ const Translations: Record<string, Record<string, string>> = {
     th_assigned_role: "Assigned Authority",
     msg_no_pending: "No pending requests require your approval at this time.",
     menu_user_admin: "User & Group Admin",
+    menu_notifications: "Notifications",
+    title_notifications: "Management Email Notifications & Event Alerts",
+    notifications_subtitle: "Configure distribution lists for scheduled reports (inventory balance, low stock, high-value movement) and instant alerts fired the moment a key event happens (branch transfer completed, inventory discrepancy detected).",
+    th_notif_email: "Distribution Email",
+    th_notif_type: "Report / Event Type",
+    th_notif_schedule: "Schedule (cron)",
+    th_notif_format: "Format",
+    th_notif_status: "Status",
+    th_notif_last_run: "Last Run",
+    btn_notif_save: "Save Subscription",
+    btn_notif_cancel_edit: "Cancel Edit",
+    btn_notif_edit: "Edit",
+    btn_notif_delete: "Delete",
+    btn_notif_test_send: "Test Send",
+    btn_notif_activate: "Activate",
+    btn_notif_deactivate: "Deactivate",
+    notif_form_title: "Add / Edit Subscription",
+    notif_instant_hint: "Instant event types fire immediately when the event occurs; the schedule field is stored but not used for them.",
+    notif_deliveries_title: "Recent Delivery Log",
+    th_notif_sent_at: "Sent At",
+    th_notif_delivery_status: "Status",
+    th_notif_message_id: "Message ID",
+    th_notif_failure: "Failure Reason",
+    msg_no_subscriptions: "No notification subscriptions configured yet.",
+    msg_no_deliveries: "No deliveries recorded yet.",
     title_user_admin: "User Onboarding & Group Privilege Management",
     user_admin_subtitle: "Manage system users, privilege groups, and fine-grained module access permissions.",
     tab_users: "User Management",
@@ -402,6 +492,8 @@ const Translations: Record<string, Record<string, string>> = {
     btn_log_scan: "تسجيل حركة المسح ماديًا",
     stocktake_disc_title: "تقرير مطابقة فروق الجرد والملاحظات",
     stocktake_disc_sub: "مقارنة المطابقة والتحقق بين الأرصدة الدفترية والمسوحات الفعلية",
+    btn_run_reconciliation: "تنفيذ المطابقة مع دفتر الأستاذ العام للخدمات المصرفية الأساسية",
+    btn_running_reconciliation: "جارٍ تنفيذ المطابقة...",
     th_expected_coords: "الإحداثيات المتوقعة",
     th_owner: "المالك",
     th_mismatch: "نوع الفرق المرصود",
@@ -465,6 +557,8 @@ const Translations: Record<string, Record<string, string>> = {
     rep_occupancy: "نسبة إشغال إحداثيات الخزنة",
     rep_audit: "سجل حركات التدقيق (Maker-Checker)",
     rep_transactions: "حركات سجل الأستاذ التاريخية",
+    rep_inventory_balance: "تقرير أرصدة المخزون",
+    rep_reconciliation: "تقرير فروقات المطابقة",
     th_cost_basis: "التكلفة الدفترية (USD)",
     th_market_val: "القيمة السوقية (USD)",
     th_unrealized_pnl: "الأرباح/الخسائر غير المحققة",
@@ -480,6 +574,13 @@ const Translations: Record<string, Record<string, string>> = {
     th_source_loc: "الموقع المصدر",
     th_dest_loc: "الموقع الهدف",
     th_ownership: "الملكية",
+    th_vault: "الخزنة",
+    th_ready_qty: "الكمية الجاهزة",
+    th_total_weight_g: "الوزن الإجمالي (جم)",
+    th_case_id: "رقم الحالة",
+    th_reason_code: "رمز السبب",
+    th_resolved_by: "تمت التسوية بواسطة",
+    th_resolved_at: "تاريخ التسوية",
     menu_workflows: "إعداد وتدقيق المسارات",
     menu_workflows_queue: "قائمة الطلبات المعلقة",
     title_workflows: "منصة إدارة مسارات الاعتماد والعمليات المعلقة",
@@ -504,6 +605,31 @@ const Translations: Record<string, Record<string, string>> = {
     btn_reject: "رفض المعاملة",
     lbl_comments: "ملاحظات القرار",
     menu_user_admin: "إدارة المستخدمين والمجموعات",
+    menu_notifications: "الإشعارات",
+    title_notifications: "إشعارات البريد الإلكتروني الإدارية وتنبيهات الأحداث",
+    notifications_subtitle: "إعداد القوائم البريدية للتقارير المجدولة (رصيد المخزون، المخزون المنخفض، الحركات عالية القيمة) والتنبيهات الفورية التي تُطلق فور وقوع حدث رئيسي (اكتمال حركة تحويل، اكتشاف فرق في الجرد).",
+    th_notif_email: "البريد الإلكتروني للقائمة",
+    th_notif_type: "نوع التقرير / الحدث",
+    th_notif_schedule: "الجدولة (cron)",
+    th_notif_format: "الصيغة",
+    th_notif_status: "الحالة",
+    th_notif_last_run: "آخر تشغيل",
+    btn_notif_save: "حفظ الاشتراك",
+    btn_notif_cancel_edit: "إلغاء التعديل",
+    btn_notif_edit: "تعديل",
+    btn_notif_delete: "حذف",
+    btn_notif_test_send: "إرسال تجريبي",
+    btn_notif_activate: "تفعيل",
+    btn_notif_deactivate: "إيقاف",
+    notif_form_title: "إضافة / تعديل اشتراك",
+    notif_instant_hint: "أنواع الأحداث الفورية تُطلق مباشرة عند وقوع الحدث؛ يتم حفظ حقل الجدولة لكنه لا يُستخدم لها.",
+    notif_deliveries_title: "سجل التسليم الأخير",
+    th_notif_sent_at: "وقت الإرسال",
+    th_notif_delivery_status: "الحالة",
+    th_notif_message_id: "معرّف الرسالة",
+    th_notif_failure: "سبب الفشل",
+    msg_no_subscriptions: "لا توجد اشتراكات إشعارات مُعدة بعد.",
+    msg_no_deliveries: "لا توجد عمليات تسليم مسجلة بعد.",
     title_user_admin: "إدارة تسجيل المستخدمين وصلاحيات المجموعات",
     user_admin_subtitle: "إدارة مستخدمي النظام ومجموعات الصلاحيات وأذونات الوصول للوحدات.",
     tab_users: "إدارة المستخدمين",
@@ -574,6 +700,28 @@ export default function App() {
   const [loadingReport, setLoadingReport] = useState(false);
   const [filterMetal, setFilterMetal] = useState('');
   const [filterVault, setFilterVault] = useState('');
+  const [valuationMethod, setValuationMethod] = useState('AVERAGE');
+
+  // Enhanced Audit Trail search/filter/pagination/drill-down state -- self-service
+  // access to the same search/export/tamper-verification API that the backend has
+  // exposed since PMIMSControllers.Audit.cs (search, {id} drill-down, export), which
+  // the UI previously never called (it only used the older flat GET /reports/audit-logs).
+  const [auditQuery, setAuditQuery] = useState('');
+  const [auditUser, setAuditUser] = useState('');
+  const [auditModule, setAuditModule] = useState('');
+  const [auditEntityType, setAuditEntityType] = useState('');
+  const [auditStatus, setAuditStatus] = useState('');
+  const [auditFrom, setAuditFrom] = useState('');
+  const [auditTo, setAuditTo] = useState('');
+  const [auditPage, setAuditPage] = useState(1);
+  const [auditPageSize] = useState(25);
+  const [auditTotalCount, setAuditTotalCount] = useState(0);
+  const [auditDetail, setAuditDetail] = useState<any>(null);
+
+  // Transaction traceability drill-down (Reports -> Transactions -> Trace) --
+  // assembled server-side from the ledger row, its matched audit entry, courier
+  // detail, and the item's full chain-of-custody timeline. See GetTransactionTraceAsync.
+  const [transactionTrace, setTransactionTrace] = useState<any>(null);
 
   // Rates tickers state
   const [goldRate, setGoldRate] = useState(2284.50);
@@ -632,6 +780,17 @@ export default function App() {
   const [scannedSerials, setScannedSerials] = useState<{ serial: string; product_id: number; product_code: string }[]>([]);
   const [currentScanSerial, setCurrentScanSerial] = useState('');
   const [intakeSelectedProductId, setIntakeSelectedProductId] = useState<number>(1);
+  // Receipt of precious metals FROM a customer (buyback / custody deposit / return) --
+  // the mirror of the supplier intake flow above, no Purchase Order involved.
+  const [showCustomerReceiptModal, setShowCustomerReceiptModal] = useState(false);
+  const [receiptCustomerId, setReceiptCustomerId] = useState('');
+  const [receiptAccountId, setReceiptAccountId] = useState('');
+  const [receiptReason, setReceiptReason] = useState<'BUYBACK' | 'CUSTODY_DEPOSIT' | 'RETURN'>('BUYBACK');
+  const [receiptLotNum, setReceiptLotNum] = useState('');
+  const [receiptSelectedLocation, setReceiptSelectedLocation] = useState<number>(1);
+  const [receiptSelectedProductId, setReceiptSelectedProductId] = useState<number>(1);
+  const [receiptScannedSerials, setReceiptScannedSerials] = useState<{ serial: string; product_id: number }[]>([]);
+  const [currentReceiptScanSerial, setCurrentReceiptScanSerial] = useState('');
   const [transferBarcodeQuery, setTransferBarcodeQuery] = useState('');
   const [newZoneRoom, setNewZoneRoom] = useState('Zone Alpha');
   const [newShelfRow, setNewShelfRow] = useState('Shelf Row 4');
@@ -654,6 +813,23 @@ export default function App() {
   // Ingestion states
   const [ingressData, setIngressData] = useState<any>(null);
 const [migrationApproved, setMigrationApproved] = useState(false);
+
+  // Notifications (RFP item 7 + event-triggered extension) states
+  const [notificationSubscriptions, setNotificationSubscriptions] = useState<any[]>([]);
+  const [notificationDeliveries, setNotificationDeliveries] = useState<any[]>([]);
+  const [editingSubscriptionId, setEditingSubscriptionId] = useState<number | null>(null);
+  const [notifFormEmail, setNotifFormEmail] = useState('');
+  const [notifFormReportType, setNotifFormReportType] = useState('LOW_STOCK');
+  const [notifFormCron, setNotifFormCron] = useState('0 7 * * *');
+  const [notifFormFormat, setNotifFormFormat] = useState('PDF');
+  const NOTIFICATION_REPORT_TYPES = [
+    { value: 'LOW_STOCK', labelEn: 'Low Stock (scheduled)', labelAr: 'مخزون منخفض (مجدول)' },
+    { value: 'INVENTORY_BALANCE', labelEn: 'Inventory Balance (scheduled)', labelAr: 'رصيد المخزون (مجدول)' },
+    { value: 'HIGH_VALUE_MOVEMENT', labelEn: 'High-Value Movement (scheduled)', labelAr: 'حركة عالية القيمة (مجدول)' },
+    { value: 'TRANSFER_COMPLETED', labelEn: 'Transfer Completed (instant)', labelAr: 'اكتمال حركة التحويل (فوري)' },
+    { value: 'INVENTORY_DISCREPANCY', labelEn: 'Inventory Discrepancy (instant)', labelAr: 'فرق جرد المخزون (فوري)' }
+  ];
+  const isInstantReportType = (rt: string) => rt === 'TRANSFER_COMPLETED' || rt === 'INVENTORY_DISCREPANCY';
 
   // Configurations states
   const [settingsTab, setSettingsTab] = useState('ai');
@@ -682,6 +858,17 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   const [editBranchName, setEditBranchName] = useState('');
   const [editBranchVaultId, setEditBranchVaultId] = useState('');
   const [editBranchActive, setEditBranchActive] = useState(true);
+
+  // Real-Time Inventory Monitoring state (precious-metal quantities & movements --
+  // to/from main vault, between branches, and with customers). liveBalances is
+  // seeded once from GET /reports/live-balances then patched in place by the
+  // "BalanceChanged" hub event; liveMovements is a capped, newest-first feed built
+  // entirely from "MovementOccurred" push events (there is no REST equivalent to
+  // seed it -- GET /reports/transactions already exists for the historical view).
+  const [liveBalances, setLiveBalances] = useState<any[]>([]);
+  const [liveMovements, setLiveMovements] = useState<any[]>([]);
+  const [hubStatus, setHubStatus] = useState<'connecting' | 'live' | 'offline'>('offline');
+  const hubConnectionRef = useRef<any>(null);
 
   // Denominations CRUD state
   const [denomsList, setDenomsList] = useState<any[]>([
@@ -878,13 +1065,18 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     { key: 'reports', label: 'Reporting & Analytics', tier: 'Operations' },
     { key: 'workflows', label: 'Workflow Actions (approve/reject)', tier: 'Operations' },
     { key: 'intake', label: 'Receive Shipment', tier: 'Operations' },
+    { key: 'dispensing', label: 'GDM Dispensing (view/operate)', tier: 'Operations' },
     // --- Administration / Setup ---
     { key: 'vault_location', label: 'Vault Location Setup (manage shelves)', tier: 'Administration' },
     { key: 'master_data', label: 'Master Data (branches, vendors, thresholds)', tier: 'Administration' },
     { key: 'workflow_design', label: 'Workflow Designer (templates)', tier: 'Administration' },
     { key: 'migration', label: 'Bulk Ingestion', tier: 'Administration' },
+    { key: 'rules_engine', label: 'Business Rules Engine (author/version rules)', tier: 'Administration' },
+    { key: 'notifications', label: 'Notifications (distribution lists & alerts)', tier: 'Administration' },
+    { key: 'monitoring', label: 'Monitoring (SLA metrics & alert routing)', tier: 'Administration' },
     { key: 'settings', label: 'System Settings', tier: 'Administration' },
-    { key: 'user_admin', label: 'User & Group Admin', tier: 'Administration' }
+    { key: 'user_admin', label: 'User & Group Admin', tier: 'Administration' },
+    { key: 'device_integration', label: 'GDM Device Registration (manage machines)', tier: 'Administration' }
   ];
 
   const canAccess = (moduleKey: string) => {
@@ -1416,6 +1608,86 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     } catch (_) {}
   };
 
+  // --- Real-Time Inventory Monitoring -------------------------------------
+  // One-time REST snapshot to seed the balances table; live patches then arrive
+  // over the SignalR hub (connectMonitoringHub below) and are merged in place.
+  const fetchLiveBalances = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/reports/live-balances`);
+      if (res.ok) {
+        setLiveBalances(await res.json());
+      }
+    } catch (_) {}
+  };
+
+  // Resolves a location_id from a live push event (which only carries raw IDs,
+  // not resolved names -- see SignalRInventoryMonitoringNotifier) against the
+  // `locations` state already loaded for the Vault Spatial Map screen.
+  const resolveLocationLabel = (locationId: number | null | undefined) => {
+    if (!locationId) return currentLang === 'en' ? 'Outside Vault (Customer)' : 'خارج الخزنة (عميل)';
+    const loc = locations.find((l: any) => l.id === locationId);
+    return loc ? `${loc.vault_name} — ${loc.name}` : `#${locationId}`;
+  };
+
+  // Opens (or re-opens) the real-time monitoring hub connection. Called once
+  // after login; automatically reconnects on transient network drops. The
+  // connection is intentionally lazy (only started once the user is logged in
+  // and authToken is set), since the hub requires the same `reports.read`
+  // authorization as every other reporting view.
+  const connectMonitoringHub = async () => {
+    if (hubConnectionRef.current) return; // already connecting/connected
+    let signalR: any;
+    try {
+      signalR = await import('@microsoft/signalr');
+    } catch (_) {
+      return; // dependency not installed yet -- monitoring screen simply stays on REST-only data
+    }
+    const hubUrl = `${API_BASE.replace(/\/api$/, '')}/hubs/inventory-monitoring`;
+    const connection = new signalR.HubConnectionBuilder()
+      .withUrl(hubUrl, { accessTokenFactory: () => authToken || '' })
+      .withAutomaticReconnect()
+      .build();
+
+    connection.on('BalanceChanged', (patch: any) => {
+      setLiveBalances((prev: any[]) => {
+        const idx = prev.findIndex((b: any) =>
+          b.location_id === patch.location_id && b.product_id === patch.product_id && b.ownership_type === patch.ownership_type);
+        if (idx === -1) {
+          // First time we've seen this (location, product, ownership) combo -- no
+          // resolved names available yet from this push alone; the next full
+          // fetchLiveBalances() refresh will fill them in.
+          return [...prev, patch];
+        }
+        const next = [...prev];
+        next[idx] = { ...next[idx], ...patch };
+        return next;
+      });
+    });
+
+    connection.on('MovementOccurred', (movement: any) => {
+      setLiveMovements((prev: any[]) => [movement, ...prev].slice(0, 50));
+    });
+
+    connection.onreconnecting(() => setHubStatus('connecting'));
+    connection.onreconnected(() => setHubStatus('live'));
+    connection.onclose(() => setHubStatus('offline'));
+
+    try {
+      setHubStatus('connecting');
+      await connection.start();
+      setHubStatus('live');
+      hubConnectionRef.current = connection;
+    } catch (_) {
+      setHubStatus('offline');
+    }
+  };
+
+  const disconnectMonitoringHub = () => {
+    hubConnectionRef.current?.stop?.();
+    hubConnectionRef.current = null;
+    setHubStatus('offline');
+  };
+
   const handleAddBranch = async () => {
     if (!newBranchCode || !newBranchName) return;
     try {
@@ -1580,6 +1852,171 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     } catch (e) {
       console.warn("Backend reconciliation/discrepancies not responding.", e);
       setDiscrepancyList([]);
+    }
+  };
+
+  // Triggers a reconciliation run against Core Banking GL (POST /api/reconciliation/run,
+  // gated reports.write). Previously there was no way to invoke this from the UI at all --
+  // it's also the moment an INVENTORY_DISCREPANCY notification fires (see
+  // ReconciliationService.RunReconciliationAsync / docs/PERMISSIONS.md `notifications`
+  // module), so exposing it here is what makes that alert type reachable in practice.
+  const [reconciliationRunning, setReconciliationRunning] = useState(false);
+  const handleRunReconciliation = async () => {
+    setReconciliationRunning(true);
+    try {
+      const res = await fetch(`${API_BASE}/reconciliation/run`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ executed_by: username })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        alert(currentLang === 'en'
+          ? `Reconciliation run complete: ${data.total_discrepancies} discrepancy(ies) found out of ${data.total_items_checked} items checked.`
+          : `اكتملت عملية المطابقة: تم العثور على ${data.total_discrepancies} فروقات من أصل ${data.total_items_checked} صنف تم فحصه.`);
+        fetchReconciliation();
+      } else {
+        alert(await describeApiError(res, currentLang, 'Failed to run reconciliation', 'فشل تنفيذ عملية المطابقة'));
+      }
+    } catch (e) {
+      alert(currentLang === 'en' ? 'Error running reconciliation.' : 'خطأ أثناء تنفيذ المطابقة.');
+    } finally {
+      setReconciliationRunning(false);
+    }
+  };
+
+  // =========================================================================
+  // Notifications (RFP item 7: cron-scheduled distribution-list reports, plus the
+  // TRANSFER_COMPLETED / INVENTORY_DISCREPANCY event-triggered extension). Admin-tier
+  // (`notifications` module) -- see docs/PERMISSIONS.md.
+  // =========================================================================
+  const fetchNotificationSubscriptions = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/notifications/subscriptions`);
+      if (res.ok) {
+        setNotificationSubscriptions(await res.json());
+      } else {
+        setNotificationSubscriptions([]);
+      }
+    } catch (e) {
+      console.warn("Backend notifications/subscriptions not responding.", e);
+      setNotificationSubscriptions([]);
+    }
+  };
+
+  const fetchNotificationDeliveries = async (subscriptionId?: number) => {
+    try {
+      const qs = subscriptionId ? `?subscriptionId=${subscriptionId}` : '';
+      const res = await fetch(`${API_BASE}/notifications/deliveries${qs}`);
+      if (res.ok) {
+        setNotificationDeliveries(await res.json());
+      } else {
+        setNotificationDeliveries([]);
+      }
+    } catch (e) {
+      console.warn("Backend notifications/deliveries not responding.", e);
+      setNotificationDeliveries([]);
+    }
+  };
+
+  const resetNotificationForm = () => {
+    setEditingSubscriptionId(null);
+    setNotifFormEmail('');
+    setNotifFormReportType('LOW_STOCK');
+    setNotifFormCron('0 7 * * *');
+    setNotifFormFormat('PDF');
+  };
+
+  const handleEditSubscription = (sub: any) => {
+    setEditingSubscriptionId(sub.subscription_id);
+    setNotifFormEmail(sub.distribution_list_email);
+    setNotifFormReportType(sub.report_type);
+    setNotifFormCron(sub.schedule_cron);
+    setNotifFormFormat(sub.format);
+  };
+
+  const handleSaveSubscription = async () => {
+    if (!notifFormEmail.trim() || !notifFormCron.trim()) {
+      alert(currentLang === 'en' ? 'Please fill in all fields.' : 'يرجى ملء جميع الحقول.');
+      return;
+    }
+    try {
+      const isEdit = editingSubscriptionId !== null;
+      const res = await fetch(
+        isEdit ? `${API_BASE}/notifications/subscriptions/${editingSubscriptionId}` : `${API_BASE}/notifications/subscriptions`,
+        {
+          method: isEdit ? 'PUT' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            distributionListEmail: notifFormEmail,
+            reportType: notifFormReportType,
+            scheduleCron: notifFormCron,
+            format: notifFormFormat,
+            isActive: true,
+            createdBy: username
+          })
+        }
+      );
+      if (res.ok) {
+        alert(currentLang === 'en' ? 'Notification subscription saved.' : 'تم حفظ اشتراك الإشعار.');
+        resetNotificationForm();
+        fetchNotificationSubscriptions();
+      } else {
+        alert(await describeApiError(res, currentLang, 'Failed to save subscription', 'فشل حفظ الاشتراك'));
+      }
+    } catch (e) {
+      alert(currentLang === 'en' ? 'Error saving subscription.' : 'خطأ أثناء حفظ الاشتراك.');
+    }
+  };
+
+  const handleToggleSubscriptionActive = async (sub: any) => {
+    try {
+      const res = await fetch(`${API_BASE}/notifications/subscriptions/${sub.subscription_id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          distributionListEmail: sub.distribution_list_email,
+          reportType: sub.report_type,
+          scheduleCron: sub.schedule_cron,
+          format: sub.format,
+          isActive: !sub.is_active
+        })
+      });
+      if (res.ok) {
+        fetchNotificationSubscriptions();
+      } else {
+        alert(await describeApiError(res, currentLang, 'Failed to update subscription', 'فشل تحديث الاشتراك'));
+      }
+    } catch (e) {
+      alert(currentLang === 'en' ? 'Error updating subscription.' : 'خطأ أثناء تحديث الاشتراك.');
+    }
+  };
+
+  const handleDeleteSubscription = async (id: number) => {
+    if (!window.confirm(currentLang === 'en' ? 'Delete this notification subscription?' : 'هل تريد حذف اشتراك الإشعار هذا؟')) return;
+    try {
+      const res = await fetch(`${API_BASE}/notifications/subscriptions/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        fetchNotificationSubscriptions();
+      } else {
+        alert(await describeApiError(res, currentLang, 'Failed to delete subscription', 'فشل حذف الاشتراك'));
+      }
+    } catch (e) {
+      alert(currentLang === 'en' ? 'Error deleting subscription.' : 'خطأ أثناء حذف الاشتراك.');
+    }
+  };
+
+  const handleTestSendSubscription = async (id: number) => {
+    try {
+      const res = await fetch(`${API_BASE}/notifications/subscriptions/${id}/test-send`, { method: 'POST' });
+      if (res.ok) {
+        alert(currentLang === 'en' ? 'Test email sent.' : 'تم إرسال بريد الاختبار.');
+        fetchNotificationDeliveries();
+      } else {
+        alert(await describeApiError(res, currentLang, 'Failed to send test email', 'فشل إرسال بريد الاختبار'));
+      }
+    } catch (e) {
+      alert(currentLang === 'en' ? 'Error sending test email.' : 'خطأ أثناء إرسال بريد الاختبار.');
     }
   };
 
@@ -1854,6 +2291,10 @@ const [migrationApproved, setMigrationApproved] = useState(false);
         fetchBranches();
         if (data.permissions && data.permissions['user_admin'] !== 'HIDDEN') {
           fetchAdminData();
+        }
+        if (!data.permissions || data.permissions['reports'] !== 'HIDDEN') {
+          fetchLiveBalances();
+          connectMonitoringHub();
         }
       } else {
         const errorMsg = res.status === 401 
@@ -2203,6 +2644,67 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     }
   };
 
+  const openCustomerReceiptModal = () => {
+    setReceiptCustomerId('');
+    setReceiptAccountId('');
+    setReceiptReason('BUYBACK');
+    setReceiptLotNum(`RCPT-CUST-${Date.now()}`);
+    setReceiptScannedSerials([]);
+    setCurrentReceiptScanSerial('');
+    const flatSlots = locations.flatMap(loc => loc.slots);
+    const firstFreeSlot = flatSlots.find((s: any) => !s.occupied);
+    setReceiptSelectedLocation(firstFreeSlot ? firstFreeSlot.id : 1);
+    setReceiptSelectedProductId(products && products.length ? products[0].product_id : 1);
+    setShowCustomerReceiptModal(true);
+  };
+
+  const handleSubmitCustomerReceipt = async () => {
+    if (!receiptCustomerId.trim()) {
+      alert(currentLang === 'en' ? "Please enter the customer's ID." : "يرجى إدخال رقم العميل.");
+      return;
+    }
+    if (receiptReason === 'CUSTODY_DEPOSIT' && !receiptAccountId.trim()) {
+      alert(currentLang === 'en' ? "A custody deposit requires the customer's account number." : "يتطلب إيداع الأمانة رقم حساب العميل.");
+      return;
+    }
+    if (!receiptLotNum.trim()) {
+      alert(currentLang === 'en' ? "Please enter a Lot Number." : "يرجى إدخال رقم التشغيلة/اللوت.");
+      return;
+    }
+    if (receiptScannedSerials.length === 0) {
+      alert(currentLang === 'en' ? "Please scan at least one piece." : "يرجى مسح قطعة واحدة على الأقل بالباركود.");
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_BASE}/vault/intake/customer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customerId: parseInt(receiptCustomerId, 10),
+          accountId: receiptReason === 'CUSTODY_DEPOSIT' ? parseInt(receiptAccountId, 10) : null,
+          receiptReason: receiptReason,
+          lotNumber: receiptLotNum,
+          locationId: receiptSelectedLocation,
+          receivedBy: displayName,
+          items: receiptScannedSerials.map(s => ({ serial: s.serial, product_id: s.product_id }))
+        })
+      });
+
+      if (res.ok) {
+        alert(currentLang === 'en' ? "Customer receipt verification request initiated and routed to the Maker-Checker workflow approval." : "تم بدء طلب التحقق من استلام العميل وتوجيهه لاعتماد مسار سير العمل بنجاح.");
+        setShowCustomerReceiptModal(false);
+        setReceiptScannedSerials([]);
+        fetchInventory();
+        fetchWorkflows();
+      } else {
+        alert(await describeApiError(res, currentLang, 'Failed to receive from customer', 'فشل استلام المعادن من العميل'));
+      }
+    } catch (e) {
+      alert("Error submitting customer receipt. Please ensure the backend is running.");
+    }
+  };
+
   const handleSearchCustody = async () => {
     // Partial, case-insensitive match on Civil ID, customer name, or serial.
     // Empty search lists all holdings so the portfolio can be browsed.
@@ -2236,9 +2738,45 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     }
   };
 
-  const handleWithdrawCustody = (serial: string) => {
-    setCustodyList(prev => prev.map(c => c.serial === serial ? { ...c, status: 'WITHDRAWN', coords: 'Withdrawn' } : c));
-    alert("OTP Verified. Physical delivery confirmed and signature logged. Custody archived.");
+  const handleWithdrawCustody = async (holdingId: number, serial: string) => {
+    const signature = prompt(currentLang === 'en' ? "Enter recipient signature:" : "أدخل توقيع المستلم:");
+    if (!signature) return;
+
+    try {
+      const reqRes = await fetch(`${API_BASE}/withdrawals/request`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ holdingId, branchId: 1 })
+      });
+      if (!reqRes.ok) {
+        alert("Failed to request withdrawal. Lacking permissions or invalid state.");
+        return;
+      }
+      const reqData = await reqRes.json();
+      
+      const otp = prompt(currentLang === 'en' ? `Enter verification OTP (Sent to mobile: ${reqData.message})` : `أدخل رمز التحقق (تم إرساله للمحمول: ${reqData.message})`);
+      if (!otp) return;
+
+      const confRes = await fetch(`${API_BASE}/withdrawals/confirm`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          holdingId,
+          branchId: 1,
+          verificationOtp: otp,
+          recipientSignature: signature
+        })
+      });
+      
+      if (confRes.ok) {
+        setCustodyList(prev => prev.map(c => c.holding_id === holdingId ? { ...c, status: 'WITHDRAWN', coords: 'Withdrawn' } : c));
+        alert(currentLang === 'en' ? "OTP Verified. Physical delivery confirmed and signature logged. Custody archived." : "تم التحقق من الرمز وتأكيد التسليم المادي وتوقيع المستلم. تم أرشفة العهدة.");
+      } else {
+        alert(await describeApiError(confRes, currentLang, 'OTP validation or signature logging failed.', 'فشل التحقق من رمز OTP أو تسجيل التوقيع'));
+      }
+    } catch (e) {
+      alert("Error processing custody withdrawal.");
+    }
   };
 
   const toggleStocktakeFreeze = () => {
@@ -2284,7 +2822,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     alert("Migration complete. Excel staged data successfully merged into active ledger.");
   };
 
-  const fetchReport = async (type: string) => {
+  const fetchReport = async (type: string, method?: string) => {
     setLoadingReport(true);
     try {
       let endpoint = '';
@@ -2292,8 +2830,16 @@ const [migrationApproved, setMigrationApproved] = useState(false);
       else if (type === 'occupancy') endpoint = 'holdings';
       else if (type === 'audit') endpoint = 'audit-logs';
       else if (type === 'transactions') endpoint = 'transactions';
-      
-      const res = await fetch(`${API_BASE}/reports/${endpoint}`);
+      else if (type === 'inventory_balance') endpoint = 'inventory-balance';
+
+      // Reconciliation differences live under /api/reconciliation, not /api/reports.
+      const activeMethod = method || valuationMethod;
+      const url = type === 'reconciliation' 
+        ? `${API_BASE}/reconciliation/discrepancies` 
+        : type === 'valuation'
+          ? `${API_BASE}/reports/valuation?method=${activeMethod}`
+          : `${API_BASE}/reports/${endpoint}`;
+      const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
         if (type === 'occupancy') {
@@ -2377,6 +2923,101 @@ const [migrationApproved, setMigrationApproved] = useState(false);
 
   const handleExportPDF = () => {
     window.print();
+  };
+
+  // --- Enhanced Audit Trail: search / drill-down / real backend export -------
+  const buildAuditQueryString = (page: number) => {
+    const params = new URLSearchParams();
+    if (auditQuery) params.set('query', auditQuery);
+    if (auditUser) params.set('user', auditUser);
+    if (auditModule) params.set('module', auditModule);
+    if (auditEntityType) params.set('entityType', auditEntityType);
+    if (auditStatus) params.set('status', auditStatus);
+    if (auditFrom) params.set('from', auditFrom);
+    if (auditTo) params.set('to', auditTo);
+    params.set('page', String(page));
+    params.set('pageSize', String(auditPageSize));
+    return params.toString();
+  };
+
+  const fetchAuditLogs = async (page: number = 1) => {
+    setLoadingReport(true);
+    try {
+      const res = await fetch(`${API_BASE}/reports/audit-logs/search?${buildAuditQueryString(page)}`);
+      if (res.ok) {
+        const data = await res.json();
+        setReportData(data.items || []);
+        setAuditTotalCount(data.total_count || 0);
+        setAuditPage(data.page || page);
+      } else {
+        setReportData([]);
+        setAuditTotalCount(0);
+      }
+    } catch (_) {
+      setReportData([]);
+      setAuditTotalCount(0);
+    }
+    setLoadingReport(false);
+  };
+
+  // Dispatches to the right loader for the selected report type -- audit uses its
+  // own search/pagination endpoint, everything else keeps using fetchReport.
+  const loadReport = (type: string, method?: string) => {
+    if (type === 'audit') fetchAuditLogs(1);
+    else fetchReport(type, method);
+  };
+
+  const fetchAuditLogDetail = async (logId: number) => {
+    try {
+      const res = await fetch(`${API_BASE}/reports/audit-logs/${logId}`);
+      if (res.ok) setAuditDetail(await res.json());
+      else alert(currentLang === 'en' ? 'Could not load audit entry detail.' : 'تعذر تحميل تفاصيل سجل التدقيق.');
+    } catch (_) {
+      alert(currentLang === 'en' ? 'Could not load audit entry detail.' : 'تعذر تحميل تفاصيل سجل التدقيق.');
+    }
+  };
+
+  const fetchTransactionTrace = async (transactionId: number) => {
+    try {
+      const res = await fetch(`${API_BASE}/reports/transactions/${transactionId}/trace`);
+      if (res.ok) setTransactionTrace(await res.json());
+      else alert(currentLang === 'en' ? 'Could not load transaction trace.' : 'تعذر تحميل تتبع المعاملة.');
+    } catch (_) {
+      alert(currentLang === 'en' ? 'Could not load transaction trace.' : 'تعذر تحميل تتبع المعاملة.');
+    }
+  };
+
+  const downloadBlob = async (url: string, filename: string) => {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) { alert(currentLang === 'en' ? 'Export failed.' : 'فشل التصدير.'); return; }
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(objectUrl);
+    } catch (_) {
+      alert(currentLang === 'en' ? 'Export failed.' : 'فشل التصدير.');
+    }
+  };
+
+  // Server-side export (CSV/XLSX/PDF, tamper-status included, up to Audit:ExportMaxRows
+  // rows) honoring the current filters -- distinct from the generic client-side CSV/print
+  // export used by the other report tabs, which only covers whatever page is loaded.
+  const handleExportAuditLogs = (format: 'csv' | 'xlsx' | 'pdf') => {
+    const qs = buildAuditQueryString(1);
+    downloadBlob(`${API_BASE}/reports/audit-logs/export?format=${format}&${qs}`, `audit_logs.${format}`);
+  };
+
+  // Real server-side export (QuestPDF/ClosedXML, same rendering path as the audit trail
+  // export above) for the three "official report" types that previously had no downloadable
+  // output at all: inventory balance, transaction log, reconciliation differences.
+  const handleExportOfficialReport = (reportKind: 'inventory_balance' | 'transactions' | 'reconciliation', format: 'csv' | 'xlsx' | 'pdf') => {
+    downloadBlob(`${API_BASE}/reports/export?type=${reportKind}&format=${format}`, `${reportKind}_report.${format}`);
   };
 
   const toggleLanguage = () => {
@@ -2504,9 +3145,20 @@ const [migrationApproved, setMigrationApproved] = useState(false);
             </div>
           )}
           {canAccess('reports') && (
-            <div className={`menu-item ${activeTab === 'screen-reports' ? 'active' : ''}`} onClick={() => { setActiveTab('screen-reports'); fetchReport(reportType); }}>
+            <div className={`menu-item ${activeTab === 'screen-reports' ? 'active' : ''}`} onClick={() => { setActiveTab('screen-reports'); loadReport(reportType); }}>
               <i className="fa-solid fa-chart-pie menu-item-icon"></i>
               <span>{t('menu_reports')}</span>
+            </div>
+          )}
+          {canAccess('reports') && (
+            <div className={`menu-item ${activeTab === 'screen-realtime' ? 'active' : ''}`} onClick={() => { setActiveTab('screen-realtime'); fetchLiveBalances(); }}>
+              <i className="fa-solid fa-tower-broadcast menu-item-icon"></i>
+              <span>{currentLang === 'en' ? 'Real-Time Monitoring' : 'المراقبة اللحظية'}</span>
+              <span style={{
+                marginLeft: 'auto', width: '8px', height: '8px', borderRadius: '50%',
+                background: hubStatus === 'live' ? '#22C55E' : hubStatus === 'connecting' ? '#F59E0B' : '#9CA3AF',
+                boxShadow: hubStatus === 'live' ? '0 0 0 3px rgba(34,197,94,0.2)' : 'none'
+              }}></span>
             </div>
           )}
           {canAccess('workflows') && (
@@ -2518,7 +3170,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
 
           {/* Administration / Setup tier — manage/configuration surfaces, segregated
               from the operational modules above. */}
-          {(canAccess('migration') || canAccess('settings') || canAccess('user_admin')) && (
+          {(canAccess('migration') || canAccess('settings') || canAccess('user_admin') || canAccess('notifications')) && (
             <div className="menu-section-header">{currentLang === 'en' ? 'Administration & Setup' : 'الإدارة والإعداد'}</div>
           )}
           {canAccess('settings') && (
@@ -2539,6 +3191,12 @@ const [migrationApproved, setMigrationApproved] = useState(false);
               <span>{t('menu_user_admin')}</span>
             </div>
           )}
+          {canAccess('notifications') && (
+            <div className={`menu-item ${activeTab === 'screen-notifications' ? 'active' : ''}`} onClick={() => { setActiveTab('screen-notifications'); fetchNotificationSubscriptions(); fetchNotificationDeliveries(); }}>
+              <i className="fa-solid fa-bell menu-item-icon"></i>
+              <span>{t('menu_notifications')}</span>
+            </div>
+          )}
         </nav>
 
         {/* User Info Footer */}
@@ -2546,6 +3204,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><i className="fa-solid fa-user" style={{ color: 'var(--kfh-green)' }}></i> <strong>{displayName}</strong></div>
           <div style={{ fontSize: '10px', color: '#009B4E', fontWeight: 600 }}>{userRole}</div>
           <button className="btn" style={{ padding: '5px 10px', fontSize: '11px', marginTop: '4px', borderColor: '#FCA5A5', color: '#DC2626', alignSelf: 'flex-start', background: '#FFF5F5' }} onClick={() => {
+            disconnectMonitoringHub();
             setIsLoggedIn(false);
             setUsername('');
             setPassword('');
@@ -3353,6 +4012,20 @@ const [migrationApproved, setMigrationApproved] = useState(false);
               </table>
             </div>
           </div>
+
+          <div className="glass-card" style={{ marginTop: '20px' }}>
+            <h3>{currentLang === 'en' ? 'Receive Precious Metals from a Customer' : 'استلام معادن ثمينة من عميل'}</h3>
+            <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '15px' }}>
+              {currentLang === 'en'
+                ? 'Log a receipt of gold/silver presented directly by a customer -- a buyback (KFH purchases it), a custody deposit (customer keeps ownership, KFH keeps it safe), or a returned bar. Routed through the same Maker-Checker approval as a supplier shipment.'
+                : 'سجّل استلام ذهب/فضة تم تقديمه مباشرة من قبل عميل -- إعادة شراء (يشتريه البنك) أو إيداع أمانة (يحتفظ العميل بالملكية ويحفظه البنك) أو سبيكة معادة. تتم الموافقة عبر نفس مسار الصانع والمدقق كأي شحنة من مورد.'}
+            </p>
+            {canModify('intake') && (
+              <button className="btn" style={{ backgroundColor: 'var(--accent-blue)', padding: '6px 14px', fontSize: '12px' }} onClick={openCustomerReceiptModal}>
+                <i className="fa-solid fa-hand-holding-dollar"></i> {currentLang === 'en' ? 'Receive from Customer' : 'استلام من عميل'}
+              </button>
+            )}
+          </div>
         </section>
 
         {/* SCREEN VIEWPORT: BRANCH TRANSFERS */}
@@ -3441,7 +4114,8 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     onChange={e => {
                       const val = e.target.value;
                       setTransferBarcodeQuery(val);
-                      const found = inventoryList.find((item: any) => item.serial_number === val.trim());
+                      const parsed = parseGs1Barcode(val.trim());
+                      const found = inventoryList.find((item: any) => item.serial_number === parsed.serial);
                       if (found) {
                          setTransferItemId(found.item_id);
                          setTransferItemSerial(found.serial_number);
@@ -3842,7 +4516,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       </td>
                       <td>
                         {item.status === 'HELD_IN_CUSTODY' && (
-                          <button className="btn btn-danger" onClick={() => handleWithdrawCustody(item.serial)}>Withdraw Bar</button>
+                          <button className="btn btn-danger" onClick={() => handleWithdrawCustody(item.holding_id, item.serial)}>Withdraw Bar</button>
                         )}
                       </td>
                     </tr>
@@ -3886,6 +4560,11 @@ const [migrationApproved, setMigrationApproved] = useState(false);
               <div className="glass-card" style={{ marginBottom: 0 }}>
                 <h4>{t('stocktake_disc_title')}</h4>
                 <p style={{ color: 'var(--text-muted)', fontSize: '12px', marginBottom: '15px' }}>{t('stocktake_disc_sub')}</p>
+                {canModify('reports') && (
+                  <button className="btn" style={{ marginBottom: '15px' }} onClick={handleRunReconciliation} disabled={reconciliationRunning}>
+                    {reconciliationRunning ? t('btn_running_reconciliation') : t('btn_run_reconciliation')}
+                  </button>
+                )}
                 <div className="table-responsive">
                   <table>
                     <thead>
@@ -3958,6 +4637,135 @@ const [migrationApproved, setMigrationApproved] = useState(false);
           </div>
         </section>
 
+        {/* SCREEN VIEWPORT: NOTIFICATIONS (scheduled reports + event-triggered alerts) */}
+        <section className={`screen-viewport ${activeTab === 'screen-notifications' ? 'active' : ''}`}>
+          <div className="glass-card">
+            <h3>{t('title_notifications')}</h3>
+            <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>{t('notifications_subtitle')}</p>
+
+            {canModify('notifications') && (
+              <div className="glass-card" style={{ marginBottom: '24px' }}>
+                <h4>{t('notif_form_title')}</h4>
+                <div className="split-grid-2">
+                  <div className="form-group">
+                    <label>{t('th_notif_email')}</label>
+                    <input type="email" className="form-control" placeholder="treasury-mgmt@kfh.com.kw"
+                      value={notifFormEmail} onChange={e => setNotifFormEmail(e.target.value)} />
+                  </div>
+                  <div className="form-group">
+                    <label>{t('th_notif_type')}</label>
+                    <select className="form-control" value={notifFormReportType} onChange={e => setNotifFormReportType(e.target.value)}>
+                      {NOTIFICATION_REPORT_TYPES.map(rt => (
+                        <option key={rt.value} value={rt.value}>{currentLang === 'en' ? rt.labelEn : rt.labelAr}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label>{t('th_notif_schedule')}</label>
+                    <input type="text" className="form-control" placeholder="0 7 * * *"
+                      value={notifFormCron} onChange={e => setNotifFormCron(e.target.value)}
+                      disabled={isInstantReportType(notifFormReportType)} />
+                  </div>
+                  <div className="form-group">
+                    <label>{t('th_notif_format')}</label>
+                    <select className="form-control" value={notifFormFormat} onChange={e => setNotifFormFormat(e.target.value)}
+                      disabled={isInstantReportType(notifFormReportType)}>
+                      <option value="PDF">PDF</option>
+                      <option value="XLSX">XLSX</option>
+                      <option value="BOTH">{currentLang === 'en' ? 'Both' : 'كلاهما'}</option>
+                    </select>
+                  </div>
+                </div>
+                {isInstantReportType(notifFormReportType) && (
+                  <p style={{ color: 'var(--text-muted)', fontSize: '12px', marginTop: '4px' }}>{t('notif_instant_hint')}</p>
+                )}
+                <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
+                  <button className="btn btn-primary" onClick={handleSaveSubscription}>{t('btn_notif_save')}</button>
+                  {editingSubscriptionId !== null && (
+                    <button className="btn" onClick={resetNotificationForm}>{t('btn_notif_cancel_edit')}</button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div className="table-responsive" style={{ marginBottom: '24px' }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>{t('th_notif_email')}</th>
+                    <th>{t('th_notif_type')}</th>
+                    <th>{t('th_notif_schedule')}</th>
+                    <th>{t('th_notif_format')}</th>
+                    <th>{t('th_notif_status')}</th>
+                    <th>{t('th_notif_last_run')}</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {notificationSubscriptions.length === 0 && (
+                    <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>{t('msg_no_subscriptions')}</td></tr>
+                  )}
+                  {notificationSubscriptions.map((sub: any) => (
+                    <tr key={sub.subscription_id}>
+                      <td>{sub.distribution_list_email}</td>
+                      <td>{(NOTIFICATION_REPORT_TYPES.find(rt => rt.value === sub.report_type) as any)?.[currentLang === 'en' ? 'labelEn' : 'labelAr'] || sub.report_type}</td>
+                      <td>{isInstantReportType(sub.report_type) ? (currentLang === 'en' ? 'Instant' : 'فوري') : sub.schedule_cron}</td>
+                      <td>{sub.format}</td>
+                      <td>
+                        <span className={`badge ${sub.is_active ? 'badge-ready' : 'badge-quarantined'}`}>
+                          {sub.is_active ? (currentLang === 'en' ? 'Active' : 'نشط') : (currentLang === 'en' ? 'Inactive' : 'غير نشط')}
+                        </span>
+                      </td>
+                      <td>{sub.last_run_at ? new Date(sub.last_run_at).toLocaleString() : '—'}</td>
+                      <td>
+                        {canModify('notifications') && (
+                          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                            <button className="btn" onClick={() => handleEditSubscription(sub)}>{t('btn_notif_edit')}</button>
+                            <button className="btn" onClick={() => handleToggleSubscriptionActive(sub)}>
+                              {sub.is_active ? t('btn_notif_deactivate') : t('btn_notif_activate')}
+                            </button>
+                            <button className="btn" onClick={() => handleTestSendSubscription(sub.subscription_id)}>{t('btn_notif_test_send')}</button>
+                            <button className="btn btn-danger" onClick={() => handleDeleteSubscription(sub.subscription_id)}>{t('btn_notif_delete')}</button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <h4>{t('notif_deliveries_title')}</h4>
+            <div className="table-responsive">
+              <table>
+                <thead>
+                  <tr>
+                    <th>{t('th_notif_sent_at')}</th>
+                    <th>{t('th_notif_delivery_status')}</th>
+                    <th>{t('th_notif_message_id')}</th>
+                    <th>{t('th_notif_failure')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {notificationDeliveries.length === 0 && (
+                    <tr><td colSpan={4} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>{t('msg_no_deliveries')}</td></tr>
+                  )}
+                  {notificationDeliveries.map((d: any) => (
+                    <tr key={d.delivery_id}>
+                      <td>{new Date(d.sent_at).toLocaleString()}</td>
+                      <td>
+                        <span className={`badge ${d.status_code === 'SENT' ? 'badge-ready' : 'badge-quarantined'}`}>{d.status_code}</span>
+                      </td>
+                      <td>{d.message_id || '—'}</td>
+                      <td>{d.failure_reason || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
         {/* SCREEN VIEWPORT: REPORTING & ANALYTICS */}
         <section className={`screen-viewport ${activeTab === 'screen-reports' ? 'active' : ''}`}>
           <div className="glass-card">
@@ -3967,25 +4775,102 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                 <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>{t('reports_subtitle')}</p>
               </div>
               <div style={{ display: 'flex', gap: '10px' }}>
-                <button className="btn btn-primary" onClick={handleExportExcel} disabled={reportData.length === 0 || loadingReport}>
-                  <i className="fa-solid fa-file-excel"></i> {t('btn_export_excel')}
-                </button>
-                <button className="btn btn-primary" onClick={handleExportPDF} disabled={reportData.length === 0 || loadingReport}>
-                  <i className="fa-solid fa-file-pdf"></i> {t('btn_export_pdf')}
-                </button>
+                {reportType === 'audit' ? (
+                  <>
+                    <button className="btn btn-primary" onClick={() => handleExportAuditLogs('csv')} disabled={loadingReport}>
+                      <i className="fa-solid fa-file-csv"></i> CSV
+                    </button>
+                    <button className="btn btn-primary" onClick={() => handleExportAuditLogs('xlsx')} disabled={loadingReport}>
+                      <i className="fa-solid fa-file-excel"></i> {t('btn_export_excel')}
+                    </button>
+                    <button className="btn btn-primary" onClick={() => handleExportAuditLogs('pdf')} disabled={loadingReport}>
+                      <i className="fa-solid fa-file-pdf"></i> {t('btn_export_pdf')}
+                    </button>
+                  </>
+                ) : (reportType === 'inventory_balance' || reportType === 'transactions' || reportType === 'reconciliation') ? (
+                  // Real server-generated report (RFP: "official reports on inventory
+                  // balances, transaction logs, reconciliation differences") -- same
+                  // QuestPDF/ClosedXML rendering path as the audit trail export, not the
+                  // lightweight client-side CSV/print used by valuation/occupancy below.
+                  <>
+                    <button className="btn btn-primary" onClick={() => handleExportOfficialReport(reportType as any, 'csv')} disabled={loadingReport}>
+                      <i className="fa-solid fa-file-csv"></i> CSV
+                    </button>
+                    <button className="btn btn-primary" onClick={() => handleExportOfficialReport(reportType as any, 'xlsx')} disabled={loadingReport}>
+                      <i className="fa-solid fa-file-excel"></i> {t('btn_export_excel')}
+                    </button>
+                    <button className="btn btn-primary" onClick={() => handleExportOfficialReport(reportType as any, 'pdf')} disabled={loadingReport}>
+                      <i className="fa-solid fa-file-pdf"></i> {t('btn_export_pdf')}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button className="btn btn-primary" onClick={handleExportExcel} disabled={reportData.length === 0 || loadingReport}>
+                      <i className="fa-solid fa-file-excel"></i> {t('btn_export_excel')}
+                    </button>
+                    <button className="btn btn-primary" onClick={handleExportPDF} disabled={reportData.length === 0 || loadingReport}>
+                      <i className="fa-solid fa-file-pdf"></i> {t('btn_export_pdf')}
+                    </button>
+                  </>
+                )}
               </div>
             </div>
 
             <div className="report-controls glass-card" style={{ padding: '20px', marginBottom: '20px', display: 'flex', gap: '20px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
               <div className="form-group" style={{ marginBottom: 0, flex: 1, minWidth: '200px' }}>
                 <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', fontWeight: '600' }}>{t('lbl_report_type')}</label>
-                <select value={reportType} onChange={e => { setReportType(e.target.value); fetchReport(e.target.value); }} style={{ width: '100%', padding: '10px', borderRadius: '8px', background: 'var(--bg-secondary)', border: '1px solid var(--surface-border)', color: '#000' }}>
+                <select value={reportType} onChange={e => { setReportType(e.target.value); loadReport(e.target.value); }} style={{ width: '100%', padding: '10px', borderRadius: '8px', background: 'var(--bg-secondary)', border: '1px solid var(--surface-border)', color: '#000' }}>
                   <option value="valuation">{t('rep_valuation')}</option>
                   <option value="occupancy">{t('rep_occupancy')}</option>
                   <option value="audit">{t('rep_audit')}</option>
                   <option value="transactions">{t('rep_transactions')}</option>
+                  <option value="inventory_balance">{t('rep_inventory_balance')}</option>
+                  <option value="reconciliation">{t('rep_reconciliation')}</option>
                 </select>
               </div>
+
+              {reportType === 'audit' && (
+                <>
+                  <div className="form-group" style={{ marginBottom: 0, minWidth: '160px' }}>
+                    <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', fontWeight: '600' }}>{currentLang === 'en' ? 'Search Text' : 'نص البحث'}</label>
+                    <input type="text" value={auditQuery} onChange={e => setAuditQuery(e.target.value)} placeholder={currentLang === 'en' ? 'Action description…' : 'وصف الإجراء…'} style={{ width: '100%', padding: '10px', borderRadius: '8px', background: 'var(--bg-secondary)', border: '1px solid var(--surface-border)', color: '#000' }} />
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0, minWidth: '140px' }}>
+                    <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', fontWeight: '600' }}>{currentLang === 'en' ? 'User' : 'المستخدم'}</label>
+                    <input type="text" value={auditUser} onChange={e => setAuditUser(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '8px', background: 'var(--bg-secondary)', border: '1px solid var(--surface-border)', color: '#000' }} />
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0, minWidth: '140px' }}>
+                    <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', fontWeight: '600' }}>{currentLang === 'en' ? 'Module' : 'الوحدة'}</label>
+                    <input type="text" value={auditModule} onChange={e => setAuditModule(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '8px', background: 'var(--bg-secondary)', border: '1px solid var(--surface-border)', color: '#000' }} />
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0, minWidth: '140px' }}>
+                    <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', fontWeight: '600' }}>{currentLang === 'en' ? 'Entity Type' : 'نوع الكيان'}</label>
+                    <input type="text" value={auditEntityType} onChange={e => setAuditEntityType(e.target.value)} placeholder="e.g. PURCHASE_ORDER" style={{ width: '100%', padding: '10px', borderRadius: '8px', background: 'var(--bg-secondary)', border: '1px solid var(--surface-border)', color: '#000' }} />
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0, minWidth: '160px' }}>
+                    <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', fontWeight: '600' }}>{currentLang === 'en' ? 'Integrity Status' : 'حالة السلامة'}</label>
+                    <select value={auditStatus} onChange={e => setAuditStatus(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '8px', background: 'var(--bg-secondary)', border: '1px solid var(--surface-border)', color: '#000' }}>
+                      <option value="">{currentLang === 'en' ? 'All' : 'الكل'}</option>
+                      <option value="verified">{currentLang === 'en' ? 'Verified' : 'موثّق'}</option>
+                      <option value="unverified">{currentLang === 'en' ? 'Unverified (pre-dates hashing)' : 'غير موثّق (قبل التوثيق)'}</option>
+                      <option value="tampered">{currentLang === 'en' ? 'Tampered' : 'تم العبث به'}</option>
+                    </select>
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0, minWidth: '150px' }}>
+                    <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', fontWeight: '600' }}>{currentLang === 'en' ? 'From' : 'من'}</label>
+                    <input type="date" value={auditFrom} onChange={e => setAuditFrom(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '8px', background: 'var(--bg-secondary)', border: '1px solid var(--surface-border)', color: '#000' }} />
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0, minWidth: '150px' }}>
+                    <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', fontWeight: '600' }}>{currentLang === 'en' ? 'To' : 'إلى'}</label>
+                    <input type="date" value={auditTo} onChange={e => setAuditTo(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '8px', background: 'var(--bg-secondary)', border: '1px solid var(--surface-border)', color: '#000' }} />
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <button className="btn btn-primary" onClick={() => fetchAuditLogs(1)} disabled={loadingReport}>
+                      <i className="fa-solid fa-magnifying-glass"></i> {currentLang === 'en' ? 'Search' : 'بحث'}
+                    </button>
+                  </div>
+                </>
+              )}
 
               {reportType === 'valuation' && (
                 <>
@@ -4005,6 +4890,14 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       <option value="CUSTOMER_OWNED">{currentLang === 'en' ? 'Customer Custody' : 'أمانات العملاء'}</option>
                     </select>
                   </div>
+                  <div className="form-group" style={{ marginBottom: 0, minWidth: '150px' }}>
+                    <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', fontWeight: '600' }}>{currentLang === 'en' ? 'Valuation Method' : 'طريقة التقييم'}</label>
+                    <select value={valuationMethod} onChange={e => { setValuationMethod(e.target.value); loadReport('valuation', e.target.value); }} style={{ width: '100%', padding: '10px', borderRadius: '8px', background: 'var(--bg-secondary)', border: '1px solid var(--surface-border)', color: '#000' }}>
+                      <option value="AVERAGE">{currentLang === 'en' ? 'Average Cost' : 'متوسط التكلفة'}</option>
+                      <option value="FIFO">{currentLang === 'en' ? 'FIFO (First-In First-Out)' : 'الوارد أولاً يصرف أولاً'}</option>
+                      <option value="LIFO">{currentLang === 'en' ? 'LIFO (Last-In First-Out)' : 'الوارد أخيراً يصرف أولاً'}</option>
+                    </select>
+                  </div>
                 </>
               )}
             </div>
@@ -4019,6 +4912,8 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     {reportType === 'occupancy' && t('rep_occupancy')}
                     {reportType === 'audit' && t('rep_audit')}
                     {reportType === 'transactions' && t('rep_transactions')}
+                    {reportType === 'inventory_balance' && t('rep_inventory_balance')}
+                    {reportType === 'reconciliation' && t('rep_reconciliation')}
                   </h3>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginTop: '20px', color: '#121824' }}>
                     <span>Date Generated: {new Date().toLocaleString()}</span>
@@ -4118,15 +5013,23 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                             <th>{t('th_user')}</th>
                             <th>{t('th_module')}</th>
                             <th>{t('th_action_desc')}</th>
+                            <th>{currentLang === 'en' ? 'Entity' : 'الكيان'}</th>
+                            <th>{currentLang === 'en' ? 'Integrity' : 'السلامة'}</th>
                           </tr>
                         </thead>
                         <tbody>
                           {reportData.map((row, idx) => (
-                            <tr key={idx}>
+                            <tr key={idx} style={{ cursor: 'pointer' }} onClick={() => fetchAuditLogDetail(row.logId)} title={currentLang === 'en' ? 'Click for full detail' : 'انقر لعرض التفاصيل الكاملة'}>
                               <td>{new Date(row.timestamp).toLocaleString()}</td>
                               <td><strong>{row.username}</strong></td>
                               <td><span className="badge badge-ready">{row.moduleName}</span></td>
                               <td>{row.actionDescription}</td>
+                              <td>{row.entityType ? `${row.entityType}${row.entityId ? ' #' + row.entityId : ''}` : '—'}</td>
+                              <td>
+                                <span className={`badge ${row.tamperStatus === 'Verified' ? 'badge-ready' : row.tamperStatus === 'Tampered' ? 'badge-quarantined' : 'badge-sold'}`}>
+                                  {row.tamperStatus}
+                                </span>
+                              </td>
                             </tr>
                           ))}
                         </tbody>
@@ -4144,7 +5047,9 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                             <th>{t('th_dest_loc')}</th>
                             <th>{t('th_ownership')}</th>
                             <th>{t('th_user')}</th>
+                            <th>{currentLang === 'en' ? 'Approved By' : 'اعتمدها'}</th>
                             <th>{t('th_timestamp')}</th>
+                            <th>{currentLang === 'en' ? 'Traceability' : 'إمكانية التتبع'}</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -4157,7 +5062,69 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                               <td>{translateDb(row.destination_vault || 'N/A')} {row.destination_location ? `(${translateDb(row.destination_location)})` : ''}</td>
                               <td>{translateDb(row.source_ownership)}</td>
                               <td>{row.initiated_by}</td>
+                              <td>{row.approved_by || '—'}</td>
                               <td>{new Date(row.timestamp).toLocaleString()}</td>
+                              <td>
+                                <button className="btn" style={{ fontSize: '11px', padding: '4px 10px' }} onClick={() => fetchTransactionTrace(row.transaction_id)}>
+                                  <i className="fa-solid fa-diagram-project"></i> {currentLang === 'en' ? 'Trace' : 'تتبع'}
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </>
+                    )}
+
+                    {reportType === 'inventory_balance' && (
+                      <>
+                        <thead>
+                          <tr>
+                            <th>{t('th_vault')}</th>
+                            <th>{t('th_metal')}</th>
+                            <th>{t('th_denom')}</th>
+                            <th>{t('th_ready_qty')}</th>
+                            <th>{t('th_total_weight_g')}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {reportData.map((row, idx) => (
+                            <tr key={idx}>
+                              <td>{translateDb(row.vault)}</td>
+                              <td>{translateDb(row.metal_type)}</td>
+                              <td>{row.denomination}</td>
+                              <td><strong>{row.ready_qty}</strong></td>
+                              <td>{row.total_weight_grams}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </>
+                    )}
+
+                    {reportType === 'reconciliation' && (
+                      <>
+                        <thead>
+                          <tr>
+                            <th>{t('th_case_id')}</th>
+                            <th>{t('th_serial')}</th>
+                            <th>{t('th_denom')}</th>
+                            <th>{t('th_expected_coords')}</th>
+                            <th>{t('th_mismatch')}</th>
+                            <th>{t('th_reason_code')}</th>
+                            <th>{t('th_resolved_by')}</th>
+                            <th>{t('th_resolved_at')}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {reportData.map((row, idx) => (
+                            <tr key={idx}>
+                              <td>{row.case_id}</td>
+                              <td><strong style={{ color: 'var(--accent-red)' }}>{row.serial_number}</strong></td>
+                              <td>{row.denomination}</td>
+                              <td>{row.expected}</td>
+                              <td>{row.mismatch}</td>
+                              <td>{row.reason_code || '—'}</td>
+                              <td>{row.resolved_by || '—'}</td>
+                              <td>{row.resolved_at ? new Date(row.resolved_at).toLocaleString() : '—'}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -4166,6 +5133,270 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                   </table>
                 </div>
               )}
+            </div>
+
+            {reportType === 'audit' && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '16px', flexWrap: 'wrap', gap: '10px', fontSize: '13px' }}>
+                <span style={{ color: 'var(--text-muted)' }}>
+                  {currentLang === 'en'
+                    ? `Showing ${reportData.length === 0 ? 0 : (auditPage - 1) * auditPageSize + 1}–${(auditPage - 1) * auditPageSize + reportData.length} of ${auditTotalCount}`
+                    : `عرض ${reportData.length === 0 ? 0 : (auditPage - 1) * auditPageSize + 1}–${(auditPage - 1) * auditPageSize + reportData.length} من ${auditTotalCount}`}
+                </span>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button className="btn" disabled={auditPage <= 1 || loadingReport} onClick={() => fetchAuditLogs(auditPage - 1)}>
+                    <i className="fa-solid fa-chevron-left"></i> {currentLang === 'en' ? 'Previous' : 'السابق'}
+                  </button>
+                  <button className="btn" disabled={(auditPage * auditPageSize) >= auditTotalCount || loadingReport} onClick={() => fetchAuditLogs(auditPage + 1)}>
+                    {currentLang === 'en' ? 'Next' : 'التالي'} <i className="fa-solid fa-chevron-right"></i>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* Audit Trail drill-down modal -- full record incl. tamper-hash verification status */}
+        {auditDetail && (
+          <div className="modal-overlay active" onClick={() => setAuditDetail(null)}>
+            <div className="glass-card modal-content-box" onClick={e => e.stopPropagation()} style={{ maxWidth: '650px', width: '90%' }}>
+              <div className="modal-header">
+                <h3>{currentLang === 'en' ? 'Audit Entry Detail' : 'تفاصيل سجل التدقيق'} #{auditDetail.logId}</h3>
+                <span className="modal-close-btn" onClick={() => setAuditDetail(null)}>&times;</span>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '13px' }}>
+                <div><strong>{currentLang === 'en' ? 'Timestamp' : 'التوقيت'}:</strong> {new Date(auditDetail.timestamp).toLocaleString()}</div>
+                <div><strong>{currentLang === 'en' ? 'User' : 'المستخدم'}:</strong> {auditDetail.username} ({auditDetail.ipAddress})</div>
+                <div><strong>{currentLang === 'en' ? 'Module' : 'الوحدة'}:</strong> {auditDetail.moduleName}</div>
+                <div><strong>{currentLang === 'en' ? 'Entity' : 'الكيان'}:</strong> {auditDetail.entityType ? `${auditDetail.entityType} #${auditDetail.entityId ?? ''}` : (currentLang === 'en' ? 'N/A' : 'غير متاح')}</div>
+                <div>
+                  <strong>{currentLang === 'en' ? 'Integrity Status' : 'حالة السلامة'}:</strong>{' '}
+                  <span className={`badge ${auditDetail.tamperStatus === 'Verified' ? 'badge-ready' : auditDetail.tamperStatus === 'Tampered' ? 'badge-quarantined' : 'badge-sold'}`}>
+                    {auditDetail.tamperStatus}
+                  </span>
+                  {auditDetail.tamperStatus === 'Tampered' && (
+                    <div style={{ color: '#DC2626', marginTop: '6px', fontSize: '12px' }}>
+                      {currentLang === 'en'
+                        ? 'The recomputed row hash does not match the stored hash — this row appears to have been altered after it was written.'
+                        : 'لا يتطابق التجزئة المعاد حسابها مع التجزئة المخزنة — يبدو أن هذا السجل تم تعديله بعد كتابته.'}
+                    </div>
+                  )}
+                  {auditDetail.tamperStatus === 'Unverified' && (
+                    <div style={{ color: 'var(--text-muted)', marginTop: '6px', fontSize: '12px' }}>
+                      {currentLang === 'en'
+                        ? 'This row pre-dates tamper-hashing and cannot be cryptographically verified either way.'
+                        : 'هذا السجل يسبق تفعيل التحقق بالتجزئة ولا يمكن التحقق منه بشكل قاطع.'}
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <strong>{currentLang === 'en' ? 'Action Description' : 'وصف الإجراء'}:</strong>
+                  <p style={{ marginTop: '4px', background: 'var(--bg-secondary)', padding: '10px', borderRadius: '8px' }}>{auditDetail.actionDescription}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Transaction traceability drill-down modal */}
+        {transactionTrace && (
+          <div className="modal-overlay active" onClick={() => setTransactionTrace(null)}>
+            <div className="glass-card modal-content-box" onClick={e => e.stopPropagation()} style={{ maxWidth: '750px', width: '90%', maxHeight: '85vh', overflowY: 'auto' }}>
+              <div className="modal-header">
+                <h3>{currentLang === 'en' ? 'Movement Trace' : 'تتبع الحركة'}: {transactionTrace.transaction?.transaction_number}</h3>
+                <span className="modal-close-btn" onClick={() => setTransactionTrace(null)}>&times;</span>
+              </div>
+
+              <h4 style={{ marginBottom: '8px' }}>{currentLang === 'en' ? 'Transaction' : 'المعاملة'}</h4>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '13px', marginBottom: '18px' }}>
+                <div><strong>{currentLang === 'en' ? 'Type' : 'النوع'}:</strong> <span className="badge">{translateDb(transactionTrace.transaction?.transaction_type)}</span></div>
+                <div><strong>{currentLang === 'en' ? 'Serial' : 'الرقم التسلسلي'}:</strong> {transactionTrace.transaction?.serial_number || '—'}</div>
+                <div><strong>{currentLang === 'en' ? 'From' : 'من'}:</strong> {translateDb(transactionTrace.transaction?.source_vault || 'N/A')} {transactionTrace.transaction?.source_location ? `(${translateDb(transactionTrace.transaction.source_location)})` : ''}</div>
+                <div><strong>{currentLang === 'en' ? 'To' : 'إلى'}:</strong> {translateDb(transactionTrace.transaction?.destination_vault || 'N/A')} {transactionTrace.transaction?.destination_location ? `(${translateDb(transactionTrace.transaction.destination_location)})` : ''}</div>
+                <div><strong>{currentLang === 'en' ? 'Ownership' : 'الملكية'}:</strong> {transactionTrace.transaction?.source_ownership} → {transactionTrace.transaction?.destination_ownership}</div>
+                <div><strong>{currentLang === 'en' ? 'Initiated / Approved By' : 'بدأها / اعتمدها'}:</strong> {transactionTrace.transaction?.initiated_by} {transactionTrace.transaction?.approved_by ? `/ ${transactionTrace.transaction.approved_by}` : ''}</div>
+                <div><strong>{currentLang === 'en' ? 'Timestamp' : 'التوقيت'}:</strong> {transactionTrace.transaction?.timestamp ? new Date(transactionTrace.transaction.timestamp).toLocaleString() : ''}</div>
+              </div>
+
+              <h4 style={{ marginBottom: '8px' }}>{currentLang === 'en' ? 'Linked Audit Entry' : 'سجل التدقيق المرتبط'}</h4>
+              {transactionTrace.audit_entry ? (
+                <div style={{ fontSize: '13px', marginBottom: '18px', background: 'var(--bg-secondary)', padding: '10px', borderRadius: '8px' }}>
+                  <div><strong>{currentLang === 'en' ? 'By' : 'بواسطة'}:</strong> {transactionTrace.audit_entry.username} — {new Date(transactionTrace.audit_entry.timestamp).toLocaleString()}</div>
+                  <div style={{ marginTop: '4px' }}>{transactionTrace.audit_entry.action_description}</div>
+                  <div style={{ marginTop: '6px' }}>
+                    <span className={`badge ${transactionTrace.audit_entry.tamper_status === 'Verified' ? 'badge-ready' : transactionTrace.audit_entry.tamper_status === 'Tampered' ? 'badge-quarantined' : 'badge-sold'}`}>
+                      {transactionTrace.audit_entry.tamper_status}
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '18px' }}>
+                  {currentLang === 'en' ? 'No linked audit entry found.' : 'لا يوجد سجل تدقيق مرتبط.'}
+                </p>
+              )}
+
+              {transactionTrace.courier && (
+                <>
+                  <h4 style={{ marginBottom: '8px' }}>{currentLang === 'en' ? 'Courier / Movement Detail' : 'تفاصيل النقل / المرافقة'}</h4>
+                  <div style={{ fontSize: '13px', marginBottom: '18px' }}>
+                    <div>{currentLang === 'en' ? 'Courier' : 'الناقل'}: {transactionTrace.courier.courier_details || '—'}</div>
+                    {transactionTrace.courier.security_escort_name && <div>{currentLang === 'en' ? 'Security Escort' : 'المرافقة الأمنية'}: {transactionTrace.courier.security_escort_name}</div>}
+                    {transactionTrace.courier.departure_time && <div>{currentLang === 'en' ? 'Departed' : 'المغادرة'}: {new Date(transactionTrace.courier.departure_time).toLocaleString()}</div>}
+                    {transactionTrace.courier.arrival_time && <div>{currentLang === 'en' ? 'Arrived' : 'الوصول'}: {new Date(transactionTrace.courier.arrival_time).toLocaleString()}</div>}
+                  </div>
+                </>
+              )}
+
+              <h4 style={{ marginBottom: '8px' }}>{currentLang === 'en' ? 'Chain of Custody Timeline' : 'الجدول الزمني لسلسلة العهدة'}</h4>
+              {transactionTrace.custody_chain && transactionTrace.custody_chain.length > 0 ? (
+                <div className="table-responsive">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>{currentLang === 'en' ? 'Event' : 'الحدث'}</th>
+                        <th>{currentLang === 'en' ? 'Location' : 'الموقع'}</th>
+                        <th>{currentLang === 'en' ? 'By' : 'بواسطة'}</th>
+                        <th>{currentLang === 'en' ? 'When' : 'متى'}</th>
+                        <th>{currentLang === 'en' ? 'Notes' : 'ملاحظات'}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {transactionTrace.custody_chain.map((e: any, idx: number) => (
+                        <tr key={idx}>
+                          <td><span className="badge">{e.event_type}</span></td>
+                          <td>{translateDb(e.location) || '—'}</td>
+                          <td>{e.recorded_by}</td>
+                          <td>{new Date(e.recorded_at).toLocaleString()}</td>
+                          <td style={{ fontSize: '12px' }}>{e.notes || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
+                  {currentLang === 'en' ? 'No custody events recorded for this item yet.' : 'لم يتم تسجيل أي أحداث عهدة لهذا الصنف بعد.'}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* SCREEN VIEWPORT: REAL-TIME INVENTORY MONITORING */}
+        <section className={`screen-viewport ${activeTab === 'screen-realtime' ? 'active' : ''}`}>
+          <div className="glass-card">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+              <div>
+                <h3>{currentLang === 'en' ? 'Real-Time Inventory Monitoring' : 'المراقبة اللحظية للمخزون'}</h3>
+                <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>
+                  {currentLang === 'en'
+                    ? 'Live precious-metal quantities and movements — to/from the main vault, between branches, and with customers.'
+                    : 'كميات وحركات المعادن الثمينة بشكل لحظي — من وإلى الخزنة الرئيسية، بين الفروع، ومع العملاء.'}
+                </p>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', fontWeight: 600 }}>
+                <span style={{
+                  width: '10px', height: '10px', borderRadius: '50%',
+                  background: hubStatus === 'live' ? '#22C55E' : hubStatus === 'connecting' ? '#F59E0B' : '#9CA3AF',
+                  boxShadow: hubStatus === 'live' ? '0 0 0 4px rgba(34,197,94,0.18)' : 'none'
+                }}></span>
+                <span>
+                  {hubStatus === 'live' && (currentLang === 'en' ? 'Live' : 'مباشر')}
+                  {hubStatus === 'connecting' && (currentLang === 'en' ? 'Connecting…' : 'جارٍ الاتصال…')}
+                  {hubStatus === 'offline' && (currentLang === 'en' ? 'Offline (snapshot only)' : 'غير متصل (لقطة فقط)')}
+                </span>
+                <button className="btn" style={{ fontSize: '11px', padding: '5px 10px' }} onClick={() => { fetchLiveBalances(); connectMonitoringHub(); }}>
+                  <i className="fa-solid fa-rotate"></i> {currentLang === 'en' ? 'Refresh' : 'تحديث'}
+                </button>
+              </div>
+            </div>
+
+            {/* Current quantities by location */}
+            <h4 style={{ marginTop: '18px', marginBottom: '8px' }}>{currentLang === 'en' ? 'Current Quantities by Location' : 'الكميات الحالية حسب الموقع'}</h4>
+            <div style={{ overflowX: 'auto' }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>{currentLang === 'en' ? 'Vault / Branch' : 'الخزنة / الفرع'}</th>
+                    <th>{currentLang === 'en' ? 'Location' : 'الموقع'}</th>
+                    <th>{currentLang === 'en' ? 'Metal / Denomination' : 'المعدن / الفئة'}</th>
+                    <th>{currentLang === 'en' ? 'Ownership' : 'الملكية'}</th>
+                    <th style={{ textAlign: 'right' }}>{currentLang === 'en' ? 'Ready' : 'جاهز'}</th>
+                    <th style={{ textAlign: 'right' }}>{currentLang === 'en' ? 'Reserved' : 'محجوز'}</th>
+                    <th style={{ textAlign: 'right' }}>{currentLang === 'en' ? 'In Transit' : 'قيد النقل'}</th>
+                    <th style={{ textAlign: 'right' }}>{currentLang === 'en' ? 'Quarantined' : 'معزول'}</th>
+                    <th style={{ textAlign: 'right' }}>{currentLang === 'en' ? 'Sold/Custody' : 'مباع/عهدة'}</th>
+                    <th>{currentLang === 'en' ? 'Last Updated' : 'آخر تحديث'}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {liveBalances.length === 0 ? (
+                    <tr>
+                      <td colSpan={10} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '20px' }}>
+                        {currentLang === 'en' ? 'No balance data yet.' : 'لا توجد بيانات أرصدة بعد.'}
+                      </td>
+                    </tr>
+                  ) : (
+                    liveBalances.map((b: any, idx: number) => (
+                      <tr key={idx}>
+                        <td>{translateDb(b.vault_name) || '—'}{b.branch_name ? ` — ${translateDb(b.branch_name)}` : ''}</td>
+                        <td>{translateDb(b.location) || `#${b.location_id}`}</td>
+                        <td>{translateDb(b.metal_name) || ''} {b.denomination ? `(${translateDb(b.denomination)})` : ''}</td>
+                        <td>{translateDb(b.ownership_type)}</td>
+                        <td style={{ textAlign: 'right' }}>{(b.ready_for_sale_qty ?? 0).toLocaleString()}</td>
+                        <td style={{ textAlign: 'right' }}>{(b.reserved_qty ?? 0).toLocaleString()}</td>
+                        <td style={{ textAlign: 'right' }}>{(b.in_transit_qty ?? 0).toLocaleString()}</td>
+                        <td style={{ textAlign: 'right' }}>{(b.quarantined_qty ?? 0).toLocaleString()}</td>
+                        <td style={{ textAlign: 'right' }}>{(b.sold_qty ?? 0).toLocaleString()}</td>
+                        <td>{b.last_updated ? new Date(b.last_updated).toLocaleString() : ''}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Live movement feed */}
+            <h4 style={{ marginTop: '26px', marginBottom: '8px' }}>{currentLang === 'en' ? 'Live Movement Feed' : 'خلاصة الحركات اللحظية'}</h4>
+            <p style={{ color: 'var(--text-muted)', fontSize: '12px', marginTop: '-4px' }}>
+              {currentLang === 'en'
+                ? 'Populated live as movements occur (most recent 50). See Reports → Transactions for full history.'
+                : 'يتم تعبئتها لحظيًا عند حدوث الحركات (أحدث 50). راجع التقارير ← المعاملات للسجل الكامل.'}
+            </p>
+            <div style={{ overflowX: 'auto', maxHeight: '360px', overflowY: 'auto', border: '1px solid var(--surface-border)', borderRadius: '8px' }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>{currentLang === 'en' ? 'Type' : 'النوع'}</th>
+                    <th>{currentLang === 'en' ? 'Item' : 'الصنف'}</th>
+                    <th>{currentLang === 'en' ? 'From' : 'من'}</th>
+                    <th>{currentLang === 'en' ? 'To' : 'إلى'}</th>
+                    <th>{currentLang === 'en' ? 'Ownership Change' : 'تغيير الملكية'}</th>
+                    <th>{currentLang === 'en' ? 'Initiated By' : 'بدأها'}</th>
+                    <th>{currentLang === 'en' ? 'Time' : 'الوقت'}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {liveMovements.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '20px' }}>
+                        {currentLang === 'en' ? 'Waiting for the next movement…' : 'في انتظار الحركة التالية…'}
+                      </td>
+                    </tr>
+                  ) : (
+                    liveMovements.map((m: any, idx: number) => (
+                      <tr key={idx}>
+                        <td><span className="badge">{translateDb(m.transaction_type)}</span></td>
+                        <td>#{m.item_id}</td>
+                        <td>{resolveLocationLabel(m.source_location_id)}</td>
+                        <td>{resolveLocationLabel(m.destination_location_id)}</td>
+                        <td>{m.source_ownership} → {m.destination_ownership}</td>
+                        <td>{m.initiated_by}</td>
+                        <td>{new Date(m.timestamp).toLocaleTimeString()}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
         </section>
@@ -5257,12 +6488,21 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                           </td>
                           <td>
                             {inst.details ? (
-                              <div style={{ fontSize: '12px' }}>
-                                <strong>{inst.details.po_number}</strong><br/>
-                                <span style={{ color: 'var(--accent-gold)' }}>
-                                  {inst.details.vendor_name} | {inst.details.total_weight}g | ${inst.details.total_cost?.toLocaleString()} {inst.details.currency}
-                                </span>
-                              </div>
+                              inst.workflow_type === 'INTAKE_SHIPMENT' && inst.details.source_type === 'CUSTOMER' ? (
+                                <div style={{ fontSize: '12px' }}>
+                                  <strong>{currentLang === 'en' ? 'Customer:' : 'العميل:'} {inst.details.customer_name || `#${inst.details.customer_id}`}</strong><br/>
+                                  <span style={{ color: 'var(--accent-gold)' }}>
+                                    {inst.details.receipt_reason} | {currentLang === 'en' ? 'Lot' : 'اللوت'} {inst.details.lot_number}
+                                  </span>
+                                </div>
+                              ) : (
+                                <div style={{ fontSize: '12px' }}>
+                                  <strong>{inst.details.po_number}</strong><br/>
+                                  <span style={{ color: 'var(--accent-gold)' }}>
+                                    {inst.details.vendor_name} | {inst.details.total_weight}g | ${inst.details.total_cost?.toLocaleString()} {inst.details.currency}
+                                  </span>
+                                </div>
+                              )
                             ) : (
                               <span>Entity ID: {inst.entity_id}</span>
                             )}
@@ -5487,7 +6727,19 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                   <h4>{currentLang === 'en' ? 'Transaction Details' : 'تفاصيل المعاملة'}</h4>
                   {selectedWfInstance.details ? (
                     <div style={{ backgroundColor: 'rgba(255,255,255,0.02)', padding: '15px', borderRadius: '6px', border: '1px solid var(--surface-border)', marginTop: '8px' }}>
-                      {selectedWfInstance.workflow_type === "INTAKE_SHIPMENT" ? (
+                      {selectedWfInstance.workflow_type === "INTAKE_SHIPMENT" && selectedWfInstance.details.source_type === "CUSTOMER" ? (
+                        <div className="split-grid-2" style={{ gap: '10px 20px' }}>
+                          <div><strong>{currentLang === 'en' ? 'Customer:' : 'العميل:'}</strong> {selectedWfInstance.details.customer_name || `#${selectedWfInstance.details.customer_id}`}</div>
+                          <div><strong>{currentLang === 'en' ? 'Receipt Reason:' : 'سبب الاستلام:'}</strong> {selectedWfInstance.details.receipt_reason}</div>
+                          {selectedWfInstance.details.account_id && (
+                            <div><strong>{currentLang === 'en' ? 'Custody Account:' : 'حساب الأمانة:'}</strong> {selectedWfInstance.details.account_id}</div>
+                          )}
+                          <div><strong>{currentLang === 'en' ? 'Lot Number:' : 'رقم اللوت:'}</strong> {selectedWfInstance.details.lot_number}</div>
+                          <div><strong>{currentLang === 'en' ? 'Destination Location:' : 'موقع الوجهة:'}</strong> {selectedWfInstance.details.location_name}</div>
+                          <div><strong>{currentLang === 'en' ? 'Received By:' : 'المستلم:'}</strong> {selectedWfInstance.details.received_by}</div>
+                          <div><strong>{currentLang === 'en' ? 'Status Code:' : 'حالة الاعتماد:'}</strong> {selectedWfInstance.details.status_code}</div>
+                        </div>
+                      ) : selectedWfInstance.workflow_type === "INTAKE_SHIPMENT" ? (
                         <div className="split-grid-2" style={{ gap: '10px 20px' }}>
                           <div><strong>{currentLang === 'en' ? 'P.O. Number:' : 'رقم طلب الشراء:'}</strong> {selectedWfInstance.details.po_number}</div>
                           <div><strong>{currentLang === 'en' ? 'Lot Number:' : 'رقم اللوت:'}</strong> {selectedWfInstance.details.lot_number}</div>
@@ -5854,14 +7106,15 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                           e.preventDefault();
                           if (currentScanSerial.trim()) {
                             // Add scanned item
-                            const isDup = scannedSerials.some(s => s.serial === currentScanSerial.trim());
+                            const parsed = parseGs1Barcode(currentScanSerial.trim());
+                            const isDup = scannedSerials.some(s => s.serial === parsed.serial);
                             if (isDup) {
                               alert(currentLang === 'en' ? 'This barcode/serial has already been scanned.' : 'هذا الباركود/الرقم التسلسلي تم مسحه مسبقاً.');
                               return;
                             }
                             setScannedSerials([
                               ...scannedSerials,
-                              { serial: currentScanSerial.trim(), product_id: intakeSelectedProductId, product_code: (products.find((p: any) => p.product_id === intakeSelectedProductId)?.denomination_label) || (products.find((p: any) => p.product_id === intakeSelectedProductId)?.product_code) || 'Bar' }
+                              { serial: parsed.serial, product_id: intakeSelectedProductId, product_code: (products.find((p: any) => p.product_id === intakeSelectedProductId)?.denomination_label) || (products.find((p: any) => p.product_id === intakeSelectedProductId)?.product_code) || 'Bar' }
                             ]);
                             setCurrentScanSerial('');
                           }
@@ -5873,14 +7126,15 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       type="button"
                       onClick={() => {
                         if (currentScanSerial.trim()) {
-                          const isDup = scannedSerials.some(s => s.serial === currentScanSerial.trim());
+                          const parsed = parseGs1Barcode(currentScanSerial.trim());
+                          const isDup = scannedSerials.some(s => s.serial === parsed.serial);
                           if (isDup) {
                             alert(currentLang === 'en' ? 'This barcode/serial has already been scanned.' : 'هذا الباركود/الرقم التسلسلي تم مسحه مسبقاً.');
                             return;
                           }
                           setScannedSerials([
                             ...scannedSerials,
-                            { serial: currentScanSerial.trim(), product_id: intakeSelectedProductId, product_code: intakeSelectedProductId === 1 ? '1 Kilogram Bar' : 'Other Bar' }
+                            { serial: parsed.serial, product_id: intakeSelectedProductId, product_code: intakeSelectedProductId === 1 ? '1 Kilogram Bar' : 'Other Bar' }
                           ]);
                           setCurrentScanSerial('');
                         }
@@ -5952,6 +7206,140 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                   onClick={handleSubmitIntake}
                 >
                   <i className="fa-solid fa-check"></i> {currentLang === 'ar' ? 'تأكيد استلام الشحنة' : 'Confirm Shipment Receipt'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* CUSTOMER RECEIPT MODAL -- receipt of precious metals FROM a customer */}
+        {showCustomerReceiptModal && (
+          <div className="modal-overlay active" onClick={() => setShowCustomerReceiptModal(false)}>
+            <div className="glass-card modal-content-box" onClick={e => e.stopPropagation()} style={{ maxWidth: '550px', width: '90%' }}>
+              <div className="modal-header">
+                <h3>{currentLang === 'ar' ? 'استلام معادن ثمينة من عميل' : 'Receive Precious Metals from a Customer'}</h3>
+                <span className="modal-close-btn" onClick={() => setShowCustomerReceiptModal(false)}>&times;</span>
+              </div>
+              <div style={{ padding: '10px 0' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+                  <div className="form-group">
+                    <label>{currentLang === 'ar' ? 'رقم العميل' : 'Customer ID'}</label>
+                    <input type="number" className="form-control" value={receiptCustomerId} onChange={e => setReceiptCustomerId(e.target.value)} />
+                  </div>
+                  <div className="form-group">
+                    <label>{currentLang === 'ar' ? 'سبب الاستلام' : 'Receipt Reason'}</label>
+                    <select value={receiptReason} onChange={e => setReceiptReason(e.target.value as any)} style={{ color: '#000' }}>
+                      <option value="BUYBACK">{currentLang === 'ar' ? 'إعادة شراء (يملكها البنك)' : 'Buyback (KFH takes ownership)'}</option>
+                      <option value="CUSTODY_DEPOSIT">{currentLang === 'ar' ? 'إيداع أمانة (تبقى ملكاً للعميل)' : 'Custody Deposit (customer keeps ownership)'}</option>
+                      <option value="RETURN">{currentLang === 'ar' ? 'إعادة سبيكة' : 'Returned Bar'}</option>
+                    </select>
+                  </div>
+                </div>
+
+                {receiptReason === 'CUSTODY_DEPOSIT' && (
+                  <div className="form-group" style={{ marginBottom: '12px' }}>
+                    <label>{currentLang === 'ar' ? 'رقم حساب العميل (لحيازة الأمانة)' : "Customer Account ID (to hold the custody deposit)"}</label>
+                    <input type="number" className="form-control" value={receiptAccountId} onChange={e => setReceiptAccountId(e.target.value)} />
+                  </div>
+                )}
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '15px' }}>
+                  <div className="form-group">
+                    <label>{currentLang === 'ar' ? 'رقم التشغيلة/اللوت' : 'Lot Number'}</label>
+                    <input type="text" className="form-control" value={receiptLotNum} onChange={e => setReceiptLotNum(e.target.value)} />
+                  </div>
+                  <div className="form-group">
+                    <label>{currentLang === 'ar' ? 'موقع التخزين' : 'Storage Slot Location'}</label>
+                    <select value={receiptSelectedLocation} onChange={e => setReceiptSelectedLocation(parseInt(e.target.value))} style={{ color: '#000' }}>
+                      {locations.flatMap(loc =>
+                        loc.slots.map((s: any) => ({
+                          id: s.location_id,
+                          label: `${loc.vault_name} - ${loc.zone_room} - Row ${s.shelf_row} - Slot ${s.slot_bin} ${s.occupied ? '(Occupied)' : ''}`
+                        }))
+                      ).map(item => (
+                        <option key={item.id} value={item.id}>{item.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="glass-card" style={{ padding: '12px', background: 'rgba(0, 155, 78, 0.05)', border: '1px solid rgba(0, 155, 78, 0.2)', marginBottom: '15px' }}>
+                  <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--kfh-green)' }}>
+                    <i className="fa-solid fa-barcode"></i> {currentLang === 'ar' ? 'محاكي جهاز مسح الباركود / الرقم التسلسلي' : 'Barcode / Serial Scanner Input'}
+                  </h4>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder={currentLang === 'ar' ? 'امسح الباركود للقطعة أو أدخل الرقم التسلسلي واضغط Enter...' : 'Scan piece barcode or enter serial number & hit Enter...'}
+                      value={currentReceiptScanSerial}
+                      onChange={e => setCurrentReceiptScanSerial(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          if (currentReceiptScanSerial.trim()) {
+                            const parsed = parseGs1Barcode(currentReceiptScanSerial.trim());
+                            const isDup = receiptScannedSerials.some(s => s.serial === parsed.serial);
+                            if (isDup) {
+                              alert(currentLang === 'en' ? 'This barcode/serial has already been scanned.' : 'هذا الباركود/الرقم التسلسلي تم مسحه مسبقاً.');
+                              return;
+                            }
+                            setReceiptScannedSerials([...receiptScannedSerials, { serial: parsed.serial, product_id: receiptSelectedProductId }]);
+                            setCurrentReceiptScanSerial('');
+                          }
+                        }
+                      }}
+                    />
+                    <button
+                      className="btn btn-primary"
+                      type="button"
+                      onClick={() => {
+                        if (currentReceiptScanSerial.trim()) {
+                          const parsed = parseGs1Barcode(currentReceiptScanSerial.trim());
+                          const isDup = receiptScannedSerials.some(s => s.serial === parsed.serial);
+                          if (isDup) {
+                            alert(currentLang === 'en' ? 'This barcode/serial has already been scanned.' : 'هذا الباركود/الرقم التسلسلي تم مسحه مسبقاً.');
+                            return;
+                          }
+                          setReceiptScannedSerials([...receiptScannedSerials, { serial: parsed.serial, product_id: receiptSelectedProductId }]);
+                          setCurrentReceiptScanSerial('');
+                        }
+                      }}
+                    >
+                      {currentLang === 'ar' ? 'إضافة' : 'Add'}
+                    </button>
+                  </div>
+
+                  <div className="form-group" style={{ marginTop: '10px', marginBottom: 0 }}>
+                    <label style={{ fontSize: '11px' }}>{currentLang === 'ar' ? 'صنف المنتج' : 'Product Denomination'}</label>
+                    <select
+                      value={receiptSelectedProductId}
+                      onChange={e => setReceiptSelectedProductId(parseInt(e.target.value))}
+                      style={{ padding: '4px', fontSize: '12px', height: '30px', color: '#000' }}
+                    >
+                      {products
+                        .filter((p: any) => p.is_active !== false)
+                        .map((p: any) => (
+                          <option key={p.product_id} value={p.product_id}>
+                            {`${p.metal_name} ${p.denomination_label}` + (p.purity_value ? ` (${p.purity_value} ${currentLang === 'ar' ? 'نقاوة' : 'Purity'})` : '')}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+
+                  {receiptScannedSerials.length > 0 && (
+                    <div style={{ marginTop: '10px', fontSize: '11px', color: 'var(--text-muted)' }}>
+                      {receiptScannedSerials.length} {currentLang === 'ar' ? 'قطعة تم مسحها' : 'piece(s) scanned'}: {receiptScannedSerials.map(s => s.serial).join(', ')}
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  className="btn btn-primary"
+                  style={{ width: '100%', marginTop: '15px' }}
+                  onClick={handleSubmitCustomerReceipt}
+                >
+                  <i className="fa-solid fa-check"></i> {currentLang === 'ar' ? 'تأكيد استلام العميل' : 'Confirm Customer Receipt'}
                 </button>
               </div>
             </div>

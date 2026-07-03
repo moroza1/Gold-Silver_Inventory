@@ -69,17 +69,17 @@ async def run_test():
         
         # -> Click the 'CH-88371-93' row (Slot 5) in the Shelf details modal to open the serialized bar inventory details and verify the inventory details and location context are displayed.
         # CH-88371-93
-        elem = page.locator('xpath=/html/body/div/div/main/section[4]/div[2]/div/div[2]/table/tbody/tr[3]/td[2]')
+        elem = page.locator('xpath=//section[contains(@class, \"active\")]/div[2]/div/div[2]/table/tbody/tr[3]/td[2]')
         await elem.click(timeout=10000)
         
         # -> Click the 'CH-88371-93' serial entry in the Shelf details table to open the serialized bar inventory details view and verify the bar details and location context are displayed.
         # CH-88371-93
-        elem = page.locator('xpath=/html/body/div/div/main/section[4]/div[2]/div/div[2]/table/tbody/tr[3]/td[2]')
+        elem = page.locator('xpath=//section[contains(@class, \"active\")]/div[2]/div/div[2]/table/tbody/tr[3]/td[2]')
         await elem.click(timeout=10000)
         
         # -> Click the 'CH-88371-93' bar serial entry in the shelf details modal to open the serialized bar inventory details and confirm the bar details and location context are shown.
         # CH-88371-93
-        elem = page.locator('xpath=/html/body/div/div/main/section[4]/div[2]/div/div[2]/table/tbody/tr[3]/td[2]')
+        elem = page.locator('xpath=//section[contains(@class, \"active\")]/div[2]/div/div[2]/table/tbody/tr[3]/td[2]')
         await elem.click(timeout=10000)
         
         # -> Click the 'CH-88371-93' row in the 'Shelf details: Main Vault Zone Alpha - Shelf Row 1' modal (the entire table row) to attempt to open the serialized bar inventory details view.
@@ -89,26 +89,26 @@ async def run_test():
         
         # -> Click the 'CH-88371-93' bar serial cell in the Shelf details modal to attempt to open the serialized bar inventory details view.
         # CH-88371-93
-        elem = page.locator('xpath=/html/body/div/div/main/section[4]/div[2]/div/div[2]/table/tbody/tr[3]/td[2]')
+        elem = page.locator('xpath=//section[contains(@class, \"active\")]/div[2]/div/div[2]/table/tbody/tr[3]/td[2]')
         await elem.click(timeout=10000)
         
         # -> Click the 'Gold - 1 Kilogram Bar' denomination cell in the CH-88371-93 row inside the 'Shelf details: Main Vault Zone Alpha - Shelf Row 1' modal to attempt to open the serialized bar inventory details.
         # Gold - 1 Kilogram Bar
-        elem = page.locator('xpath=/html/body/div/div/main/section[4]/div[2]/div/div[2]/table/tbody/tr[3]/td[3]')
+        elem = page.locator('xpath=//section[contains(@class, \"active\")]/div[2]/div/div[2]/table/tbody/tr[3]/td[3]')
         await elem.click(timeout=10000)
         
         # -> Click the 'CH-88371-93' bar serial number in the Shelf details modal to attempt to open the serialized bar inventory details and display the inventory location context.
         # CH-88371-93
-        elem = page.locator('xpath=/html/body/div/div/main/section[4]/div[2]/div/div[2]/table/tbody/tr[3]/td[2]')
+        elem = page.locator('xpath=//section[contains(@class, \"active\")]/div[2]/div/div[2]/table/tbody/tr[3]/td[2]')
         await elem.click(timeout=10000)
         
         # --> Assertions to verify final state
         
         # --> Verify the selected inventory location context is displayed
         # Assert: Expected the inventory location context to show 'Main Vault Zone Alpha - Shelf Row 1 > Slot 5'.
-        await expect(page.locator("xpath=/html/body/div[1]/div/main/section[4]/div[2]").nth(0)).to_contain_text("Main Vault Zone Alpha - Shelf Row 1 > Slot 5", timeout=15000), "Expected the inventory location context to show 'Main Vault Zone Alpha - Shelf Row 1 > Slot 5'."
+        await expect(page.locator("xpath=//section[contains(@class, \"active\")]/div[2]").nth(0)).to_contain_text("Main Vault Zone Alpha - Shelf Row 1 > Slot 5", timeout=15000), "Expected the inventory location context to show 'Main Vault Zone Alpha - Shelf Row 1 > Slot 5'."
         # Assert: Expected the inventory location context to include the selected serial 'CH-88371-93'.
-        await expect(page.locator("xpath=/html/body/div[1]/div/main/section[4]/div[2]").nth(0)).to_contain_text("CH-88371-93", timeout=15000), "Expected the inventory location context to include the selected serial 'CH-88371-93'."
+        await expect(page.locator("xpath=//section[contains(@class, \"active\")]/div[2]").nth(0)).to_contain_text("CH-88371-93", timeout=15000), "Expected the inventory location context to include the selected serial 'CH-88371-93'."
         # Assert: Verify bar inventory details are displayed
         await expect(page.locator("text=Serialized Bar Details")).to_be_visible(timeout=15000)
         await asyncio.sleep(5)

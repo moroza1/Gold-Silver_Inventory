@@ -29,6 +29,12 @@ public partial class PMIMSControllers : ControllerBase
     private readonly IReconciliationService _reconService;
     private readonly IBulkMigrationService _migrationService;
     private readonly IConfiguration _config;
+    // Items 5-8
+    private readonly IRuleEngineService _ruleEngine;
+    private readonly IAuditExportService _auditExport;
+    private readonly IEmailSenderService _emailSender;
+    private readonly IMonitoringAdapter _monitoringAdapter;
+    private readonly INotificationDispatchService _notificationDispatch;
 
     public PMIMSControllers(
         IInventoryRepository repository,
@@ -37,7 +43,12 @@ public partial class PMIMSControllers : ControllerBase
         IRateFeedService rateFeed,
         IReconciliationService reconService,
         IBulkMigrationService migrationService,
-        IConfiguration config)
+        IConfiguration config,
+        IRuleEngineService ruleEngine,
+        IAuditExportService auditExport,
+        IEmailSenderService emailSender,
+        IMonitoringAdapter monitoringAdapter,
+        INotificationDispatchService notificationDispatch)
     {
         _repository = repository;
         _adService = adService;
@@ -46,6 +57,11 @@ public partial class PMIMSControllers : ControllerBase
         _reconService = reconService;
         _migrationService = migrationService;
         _config = config;
+        _ruleEngine = ruleEngine;
+        _auditExport = auditExport;
+        _emailSender = emailSender;
+        _monitoringAdapter = monitoringAdapter;
+        _notificationDispatch = notificationDispatch;
     }
 
     // =========================================================================
@@ -126,6 +142,10 @@ public partial class PMIMSControllers : ControllerBase
         }));
     }
 
+    // Was missing [Authorize] entirely -- anonymous callers could create new product/
+    // denomination catalog entries. This is master-data (same tier as branches/vendors/
+    // reorder-thresholds below), so gate it the same way.
+    [Authorize(Policy = "master_data.write")]
     [HttpPost("catalog/products")]
     public async Task<IActionResult> CreateProduct([FromBody] CreateProductRequestDto req)
     {
@@ -267,6 +287,10 @@ public partial class PMIMSControllers : ControllerBase
         }));
     }
 
+    // Was missing [Authorize] entirely (see AGENTS.md "missing [Authorize] = anonymous
+    // access" gotcha) -- reconciliation break data is sensitive financial discrepancy
+    // information, so it gets the same reports.read policy as every other reporting view.
+    [Authorize(Policy = "reports.read")]
     [HttpGet("reconciliation/discrepancies")]
     public async Task<IActionResult> GetDiscrepancies()
     {
@@ -283,6 +307,29 @@ public partial class PMIMSControllers : ControllerBase
             resolved_by = c.ResolvedBy,
             resolved_at = c.ResolvedAt
         }));
+    }
+
+    // Previously IReconciliationService.RunReconciliationAsync had no HTTP endpoint at all --
+    // it existed (and was unit-tested) but nothing in the API surface could trigger it. This
+    // is also the trigger point for the INVENTORY_DISCREPANCY notification (see
+    // ReconciliationService.RunReconciliationAsync), so without this endpoint that event type
+    // could never fire in practice. Gated reports.write, same tier as the IFRS disclosure
+    // snapshot generation just below -- a mutating action (quarantines items) that only
+    // Reconciliation Officers / IT/Admin (FULL on `reports`) should be able to invoke.
+    [Authorize(Policy = "reports.write")]
+    [HttpPost("reconciliation/run")]
+    public async Task<IActionResult> RunReconciliation([FromBody] RunReconciliationRequest? req)
+    {
+        string executedBy = req?.ExecutedBy ?? User.Identity?.Name ?? "system";
+        var run = await _reconService.RunReconciliationAsync(executedBy);
+        return Ok(new
+        {
+            executed_by = run.ExecutedBy,
+            run_timestamp = run.RunTimestamp,
+            total_items_checked = run.TotalItemsChecked,
+            total_discrepancies = run.TotalDiscrepancies,
+            status = run.StatusCode
+        });
     }
 
     // =========================================================================
@@ -437,6 +484,26 @@ public partial class PMIMSControllers : ControllerBase
         }
     }
 
+    // Receipt of precious metals from a customer (buyback / custody deposit / return) --
+    // no Purchase Order involved. Same Maker-Checker workflow (INTAKE_SHIPMENT) as a supplier
+    // receipt so it goes through the identical approval queue/UI.
+    [HttpPost("vault/intake/customer")]
+    [Authorize(Policy = "intake.write")]
+    public async Task<IActionResult> IntakeFromCustomer([FromBody] CustomerReceiptRequest req)
+    {
+        try
+        {
+            string itemsJson = JsonSerializer.Serialize(req.Items);
+            var pending = await _repository.InitiateWorkflowIntakeAsync(null, req.LotNumber, req.LocationId, req.ReceivedBy, itemsJson,
+                sourceType: "CUSTOMER", customerId: req.CustomerId, accountId: req.AccountId, receiptReason: req.ReceiptReason);
+            return Ok(new { pending_id = pending.PendingIntakeId, message = "Customer receipt verification request initiated and routed to the Maker-Checker workflow approval." });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
     [Authorize(Policy = "custody.write")]
     [HttpPost("transfers")]
     public async Task<IActionResult> TransferStock([FromBody] TransferRequest req)
@@ -453,6 +520,27 @@ public partial class PMIMSControllers : ControllerBase
     {
         try
         {
+            // Dynamic Business Validation Rules Engine (RFP item 5) -- additive pre-check,
+            // e.g. a business-authored "no single transfer over N grams without dual approval"
+            // rule. Never replaces the workflow's own Maker-Checker approval; a BLOCK-severity
+            // rule match here just stops the transfer from being initiated at all.
+            var item = (await _repository.GetItemsAsync()).FirstOrDefault(i => i.ItemId == req.ItemId);
+            if (item != null)
+            {
+                var context = new Dictionary<string, object>
+                {
+                    ["weightGrams"] = item.Product?.Denomination?.WeightGrams ?? 0m,
+                    ["metalType"] = item.Product?.MetalType?.MetalName ?? "",
+                    ["destinationBranchId"] = req.DestinationBranchId
+                };
+                var ruleResult = await _ruleEngine.EvaluateAsync("TRANSFER_LIMIT", "InventoryItem", req.ItemId.ToString(), context);
+                if (!ruleResult.Passed)
+                {
+                    string reasons = string.Join("; ", ruleResult.Details.Where(d => d.Result == "FAIL").Select(d => d.Message));
+                    return BadRequest(new { error = $"Blocked by business rule: {reasons}" });
+                }
+            }
+
             var transfer = await _repository.InitiateWorkflowBranchTransferAsync(req.ItemId, req.DestinationBranchId, req.CourierInfo, req.InitiatedBy);
             return Ok(new { transfer_id = transfer.TransferId, message = "Branch transfer initiated and routed to the Maker-Checker workflow approval." });
         }
@@ -631,30 +719,12 @@ public partial class PMIMSControllers : ControllerBase
 
     // =========================================================================
     // 9. FIM SYNC PROVISIONING HOOKS
+    // -- Moved to PMIMSControllers.Fim.cs, which covers all 29 RFP FIM
+    // Integration Module functions (identity provisioning, access
+    // management/rights, password management, delta-sync) against the real
+    // FimService implementation. See that file for GET/POST/PUT/DELETE
+    // /api/fim/* endpoints.
     // =========================================================================
-    [Authorize(Policy = "user_admin.read")]
-    [HttpGet("fim/users")]
-    public async Task<IActionResult> FimGetUsers() => Ok(await _fimService.GetUsersAsync());
-
-    [Authorize(Policy = "user_admin.read")]
-    [HttpGet("fim/profiles")]
-    public async Task<IActionResult> FimGetProfiles() => Ok(await _fimService.GetProfilesAsync());
-
-    [Authorize(Policy = "user_admin.write")]
-    [HttpPost("fim/users")]
-    public async Task<IActionResult> FimAddUser([FromBody] FimAddUserRequest req)
-    {
-        bool res = await _fimService.AddUserAsync(req.Username, req.Email, "MOCK-PASSWORD-HASH");
-        return Ok(new { success = res });
-    }
-
-    [Authorize(Policy = "user_admin.write")]
-    [HttpPost("fim/profiles")]
-    public async Task<IActionResult> FimAddProfile([FromBody] FimAddProfileRequest req)
-    {
-        bool res = await _fimService.AddProfileAsync(req.ProfileName, req.Description);
-        return Ok(new { success = res });
-    }
 
     // =========================================================================
     // 10. REPORTING & EXPORTS
@@ -708,13 +778,27 @@ public partial class PMIMSControllers : ControllerBase
             source_ownership = t.SourceOwnership,
             destination_ownership = t.DestinationOwnership,
             initiated_by = t.InitiatedBy,
+            approved_by = t.ApprovedBy,
             timestamp = t.TransactionTimestamp
         }));
     }
 
+    // Assembles one movement's full traceability picture: the ledger row, its matched
+    // (tamper-hash-verified) audit log entry, courier detail if it's a TRANSFER, and the
+    // full chain-of-custody timeline for the underlying bar. See
+    // IInventoryRepository.GetTransactionTraceAsync.
+    [Authorize(Policy = "reports.read")]
+    [HttpGet("reports/transactions/{id:int}/trace")]
+    public async Task<IActionResult> GetTransactionTrace(int id)
+    {
+        var trace = await _repository.GetTransactionTraceAsync(id);
+        if (trace == null) return NotFound(new { error = "Transaction not found." });
+        return Ok(trace);
+    }
+
     [Authorize(Policy = "reports.read")]
     [HttpGet("reports/valuation")]
-    public async Task<IActionResult> GetValuationReport()
+    public async Task<IActionResult> GetValuationReport([FromQuery] string method = "AVERAGE")
     {
         var items = await _repository.GetItemsAsync();
         var goldRate = await _rateFeed.GetLiveRatesAsync("Gold");
@@ -724,44 +808,82 @@ public partial class PMIMSControllers : ControllerBase
         decimal silverPricePerGram = silverRate.bid / 31.1034768m;
 
         var valuationList = new List<object>();
+        var itemsList = items.ToList();
+        var methodUpper = (method ?? "AVERAGE").Trim().ToUpperInvariant();
 
-        foreach (var item in items)
+        var productsGrouped = itemsList.GroupBy(i => i.ProductId);
+        foreach (var group in productsGrouped)
         {
-            if (item.StatusCode == "INACTIVE" || item.StatusCode == "WITHDRAWN") continue;
-
-            decimal weight = item.Product?.Denomination?.WeightGrams ?? 0;
-            string metal = item.Product?.MetalType?.MetalName ?? "Gold";
+            var productId = group.Key;
+            var prodItems = group.ToList();
+            var activeItems = prodItems.Where(i => i.StatusCode != "INACTIVE" && i.StatusCode != "WITHDRAWN").ToList();
             
-            decimal currentPricePerGram = metal.Equals("Silver", StringComparison.OrdinalIgnoreCase) 
-                ? silverPricePerGram 
-                : goldPricePerGram;
-
-            decimal currentMarketValue = weight * currentPricePerGram;
-
-            decimal avgCostPerGram = 0;
-            if (item.Lot != null)
+            // Build cost pools for FIFO/LIFO
+            List<decimal> costPool = new List<decimal>();
+            if (methodUpper == "FIFO")
             {
-                avgCostPerGram = item.Lot.AverageUnitCost;
+                activeItems = activeItems.OrderByDescending(i => i.Lot?.AcquisitionDate).ThenByDescending(i => i.LotId).ToList();
+                var prodLots = prodItems.Where(i => i.Lot != null).Select(i => i.Lot!).DistinctBy(l => l.LotId)
+                    .OrderByDescending(l => l.AcquisitionDate).ThenByDescending(l => l.LotId).ToList();
+                foreach (var lot in prodLots)
+                {
+                    int originalCount = prodItems.Count(i => i.LotId == lot.LotId);
+                    costPool.AddRange(Enumerable.Repeat(lot.AverageUnitCost, originalCount));
+                }
             }
-            
-            decimal costBasis = weight * avgCostPerGram;
-            decimal unrealizedPnl = currentMarketValue - costBasis;
-
-            valuationList.Add(new
+            else if (methodUpper == "LIFO")
             {
-                item_id = item.ItemId,
-                serial_number = item.SerialNumber,
-                metal_name = metal,
-                denomination = item.Product?.Denomination?.Label,
-                weight_grams = weight,
-                purity = item.Product?.Purity?.PurityValue,
-                location = item.Location?.Description ?? "Unknown",
-                status_code = item.StatusCode,
-                ownership_type = item.OwnershipType,
-                cost_basis = Math.Round(costBasis, 2),
-                market_value = Math.Round(currentMarketValue, 2),
-                unrealized_pnl = Math.Round(unrealizedPnl, 2)
-            });
+                activeItems = activeItems.OrderBy(i => i.Lot?.AcquisitionDate).ThenBy(i => i.LotId).ToList();
+                var prodLots = prodItems.Where(i => i.Lot != null).Select(i => i.Lot!).DistinctBy(l => l.LotId)
+                    .OrderBy(l => l.AcquisitionDate).ThenBy(l => l.LotId).ToList();
+                foreach (var lot in prodLots)
+                {
+                    int originalCount = prodItems.Count(i => i.LotId == lot.LotId);
+                    costPool.AddRange(Enumerable.Repeat(lot.AverageUnitCost, originalCount));
+                }
+            }
+
+            for (int k = 0; k < activeItems.Count; k++)
+            {
+                var item = activeItems[k];
+                decimal weight = item.Product?.Denomination?.WeightGrams ?? 0;
+                string metal = item.Product?.MetalType?.MetalName ?? "Gold";
+                
+                decimal currentPricePerGram = metal.Equals("Silver", StringComparison.OrdinalIgnoreCase) 
+                    ? silverPricePerGram 
+                    : goldPricePerGram;
+
+                decimal currentMarketValue = weight * currentPricePerGram;
+
+                decimal unitCost = 0;
+                if (methodUpper == "FIFO" || methodUpper == "LIFO")
+                {
+                    unitCost = k < costPool.Count ? costPool[k] : (item.Lot?.AverageUnitCost ?? 0);
+                }
+                else
+                {
+                    unitCost = item.Lot?.AverageUnitCost ?? 0;
+                }
+                
+                decimal costBasis = weight * unitCost;
+                decimal unrealizedPnl = currentMarketValue - costBasis;
+
+                valuationList.Add(new
+                {
+                    item_id = item.ItemId,
+                    serial_number = item.SerialNumber,
+                    metal_name = metal,
+                    denomination = item.Product?.Denomination?.Label,
+                    weight_grams = weight,
+                    purity = item.Product?.Purity?.PurityValue,
+                    location = item.Location?.Description ?? "Unknown",
+                    status_code = item.StatusCode,
+                    ownership_type = item.OwnershipType,
+                    cost_basis = Math.Round(costBasis, 2),
+                    market_value = Math.Round(currentMarketValue, 2),
+                    unrealized_pnl = Math.Round(unrealizedPnl, 2)
+                });
+            }
         }
 
         return Ok(valuationList);
@@ -845,8 +967,13 @@ public partial class PMIMSControllers : ControllerBase
                     entityDetails = new
                     {
                         pending_intake_id = pending.PendingIntakeId,
+                        source_type = pending.SourceType,
                         po_id = pending.PoId,
-                        po_number = pending.PurchaseOrder?.PoNumber ?? "Unknown",
+                        po_number = pending.SourceType == "CUSTOMER" ? null : (pending.PurchaseOrder?.PoNumber ?? "Unknown"),
+                        customer_id = pending.CustomerId,
+                        customer_name = pending.Customer?.CustomerName,
+                        account_id = pending.AccountId,
+                        receipt_reason = pending.ReceiptReason,
                         lot_number = pending.LotNumber,
                         location_id = pending.LocationId,
                         location_name = $"{pending.Location?.ZoneRoom}-{pending.Location?.ShelfRow}-{pending.Location?.SlotBin}",
@@ -941,6 +1068,13 @@ public partial class PMIMSControllers : ControllerBase
         var result = await _repository.ProcessWorkflowActionAsync(id, req.Username, req.Action, req.Comments);
         if (result == "SUCCESS")
         {
+            if (req.Action == "APPROVED")
+            {
+                // Customer/management communication (RFP item 7 extension) -- fires only when
+                // this action was the final approval step of a BRANCH_TRANSFER (i.e. the
+                // transfer is now actually complete), not on every intermediate step.
+                await NotifyIfTransferCompletedAsync(id);
+            }
             return Ok(new { message = "Workflow action processed successfully." });
         }
         return BadRequest(new { error = result });
@@ -993,7 +1127,10 @@ public partial class PMIMSControllers : ControllerBase
             if (workflowType == "INTAKE_SHIPMENT")
             {
                 var pi = pendingIntakes.FirstOrDefault(p => p.PendingIntakeId == entityId);
-                return pi != null ? $"Intake lot {pi.LotNumber} (PO {pi.PurchaseOrder?.PoNumber ?? "Unknown"})" : $"Intake #{entityId}";
+                if (pi == null) return $"Intake #{entityId}";
+                return pi.SourceType == "CUSTOMER"
+                    ? $"Intake lot {pi.LotNumber} (Customer {pi.Customer?.CustomerName ?? "Unknown"} -- {pi.ReceiptReason})"
+                    : $"Intake lot {pi.LotNumber} (PO {pi.PurchaseOrder?.PoNumber ?? "Unknown"})";
             }
             if (workflowType == "BRANCH_TRANSFER")
             {
@@ -1041,6 +1178,11 @@ public partial class PMIMSControllers : ControllerBase
     // Scopes the board's KPIs (gold weight / ready / custody) and inventory table to
     // items whose lot was acquired within the given date range. Custody is scoped by
     // when the holding was allocated, since that's the event date for that KPI.
+    // Was fully anonymous -- no [Authorize] at all -- exposing executive KPIs (gold weight,
+    // ready/reserved/custody counts, the underlying inventory item list) to unauthenticated
+    // callers. There was also no "dashboard" policy registered anywhere, so the seeded
+    // per-role "dashboard" permission level was never enforced (see Program.cs).
+    [Authorize(Policy = "dashboard.read")]
     [HttpGet("dashboard/executive-board")]
     public async Task<IActionResult> GetExecutiveBoard([FromQuery] string? startDate, [FromQuery] string? endDate)
     {
@@ -1102,7 +1244,8 @@ public partial class PMIMSControllers : ControllerBase
     {
         "dashboard", "pending_actions", "purchase_orders", "spatial_map", "custody",
         "stocktake", "migration", "reports", "workflows", "settings", "user_admin",
-        "vault_location", "master_data", "workflow_design", "intake"
+        "vault_location", "master_data", "workflow_design", "intake",
+        "rules_engine", "notifications", "monitoring", "dispensing", "device_integration"
     };
 
     // Reconstructs the caller's effective module permissions from the JWT "perm:*" claims.
@@ -1139,7 +1282,36 @@ public class CreateLocationRequest { public string ZoneRoom { get; set; } = null
 public class CreatePORequest { public string PoNumber { get; set; } = null!; public int VendorId { get; set; } public decimal TotalWeightGrams { get; set; } public decimal TotalCost { get; set; } public string Currency { get; set; } = "USD"; public string CreatedBy { get; set; } = null!; public List<POItemDTO> Items { get; set; } = new(); }
 public class POItemDTO { public int product_id { get; set; } public int qty { get; set; } public decimal unit_cost { get; set; } }
 public class IntakeRequest { public int PoId { get; set; } public string LotNumber { get; set; } = null!; public int LocationId { get; set; } public string ReceivedBy { get; set; } = null!; public List<IntakeItemDTO> Items { get; set; } = new(); }
-public class IntakeItemDTO { public string serial { get; set; } = null!; public int product_id { get; set; } }
+public class IntakeItemDTO
+{
+    public string serial { get; set; } = null!;
+    public int product_id { get; set; }
+
+    // LBMA Good Delivery attributes -- all optional; omit for products/lots
+    // where refiner/assay data isn't captured yet (GoodDeliveryStatus then
+    // defaults to NOT_ASSESSED and shows up in GET /api/reports/lbma-compliance).
+    public string? refiner_name { get; set; }
+    public string? refiner_lbma_id { get; set; }
+    public string? assay_certificate_number { get; set; }
+    public decimal? fineness_ppt { get; set; }
+    public string? hallmark_number { get; set; }
+    public string? good_delivery_status { get; set; }
+}
+// Receipt of precious metals FROM a customer -- the mirror of IntakeRequest (which is the
+// supplier/PO-based receipt). ReceiptReason: BUYBACK (KFH purchases the metal outright),
+// CUSTODY_DEPOSIT (customer's own metal placed into vault safekeeping -- requires AccountId),
+// or RETURN (a previously withdrawn/dispensed bar physically comes back). See
+// IInventoryRepository.InitiateWorkflowIntakeAsync / IntakeInventoryItemsAsync.
+public class CustomerReceiptRequest
+{
+    public int CustomerId { get; set; }
+    public int? AccountId { get; set; }
+    public string ReceiptReason { get; set; } = "BUYBACK";
+    public string LotNumber { get; set; } = null!;
+    public int LocationId { get; set; }
+    public string ReceivedBy { get; set; } = null!;
+    public List<IntakeItemDTO> Items { get; set; } = new();
+}
 public class TransferRequest { public int ItemId { get; set; } public int DestinationLocationId { get; set; } public string CourierInfo { get; set; } = null!; public string InitiatedBy { get; set; } = null!; }
 public class ReserveRequest { public int CustomerId { get; set; } public int ProductId { get; set; } public int BranchId { get; set; } public int ChannelId { get; set; } }
 public class PurchaseConfirmRequest { public Guid ReservationToken { get; set; } public int AccountId { get; set; } public decimal SalePrice { get; set; } public decimal MarkupAmount { get; set; } public string InvoiceNumber { get; set; } = null!; public string? CustodyAgreementNumber { get; set; } }
@@ -1149,8 +1321,8 @@ public class StartStocktakeRequest { public string SessionCode { get; set; } = n
 public class LogScanRequest { public int SessionId { get; set; } public string ScannedSerial { get; set; } = null!; public int LocationId { get; set; } public string ScannedBy { get; set; } = null!; }
 public class CommitMigrationRequest { public int MigrationId { get; set; } public string ApprovedBy { get; set; } = null!; }
 public class CreateProductRequestDto { public string Label { get; set; } = null!; public string MetalName { get; set; } = null!; public decimal WeightGrams { get; set; } }
-public class FimAddUserRequest { public string Username { get; set; } = null!; public string Email { get; set; } = null!; }
-public class FimAddProfileRequest { public string ProfileName { get; set; } = null!; public string Description { get; set; } = null!; }
+// FimAddUserRequest / FimAddProfileRequest retired -- see FimAttributesRequest
+// and the rest of the /api/fim/* DTOs in PMIMSControllers.Fim.cs.
 
 public class SaveTemplateRequest
 {
@@ -1172,6 +1344,11 @@ public class WorkflowActionRequest
     public string Username { get; set; } = null!;
     public string Action { get; set; } = null!; // APPROVED, REJECTED
     public string? Comments { get; set; }
+}
+
+public class RunReconciliationRequest
+{
+    public string? ExecutedBy { get; set; }
 }
 
 public class CreateAppUserRequest

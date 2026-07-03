@@ -60,26 +60,14 @@ async def run_test():
         # --> Assertions to verify final state
         
         # --> Verify the treasury dashboard is displayed
-        await page.locator("xpath=/html/body/div/div/aside/nav/div[3]").nth(0).scroll_into_view_if_needed()
         # Assert: The 'My Pending Actions' navigation item is visible, indicating the dashboard is shown.
-        await expect(page.locator("xpath=/html/body/div/div/aside/nav/div[3]").nth(0)).to_be_visible(timeout=15000), "The 'My Pending Actions' navigation item is visible, indicating the dashboard is shown."
-        await page.locator("xpath=/html/body/div/div/main/section[1]/div[1]/div[1]").nth(0).scroll_into_view_if_needed()
+        await expect(page.get_by_text("My Pending Actions")).to_be_visible(timeout=15000)
         # Assert: The 'Proprietary Gold Stock' summary card is visible on the treasury dashboard.
-        await expect(page.locator("xpath=/html/body/div/div/main/section[1]/div[1]/div[1]").nth(0)).to_be_visible(timeout=15000), "The 'Proprietary Gold Stock' summary card is visible on the treasury dashboard."
-        await page.locator("xpath=/html/body/div/div/main/section[1]/div[2]").nth(0).scroll_into_view_if_needed()
-        # Assert: The 'Active Inventory Registry' section is visible on the treasury dashboard.
-        await expect(page.locator("xpath=/html/body/div/div/main/section[1]/div[2]").nth(0)).to_be_visible(timeout=15000), "The 'Active Inventory Registry' section is visible on the treasury dashboard."
+        await expect(page.get_by_text("Proprietary Gold Stock")).to_be_visible(timeout=15000)
         
         # --> Verify stock summary and pending authorization information are displayed
-        await page.locator("xpath=/html/body/div/div/main/section[1]/div[1]/div[1]").nth(0).scroll_into_view_if_needed()
-        # Assert: Proprietary Gold Stock summary card is visible.
-        await expect(page.locator("xpath=/html/body/div/div/main/section[1]/div[1]/div[1]").nth(0)).to_be_visible(timeout=15000), "Proprietary Gold Stock summary card is visible."
-        await page.locator("xpath=/html/body/div/div/main/section[1]/div[1]/div[3]").nth(0).scroll_into_view_if_needed()
-        # Assert: Reserved Checkout Locks summary card (pending authorizations) is visible.
-        await expect(page.locator("xpath=/html/body/div/div/main/section[1]/div[1]/div[3]").nth(0)).to_be_visible(timeout=15000), "Reserved Checkout Locks summary card (pending authorizations) is visible."
-        await page.locator("xpath=/html/body/div/div/aside/nav/div[3]").nth(0).scroll_into_view_if_needed()
-        # Assert: My Pending Actions navigation item is visible.
-        await expect(page.locator("xpath=/html/body/div/div/aside/nav/div[3]").nth(0)).to_be_visible(timeout=15000), "My Pending Actions navigation item is visible."
+        await expect(page.get_by_text("Ready for Sale (Prop)")).to_be_visible(timeout=15000)
+        await expect(page.get_by_text("Reserved Checkout Locks")).to_be_visible(timeout=15000)
         await asyncio.sleep(5)
 
     finally:

@@ -82,7 +82,12 @@ public static class DbSeeder
         // 7. Vendors
         var v1 = new Vendor { VendorCode = "VAL-SWISS", VendorName = "Valcambi Suisse", CountryOfOrigin = "Switzerland", IsShariaCompliant = true, ContactEmail = "compliance@valcambi.ch" };
         var v2 = new Vendor { VendorCode = "NAD-TURK", VendorName = "Nadir Gold Refinery", CountryOfOrigin = "Turkey", IsShariaCompliant = true, ContactEmail = "info@nadirgold.com" };
-        context.Vendors.AddRange(v1, v2);
+        // Not a real supplier -- stands in for "no vendor" on lots received directly from a
+        // customer (buyback/custody deposit/return), since InventoryLot.VendorId is required.
+        // See InventoryRepository.GetOrCreateWalkInVendorIdAsync, which also creates this
+        // defensively if a database was seeded before this row existed.
+        var vWalkIn = new Vendor { VendorCode = "WALK-IN", VendorName = "Walk-In Customer (Receipt Source)", CountryOfOrigin = "KWT", IsShariaCompliant = true, ContactEmail = "n/a@kfh.internal" };
+        context.Vendors.AddRange(v1, v2, vWalkIn);
 
         // 8. Vaults
         var vaultMain = new Vault { VaultName = "Main Vault", LocationDescription = "Head Office HQ Basement - Vault Room Alpha", MaxWeightCapacityKg = 5000.00m };
@@ -104,7 +109,8 @@ public static class DbSeeder
         var chOnline = new Channel { ChannelName = "Online" };
         var chXtm = new Channel { ChannelName = "XTM" };
         var chApi = new Channel { ChannelName = "API" };
-        context.Channels.AddRange(chBranch, chMobile, chOnline, chXtm, chApi);
+        var chGdm = new Channel { ChannelName = "GDM" }; // Gold Dispensing Machine self-service channel
+        context.Channels.AddRange(chBranch, chMobile, chOnline, chXtm, chApi, chGdm);
 
         // 11. Spatial Coordinates Layout setup
         // Vault Main, Shelves 1-3
@@ -146,6 +152,20 @@ public static class DbSeeder
                 SlotBin = $"Slot {slot}"
             });
         }
+        // Gold Dispensing Machine cassette location (Fahaheel Branch, lobby unit #1) --
+        // scalability hook demo data so the `dispensing`/`device_integration` modules are
+        // exercisable immediately after a fresh seed. Modeled as a normal InventoryLocation
+        // (same coordinate-grid pattern as every other shelf/slot) so all existing
+        // balance/transaction/reporting code works against it unchanged.
+        var gdmLocation = new InventoryLocation
+        {
+            VaultId = vaultBranch.VaultId,
+            BranchId = bFahaheel.BranchId,
+            ZoneRoom = "Lobby",
+            ShelfRow = "GDM Unit",
+            SlotBin = "Cassette 1"
+        };
+        context.InventoryLocations.Add(gdmLocation);
         await context.SaveChangesAsync();
 
         // 12. Demo Customers & Accounts
@@ -193,12 +213,17 @@ public static class DbSeeder
         context.WorkflowTemplates.Add(poWorkflow);
         await context.SaveChangesAsync();
 
+        // RequiredRole must be the literal PrivilegeGroup.GroupName of the group that should
+        // be able to act on this step (see grpChecker/grpRecon/grpAdmin below) -- Maker-
+        // Checker step gating (InventoryRepository.GetUserRoles/ProcessWorkflowActionAsync)
+        // resolves a user's roles purely from their real group membership, so these strings
+        // have to match exactly or every approval attempt fails with UNAUTHORIZED_ROLE.
         var step1 = new WorkflowStep
         {
             TemplateId = poWorkflow.TemplateId,
             StepOrder = 1,
             StepName = "Risk & Treasury Review",
-            RequiredRole = "Operations Checker",
+            RequiredRole = "Treasury Operations (Checker)",
             Description = "Initial review of cost and provider accreditation."
         };
         var step2 = new WorkflowStep
@@ -206,7 +231,7 @@ public static class DbSeeder
             TemplateId = poWorkflow.TemplateId,
             StepOrder = 2,
             StepName = "Reconciliation Double Check",
-            RequiredRole = "Reconciliation Officer",
+            RequiredRole = "Reconciliation Officers",
             Description = "Validation against system ledger balances."
         };
         context.WorkflowSteps.AddRange(step1, step2);
@@ -228,7 +253,7 @@ public static class DbSeeder
             TemplateId = intakeWorkflow.TemplateId,
             StepOrder = 1,
             StepName = "Treasury Verification",
-            RequiredRole = "Operations Checker",
+            RequiredRole = "Treasury Operations (Checker)",
             Description = "Verify weight, serials and coordinate shelf placement."
         };
         context.WorkflowSteps.Add(intakeStep);
@@ -240,7 +265,9 @@ public static class DbSeeder
         // the administrative *manage/setup* modules (vault_location, master_data,
         // workflow_design). This separation is what lets an operator view the vault map
         // while being denied the authority to create/delete physical shelf locations.
-        var allModules = new[] { "dashboard", "pending_actions", "purchase_orders", "spatial_map", "custody", "stocktake", "migration", "reports", "workflows", "settings", "user_admin", "vault_location", "master_data", "workflow_design", "intake" };
+        // RFP items 5-8 (rules_engine, notifications, monitoring) are new admin-tier
+        // modules, same governance tier as vault_location/master_data/workflow_design.
+        var allModules = new[] { "dashboard", "pending_actions", "purchase_orders", "spatial_map", "custody", "stocktake", "migration", "reports", "workflows", "settings", "user_admin", "vault_location", "master_data", "workflow_design", "intake", "rules_engine", "notifications", "monitoring", "dispensing", "device_integration" };
 
         var grpMaker = new PrivilegeGroup { GroupName = "Treasury Operations (Maker)", Description = "Initiates purchase orders, transfers, and branch operations.", IsSystem = true };
         var grpChecker = new PrivilegeGroup { GroupName = "Treasury Operations (Checker)", Description = "Reviews and approves purchase orders and intake verifications.", IsSystem = true };
@@ -256,28 +283,41 @@ public static class DbSeeder
             {"reports","READ_ONLY"}, {"workflows","READ_ONLY"}, {"settings","HIDDEN"}, {"user_admin","HIDDEN"},
             // Operators may VIEW but never MANAGE structural/master data:
             {"vault_location","HIDDEN"}, {"master_data","HIDDEN"}, {"workflow_design","HIDDEN"},
-            {"intake","FULL"} // Vault team maker has full access to receive shipments
+            {"intake","FULL"}, // Vault team maker has full access to receive shipments
+            {"rules_engine","HIDDEN"}, {"notifications","HIDDEN"}, {"monitoring","HIDDEN"},
+            // Treasury Ops monitor/operate GDM dispense activity (view + manual fail/retry),
+            // but device registration/decommissioning is admin-only infrastructure work.
+            {"dispensing","FULL"}, {"device_integration","HIDDEN"}
         };
         var checkerPerms = new Dictionary<string, string> {
             {"dashboard","READ_ONLY"}, {"pending_actions","FULL"}, {"purchase_orders","READ_ONLY"}, {"spatial_map","READ_ONLY"},
             {"custody","READ_ONLY"}, {"stocktake","READ_WRITE"}, {"migration","READ_ONLY"},
             {"reports","READ_ONLY"}, {"workflows","READ_ONLY"}, {"settings","HIDDEN"}, {"user_admin","HIDDEN"},
             {"vault_location","HIDDEN"}, {"master_data","HIDDEN"}, {"workflow_design","HIDDEN"},
-            {"intake","READ_ONLY"} // Vault team checker has read-only access (they approve via workflows)
+            {"intake","READ_ONLY"}, // Vault team checker has read-only access (they approve via workflows)
+            {"rules_engine","HIDDEN"}, {"notifications","HIDDEN"}, {"monitoring","HIDDEN"},
+            {"dispensing","READ_ONLY"}, {"device_integration","HIDDEN"}
         };
         var reconPerms = new Dictionary<string, string> {
             {"dashboard","READ_ONLY"}, {"pending_actions","FULL"}, {"purchase_orders","READ_ONLY"}, {"spatial_map","READ_ONLY"},
             {"custody","READ_ONLY"}, {"stocktake","FULL"}, {"migration","READ_ONLY"},
             {"reports","FULL"}, {"workflows","READ_ONLY"}, {"settings","HIDDEN"}, {"user_admin","HIDDEN"},
             {"vault_location","HIDDEN"}, {"master_data","HIDDEN"}, {"workflow_design","HIDDEN"},
-            {"intake","READ_ONLY"}
+            {"intake","READ_ONLY"},
+            // Reconciliation officers may VIEW rule evaluations and SLA/monitoring
+            // metrics (relevant to break investigation) but not author rules or
+            // configure email distribution lists.
+            {"rules_engine","READ_ONLY"}, {"notifications","HIDDEN"}, {"monitoring","READ_ONLY"},
+            {"dispensing","READ_ONLY"}, {"device_integration","HIDDEN"}
         };
         var adminPerms = new Dictionary<string, string> {
             {"dashboard","FULL"}, {"pending_actions","FULL"}, {"purchase_orders","FULL"}, {"spatial_map","FULL"},
             {"custody","FULL"}, {"stocktake","FULL"}, {"migration","FULL"},
             {"reports","FULL"}, {"workflows","FULL"}, {"settings","FULL"}, {"user_admin","FULL"},
             {"vault_location","FULL"}, {"master_data","FULL"}, {"workflow_design","FULL"},
-            {"intake","FULL"}
+            {"intake","FULL"},
+            {"rules_engine","FULL"}, {"notifications","FULL"}, {"monitoring","FULL"},
+            {"dispensing","FULL"}, {"device_integration","FULL"}
         };
 
         foreach (var kv in makerPerms)
@@ -308,6 +348,96 @@ public static class DbSeeder
             new UserGroupMembership { UserId = userRecon.UserId, GroupId = grpRecon.GroupId, AssignedBy = "SYSTEM" },
             new UserGroupMembership { UserId = userAdmin.UserId, GroupId = grpAdmin.GroupId, AssignedBy = "SYSTEM" }
         );
+        await context.SaveChangesAsync();
+
+        // 22. FIM Integration Module -- fine-grained Rights catalog.
+        // These are the "Right" objects the RFP's FIM AddUserToRight /
+        // RemoveUserFromRight / GetAllRightsForUser functions operate on --
+        // independent of (finer-grained than) the module-level Profile
+        // (PrivilegeGroup) permission grants above. Mirrors the legacy
+        // UserPermission names already used for the demo Maker/Checker roles.
+        var rightPoCreate = new FimRight { RightCode = "PO_CREATE", RightName = "Create Purchase Orders", Description = "Initiate new purchase orders for precious metals procurement.", ModuleKey = "purchase_orders" };
+        var rightPoApprove = new FimRight { RightCode = "PO_APPROVE", RightName = "Approve Purchase Orders", Description = "Checker-level approval of pending purchase orders.", ModuleKey = "purchase_orders" };
+        var rightIntakeVerify = new FimRight { RightCode = "INTAKE_VERIFY", RightName = "Verify Shipment Intake", Description = "Verify weight/serials and approve incoming shipment intake.", ModuleKey = "intake" };
+        var rightTransferMake = new FimRight { RightCode = "TRANSFER_MAKE", RightName = "Initiate Branch Transfer", Description = "Initiate inter-branch/vault transfer of inventory items.", ModuleKey = "purchase_orders" };
+        var rightStocktakeExec = new FimRight { RightCode = "STOCKTAKE_EXECUTE", RightName = "Execute Stocktake Session", Description = "Start and scan a physical stocktake reconciliation session.", ModuleKey = "stocktake" };
+        var rightUserProvision = new FimRight { RightCode = "USER_PROVISION", RightName = "Provision Users & Profiles", Description = "Create/update/remove users, profiles and rights via FIM.", ModuleKey = "user_admin" };
+        var rightWorkflowDesign = new FimRight { RightCode = "WORKFLOW_DESIGN", RightName = "Author Workflow Templates", Description = "Design/modify Maker-Checker workflow templates and steps.", ModuleKey = "workflow_design" };
+        var rightVaultManage = new FimRight { RightCode = "VAULT_MANAGE", RightName = "Manage Vault Locations", Description = "Create/update/delete physical vault shelf/slot locations.", ModuleKey = "vault_location" };
+        context.FimRights.AddRange(rightPoCreate, rightPoApprove, rightIntakeVerify, rightTransferMake, rightStocktakeExec, rightUserProvision, rightWorkflowDesign, rightVaultManage);
+        await context.SaveChangesAsync();
+
+        // Demo direct user->right bindings (independent of the Profile/module
+        // grants above), so GetAllRightsForUser/AddUserToRight are exercisable
+        // out of the box.
+        context.FimUserRights.AddRange(
+            new FimUserRight { UserId = userMaker.UserId, RightId = rightPoCreate.RightId, GrantedBy = "SYSTEM" },
+            new FimUserRight { UserId = userMaker.UserId, RightId = rightTransferMake.RightId, GrantedBy = "SYSTEM" },
+            new FimUserRight { UserId = userChecker.UserId, RightId = rightPoApprove.RightId, GrantedBy = "SYSTEM" },
+            new FimUserRight { UserId = userChecker.UserId, RightId = rightIntakeVerify.RightId, GrantedBy = "SYSTEM" },
+            new FimUserRight { UserId = userRecon.UserId, RightId = rightStocktakeExec.RightId, GrantedBy = "SYSTEM" },
+            new FimUserRight { UserId = userAdmin.UserId, RightId = rightUserProvision.RightId, GrantedBy = "SYSTEM" },
+            new FimUserRight { UserId = userAdmin.UserId, RightId = rightWorkflowDesign.RightId, GrantedBy = "SYSTEM" },
+            new FimUserRight { UserId = userAdmin.UserId, RightId = rightVaultManage.RightId, GrantedBy = "SYSTEM" }
+        );
+        await context.SaveChangesAsync();
+
+        // 23. RFP items 5-8 demo data -- one example row per module so the
+        // feature is exercisable/demonstrable immediately after a fresh seed,
+        // without shipping fictitious "real" business thresholds.
+        var demoRule = new BusinessRule
+        {
+            RuleCode = "TRANSFER_LIMIT_DEFAULT",
+            RuleName = "Default Branch Transfer Weight Limit",
+            RuleType = "TRANSFER_LIMIT",
+            // A rule's predicate tree describes the CONDITION THAT FLAGS A PROBLEM (see
+            // RuleEngineService.EvaluateAsync) -- "gt 5000" fires (blocks) when the transfer
+            // exceeds the 5000g limit; it does not fire for transfers at or below it.
+            ExpressionJson = "{\"all\":[{\"field\":\"weightGrams\",\"op\":\"gt\",\"value\":5000}]}",
+            Severity = "BLOCK",
+            Version = 1,
+            IsActive = true,
+            CreatedBy = "SYSTEM"
+        };
+        context.BusinessRules.Add(demoRule);
+
+        var demoSubscription = new NotificationSubscription
+        {
+            DistributionListEmail = "treasury-management@kfh.com.kw",
+            ReportType = "LOW_STOCK",
+            ScheduleCron = "0 7 * * *", // daily 07:00
+            Format = "PDF",
+            IsActive = true,
+            CreatedBy = "SYSTEM"
+        };
+        context.NotificationSubscriptions.Add(demoSubscription);
+
+        var demoAlertRoute = new MonitoringAlertRoute
+        {
+            EventType = "ALERT",
+            Severity = "CRITICAL",
+            Destination = "kfh-monitoring-webhook", // maps to Monitoring:WebhookUrl in configuration
+            IsActive = true
+        };
+        context.MonitoringAlertRoutes.Add(demoAlertRoute);
+
+        // 24. Gold Dispensing Machine (GDM) demo device -- OFFLINE by default (no stock has
+        // been allocated to its cassette yet; an admin brings it ACTIVE via
+        // PUT /api/admin/devices/{id}/heartbeat once bars are intake'd to gdmLocation).
+        var demoDevice = new DispensingDevice
+        {
+            DeviceCode = "GDM-FAHAHEEL-01",
+            DeviceName = "Fahaheel Branch Lobby Dispensing Unit",
+            LocationId = gdmLocation.LocationId,
+            BranchId = bFahaheel.BranchId,
+            Manufacturer = "TBD (vendor not yet selected)",
+            Model = "TBD",
+            StatusCode = "OFFLINE",
+            IsActive = true,
+            RegisteredBy = "SYSTEM"
+        };
+        context.DispensingDevices.Add(demoDevice);
+
         await context.SaveChangesAsync();
     }
 

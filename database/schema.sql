@@ -492,6 +492,208 @@ CREATE TABLE audit_logs (
     sql_executed VARCHAR(MAX) NULL
 );
 
+-- ----------------------------------------------------------------------------
+-- 8a. User & Group Privilege Management (AppUser / PrivilegeGroup)
+-- Backs the group-based RBAC model documented in docs/PERMISSIONS.md. Was
+-- previously only present in the EF Core model (AppDbContext.cs) -- added
+-- here so the reference DDL matches the application schema, and so the FIM
+-- Integration Module tables below (which target app_users/privilege_groups
+-- directly) have valid FK targets in this script.
+-- ----------------------------------------------------------------------------
+
+CREATE TABLE app_users (
+    user_id INT IDENTITY(1,1) PRIMARY KEY,
+    username VARCHAR(100) NOT NULL UNIQUE,
+    display_name NVARCHAR(255) NOT NULL,
+    email VARCHAR(255) NOT NULL UNIQUE,
+    password_hash VARCHAR(512) NOT NULL,
+    password_algorithm VARCHAR(20) NOT NULL DEFAULT 'SHA256', -- SHA256 (legacy demo) | BCRYPT | AES256
+    is_active BIT NOT NULL DEFAULT 1,
+    created_at DATETIME2 NOT NULL DEFAULT GETDATE(),
+    created_by VARCHAR(100) NOT NULL DEFAULT 'SYSTEM'
+);
+
+CREATE TABLE privilege_groups (
+    group_id INT IDENTITY(1,1) PRIMARY KEY,
+    group_name NVARCHAR(150) NOT NULL UNIQUE,
+    description NVARCHAR(500) NOT NULL DEFAULT '',
+    is_system BIT NOT NULL DEFAULT 0,
+    is_active BIT NOT NULL DEFAULT 1,
+    created_at DATETIME2 NOT NULL DEFAULT GETDATE()
+);
+
+CREATE TABLE group_permissions (
+    permission_id INT IDENTITY(1,1) PRIMARY KEY,
+    group_id INT NOT NULL FOREIGN KEY REFERENCES privilege_groups(group_id) ON DELETE CASCADE,
+    module_key VARCHAR(50) NOT NULL,
+    access_level VARCHAR(20) NOT NULL DEFAULT 'HIDDEN', -- HIDDEN | READ_ONLY | READ_WRITE | FULL
+    CONSTRAINT UQ_group_permissions_group_module UNIQUE (group_id, module_key)
+);
+
+CREATE TABLE user_group_memberships (
+    membership_id INT IDENTITY(1,1) PRIMARY KEY,
+    user_id INT NOT NULL FOREIGN KEY REFERENCES app_users(user_id) ON DELETE CASCADE,
+    group_id INT NOT NULL FOREIGN KEY REFERENCES privilege_groups(group_id) ON DELETE CASCADE,
+    assigned_at DATETIME2 NOT NULL DEFAULT GETDATE(),
+    assigned_by VARCHAR(100) NOT NULL DEFAULT 'SYSTEM',
+    CONSTRAINT UQ_user_group_memberships_user_group UNIQUE (user_id, group_id)
+);
+
+-- ----------------------------------------------------------------------------
+-- 8b. FIM (Forefront Identity Manager) Integration Module
+-- Maps FIM's User / Profile / Right concepts onto app_users / privilege_groups
+-- (Profile == PrivilegeGroup) plus a dedicated fine-grained Right layer, a
+-- generic attribute bag for arbitrary FIM-pushed user attributes, and a
+-- delta-sync change ledger. See database/procedures.sql (sp_FIM_* procs) and
+-- docs/FIM_INTEGRATION.md for the full function-to-procedure mapping.
+-- ----------------------------------------------------------------------------
+
+CREATE TABLE fim_user_attributes (
+    attribute_id INT IDENTITY(1,1) PRIMARY KEY,
+    user_id INT NOT NULL FOREIGN KEY REFERENCES app_users(user_id) ON DELETE CASCADE,
+    attribute_name VARCHAR(100) NOT NULL,
+    attribute_value NVARCHAR(1000) NOT NULL,
+    updated_at DATETIME2 NOT NULL DEFAULT GETDATE(),
+    CONSTRAINT UQ_fim_user_attributes_user_name UNIQUE (user_id, attribute_name)
+);
+
+CREATE TABLE fim_rights (
+    right_id INT IDENTITY(1,1) PRIMARY KEY,
+    right_code VARCHAR(100) NOT NULL UNIQUE,
+    right_name NVARCHAR(255) NOT NULL,
+    description NVARCHAR(500) NULL,
+    module_key VARCHAR(50) NULL,
+    is_active BIT NOT NULL DEFAULT 1,
+    created_at DATETIME2 NOT NULL DEFAULT GETDATE()
+);
+
+CREATE TABLE fim_user_rights (
+    user_right_id INT IDENTITY(1,1) PRIMARY KEY,
+    user_id INT NOT NULL FOREIGN KEY REFERENCES app_users(user_id) ON DELETE CASCADE,
+    right_id INT NOT NULL FOREIGN KEY REFERENCES fim_rights(right_id) ON DELETE CASCADE,
+    granted_at DATETIME2 NOT NULL DEFAULT GETDATE(),
+    granted_by VARCHAR(100) NOT NULL DEFAULT 'SYSTEM',
+    CONSTRAINT UQ_fim_user_rights_user_right UNIQUE (user_id, right_id)
+);
+
+CREATE TABLE fim_sync_logs (
+    sync_log_id INT IDENTITY(1,1) PRIMARY KEY,
+    entity_type VARCHAR(30) NOT NULL,  -- USER, PROFILE, RIGHT, USER_PROFILE, USER_RIGHT, PASSWORD
+    entity_key VARCHAR(100) NOT NULL,
+    change_type VARCHAR(20) NOT NULL,  -- CREATE, UPDATE, DELETE
+    changed_at DATETIME2 NOT NULL DEFAULT GETDATE(),
+    changed_by VARCHAR(100) NOT NULL DEFAULT 'SYSTEM',
+    source VARCHAR(20) NOT NULL DEFAULT 'APPLICATION', -- APPLICATION | FIM
+    details_json NVARCHAR(MAX) NULL
+);
+
+CREATE NONCLUSTERED INDEX IX_fim_sync_logs_changed_at ON fim_sync_logs(changed_at);
+CREATE NONCLUSTERED INDEX IX_fim_user_rights_user ON fim_user_rights(user_id);
+CREATE NONCLUSTERED INDEX IX_fim_user_rights_right ON fim_user_rights(right_id);
+CREATE NONCLUSTERED INDEX IX_user_group_memberships_user ON user_group_memberships(user_id);
+CREATE NONCLUSTERED INDEX IX_group_permissions_group ON group_permissions(group_id);
+
+-- ----------------------------------------------------------------------------
+-- 8c. Enhanced Audit Trail UI (RFP item 6) -- extends the existing audit_logs
+-- table (section 8 above) rather than replacing it. All three columns are
+-- nullable so every pre-existing row remains valid; rows with row_hash NULL
+-- are reported "Unverified (pre-dates hashing)" by the search API, not a
+-- false tamper flag. See database/procedures.sql sp_SearchAuditLogs.
+-- ----------------------------------------------------------------------------
+ALTER TABLE audit_logs ADD entity_type VARCHAR(50) NULL;
+ALTER TABLE audit_logs ADD entity_id VARCHAR(50) NULL;
+ALTER TABLE audit_logs ADD row_hash CHAR(64) NULL; -- SHA-256 hex digest, tamper-detection fingerprint
+
+CREATE NONCLUSTERED INDEX IX_audit_logs_entity ON audit_logs(entity_type, entity_id);
+-- Full-text search across action_description requires a full-text catalog; created separately
+-- by a DBA (CREATE FULLTEXT CATALOG ... ; CREATE FULLTEXT INDEX ON audit_logs(action_description)
+-- KEY INDEX <pk_index_name>) since catalog placement is environment-specific.
+
+-- ----------------------------------------------------------------------------
+-- 8d. Dynamic Business Validation Rules Engine (RFP item 5)
+-- ----------------------------------------------------------------------------
+CREATE TABLE business_rules (
+    rule_id INT IDENTITY(1,1) PRIMARY KEY,
+    rule_code VARCHAR(100) NOT NULL,
+    rule_name NVARCHAR(255) NOT NULL,
+    rule_type VARCHAR(50) NOT NULL, -- TRANSFER_LIMIT, RECEIPT_VALIDATION, CUSTOMER_ELIGIBILITY, RATE_THRESHOLD, INVENTORY_CHECK
+    expression_json NVARCHAR(MAX) NOT NULL, -- structured predicate tree, never executable code
+    severity VARCHAR(10) NOT NULL DEFAULT 'BLOCK', -- BLOCK | WARN
+    version INT NOT NULL DEFAULT 1,
+    is_active BIT NOT NULL DEFAULT 1,
+    effective_from DATETIME2 NOT NULL DEFAULT GETDATE(),
+    effective_to DATETIME2 NULL,
+    created_by VARCHAR(100) NOT NULL DEFAULT 'SYSTEM',
+    created_at DATETIME2 NOT NULL DEFAULT GETDATE(),
+    CONSTRAINT UQ_business_rules_code_version UNIQUE (rule_code, version)
+);
+
+CREATE TABLE business_rule_evaluations (
+    evaluation_id INT IDENTITY(1,1) PRIMARY KEY,
+    rule_id INT NOT NULL FOREIGN KEY REFERENCES business_rules(rule_id) ON DELETE CASCADE,
+    entity_type VARCHAR(50) NOT NULL,
+    entity_id VARCHAR(50) NOT NULL,
+    result VARCHAR(10) NOT NULL, -- PASS, FAIL, WARN
+    evaluated_at DATETIME2 NOT NULL DEFAULT GETDATE(),
+    context_json NVARCHAR(MAX) NULL
+);
+
+CREATE NONCLUSTERED INDEX IX_business_rules_type_active ON business_rules(rule_type, is_active);
+CREATE NONCLUSTERED INDEX IX_business_rule_evaluations_rule ON business_rule_evaluations(rule_id);
+
+-- ----------------------------------------------------------------------------
+-- 8e. Automatic Management Email Notifications (RFP item 7)
+-- ----------------------------------------------------------------------------
+CREATE TABLE notification_subscriptions (
+    subscription_id INT IDENTITY(1,1) PRIMARY KEY,
+    distribution_list_email VARCHAR(255) NOT NULL,
+    report_type VARCHAR(50) NOT NULL, -- INVENTORY_BALANCE, LOW_STOCK, HIGH_VALUE_MOVEMENT
+    schedule_cron VARCHAR(50) NOT NULL,
+    format VARCHAR(10) NOT NULL DEFAULT 'PDF', -- PDF, XLSX, BOTH
+    is_active BIT NOT NULL DEFAULT 1,
+    last_run_at DATETIME2 NULL,
+    unsubscribed_at DATETIME2 NULL,
+    created_by VARCHAR(100) NOT NULL DEFAULT 'SYSTEM',
+    created_at DATETIME2 NOT NULL DEFAULT GETDATE()
+);
+
+CREATE TABLE notification_deliveries (
+    delivery_id INT IDENTITY(1,1) PRIMARY KEY,
+    subscription_id INT NOT NULL FOREIGN KEY REFERENCES notification_subscriptions(subscription_id) ON DELETE CASCADE,
+    sent_at DATETIME2 NOT NULL DEFAULT GETDATE(),
+    status_code VARCHAR(20) NOT NULL DEFAULT 'SENT', -- SENT, FAILED, BOUNCED
+    message_id VARCHAR(255) NULL,
+    failure_reason NVARCHAR(500) NULL
+);
+
+CREATE NONCLUSTERED INDEX IX_notification_deliveries_subscription ON notification_deliveries(subscription_id);
+
+-- ----------------------------------------------------------------------------
+-- 8f. KFH Existing Monitoring Tool Integration (RFP item 8)
+-- ----------------------------------------------------------------------------
+CREATE TABLE monitoring_events (
+    event_id INT IDENTITY(1,1) PRIMARY KEY,
+    event_type VARCHAR(30) NOT NULL, -- HEALTH_CHECK, SLA_METRIC, ALERT
+    service_name VARCHAR(100) NOT NULL DEFAULT 'PMIMS',
+    metric_name VARCHAR(100) NOT NULL,
+    metric_value NVARCHAR(255) NOT NULL,
+    severity VARCHAR(20) NOT NULL DEFAULT 'INFO', -- INFO, WARNING, CRITICAL
+    occurred_at DATETIME2 NOT NULL DEFAULT GETDATE(),
+    pushed_at DATETIME2 NULL,
+    push_status VARCHAR(20) NOT NULL DEFAULT 'PENDING' -- PENDING, SENT, FAILED, DISABLED
+);
+
+CREATE TABLE monitoring_alert_routes (
+    route_id INT IDENTITY(1,1) PRIMARY KEY,
+    event_type VARCHAR(30) NOT NULL,
+    severity VARCHAR(20) NOT NULL,
+    destination NVARCHAR(500) NOT NULL, -- webhook URL, on-call group name, etc.
+    is_active BIT NOT NULL DEFAULT 1
+);
+
+CREATE NONCLUSTERED INDEX IX_monitoring_events_occurred_at ON monitoring_events(occurred_at);
+CREATE NONCLUSTERED INDEX IX_monitoring_events_type_severity ON monitoring_events(event_type, severity);
+
 -- ============================================================================
 -- 9. AI COPILOT & DATA MIGRATION SPECIFIC TABLES
 -- ============================================================================

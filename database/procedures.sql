@@ -687,3 +687,843 @@ BEGIN
     END CATCH
 END;
 GO
+
+-- ============================================================================
+-- FIM (FOREFRONT IDENTITY MANAGER) INTEGRATION MODULE
+-- ----------------------------------------------------------------------------
+-- SQL Server-side mirror of every function in IFimService / PMIMSControllers.
+-- Fim.cs, for FIM sync scenarios that use direct database connectivity
+-- instead of (or in addition to) the REST API. "User" = app_users,
+-- "Profile" = privilege_groups, "Right" = fim_rights (see schema.sql,
+-- section 8a/8b). Every mutating procedure appends a fim_sync_logs row via
+-- sp_FIM_LogSyncChange so DetectDeltaChanges (sp_FIM_DetectDeltaChanges) can
+-- report "what changed since @LastSyncTime" without scanning audit_logs.
+--
+-- NOTE on passwords: bcrypt/AES-256 are intentionally NOT implemented in
+-- T-SQL (no native primitive, and rolling a custom one in a stored
+-- procedure is a security anti-pattern). sp_FIM_SetPassword accepts an
+-- already-hashed/encrypted value computed by PMIMS.Infrastructure.
+-- PasswordHasher (the .NET side, used by both FimService and this proc's
+-- REST equivalent) and simply persists it + the algorithm tag. Direct-DB
+-- FIM connectors that cannot call the REST API must replicate the same
+-- BCrypt.Net-Next / AES-256-CBC scheme before calling this procedure.
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- Internal helper: append one change-ledger row. Not itself an RFP function;
+-- called from every mutating sp_FIM_* procedure below.
+-- ----------------------------------------------------------------------------
+CREATE OR ALTER PROCEDURE sp_FIM_LogSyncChange
+    @EntityType VARCHAR(30),
+    @EntityKey  VARCHAR(100),
+    @ChangeType VARCHAR(20),
+    @ChangedBy  VARCHAR(100),
+    @DetailsJson NVARCHAR(MAX) = NULL,
+    @Source     VARCHAR(20) = 'APPLICATION'
+AS
+BEGIN
+    SET NOCOUNT ON;
+    INSERT INTO fim_sync_logs (entity_type, entity_key, change_type, changed_by, changed_at, source, details_json)
+    VALUES (@EntityType, @EntityKey, @ChangeType, @ChangedBy, GETDATE(), @Source, @DetailsJson);
+END;
+GO
+
+-- ============================================================================
+-- Identity Provisioning Functions
+-- ============================================================================
+
+-- GetUsers()
+CREATE OR ALTER PROCEDURE sp_FIM_GetUsers
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT user_id, username, display_name, email, password_algorithm, is_active, created_at, created_by
+    FROM app_users
+    ORDER BY username;
+END;
+GO
+
+-- GetNumberOfUsers()
+CREATE OR ALTER PROCEDURE sp_FIM_GetNumberOfUsers
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT COUNT(*) AS user_count FROM app_users;
+END;
+GO
+
+-- GetUserInfo(userId) -- full attribute values: core columns + fim_user_attributes bag
+CREATE OR ALTER PROCEDURE sp_FIM_GetUserInfo
+    @UserID INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT user_id, username, display_name, email, password_algorithm, is_active, created_at, created_by
+    FROM app_users WHERE user_id = @UserID;
+
+    SELECT attribute_name, attribute_value, updated_at
+    FROM fim_user_attributes WHERE user_id = @UserID;
+END;
+GO
+
+-- GetProfiles()
+CREATE OR ALTER PROCEDURE sp_FIM_GetProfiles
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT g.group_id, g.group_name, g.description, g.is_system, g.is_active, g.created_at,
+           (SELECT COUNT(*) FROM user_group_memberships m WHERE m.group_id = g.group_id) AS member_count
+    FROM privilege_groups g
+    ORDER BY g.group_name;
+END;
+GO
+
+-- GetNumberOfProfiles()
+CREATE OR ALTER PROCEDURE sp_FIM_GetNumberOfProfiles
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT COUNT(*) AS profile_count FROM privilege_groups;
+END;
+GO
+
+-- GetProfileInfo(profileId) -- full attribute values: core columns + module permission grants
+CREATE OR ALTER PROCEDURE sp_FIM_GetProfileInfo
+    @ProfileID INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT g.group_id, g.group_name, g.description, g.is_system, g.is_active, g.created_at,
+           (SELECT COUNT(*) FROM user_group_memberships m WHERE m.group_id = g.group_id) AS member_count
+    FROM privilege_groups g WHERE g.group_id = @ProfileID;
+
+    SELECT module_key, access_level
+    FROM group_permissions WHERE group_id = @ProfileID;
+END;
+GO
+
+-- GetUsersFromProfile(profileId)
+CREATE OR ALTER PROCEDURE sp_FIM_GetUsersFromProfile
+    @ProfileID INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT u.user_id, u.username, u.display_name, u.email, u.is_active
+    FROM user_group_memberships m
+    INNER JOIN app_users u ON u.user_id = m.user_id
+    WHERE m.group_id = @ProfileID
+    ORDER BY u.username;
+END;
+GO
+
+-- GetNumberOfUsersFromProfile(profileId)
+CREATE OR ALTER PROCEDURE sp_FIM_GetNumberOfUsersFromProfile
+    @ProfileID INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT COUNT(*) AS user_count FROM user_group_memberships WHERE group_id = @ProfileID;
+END;
+GO
+
+-- GetProfilesFromUser(userId)
+CREATE OR ALTER PROCEDURE sp_FIM_GetProfilesFromUser
+    @UserID INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT g.group_id, g.group_name, g.description, g.is_system, g.is_active
+    FROM user_group_memberships m
+    INNER JOIN privilege_groups g ON g.group_id = m.group_id
+    WHERE m.user_id = @UserID
+    ORDER BY g.group_name;
+END;
+GO
+
+-- GetNumberOfProfilesFromUser(userId)
+CREATE OR ALTER PROCEDURE sp_FIM_GetNumberOfProfilesFromUser
+    @UserID INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT COUNT(*) AS profile_count FROM user_group_memberships WHERE user_id = @UserID;
+END;
+GO
+
+-- AddUser(userAttributes) -- mandatory: @Username, @Email. @PasswordHash/@PasswordAlgorithm
+-- pre-computed by the caller (PasswordHasher). @ExtraAttributesJson: JSON array of
+-- {"name":"...","value":"..."} for any additional mandatory/custom attributes.
+CREATE OR ALTER PROCEDURE sp_FIM_AddUser
+    @Username VARCHAR(100),
+    @DisplayName NVARCHAR(255),
+    @Email VARCHAR(255),
+    @PasswordHash VARCHAR(512),
+    @PasswordAlgorithm VARCHAR(20) = 'BCRYPT',
+    @CreatedBy VARCHAR(100) = 'FIM_INTEGRATION',
+    @ExtraAttributesJson NVARCHAR(MAX) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        IF EXISTS (SELECT 1 FROM app_users WHERE username = @Username OR email = @Email)
+        BEGIN
+            THROW 51001, 'A user with this username or email already exists.', 16;
+        END
+
+        INSERT INTO app_users (username, display_name, email, password_hash, password_algorithm, is_active, created_at, created_by)
+        VALUES (@Username, ISNULL(NULLIF(@DisplayName, ''), @Username), @Email, @PasswordHash, @PasswordAlgorithm, 1, GETDATE(), @CreatedBy);
+
+        DECLARE @NewUserID INT = SCOPE_IDENTITY();
+
+        IF @ExtraAttributesJson IS NOT NULL
+        BEGIN
+            INSERT INTO fim_user_attributes (user_id, attribute_name, attribute_value, updated_at)
+            SELECT @NewUserID, JSON_VALUE(value, '$.name'), JSON_VALUE(value, '$.value'), GETDATE()
+            FROM OPENJSON(@ExtraAttributesJson);
+        END
+
+        EXEC sp_FIM_LogSyncChange @EntityType = 'USER', @EntityKey = @NewUserID, @ChangeType = 'CREATE', @ChangedBy = @CreatedBy;
+
+        INSERT INTO audit_logs (username, ip_address, module_name, action_description)
+        VALUES (@CreatedBy, 'SYSTEM', 'FIM_INTEGRATION', 'FIM AddUser: created user ''' + @Username + '''.');
+
+        COMMIT TRANSACTION;
+        SELECT @NewUserID AS user_id, 'SUCCESS' AS result;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH
+END;
+GO
+
+-- AddProfile(profileAttributes) -- mandatory: @ProfileName
+CREATE OR ALTER PROCEDURE sp_FIM_AddProfile
+    @ProfileName NVARCHAR(150),
+    @Description NVARCHAR(500) = '',
+    @CreatedBy VARCHAR(100) = 'FIM_INTEGRATION'
+AS
+BEGIN
+    SET NOCOUNT ON;
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        IF EXISTS (SELECT 1 FROM privilege_groups WHERE group_name = @ProfileName)
+        BEGIN
+            THROW 51002, 'A profile with this name already exists.', 16;
+        END
+
+        INSERT INTO privilege_groups (group_name, description, is_system, is_active, created_at)
+        VALUES (@ProfileName, ISNULL(@Description, ''), 0, 1, GETDATE());
+
+        DECLARE @NewProfileID INT = SCOPE_IDENTITY();
+
+        EXEC sp_FIM_LogSyncChange @EntityType = 'PROFILE', @EntityKey = @NewProfileID, @ChangeType = 'CREATE', @ChangedBy = @CreatedBy;
+
+        INSERT INTO audit_logs (username, ip_address, module_name, action_description)
+        VALUES (@CreatedBy, 'SYSTEM', 'FIM_INTEGRATION', 'FIM AddProfile: created profile ''' + @ProfileName + '''.');
+
+        COMMIT TRANSACTION;
+        SELECT @NewProfileID AS profile_id, 'SUCCESS' AS result;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH
+END;
+GO
+
+-- AddUserToProfile(userId, profileId)
+CREATE OR ALTER PROCEDURE sp_FIM_AddUserToProfile
+    @UserID INT,
+    @ProfileID INT,
+    @AssignedBy VARCHAR(100) = 'FIM_INTEGRATION'
+AS
+BEGIN
+    SET NOCOUNT ON;
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        IF NOT EXISTS (SELECT 1 FROM app_users WHERE user_id = @UserID)
+            THROW 51003, 'User not found.', 16;
+        IF NOT EXISTS (SELECT 1 FROM privilege_groups WHERE group_id = @ProfileID)
+            THROW 51004, 'Profile not found.', 16;
+
+        IF NOT EXISTS (SELECT 1 FROM user_group_memberships WHERE user_id = @UserID AND group_id = @ProfileID)
+        BEGIN
+            INSERT INTO user_group_memberships (user_id, group_id, assigned_at, assigned_by)
+            VALUES (@UserID, @ProfileID, GETDATE(), @AssignedBy);
+
+            DECLARE @EntityKey_UP VARCHAR(100) = CAST(@UserID AS VARCHAR(20)) + ':' + CAST(@ProfileID AS VARCHAR(20));
+            EXEC sp_FIM_LogSyncChange @EntityType = 'USER_PROFILE', @EntityKey = @EntityKey_UP, @ChangeType = 'CREATE', @ChangedBy = @AssignedBy;
+        END
+
+        COMMIT TRANSACTION;
+        SELECT 'SUCCESS' AS result;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH
+END;
+GO
+
+-- UpdateProfileInfo(profileId, attributes)
+CREATE OR ALTER PROCEDURE sp_FIM_UpdateProfileInfo
+    @ProfileID INT,
+    @ProfileName NVARCHAR(150) = NULL,
+    @Description NVARCHAR(500) = NULL,
+    @UpdatedBy VARCHAR(100) = 'FIM_INTEGRATION'
+AS
+BEGIN
+    SET NOCOUNT ON;
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        IF NOT EXISTS (SELECT 1 FROM privilege_groups WHERE group_id = @ProfileID)
+            THROW 51005, 'Profile not found.', 16;
+
+        UPDATE privilege_groups
+        SET group_name = ISNULL(NULLIF(@ProfileName, ''), group_name),
+            description = ISNULL(@Description, description)
+        WHERE group_id = @ProfileID;
+
+        EXEC sp_FIM_LogSyncChange @EntityType = 'PROFILE', @EntityKey = @ProfileID, @ChangeType = 'UPDATE', @ChangedBy = @UpdatedBy;
+
+        COMMIT TRANSACTION;
+        SELECT 'SUCCESS' AS result;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH
+END;
+GO
+
+-- UpdateUserInfo(userId, attributes)
+CREATE OR ALTER PROCEDURE sp_FIM_UpdateUserInfo
+    @UserID INT,
+    @DisplayName NVARCHAR(255) = NULL,
+    @Email VARCHAR(255) = NULL,
+    @IsActive BIT = NULL,
+    @ExtraAttributesJson NVARCHAR(MAX) = NULL,
+    @UpdatedBy VARCHAR(100) = 'FIM_INTEGRATION'
+AS
+BEGIN
+    SET NOCOUNT ON;
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        IF NOT EXISTS (SELECT 1 FROM app_users WHERE user_id = @UserID)
+            THROW 51006, 'User not found.', 16;
+
+        UPDATE app_users
+        SET display_name = ISNULL(NULLIF(@DisplayName, ''), display_name),
+            email = ISNULL(NULLIF(@Email, ''), email),
+            is_active = ISNULL(@IsActive, is_active)
+        WHERE user_id = @UserID;
+
+        IF @ExtraAttributesJson IS NOT NULL
+        BEGIN
+            MERGE INTO fim_user_attributes AS target
+            USING (
+                SELECT @UserID AS user_id, JSON_VALUE(value, '$.name') AS attribute_name, JSON_VALUE(value, '$.value') AS attribute_value
+                FROM OPENJSON(@ExtraAttributesJson)
+            ) AS source
+            ON target.user_id = source.user_id AND target.attribute_name = source.attribute_name
+            WHEN MATCHED THEN UPDATE SET attribute_value = source.attribute_value, updated_at = GETDATE()
+            WHEN NOT MATCHED THEN INSERT (user_id, attribute_name, attribute_value, updated_at)
+                VALUES (source.user_id, source.attribute_name, source.attribute_value, GETDATE());
+        END
+
+        EXEC sp_FIM_LogSyncChange @EntityType = 'USER', @EntityKey = @UserID, @ChangeType = 'UPDATE', @ChangedBy = @UpdatedBy;
+
+        COMMIT TRANSACTION;
+        SELECT 'SUCCESS' AS result;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH
+END;
+GO
+
+-- RemoveUser(userId)
+CREATE OR ALTER PROCEDURE sp_FIM_RemoveUser
+    @UserID INT,
+    @RemovedBy VARCHAR(100) = 'FIM_INTEGRATION'
+AS
+BEGIN
+    SET NOCOUNT ON;
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        IF NOT EXISTS (SELECT 1 FROM app_users WHERE user_id = @UserID)
+            THROW 51007, 'User not found.', 16;
+
+        DELETE FROM fim_user_attributes WHERE user_id = @UserID;
+        DELETE FROM fim_user_rights WHERE user_id = @UserID;
+        DELETE FROM user_group_memberships WHERE user_id = @UserID;
+        DELETE FROM app_users WHERE user_id = @UserID;
+
+        EXEC sp_FIM_LogSyncChange @EntityType = 'USER', @EntityKey = @UserID, @ChangeType = 'DELETE', @ChangedBy = @RemovedBy;
+
+        INSERT INTO audit_logs (username, ip_address, module_name, action_description)
+        VALUES (@RemovedBy, 'SYSTEM', 'FIM_INTEGRATION', 'FIM RemoveUser: deleted user id ' + CAST(@UserID AS VARCHAR(10)) + '.');
+
+        COMMIT TRANSACTION;
+        SELECT 'SUCCESS' AS result;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH
+END;
+GO
+
+-- RemoveProfile(profileId) -- refuses to remove protected system profiles (is_system = 1)
+CREATE OR ALTER PROCEDURE sp_FIM_RemoveProfile
+    @ProfileID INT,
+    @RemovedBy VARCHAR(100) = 'FIM_INTEGRATION'
+AS
+BEGIN
+    SET NOCOUNT ON;
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        IF NOT EXISTS (SELECT 1 FROM privilege_groups WHERE group_id = @ProfileID)
+            THROW 51008, 'Profile not found.', 16;
+        IF EXISTS (SELECT 1 FROM privilege_groups WHERE group_id = @ProfileID AND is_system = 1)
+            THROW 51009, 'Cannot remove a protected system profile via FIM.', 16;
+
+        DELETE FROM group_permissions WHERE group_id = @ProfileID;
+        DELETE FROM user_group_memberships WHERE group_id = @ProfileID;
+        DELETE FROM privilege_groups WHERE group_id = @ProfileID;
+
+        EXEC sp_FIM_LogSyncChange @EntityType = 'PROFILE', @EntityKey = @ProfileID, @ChangeType = 'DELETE', @ChangedBy = @RemovedBy;
+
+        COMMIT TRANSACTION;
+        SELECT 'SUCCESS' AS result;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH
+END;
+GO
+
+-- RemoveUserFromProfile(userId, profileId)
+CREATE OR ALTER PROCEDURE sp_FIM_RemoveUserFromProfile
+    @UserID INT,
+    @ProfileID INT,
+    @RemovedBy VARCHAR(100) = 'FIM_INTEGRATION'
+AS
+BEGIN
+    SET NOCOUNT ON;
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        IF NOT EXISTS (SELECT 1 FROM user_group_memberships WHERE user_id = @UserID AND group_id = @ProfileID)
+            THROW 51010, 'Binding not found.', 16;
+
+        DELETE FROM user_group_memberships WHERE user_id = @UserID AND group_id = @ProfileID;
+
+        DECLARE @EntityKey_UP VARCHAR(100) = CAST(@UserID AS VARCHAR(20)) + ':' + CAST(@ProfileID AS VARCHAR(20));
+        EXEC sp_FIM_LogSyncChange @EntityType = 'USER_PROFILE', @EntityKey = @EntityKey_UP, @ChangeType = 'DELETE', @ChangedBy = @RemovedBy;
+
+        COMMIT TRANSACTION;
+        SELECT 'SUCCESS' AS result;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH
+END;
+GO
+
+-- RemoveUsersFromProfile(userIds[], profileId) -- @UserIDListJson: JSON array of ints, e.g. [12,15,19]
+CREATE OR ALTER PROCEDURE sp_FIM_RemoveUsersFromProfile
+    @UserIDListJson NVARCHAR(MAX),
+    @ProfileID INT,
+    @RemovedBy VARCHAR(100) = 'FIM_INTEGRATION'
+AS
+BEGIN
+    SET NOCOUNT ON;
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        DECLARE @RemovedCount INT;
+
+        SELECT @RemovedCount = COUNT(*)
+        FROM user_group_memberships m
+        INNER JOIN OPENJSON(@UserIDListJson) j ON m.user_id = CAST(j.value AS INT)
+        WHERE m.group_id = @ProfileID;
+
+        DELETE m
+        FROM user_group_memberships m
+        INNER JOIN OPENJSON(@UserIDListJson) j ON m.user_id = CAST(j.value AS INT)
+        WHERE m.group_id = @ProfileID;
+
+        EXEC sp_FIM_LogSyncChange @EntityType = 'USER_PROFILE', @EntityKey = @ProfileID, @ChangeType = 'DELETE',
+             @ChangedBy = @RemovedBy, @DetailsJson = @UserIDListJson;
+
+        COMMIT TRANSACTION;
+        SELECT ISNULL(@RemovedCount, 0) AS removed_count, 'SUCCESS' AS result;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH
+END;
+GO
+
+-- ============================================================================
+-- Access Management Functions
+-- ============================================================================
+
+-- GetAllRights()
+CREATE OR ALTER PROCEDURE sp_FIM_GetAllRights
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT right_id, right_code, right_name, description, module_key, is_active, created_at
+    FROM fim_rights
+    ORDER BY right_code;
+END;
+GO
+
+-- GetNumberOfRights()
+CREATE OR ALTER PROCEDURE sp_FIM_GetNumberOfRights
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT COUNT(*) AS right_count FROM fim_rights;
+END;
+GO
+
+-- GetRightInfo(rightId)
+CREATE OR ALTER PROCEDURE sp_FIM_GetRightInfo
+    @RightID INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT right_id, right_code, right_name, description, module_key, is_active, created_at
+    FROM fim_rights WHERE right_id = @RightID;
+END;
+GO
+
+-- GetAllRightsForUser(userId)
+CREATE OR ALTER PROCEDURE sp_FIM_GetAllRightsForUser
+    @UserID INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT r.right_id, r.right_code, r.right_name, r.description, r.module_key, r.is_active
+    FROM fim_user_rights ur
+    INNER JOIN fim_rights r ON r.right_id = ur.right_id
+    WHERE ur.user_id = @UserID
+    ORDER BY r.right_code;
+END;
+GO
+
+-- GetNumberOfRightsForUser(userId)
+CREATE OR ALTER PROCEDURE sp_FIM_GetNumberOfRightsForUser
+    @UserID INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT COUNT(*) AS right_count FROM fim_user_rights WHERE user_id = @UserID;
+END;
+GO
+
+-- GetAllUsersForRight(rightId)
+CREATE OR ALTER PROCEDURE sp_FIM_GetAllUsersForRight
+    @RightID INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT u.user_id, u.username, u.display_name, u.email, u.is_active
+    FROM fim_user_rights ur
+    INNER JOIN app_users u ON u.user_id = ur.user_id
+    WHERE ur.right_id = @RightID
+    ORDER BY u.username;
+END;
+GO
+
+-- GetNumberOfUsersForRight(rightId)
+CREATE OR ALTER PROCEDURE sp_FIM_GetNumberOfUsersForRight
+    @RightID INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT COUNT(*) AS user_count FROM fim_user_rights WHERE right_id = @RightID;
+END;
+GO
+
+-- AddUserToRight(userId, rightId)
+CREATE OR ALTER PROCEDURE sp_FIM_AddUserToRight
+    @UserID INT,
+    @RightID INT,
+    @GrantedBy VARCHAR(100) = 'FIM_INTEGRATION'
+AS
+BEGIN
+    SET NOCOUNT ON;
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        IF NOT EXISTS (SELECT 1 FROM app_users WHERE user_id = @UserID)
+            THROW 51011, 'User not found.', 16;
+        IF NOT EXISTS (SELECT 1 FROM fim_rights WHERE right_id = @RightID)
+            THROW 51012, 'Right not found.', 16;
+
+        IF NOT EXISTS (SELECT 1 FROM fim_user_rights WHERE user_id = @UserID AND right_id = @RightID)
+        BEGIN
+            INSERT INTO fim_user_rights (user_id, right_id, granted_at, granted_by)
+            VALUES (@UserID, @RightID, GETDATE(), @GrantedBy);
+
+            DECLARE @EntityKey_UR VARCHAR(100) = CAST(@UserID AS VARCHAR(20)) + ':' + CAST(@RightID AS VARCHAR(20));
+            EXEC sp_FIM_LogSyncChange @EntityType = 'USER_RIGHT', @EntityKey = @EntityKey_UR, @ChangeType = 'CREATE', @ChangedBy = @GrantedBy;
+        END
+
+        COMMIT TRANSACTION;
+        SELECT 'SUCCESS' AS result;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH
+END;
+GO
+
+-- RemoveUserFromRight(userId, rightId)
+CREATE OR ALTER PROCEDURE sp_FIM_RemoveUserFromRight
+    @UserID INT,
+    @RightID INT,
+    @RemovedBy VARCHAR(100) = 'FIM_INTEGRATION'
+AS
+BEGIN
+    SET NOCOUNT ON;
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        IF NOT EXISTS (SELECT 1 FROM fim_user_rights WHERE user_id = @UserID AND right_id = @RightID)
+            THROW 51013, 'Right grant not found.', 16;
+
+        DELETE FROM fim_user_rights WHERE user_id = @UserID AND right_id = @RightID;
+
+        DECLARE @EntityKey_UR VARCHAR(100) = CAST(@UserID AS VARCHAR(20)) + ':' + CAST(@RightID AS VARCHAR(20));
+        EXEC sp_FIM_LogSyncChange @EntityType = 'USER_RIGHT', @EntityKey = @EntityKey_UR, @ChangeType = 'DELETE', @ChangedBy = @RemovedBy;
+
+        COMMIT TRANSACTION;
+        SELECT 'SUCCESS' AS result;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH
+END;
+GO
+
+-- ============================================================================
+-- Password Management Functions
+-- ============================================================================
+
+-- SetPassword(userId, password, encryptionAlgorithm) -- @PasswordHash is the
+-- already-hashed/encrypted value (BCrypt.Net-Next hash, or AES-256-CBC
+-- ciphertext base64) computed by PMIMS.Infrastructure.PasswordHasher; this
+-- procedure never sees or stores a plaintext password.
+CREATE OR ALTER PROCEDURE sp_FIM_SetPassword
+    @UserID INT,
+    @PasswordHash VARCHAR(512),
+    @PasswordAlgorithm VARCHAR(20) = 'BCRYPT', -- BCRYPT (default) | AES256
+    @ChangedBy VARCHAR(100) = 'FIM_INTEGRATION'
+AS
+BEGIN
+    SET NOCOUNT ON;
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        IF NOT EXISTS (SELECT 1 FROM app_users WHERE user_id = @UserID)
+            THROW 51014, 'User not found.', 16;
+        IF @PasswordAlgorithm NOT IN ('BCRYPT', 'AES256', 'SHA256')
+            THROW 51015, 'Unsupported password encryption algorithm.', 16;
+
+        UPDATE app_users
+        SET password_hash = @PasswordHash, password_algorithm = @PasswordAlgorithm
+        WHERE user_id = @UserID;
+
+        EXEC sp_FIM_LogSyncChange @EntityType = 'PASSWORD', @EntityKey = @UserID, @ChangeType = 'UPDATE',
+             @ChangedBy = @ChangedBy, @DetailsJson = N'{"algorithm":"' + @PasswordAlgorithm + '"}';
+
+        INSERT INTO audit_logs (username, ip_address, module_name, action_description)
+        VALUES (@ChangedBy, 'SYSTEM', 'FIM_INTEGRATION', 'FIM SetPassword: credential reset for user id ' + CAST(@UserID AS VARCHAR(10)) + ' using ' + @PasswordAlgorithm + '.');
+
+        COMMIT TRANSACTION;
+        SELECT 'SUCCESS' AS result;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH
+END;
+GO
+
+-- ============================================================================
+-- Connectivity Support & Delta-Sync Change Detection
+-- ============================================================================
+
+-- DetectDeltaChanges(lastSyncTime)
+CREATE OR ALTER PROCEDURE sp_FIM_DetectDeltaChanges
+    @LastSyncTime DATETIME2
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT sync_log_id, entity_type, entity_key, change_type, changed_at, changed_by, source, details_json
+    FROM fim_sync_logs
+    WHERE changed_at > @LastSyncTime
+    ORDER BY changed_at ASC;
+END;
+GO
+
+-- ============================================================================
+-- RFP ITEMS 5-8: RULES ENGINE, AUDIT TRAIL, NOTIFICATIONS, MONITORING
+-- ----------------------------------------------------------------------------
+-- The live application path for these features runs through EF Core LINQ in
+-- InventoryRepository.cs (the "stored-proc emulation" pattern this codebase
+-- already uses for AppUser/PrivilegeGroup-style admin CRUD -- see AGENTS.md).
+-- The procedures below are the SQL Server-side reference/direct-DB-access
+-- mirror for scenarios that need to bypass the application tier entirely
+-- (batch jobs, DBA tooling, a future FIM-style direct sync client).
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- Enhanced Audit Trail UI (item 6): parameterized, dynamic-but-safe search.
+-- Every predicate is bound via sp_executesql parameters -- never string-
+-- concatenated values -- which is exactly the pattern Item 11 (Remove Inline
+-- Queries) asks every remaining ad-hoc query in the app tier to converge on.
+-- ----------------------------------------------------------------------------
+CREATE OR ALTER PROCEDURE sp_SearchAuditLogs
+    @Query NVARCHAR(200) = NULL,
+    @Username VARCHAR(100) = NULL,
+    @ModuleName VARCHAR(100) = NULL,
+    @EntityType VARCHAR(50) = NULL,
+    @FromDate DATETIME2 = NULL,
+    @ToDate DATETIME2 = NULL,
+    @Page INT = 1,
+    @PageSize INT = 50
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @Offset INT = (CASE WHEN @Page < 1 THEN 0 ELSE @Page - 1 END) * (CASE WHEN @PageSize < 1 THEN 50 ELSE @PageSize END);
+    DECLARE @Take INT = CASE WHEN @PageSize < 1 THEN 50 ELSE @PageSize END;
+
+    DECLARE @Sql NVARCHAR(MAX) = N'
+        SELECT log_id, timestamp, username, ip_address, module_name, action_description,
+               entity_type, entity_id, row_hash,
+               COUNT(*) OVER() AS total_count
+        FROM audit_logs
+        WHERE (@Query IS NULL OR action_description LIKE ''%'' + @Query + ''%'')
+          AND (@Username IS NULL OR username = @Username)
+          AND (@ModuleName IS NULL OR module_name = @ModuleName)
+          AND (@EntityType IS NULL OR entity_type = @EntityType)
+          AND (@FromDate IS NULL OR timestamp >= @FromDate)
+          AND (@ToDate IS NULL OR timestamp <= @ToDate)
+        ORDER BY timestamp DESC
+        OFFSET @Offset ROWS FETCH NEXT @Take ROWS ONLY;';
+
+    EXEC sp_executesql @Sql,
+        N'@Query NVARCHAR(200), @Username VARCHAR(100), @ModuleName VARCHAR(100), @EntityType VARCHAR(50), @FromDate DATETIME2, @ToDate DATETIME2, @Offset INT, @Take INT',
+        @Query, @Username, @ModuleName, @EntityType, @FromDate, @ToDate, @Offset, @Take;
+END;
+GO
+
+-- ----------------------------------------------------------------------------
+-- Dynamic Business Validation Rules Engine (item 5): direct-DB evaluation for
+-- the common case -- a single numeric field compared against a threshold,
+-- e.g. {"field":"weightGrams","op":"lte","value":5000}. Composite {"all"/
+-- "any"} predicate trees are evaluated by RuleEngineService (C#) at the
+-- application tier; this proc covers the majority "one threshold" case for
+-- callers that only have direct database connectivity.
+-- ----------------------------------------------------------------------------
+CREATE OR ALTER PROCEDURE sp_EvaluateBusinessRule
+    @RuleId INT,
+    @ActualValue DECIMAL(18,4),
+    @EntityType VARCHAR(50),
+    @EntityId VARCHAR(50)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @ExpressionJson NVARCHAR(MAX), @Severity VARCHAR(10);
+    SELECT @ExpressionJson = expression_json, @Severity = severity
+    FROM business_rules WHERE rule_id = @RuleId AND is_active = 1;
+
+    IF @ExpressionJson IS NULL
+    BEGIN
+        THROW 52001, 'Rule not found or not active.', 16;
+    END
+
+    DECLARE @Op VARCHAR(10) = JSON_VALUE(@ExpressionJson, '$.op');
+    DECLARE @Threshold DECIMAL(18,4) = TRY_CAST(JSON_VALUE(@ExpressionJson, '$.value') AS DECIMAL(18,4));
+
+    DECLARE @Matched BIT = 0;
+    IF @Threshold IS NOT NULL
+    BEGIN
+        SET @Matched = CASE @Op
+            WHEN 'eq'  THEN CASE WHEN @ActualValue = @Threshold THEN 1 ELSE 0 END
+            WHEN 'neq' THEN CASE WHEN @ActualValue <> @Threshold THEN 1 ELSE 0 END
+            WHEN 'gt'  THEN CASE WHEN @ActualValue > @Threshold THEN 1 ELSE 0 END
+            WHEN 'gte' THEN CASE WHEN @ActualValue >= @Threshold THEN 1 ELSE 0 END
+            WHEN 'lt'  THEN CASE WHEN @ActualValue < @Threshold THEN 1 ELSE 0 END
+            WHEN 'lte' THEN CASE WHEN @ActualValue <= @Threshold THEN 1 ELSE 0 END
+            ELSE 0
+        END;
+    END
+
+    DECLARE @Result VARCHAR(10) = CASE WHEN @Matched = 1 THEN (CASE WHEN @Severity = 'BLOCK' THEN 'FAIL' ELSE 'WARN' END) ELSE 'PASS' END;
+
+    INSERT INTO business_rule_evaluations (rule_id, entity_type, entity_id, result, evaluated_at, context_json)
+    VALUES (@RuleId, @EntityType, @EntityId, @Result, GETDATE(), N'{"actualValue":' + CAST(@ActualValue AS NVARCHAR(50)) + '}');
+
+    SELECT @Result AS result, @Severity AS severity;
+END;
+GO
+
+-- ----------------------------------------------------------------------------
+-- Automatic Management Email Notifications (item 7): due-subscription lookup
+-- for a direct-DB scheduler (the live app instead uses NotificationSchedulerService
+-- + the Cronos library for cron evaluation, since T-SQL has no native cron parser).
+-- This proc covers the simple "hours since last run" cadence case.
+-- ----------------------------------------------------------------------------
+CREATE OR ALTER PROCEDURE sp_GetDueNotificationSubscriptions
+    @MinHoursSinceLastRun INT = 24
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT subscription_id, distribution_list_email, report_type, schedule_cron, format, last_run_at
+    FROM notification_subscriptions
+    WHERE is_active = 1
+      AND (last_run_at IS NULL OR last_run_at <= DATEADD(HOUR, -@MinHoursSinceLastRun, GETDATE()));
+END;
+GO
+
+-- ----------------------------------------------------------------------------
+-- KFH Existing Monitoring Tool Integration (item 8): SLA snapshot for direct-DB
+-- polling by the external monitoring tool (mirrors GET /api/monitoring/sla-metrics).
+-- ----------------------------------------------------------------------------
+CREATE OR ALTER PROCEDURE sp_GetSlaMetricsSnapshot
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @Cutoff24h DATETIME2 = DATEADD(HOUR, -24, GETDATE());
+
+    SELECT
+        (SELECT COUNT(*) FROM workflow_instances WHERE status_code = 'PENDING_MAKER') AS pending_workflow_instances,
+        (SELECT COUNT(*) FROM mismatch_cases WHERE status_code = 'OPEN') AS open_mismatch_cases,
+        (SELECT ISNULL(SUM(total_discrepancies), 0) FROM reconciliation_runs WHERE run_timestamp >= @Cutoff24h) AS reconciliation_breaks_last_24h,
+        (SELECT COUNT(*) FROM monitoring_events WHERE event_type = 'ALERT' AND occurred_at >= @Cutoff24h) AS alert_events_last_24h;
+END;
+GO

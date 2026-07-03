@@ -724,9 +724,25 @@
           "framework": "net10.0",
           "targetAlias": "net10.0",
           "dependencies": {
+            "BCrypt.Net-Next": {
+              "target": "Package",
+              "version": "[4.0.3, )"
+            },
+            "ClosedXML": {
+              "target": "Package",
+              "version": "[0.104.2, )"
+            },
+            "Cronos": {
+              "target": "Package",
+              "version": "[0.9.0, )"
+            },
             "Dapper": {
               "target": "Package",
               "version": "[2.1.79, )"
+            },
+            "MailKit": {
+              "target": "Package",
+              "version": "[4.16.0, )"
             },
             "Microsoft.Data.SqlClient": {
               "target": "Package",
@@ -747,6 +763,10 @@
             "Microsoft.Extensions.Hosting": {
               "target": "Package",
               "version": "[10.0.9, )"
+            },
+            "QuestPDF": {
+              "target": "Package",
+              "version": "[2024.10.3, )"
             }
           },
           "imports": [

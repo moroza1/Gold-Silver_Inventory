@@ -13,3 +13,4 @@ D:\Projects\Gold2\backend\PMIMS.Application\obj\Debug\net10.0\PMIMS.Application.
 D:\Projects\Gold2\backend\PMIMS.Application\obj\Debug\net10.0\refint\PMIMS.Application.dll
 D:\Projects\Gold2\backend\PMIMS.Application\obj\Debug\net10.0\PMIMS.Application.pdb
 D:\Projects\Gold2\backend\PMIMS.Application\obj\Debug\net10.0\ref\PMIMS.Application.dll
+D:\Projects\Gold2\backend\PMIMS.Application\obj\Debug\net10.0\PMIMS.Application.sourcelink.json

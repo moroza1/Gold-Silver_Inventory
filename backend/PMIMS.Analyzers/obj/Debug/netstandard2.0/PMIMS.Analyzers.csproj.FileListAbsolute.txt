@@ -1,0 +1,11 @@
+D:\Projects\Gold2\backend\PMIMS.Analyzers\obj\Debug\netstandard2.0\PMIMS.Analyzers.csproj.AssemblyReference.cache
+D:\Projects\Gold2\backend\PMIMS.Analyzers\obj\Debug\netstandard2.0\PMIMS.Analyzers.GeneratedMSBuildEditorConfig.editorconfig
+D:\Projects\Gold2\backend\PMIMS.Analyzers\obj\Debug\netstandard2.0\PMIMS.Analyzers.AssemblyInfoInputs.cache
+D:\Projects\Gold2\backend\PMIMS.Analyzers\obj\Debug\netstandard2.0\PMIMS.Analyzers.AssemblyInfo.cs
+D:\Projects\Gold2\backend\PMIMS.Analyzers\obj\Debug\netstandard2.0\PMIMS.Analyzers.csproj.CoreCompileInputs.cache
+D:\Projects\Gold2\backend\PMIMS.Analyzers\obj\Debug\netstandard2.0\PMIMS.Analyzers.sourcelink.json
+D:\Projects\Gold2\backend\PMIMS.Analyzers\bin\Debug\netstandard2.0\PMIMS.Analyzers.deps.json
+D:\Projects\Gold2\backend\PMIMS.Analyzers\bin\Debug\netstandard2.0\PMIMS.Analyzers.dll
+D:\Projects\Gold2\backend\PMIMS.Analyzers\bin\Debug\netstandard2.0\PMIMS.Analyzers.pdb
+D:\Projects\Gold2\backend\PMIMS.Analyzers\obj\Debug\netstandard2.0\PMIMS.Analyzers.dll
+D:\Projects\Gold2\backend\PMIMS.Analyzers\obj\Debug\netstandard2.0\PMIMS.Analyzers.pdb

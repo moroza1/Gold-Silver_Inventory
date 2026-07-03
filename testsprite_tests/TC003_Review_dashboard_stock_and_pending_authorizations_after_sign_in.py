@@ -73,12 +73,12 @@ async def run_test():
         await expect(page.locator("xpath=/html/body/div/div/main/header/div[2]/div/div[2]/span[2]").nth(0)).to_be_visible(timeout=15000), "The silver price stock summary metric ($ 57.75) is visible."
         
         # --> Verify pending authorization counts are displayed
-        await page.locator("xpath=/html/body/div/div/main/section[13]/div/div/table/tbody/tr[1]").nth(0).scroll_into_view_if_needed()
+        await page.locator("xpath=//section[contains(@class, \"active\")]/div/div/table/tbody/tr[1]").nth(0).scroll_into_view_if_needed()
         # Assert: Pending request BRANCH_TRANSFER (ID: 2) row is visible.
-        await expect(page.locator("xpath=/html/body/div/div/main/section[13]/div/div/table/tbody/tr[1]").nth(0)).to_be_visible(timeout=15000), "Pending request BRANCH_TRANSFER (ID: 2) row is visible."
-        await page.locator("xpath=/html/body/div/div/main/section[13]/div/div/table/tbody/tr[2]").nth(0).scroll_into_view_if_needed()
+        await expect(page.locator("xpath=//section[contains(@class, \"active\")]/div/div/table/tbody/tr[1]").nth(0)).to_be_visible(timeout=15000), "Pending request BRANCH_TRANSFER (ID: 2) row is visible."
+        await page.locator("xpath=//section[contains(@class, \"active\")]/div/div/table/tbody/tr[2]").nth(0).scroll_into_view_if_needed()
         # Assert: Pending request PURCHASE_ORDER (PO-KFH-2026-003) row is visible.
-        await expect(page.locator("xpath=/html/body/div/div/main/section[13]/div/div/table/tbody/tr[2]").nth(0)).to_be_visible(timeout=15000), "Pending request PURCHASE_ORDER (PO-KFH-2026-003) row is visible."
+        await expect(page.locator("xpath=//section[contains(@class, \"active\")]/div/div/table/tbody/tr[2]").nth(0)).to_be_visible(timeout=15000), "Pending request PURCHASE_ORDER (PO-KFH-2026-003) row is visible."
         await asyncio.sleep(5)
 
     finally:

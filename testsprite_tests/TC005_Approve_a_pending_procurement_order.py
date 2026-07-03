@@ -74,32 +74,32 @@ async def run_test():
         
         # -> Click the Action cell for PO-KFH-2026-002 in the Active Purchase Orders table to reveal the 'Approve' button or open the PO details so the approval can be confirmed.
         # Click the Action cell for PO-KFH-2026-002 in the Active Purchase Orders table to reveal the 'Approve' button or open the PO details so the approval can be confirmed.
-        elem = page.locator('xpath=/html/body/div/div/main/section[2]/div/div/div/table/tbody/tr[2]/td[6]')
+        elem = page.locator('xpath=//section[contains(@class, \"active\")]/div/div/div/table/tbody/tr[2]/td[6]')
         await elem.click(timeout=10000)
         
         # -> Click the PO code cell labeled 'PO-KFH-2026-002' in the Active Purchase Orders table to open the purchase order details and reveal the Approve button.
         # PO-KFH-2026-002
-        elem = page.locator('xpath=/html/body/div/div/main/section[2]/div/div/div/table/tbody/tr[2]/td')
+        elem = page.locator('xpath=//section[contains(@class, \"active\")]/div/div/div/table/tbody/tr[2]/td')
         await elem.click(timeout=10000)
         
         # -> Click the Action cell for the purchase order with code 'PO-KFH-2026-002' in the Active Purchase Orders table to reveal the 'Approve' button or open the PO details so approval can be confirmed.
         # Click the Action cell for the purchase order with code 'PO-KFH-2026-002' in the Active Purchase Orders table to reveal the 'Approve' button or open the PO details so approval can be confirmed.
-        elem = page.locator('xpath=/html/body/div/div/main/section[2]/div/div/div/table/tbody/tr[2]/td[6]')
+        elem = page.locator('xpath=//section[contains(@class, \"active\")]/div/div/div/table/tbody/tr[2]/td[6]')
         await elem.click(timeout=10000)
         
         # -> Click the 'Action' cell for the row containing PO-KFH-2026-002 to reveal the Approve control or open the purchase order details.
         # Click the 'Action' cell for the row containing PO-KFH-2026-002 to reveal the Approve control or open the purchase order details.
-        elem = page.locator('xpath=/html/body/div/div/main/section[2]/div/div/div/table/tbody/tr[2]/td[6]')
+        elem = page.locator('xpath=//section[contains(@class, \"active\")]/div/div/div/table/tbody/tr[2]/td[6]')
         await elem.click(timeout=10000)
         
         # -> Open the pending procurement request details for PO-KFH-2026-002 by locating the 'Approve' label on the page and then clicking the PENDING_APPROVAL status cell to try to reveal the Approve control.
         # PENDING_APPROVAL
-        elem = page.locator('xpath=/html/body/div/div/main/section[2]/div/div/div/table/tbody/tr[2]/td[5]')
+        elem = page.locator('xpath=//section[contains(@class, \"active\")]/div/div/div/table/tbody/tr[2]/td[5]')
         await elem.click(timeout=10000)
         
         # -> Click the 'Action' cell for the PO row showing PO-KFH-2026-002 in the Active Purchase Orders table to try to reveal the Approve control or open the PO details.
         # Click the 'Action' cell for the PO row showing PO-KFH-2026-002 in the Active Purchase Orders table to try to reveal the Approve control or open the PO details.
-        elem = page.locator('xpath=/html/body/div/div/main/section[2]/div/div/div/table/tbody/tr[2]/td[6]')
+        elem = page.locator('xpath=//section[contains(@class, \"active\")]/div/div/div/table/tbody/tr[2]/td[6]')
         await elem.click(timeout=10000)
         
         # --> Test passed — verified by AI agent

@@ -74,17 +74,17 @@ async def run_test():
         
         # -> Click the 'CH-88371-92' bar serial number in the shelf details table to open the serialized bar inventory details for review.
         # CH-88371-92
-        elem = page.locator('xpath=/html/body/div/div/main/section[4]/div[2]/div/div[2]/table/tbody/tr[2]/td[2]')
+        elem = page.locator('xpath=//section[contains(@class, \"active\")]/div[2]/div/div[2]/table/tbody/tr[2]/td[2]')
         await elem.click(timeout=10000)
         
         # -> Click the 'CH-88371-92' bar serial number in the shelf details table to open its serialized bar inventory details.
         # CH-88371-92
-        elem = page.locator('xpath=/html/body/div/div/main/section[4]/div[2]/div/div[2]/table/tbody/tr[2]/td[2]')
+        elem = page.locator('xpath=//section[contains(@class, \"active\")]/div[2]/div/div[2]/table/tbody/tr[2]/td[2]')
         await elem.click(timeout=10000)
         
         # -> Click the 'CH-88371-92' bar serial number in the shelf details modal to attempt to open the serialized bar inventory details for review.
         # CH-88371-92
-        elem = page.locator('xpath=/html/body/div/div/main/section[4]/div[2]/div/div[2]/table/tbody/tr[2]/td[2]')
+        elem = page.locator('xpath=//section[contains(@class, \"active\")]/div[2]/div/div[2]/table/tbody/tr[2]/td[2]')
         await elem.click(timeout=10000)
         
         # -> Click the table row for 'Slot 2' (the row showing 'CH-88371-92') in the Shelf details modal to attempt opening the serialized bar details.
@@ -96,7 +96,7 @@ async def run_test():
         
         # --> Verify the selected location context is displayed
         # Assert: Expected the shelf details header to display the selected slot 'Slot 2'.
-        await expect(page.locator("xpath=/html/body/div[1]/div/main/section[4]/div[2]").nth(0)).to_contain_text("Slot 2", timeout=15000), "Expected the shelf details header to display the selected slot 'Slot 2'."
+        await expect(page.locator("xpath=//section[contains(@class, \"active\")]/div[2]").nth(0)).to_contain_text("Slot 2", timeout=15000), "Expected the shelf details header to display the selected slot 'Slot 2'."
         # Assert: Verify serialized bar details are displayed
         await expect(page.locator("text=Serialized Bar Details")).to_be_visible(timeout=15000)
         await asyncio.sleep(5)

@@ -64,17 +64,17 @@ async def run_test():
         
         # -> Open the transfer row for serial 'CH-88371-92' to view its details and check for a 'Reject' action or any pending status.
         # CH-88371-92 Gold - Bar Main HO Vault Operations...
-        elem = page.locator('xpath=/html/body/div/div/main/section[3]/div/div/div/table/tbody/tr')
+        elem = page.locator('xpath=//section[contains(@class, \"active\")]/div/div/div/table/tbody/tr')
         await elem.click(timeout=10000)
         
         # -> Click the Action cell for transfer 'CH-88371-92' in the Active Branch Transfers table to look for a 'Reject' button or menu option.
         # Click the Action cell for transfer 'CH-88371-92' in the Active Branch Transfers table to look for a 'Reject' button or menu option.
-        elem = page.locator('xpath=/html/body/div/div/main/section[3]/div/div/div/table/tbody/tr/td[7]')
+        elem = page.locator('xpath=//section[contains(@class, \"active\")]/div/div/div/table/tbody/tr/td[7]')
         await elem.click(timeout=10000)
         
         # -> Open the transfer row labeled 'CH-88371-92' in the Active Branch Transfers table to view its details and confirm whether any pending transfer is accessible from the table.
         # CH-88371-92 Gold - Bar Main HO Vault Operations...
-        elem = page.locator('xpath=/html/body/div/div/main/section[3]/div/div/div/table/tbody/tr')
+        elem = page.locator('xpath=//section[contains(@class, \"active\")]/div/div/div/table/tbody/tr')
         await elem.click(timeout=10000)
         
         # -> Find the first occurrence of the text 'PENDING' on the Branch Transfers page, ensure the table area is visible, and enumerate all rows in the Active Branch Transfers table so a row with Status 'PENDING' can be identified and opened.
@@ -84,13 +84,13 @@ async def run_test():
         
         # --> Verify the transfer status is updated to rejected
         # Assert: The transfer status is REJECTED.
-        await expect(page.locator("xpath=/html/body/div/div/main/section[3]/div/div[1]/div/table/tbody/tr/td[6]").nth(0)).to_have_text("REJECTED", timeout=15000), "The transfer status is REJECTED."
+        await expect(page.locator("xpath=//section[contains(@class, \"active\")]/div/div[1]/div/table/tbody/tr/td[6]").nth(0)).to_have_text("REJECTED", timeout=15000), "The transfer status is REJECTED."
         # Assert: The transfer row for CH-88371-92 is present.
-        await expect(page.locator("xpath=/html/body/div/div/main/section[3]/div/div[1]/div/table/tbody/tr/td[1]").nth(0)).to_have_text("CH-88371-92", timeout=15000), "The transfer row for CH-88371-92 is present."
+        await expect(page.locator("xpath=//section[contains(@class, \"active\")]/div/div[1]/div/table/tbody/tr/td[1]").nth(0)).to_have_text("CH-88371-92", timeout=15000), "The transfer row for CH-88371-92 is present."
         
         # --> Verify the rejected transfer is no longer shown as pending
         # Assert: The transfer's status is shown as REJECTED, confirming it is no longer pending.
-        await expect(page.locator("xpath=/html/body/div/div/main/section[3]/div/div[1]/div/table/tbody/tr/td[6]").nth(0)).to_have_text("REJECTED", timeout=15000), "The transfer's status is shown as REJECTED, confirming it is no longer pending."
+        await expect(page.locator("xpath=//section[contains(@class, \"active\")]/div/div[1]/div/table/tbody/tr/td[6]").nth(0)).to_have_text("REJECTED", timeout=15000), "The transfer's status is shown as REJECTED, confirming it is no longer pending."
         await asyncio.sleep(5)
 
     finally:
