@@ -145,6 +145,14 @@ public class AppDbContext : DbContext
     public DbSet<DispensingDevice> DispensingDevices { get; set; } = null!;
     public DbSet<DispenseTransaction> DispenseTransactions { get; set; } = null!;
 
+    // Cost Tracking & Valuation -- Core Banking (IMAL) GL Integration
+    public DbSet<CoreBankingLedgerPosting> CoreBankingLedgerPostings { get; set; } = null!;
+
+    // Reporting Requirements Gap Analysis -- Cost Analysis & Variance (Item 8)
+    public DbSet<CostBudget> CostBudgets { get; set; } = null!;
+
+    // Sidebar Menu Layout -- admin-arrangeable navigation order (single global row)
+    public DbSet<SidebarMenuLayout> SidebarMenuLayouts { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -277,6 +285,8 @@ public class AppDbContext : DbContext
             entity.ToTable("purchase_orders");
             entity.HasIndex(e => e.PoNumber).IsUnique();
             entity.HasOne(e => e.Vendor).WithMany().HasForeignKey(e => e.VendorId);
+            // Computed in C# from other mapped columns (TotalCost + fees) -- not its own column.
+            entity.Ignore(e => e.LandedCost);
         });
 
         // POItem Configuration
@@ -746,6 +756,17 @@ public class AppDbContext : DbContext
         });
 
         // ============================================================
+        // Cost Tracking & Valuation -- Core Banking (IMAL) GL Integration
+        // ============================================================
+        modelBuilder.Entity<CoreBankingLedgerPosting>(entity =>
+        {
+            entity.HasKey(e => e.PostingId);
+            entity.ToTable("core_banking_ledger_postings");
+            entity.HasIndex(e => new { e.SourceType, e.SourceId });
+            entity.HasIndex(e => e.CreatedAt);
+        });
+
+        // ============================================================
         // LBMA Chain-of-Custody Configuration
         // ============================================================
         modelBuilder.Entity<ChainOfCustodyEvent>(entity =>
@@ -790,6 +811,24 @@ public class AppDbContext : DbContext
             entity.HasOne(e => e.Item).WithMany().HasForeignKey(e => e.ItemId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.Customer).WithMany().HasForeignKey(e => e.CustomerId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.Channel).WithMany().HasForeignKey(e => e.ChannelId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ============================================================
+        // Reporting Requirements Gap Analysis -- Cost Analysis & Variance (Item 8)
+        // ============================================================
+        modelBuilder.Entity<CostBudget>(entity =>
+        {
+            entity.HasKey(e => e.BudgetId);
+            entity.ToTable("cost_budgets");
+            entity.HasIndex(e => new { e.MetalTypeId, e.Period }).IsUnique();
+            entity.HasOne(e => e.MetalType).WithMany().HasForeignKey(e => e.MetalTypeId);
+        });
+
+        // SidebarMenuLayout Configuration -- singleton row (Id always 1)
+        modelBuilder.Entity<SidebarMenuLayout>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.ToTable("sidebar_menu_layout");
         });
     }
 

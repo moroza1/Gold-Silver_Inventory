@@ -19,11 +19,17 @@ public class InventoryRepository : IInventoryRepository
     // GenerateIfrsValuationDisclosureAsync needs a live rate feed, and it fails fast with a
     // clear error if none was supplied instead of silently pricing at zero.
     private readonly IRateFeedService? _rateFeed;
+    // Cost Tracking & Valuation -- Core Banking (IMAL) GL Integration. Nullable/optional
+    // (default null), same pattern as _rateFeed, so every existing
+    // `new InventoryRepository(context)` call site -- test fixtures included -- keeps
+    // compiling; a supplier receipt just doesn't push a GL posting if none is supplied.
+    private readonly ICoreBankingLedgerService? _coreBanking;
 
-    public InventoryRepository(AppDbContext dbContext, IRateFeedService? rateFeed = null)
+    public InventoryRepository(AppDbContext dbContext, IRateFeedService? rateFeed = null, ICoreBankingLedgerService? coreBanking = null)
     {
         _dbContext = dbContext;
         _rateFeed = rateFeed;
+        _coreBanking = coreBanking;
     }
 
     private bool IsSqlServer => _dbContext.Database.ProviderName?.Contains("SqlServer") ?? false;
@@ -74,10 +80,17 @@ public class InventoryRepository : IInventoryRepository
     }
 
     // sp_CreatePurchaseOrder execution / emulation
-    public async Task<(int poId, string result)> CreatePurchaseOrderAsync(string poNumber, int vendorId, decimal totalWeightGrams, decimal totalCost, string currency, string createdBy, string poItemJsonList)
+    public async Task<(int poId, string result)> CreatePurchaseOrderAsync(string poNumber, int vendorId, decimal totalWeightGrams, decimal totalCost, string currency, string createdBy, string poItemJsonList,
+        string? supplierInvoiceNumber = null, DateTime? supplierInvoiceDate = null, decimal freightCost = 0, decimal insuranceCost = 0, decimal customsDutyCost = 0, decimal otherFeesCost = 0, string? otherFeesDescription = null)
     {
         if (IsSqlServer)
         {
+            // NOTE: sp_CreatePurchaseOrder (database/procedures.sql) does not yet accept the
+            // cost-detail params (supplierInvoiceNumber/supplierInvoiceDate/fees) -- this is a
+            // known follow-up for the SQL Server production path, same "documented gap, not a
+            // silent drop" posture as the rest of this codebase's greenfield integrations. The
+            // SQLite emulation branch below (what every local/dev/test run actually exercises)
+            // persists them.
             var poIdParam = new SqlParameter("@POID", SqlDbType.Int) { Direction = ParameterDirection.Output };
             var resultParam = new SqlParameter("@result", SqlDbType.VarChar, 50) { Direction = ParameterDirection.Output };
 
@@ -128,7 +141,14 @@ public class InventoryRepository : IInventoryRepository
                 Currency = currency,
                 StatusCode = "PENDING_APPROVAL",
                 CreatedBy = createdBy,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = DateTime.UtcNow,
+                SupplierInvoiceNumber = supplierInvoiceNumber,
+                SupplierInvoiceDate = supplierInvoiceDate,
+                FreightCost = freightCost,
+                InsuranceCost = insuranceCost,
+                CustomsDutyCost = customsDutyCost,
+                OtherFeesCost = otherFeesCost,
+                OtherFeesDescription = otherFeesDescription
             };
             _dbContext.PurchaseOrders.Add(po);
             await _dbContext.SaveChangesAsync();
@@ -159,7 +179,8 @@ public class InventoryRepository : IInventoryRepository
             return (po.PoId, "SUCCESS");
     }
 }
-    public async Task<bool> UpdatePurchaseOrderAsync(int poId, int vendorId, decimal totalWeightGrams, decimal totalCost, string currency, string username, string poItemJsonList)
+    public async Task<bool> UpdatePurchaseOrderAsync(int poId, int vendorId, decimal totalWeightGrams, decimal totalCost, string currency, string username, string poItemJsonList,
+        string? supplierInvoiceNumber = null, DateTime? supplierInvoiceDate = null, decimal freightCost = 0, decimal insuranceCost = 0, decimal customsDutyCost = 0, decimal otherFeesCost = 0, string? otherFeesDescription = null)
     {
         var po = await _dbContext.PurchaseOrders.FindAsync(poId);
         if (po == null) return false;
@@ -184,7 +205,14 @@ public class InventoryRepository : IInventoryRepository
         po.TotalWeightGrams = totalWeightGrams;
         po.TotalCost = totalCost;
         po.Currency = currency;
-        
+        po.SupplierInvoiceNumber = supplierInvoiceNumber;
+        po.SupplierInvoiceDate = supplierInvoiceDate;
+        po.FreightCost = freightCost;
+        po.InsuranceCost = insuranceCost;
+        po.CustomsDutyCost = customsDutyCost;
+        po.OtherFeesCost = otherFeesCost;
+        po.OtherFeesDescription = otherFeesDescription;
+
         // Remove existing items and add new ones
         var existingItems = _dbContext.POItems.Where(i => i.PoId == poId);
         _dbContext.POItems.RemoveRange(existingItems);
@@ -297,7 +325,11 @@ public class InventoryRepository : IInventoryRepository
                     throw new InvalidOperationException("Cannot receive shipment: The associated purchase order must be fully approved.");
                 }
                 vendorId = po?.VendorId ?? 1;
-                avgCost = po != null && po.TotalWeightGrams > 0 ? po.TotalCost / po.TotalWeightGrams : 0;
+                // Cost Tracking & Valuation: Average Cost is computed off the full landed cost
+                // (line-item cost + freight/insurance/customs/other fees -- see
+                // PurchaseOrder.LandedCost), not the bare TotalCost, so the fee detail recorded
+                // at PO creation actually feeds the Average Cost Method valuation.
+                avgCost = po != null && po.TotalWeightGrams > 0 ? po.LandedCost / po.TotalWeightGrams : 0;
             }
 
             using var doc = JsonDocument.Parse(serialsJsonList);
@@ -431,6 +463,22 @@ public class InventoryRepository : IInventoryRepository
             {
                 po.StatusCode = "RECEIVED";
                 await _dbContext.SaveChangesAsync();
+
+                // Cost Tracking & Valuation -- Core Banking (IMAL) GL Integration: a supplier
+                // receipt is the point the landed cost (line-item cost + freight/insurance/
+                // customs/other fees) becomes a real liability -- post the standard
+                // Debit Inventory-Precious Metals / Credit Accounts Payable-Vendor journal
+                // entry for it. Optional/nullable adapter (see _coreBanking) -- if none is
+                // configured, intake proceeds exactly as before this feature existed.
+                if (_coreBanking != null && po.LandedCost > 0)
+                {
+                    var vendorForMemo = await _dbContext.Vendors.FindAsync(po.VendorId);
+                    await _coreBanking.PostLedgerEntryAsync(
+                        "PURCHASE_ORDER_RECEIPT", po.PoId,
+                        "INVENTORY_PRECIOUS_METALS", "ACCOUNTS_PAYABLE_VENDOR",
+                        po.LandedCost, po.Currency, receivedBy,
+                        $"Receipt of Lot {lotNumber} ({totalItems} bar(s)) against PO {po.PoNumber} -- {vendorForMemo?.VendorName ?? "Vendor #" + po.VendorId}");
+                }
             }
 
             // Lot-level summary entry (one row per intake batch rather than per bar, to avoid
@@ -955,6 +1003,8 @@ public class InventoryRepository : IInventoryRepository
     }
 
     // Standard catalog access methods
+    public async Task<IEnumerable<MetalType>> GetMetalTypesAsync() => await _dbContext.MetalTypes.OrderBy(m => m.MetalName).ToListAsync();
+
     public async Task<IEnumerable<MetalProduct>> GetProductsAsync() => await _dbContext.MetalProducts.Include(p => p.Denomination).Include(p => p.Purity).Include(p => p.MetalType).ToListAsync();
     public async Task<IEnumerable<Vendor>> GetVendorsAsync() => await _dbContext.Vendors.ToListAsync();
     public async Task<IEnumerable<InventoryLocation>> GetLocationsAsync() => await _dbContext.InventoryLocations.Include(l => l.Vault).Include(l => l.Branch).ToListAsync();
@@ -992,8 +1042,15 @@ public class InventoryRepository : IInventoryRepository
         return true;
     }
 
-    public async Task<IEnumerable<InventoryItem>> GetItemsAsync() => await _dbContext.InventoryItems.Include(i => i.Product).ThenInclude(p => p!.MetalType).Include(i => i.Product).ThenInclude(p => p!.Denomination).Include(i => i.Location).ThenInclude(l => l!.Vault).Include(i => i.Lot).ToListAsync();
+    // Lot.Vendor added for the Reporting Requirements Gap Analysis's Item 8 cost-analysis
+    // rollup (cost by vendor) -- purely additive eager-load, no existing caller is affected.
+    public async Task<IEnumerable<InventoryItem>> GetItemsAsync() => await _dbContext.InventoryItems.Include(i => i.Product).ThenInclude(p => p!.MetalType).Include(i => i.Product).ThenInclude(p => p!.Denomination).Include(i => i.Location).ThenInclude(l => l!.Vault).Include(i => i.Lot).ThenInclude(l => l!.Vendor).ToListAsync();
     public async Task<IEnumerable<PurchaseOrder>> GetPurchaseOrdersAsync() => await _dbContext.PurchaseOrders.Include(p => p.Vendor).Include(p => p.Items).ThenInclude(i => i.Product).ToListAsync();
+
+    // Cost Tracking & Valuation -- Core Banking (IMAL) GL Integration: every posting PMIMS
+    // has pushed (or attempted to push), newest first.
+    public async Task<IEnumerable<CoreBankingLedgerPosting>> GetCoreBankingPostingsAsync() =>
+        await _dbContext.CoreBankingLedgerPostings.OrderByDescending(p => p.CreatedAt).ToListAsync();
 
     // Hard delete of a Purchase Order -- reserved for IT/Admin cleanup of erroneous/test
     // records (there's no "undo" here, unlike REJECTED which preserves the audit trail).
@@ -2445,6 +2502,54 @@ public class InventoryRepository : IInventoryRepository
     }
 
     // =========================================================================
+    // Sidebar Menu Layout (admin-arrangeable navigation order)
+    // =========================================================================
+    public async Task<SidebarMenuLayout?> GetSidebarMenuLayoutAsync() =>
+        await _dbContext.SidebarMenuLayouts.FirstOrDefaultAsync(l => l.Id == 1);
+
+    public async Task<SidebarMenuLayout> SaveSidebarMenuLayoutAsync(string orderJson, string updatedBy)
+    {
+        var existing = await _dbContext.SidebarMenuLayouts.FirstOrDefaultAsync(l => l.Id == 1);
+        if (existing == null)
+        {
+            existing = new SidebarMenuLayout { Id = 1, OrderJson = orderJson, UpdatedBy = updatedBy, UpdatedAt = DateTime.UtcNow };
+            _dbContext.SidebarMenuLayouts.Add(existing);
+        }
+        else
+        {
+            existing.OrderJson = orderJson;
+            existing.UpdatedBy = updatedBy;
+            existing.UpdatedAt = DateTime.UtcNow;
+        }
+        await _dbContext.SaveChangesAsync();
+        return existing;
+    }
+
+    // =========================================================================
+    // Barcode/QR Code Tracking (RFP Section 3) -- same Product/Lot/Location include
+    // chain as GetItemsAsync, scoped to a single item or lot for label generation.
+    // =========================================================================
+    private IQueryable<InventoryItem> ItemsWithLabelDetails() =>
+        _dbContext.InventoryItems
+            .Include(i => i.Product).ThenInclude(p => p!.MetalType)
+            .Include(i => i.Product).ThenInclude(p => p!.Denomination)
+            .Include(i => i.Product).ThenInclude(p => p!.Purity)
+            .Include(i => i.Location).ThenInclude(l => l!.Vault)
+            .Include(i => i.Lot).ThenInclude(l => l!.Vendor);
+
+    public async Task<InventoryItem?> GetItemBySerialNumberAsync(string serialNumber) =>
+        await ItemsWithLabelDetails().FirstOrDefaultAsync(i => i.SerialNumber == serialNumber);
+
+    public async Task<InventoryItem?> GetItemByIdWithDetailsAsync(int itemId) =>
+        await ItemsWithLabelDetails().FirstOrDefaultAsync(i => i.ItemId == itemId);
+
+    public async Task<InventoryLot?> GetLotByNumberAsync(string lotNumber) =>
+        await _dbContext.InventoryLots.Include(l => l.Vendor).FirstOrDefaultAsync(l => l.LotNumber == lotNumber);
+
+    public async Task<IEnumerable<InventoryItem>> GetItemsByLotIdAsync(int lotId) =>
+        await ItemsWithLabelDetails().Where(i => i.LotId == lotId).OrderBy(i => i.SerialNumber).ToListAsync();
+
+    // =========================================================================
     // Auditable, traceable movement records
     // ------------------------------------------------------------------------
     // Replaces the previous pattern (ReconciliationService quarantine/resolve
@@ -2830,6 +2935,68 @@ public class InventoryRepository : IInventoryRepository
         if (txn.Item?.LocationId != null)
             await RecalculateInventoryBalanceAsync(txn.Item.LocationId.Value, txn.Item.ProductId, txn.Item.OwnershipType);
 
+        return true;
+    }
+
+    // =========================================================================
+    // Reporting Requirements Gap Analysis -- read-side aggregation support for
+    // KPIs (Item 4), the Exceptions report (Item 5), Cost Analysis & Variance
+    // (Item 8), and the Movement report (Item 9). See
+    // PMIMSControllers.Reports.cs / PMIMSControllers.Admin.cs for the endpoints
+    // that consume these, and docs/PMIMS_Reporting_Requirements_Gap_Analysis.docx
+    // for the design this implements.
+    // =========================================================================
+
+    public async Task<IEnumerable<BusinessRuleEvaluation>> GetBusinessRuleEvaluationsAsync(DateTime? from = null, DateTime? to = null, string? result = null)
+    {
+        var query = _dbContext.BusinessRuleEvaluations.Include(e => e.Rule).AsQueryable();
+        if (from.HasValue) query = query.Where(e => e.EvaluatedAt >= from.Value);
+        if (to.HasValue) query = query.Where(e => e.EvaluatedAt < to.Value);
+        if (!string.IsNullOrWhiteSpace(result)) query = query.Where(e => e.Result == result);
+        return await query.OrderByDescending(e => e.EvaluatedAt).ToListAsync();
+    }
+
+    public async Task<IEnumerable<ApprovalAction>> GetAllApprovalActionsAsync(DateTime? from = null, DateTime? to = null)
+    {
+        var query = _dbContext.ApprovalActions.Include(a => a.Instance).AsQueryable();
+        if (from.HasValue) query = query.Where(a => a.ActionTimestamp >= from.Value);
+        if (to.HasValue) query = query.Where(a => a.ActionTimestamp < to.Value);
+        return await query.OrderByDescending(a => a.ActionTimestamp).ToListAsync();
+    }
+
+    public async Task<IEnumerable<CostBudget>> GetCostBudgetsAsync() =>
+        await _dbContext.CostBudgets.Include(b => b.MetalType).OrderByDescending(b => b.Period).ToListAsync();
+
+    public async Task<CostBudget> SaveCostBudgetAsync(CostBudget budget)
+    {
+        if (budget.BudgetId > 0)
+        {
+            var existing = await _dbContext.CostBudgets.FindAsync(budget.BudgetId)
+                ?? throw new InvalidOperationException("Cost budget not found.");
+            existing.MetalTypeId = budget.MetalTypeId;
+            existing.Period = budget.Period;
+            existing.BudgetedUnitCostPerGram = budget.BudgetedUnitCostPerGram;
+            existing.Currency = budget.Currency;
+            await _dbContext.SaveChangesAsync();
+            await _dbContext.Entry(existing).Reference(b => b.MetalType).LoadAsync();
+            return existing;
+        }
+        else
+        {
+            budget.CreatedAt = DateTime.UtcNow;
+            _dbContext.CostBudgets.Add(budget);
+            await _dbContext.SaveChangesAsync();
+            await _dbContext.Entry(budget).Reference(b => b.MetalType).LoadAsync();
+            return budget;
+        }
+    }
+
+    public async Task<bool> DeleteCostBudgetAsync(int budgetId)
+    {
+        var budget = await _dbContext.CostBudgets.FindAsync(budgetId);
+        if (budget == null) return false;
+        _dbContext.CostBudgets.Remove(budget);
+        await _dbContext.SaveChangesAsync();
         return true;
     }
 }

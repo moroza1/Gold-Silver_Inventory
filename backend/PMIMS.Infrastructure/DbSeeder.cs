@@ -267,7 +267,7 @@ public static class DbSeeder
         // while being denied the authority to create/delete physical shelf locations.
         // RFP items 5-8 (rules_engine, notifications, monitoring) are new admin-tier
         // modules, same governance tier as vault_location/master_data/workflow_design.
-        var allModules = new[] { "dashboard", "pending_actions", "purchase_orders", "spatial_map", "custody", "stocktake", "migration", "reports", "workflows", "settings", "user_admin", "vault_location", "master_data", "workflow_design", "intake", "rules_engine", "notifications", "monitoring", "dispensing", "device_integration" };
+        var allModules = new[] { "dashboard", "pending_actions", "purchase_orders", "spatial_map", "custody", "stocktake", "migration", "reports", "workflows", "settings", "user_admin", "vault_location", "master_data", "workflow_design", "intake", "rules_engine", "notifications", "monitoring", "dispensing", "device_integration", "barcode_qr_labeling" };
 
         var grpMaker = new PrivilegeGroup { GroupName = "Treasury Operations (Maker)", Description = "Initiates purchase orders, transfers, and branch operations.", IsSystem = true };
         var grpChecker = new PrivilegeGroup { GroupName = "Treasury Operations (Checker)", Description = "Reviews and approves purchase orders and intake verifications.", IsSystem = true };
@@ -287,7 +287,10 @@ public static class DbSeeder
             {"rules_engine","HIDDEN"}, {"notifications","HIDDEN"}, {"monitoring","HIDDEN"},
             // Treasury Ops monitor/operate GDM dispense activity (view + manual fail/retry),
             // but device registration/decommissioning is admin-only infrastructure work.
-            {"dispensing","FULL"}, {"device_integration","HIDDEN"}
+            {"dispensing","FULL"}, {"device_integration","HIDDEN"},
+            // Vault team maker generates/prints GS1-128 + QR labels at intake/transfer,
+            // same tier as intake/dispensing.
+            {"barcode_qr_labeling","FULL"}
         };
         var checkerPerms = new Dictionary<string, string> {
             {"dashboard","READ_ONLY"}, {"pending_actions","FULL"}, {"purchase_orders","READ_ONLY"}, {"spatial_map","READ_ONLY"},
@@ -296,7 +299,8 @@ public static class DbSeeder
             {"vault_location","HIDDEN"}, {"master_data","HIDDEN"}, {"workflow_design","HIDDEN"},
             {"intake","READ_ONLY"}, // Vault team checker has read-only access (they approve via workflows)
             {"rules_engine","HIDDEN"}, {"notifications","HIDDEN"}, {"monitoring","HIDDEN"},
-            {"dispensing","READ_ONLY"}, {"device_integration","HIDDEN"}
+            {"dispensing","READ_ONLY"}, {"device_integration","HIDDEN"},
+            {"barcode_qr_labeling","READ_ONLY"}
         };
         var reconPerms = new Dictionary<string, string> {
             {"dashboard","READ_ONLY"}, {"pending_actions","FULL"}, {"purchase_orders","READ_ONLY"}, {"spatial_map","READ_ONLY"},
@@ -308,7 +312,8 @@ public static class DbSeeder
             // metrics (relevant to break investigation) but not author rules or
             // configure email distribution lists.
             {"rules_engine","READ_ONLY"}, {"notifications","HIDDEN"}, {"monitoring","READ_ONLY"},
-            {"dispensing","READ_ONLY"}, {"device_integration","HIDDEN"}
+            {"dispensing","READ_ONLY"}, {"device_integration","HIDDEN"},
+            {"barcode_qr_labeling","READ_ONLY"}
         };
         var adminPerms = new Dictionary<string, string> {
             {"dashboard","FULL"}, {"pending_actions","FULL"}, {"purchase_orders","FULL"}, {"spatial_map","FULL"},
@@ -317,7 +322,7 @@ public static class DbSeeder
             {"vault_location","FULL"}, {"master_data","FULL"}, {"workflow_design","FULL"},
             {"intake","FULL"},
             {"rules_engine","FULL"}, {"notifications","FULL"}, {"monitoring","FULL"},
-            {"dispensing","FULL"}, {"device_integration","FULL"}
+            {"dispensing","FULL"}, {"device_integration","FULL"}, {"barcode_qr_labeling","FULL"}
         };
 
         foreach (var kv in makerPerms)
@@ -437,6 +442,18 @@ public static class DbSeeder
             RegisteredBy = "SYSTEM"
         };
         context.DispensingDevices.Add(demoDevice);
+
+        // 25. Reporting Requirements Gap Analysis -- Cost Analysis & Variance (Item 8) demo
+        // budget baseline, current calendar month, so the cost-variance report has a
+        // comparison figure out of the box instead of showing "no budget configured" on a
+        // freshly seeded database. Gold/Silver per-gram figures are illustrative KWD placeholders
+        // for demo purposes only -- Finance/Treasury owns the real figures via the
+        // master_data.write-gated cost-budgets endpoint.
+        string currentPeriod = DateTime.UtcNow.ToString("yyyy-MM");
+        context.CostBudgets.AddRange(
+            new CostBudget { MetalTypeId = gold.MetalTypeId, Period = currentPeriod, BudgetedUnitCostPerGram = 24.50m, Currency = "KWD", CreatedBy = "SYSTEM" },
+            new CostBudget { MetalTypeId = silver.MetalTypeId, Period = currentPeriod, BudgetedUnitCostPerGram = 0.30m, Currency = "KWD", CreatedBy = "SYSTEM" }
+        );
 
         await context.SaveChangesAsync();
     }

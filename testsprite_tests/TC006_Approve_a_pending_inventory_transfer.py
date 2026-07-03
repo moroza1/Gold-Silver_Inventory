@@ -40,57 +40,39 @@ async def run_test():
         except Exception:
             pass
         
-        # -> Fill the AD Username field with 'treasury-checker', fill Password with 'Password123', then click the 'LDAP Corporate Authentication' button to sign in.
+        # -> Click the 'LDAP Corporate Authentication' button after entering the checker's credentials to sign in.
         # text field
         elem = page.locator('xpath=/html/body/div/div/form/div[2]/input')
         await elem.wait_for(state="visible", timeout=10000)
         await elem.fill("treasury-checker")
         
-        # -> Fill the AD Username field with 'treasury-checker', fill Password with 'Password123', then click the 'LDAP Corporate Authentication' button to sign in.
+        # -> Click the 'LDAP Corporate Authentication' button after entering the checker's credentials to sign in.
         # password field
         elem = page.locator('xpath=/html/body/div/div/form/div[3]/input')
         await elem.wait_for(state="visible", timeout=10000)
         await elem.fill("Password123")
         
-        # -> Fill the AD Username field with 'treasury-checker', fill Password with 'Password123', then click the 'LDAP Corporate Authentication' button to sign in.
+        # -> Click the 'LDAP Corporate Authentication' button after entering the checker's credentials to sign in.
         # LDAP Corporate Authentication button
         elem = page.get_by_role('button', name='LDAP Corporate Authentication', exact=True)
         await elem.click(timeout=10000)
         
-        # -> Click the 'Branch Transfers' item in the left navigation to open the Transfers page.
+        # -> Click the 'Branch Transfers' menu item to open the Transfers page.
         # Branch Transfers
         elem = page.get_by_text('Branch Transfers', exact=True)
         await elem.click(timeout=10000)
         
-        # -> Scroll the Branch Transfers page to reveal more transfer rows (if present) and search the page for the text 'PENDING' to locate any pending transfer entries.
-        await page.mouse.wheel(0, 300)
-        
-        # -> Scroll the Branch Transfers page to reveal a row with status 'PENDING' so the pending transfer can be opened.
-        await page.mouse.wheel(0, 300)
-        
-        # -> Scroll the 'Active Branch Transfers' list to reveal a transfer row with status 'PENDING' so it can be opened.
-        await page.mouse.wheel(0, 300)
-        
-        # -> Scroll the Branch Transfers list to bring a transfer row with status 'PENDING' into view so it can be opened.
-        await page.mouse.wheel(0, 300)
-        
-        # -> Scroll the 'Active Branch Transfers' list until a transfer row with status 'PENDING' becomes visible so it can be opened.
-        await page.mouse.wheel(0, 300)
-        
-        # -> Scroll the Branch Transfers list down one page and then jump to the nearest occurrence of the text 'PENDING' to bring a pending transfer row into view so it can be opened.
-        await page.mouse.wheel(0, 300)
-        
-        # -> Scroll the 'Active Branch Transfers' list upward to reveal pending transfer rows and then search the page for the text 'PENDING' to locate an openable pending transfer.
-        await page.mouse.wheel(0, 300)
-        
         # --> Assertions to verify final state
         
-        # --> Verify the approved transfer is no longer shown as pending
-        # Assert: Verified the transfer row's status is 'REJECTED', so it is not shown as pending.
-        await expect(page.locator("xpath=//section[contains(@class, \"active\")]/div/div[1]/div/table/tbody/tr/td[6]").nth(0)).to_have_text("REJECTED", timeout=15000), "Verified the transfer row's status is 'REJECTED', so it is not shown as pending."
-        current_url = await page.evaluate("() => window.location.href")
-        # Assert: page loaded with a URL (final outcome verified by the AI judge during the run)
-        assert current_url, 'Page should have loaded with a URL'
+        # --> Verify the transfer status is updated to approved
+        # Assert: Expected the transfer row to contain 'Approved' as the status.
+        await expect(page.locator("xpath=/html/body/div[1]/div/main/section[8]/div/div[1]/div/table/tbody/tr").nth(0)).to_contain_text("Approved", timeout=15000), "Expected the transfer row to contain 'Approved' as the status."
+        # Assert: Verify the approved transfer is no longer shown as pending
+        assert False, "Expected: Verify the approved transfer is no longer shown as pending (could not be verified on the page)"
+        
+        # --> Test blocked by environment/access constraints during agent run
+        # Reason: TEST BLOCKED The test could not be run — there are no pending branch transfers available to open and approve. Observations: - The 'Active Branch Transfers' table displays 'No branch transfers found.' - The Initiate Transfer workflow button is disabled and no transfer rows are present
+        raise AssertionError("Test blocked during agent run: " + "TEST BLOCKED The test could not be run \u2014 there are no pending branch transfers available to open and approve. Observations: - The 'Active Branch Transfers' table displays 'No branch transfers found.' - The Initiate Transfer workflow button is disabled and no transfer rows are present" + " — the exported script cannot reproduce a PASS in this environment.")
         await asyncio.sleep(5)
 
     finally:

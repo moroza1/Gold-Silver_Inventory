@@ -8,8 +8,13 @@ namespace PMIMS.Application;
 public interface IInventoryRepository
 {
     // Stored Procedure operations
-    Task<(int poId, string result)> CreatePurchaseOrderAsync(string poNumber, int vendorId, decimal totalWeightGrams, decimal totalCost, string currency, string createdBy, string poItemJsonList);
-    Task<bool> UpdatePurchaseOrderAsync(int poId, int vendorId, decimal totalWeightGrams, decimal totalCost, string currency, string username, string poItemJsonList);
+    // supplierInvoiceNumber/supplierInvoiceDate + the four fee fields are the Cost Tracking &
+    // Valuation purchase-cost-detail additions (see PurchaseOrder.LandedCost) -- appended as
+    // optional params so every existing positional call site keeps compiling unchanged.
+    Task<(int poId, string result)> CreatePurchaseOrderAsync(string poNumber, int vendorId, decimal totalWeightGrams, decimal totalCost, string currency, string createdBy, string poItemJsonList,
+        string? supplierInvoiceNumber = null, DateTime? supplierInvoiceDate = null, decimal freightCost = 0, decimal insuranceCost = 0, decimal customsDutyCost = 0, decimal otherFeesCost = 0, string? otherFeesDescription = null);
+    Task<bool> UpdatePurchaseOrderAsync(int poId, int vendorId, decimal totalWeightGrams, decimal totalCost, string currency, string username, string poItemJsonList,
+        string? supplierInvoiceNumber = null, DateTime? supplierInvoiceDate = null, decimal freightCost = 0, decimal insuranceCost = 0, decimal customsDutyCost = 0, decimal otherFeesCost = 0, string? otherFeesDescription = null);
     // sourceType: "SUPPLIER" (default, requires poId) or "CUSTOMER" (requires customerId;
     // receiptReason of BUYBACK/RETURN -> KFH_OWNED, CUSTODY_DEPOSIT -> CUSTOMER_OWNED + custody holding).
     Task<string> IntakeInventoryItemsAsync(int? poId, string lotNumber, int locationId, string receivedBy, string serialsJsonList,
@@ -24,6 +29,10 @@ public interface IInventoryRepository
     Task<string> ImportMigrationDataAsync(int migrationLogID, string approvedBy);
 
     // Metadata management & seed records
+    // Reference lookup for the Reporting Requirements Gap Analysis's Item 8 cost-budget
+    // admin form (metal type picker) -- no dedicated metal-type listing endpoint existed
+    // before (GetProductsAsync's DTO exposes metal_name but not the underlying MetalTypeId).
+    Task<IEnumerable<MetalType>> GetMetalTypesAsync();
     Task<IEnumerable<MetalProduct>> GetProductsAsync();
     Task<IEnumerable<Vendor>> GetVendorsAsync();
     Task<IEnumerable<InventoryLocation>> GetLocationsAsync();
@@ -170,6 +179,21 @@ public interface IInventoryRepository
     Task<IEnumerable<dynamic>> GetLbmaComplianceReportAsync();
 
     // =========================================================================
+    // Sidebar Menu Layout (admin-arrangeable navigation order)
+    // =========================================================================
+    Task<SidebarMenuLayout?> GetSidebarMenuLayoutAsync();
+    Task<SidebarMenuLayout> SaveSidebarMenuLayoutAsync(string orderJson, string updatedBy);
+
+    // =========================================================================
+    // Barcode/QR Code Tracking (RFP Section 3) -- single-item/lot lookups with the
+    // Product/Lot/Location include chain BarcodeLabelService needs to build a label.
+    // =========================================================================
+    Task<InventoryItem?> GetItemBySerialNumberAsync(string serialNumber);
+    Task<InventoryItem?> GetItemByIdWithDetailsAsync(int itemId);
+    Task<InventoryLot?> GetLotByNumberAsync(string lotNumber);
+    Task<IEnumerable<InventoryItem>> GetItemsByLotIdAsync(int lotId);
+
+    // =========================================================================
     // Auditable, traceable movement records
     // ------------------------------------------------------------------------
     // Every status-changing adjustment to an item that ISN'T already a
@@ -203,6 +227,38 @@ public interface IInventoryRepository
     Task<(DispenseTransaction? txn, string result)> RequestDispenseAsync(int deviceId, int productId, int? customerId, int channelId, string idempotencyKey, string initiatedBy);
     Task<(bool success, string result)> CompleteDispenseAsync(int dispenseId, string completedBy);
     Task<bool> FailDispenseAsync(int dispenseId, string reason);
+
+    // =========================================================================
+    // Cost Tracking & Valuation -- Core Banking (IMAL) GL Integration
+    // =========================================================================
+    // Every GL posting PMIMS has pushed (or attempted to push) to Core Banking,
+    // newest first -- see CoreBankingLedgerPosting and ICoreBankingLedgerService.
+    Task<IEnumerable<CoreBankingLedgerPosting>> GetCoreBankingPostingsAsync();
+
+    // =========================================================================
+    // Reporting Requirements Gap Analysis -- read-side aggregation support for
+    // KPIs (Item 4), the Exceptions report (Item 5), Cost Analysis & Variance
+    // (Item 8), and the Movement report (Item 9). Purely additive: every method
+    // here is a new read (or, for cost budgets, a small new admin-configured
+    // table) layered on data every other module already writes -- no existing
+    // write path changes. See docs/PMIMS_Reporting_Requirements_Gap_Analysis.docx.
+    // =========================================================================
+
+    // Rule Engine evaluation history (Item 4's error-rate KPI, Item 5's rule-block
+    // exceptions feed). SaveBusinessRuleEvaluationAsync above is write-only today --
+    // this is the first read path over business_rule_evaluations.
+    Task<IEnumerable<BusinessRuleEvaluation>> GetBusinessRuleEvaluationsAsync(DateTime? from = null, DateTime? to = null, string? result = null);
+
+    // Every Maker-Checker decision across every user/instance (GetApprovalActionsByUserAsync
+    // is scoped to one user; GetApprovalActionsForInstanceAsync to one instance) -- needed to
+    // compute Item 4's approval-cycle-time KPI across the whole workflow population.
+    Task<IEnumerable<ApprovalAction>> GetAllApprovalActionsAsync(DateTime? from = null, DateTime? to = null);
+
+    // Cost Analysis & Variance (Item 8) -- budgeted/standard unit cost per metal type per
+    // period, configured by Finance/Treasury (master_data tier, same as reorder thresholds).
+    Task<IEnumerable<CostBudget>> GetCostBudgetsAsync();
+    Task<CostBudget> SaveCostBudgetAsync(CostBudget budget);
+    Task<bool> DeleteCostBudgetAsync(int budgetId);
 }
 
 public interface IActiveDirectoryService
@@ -271,6 +327,22 @@ public interface IReconciliationService
 {
     Task<ReconciliationRun> RunReconciliationAsync(string executedBy);
     Task<bool> ResolveMismatchAsync(int caseId, string comments, string reasonCode, string resolvedBy);
+}
+
+// ============================================================
+// Cost Tracking & Valuation -- Core Banking (IMAL) GL Integration adapter.
+// Same "adapter, not vendor lock-in" shape as IMonitoringAdapter -- posts one
+// journal entry and returns the durable local record of the attempt
+// (CoreBankingLedgerPosting), so callers (InventoryRepository) don't need to
+// know whether the entry was actually accepted by a live Core Banking
+// endpoint or simulated locally (no endpoint configured yet). Optional/
+// nullable at every injection point, same pattern as IRateFeedService, so
+// this is purely additive -- a caller/test that never supplies an
+// implementation just doesn't get GL postings.
+// ============================================================
+public interface ICoreBankingLedgerService
+{
+    Task<CoreBankingLedgerPosting> PostLedgerEntryAsync(string sourceType, int sourceId, string debitAccount, string creditAccount, decimal amount, string currency, string initiatedBy, string? memo = null);
 }
 
 public interface IBulkMigrationService

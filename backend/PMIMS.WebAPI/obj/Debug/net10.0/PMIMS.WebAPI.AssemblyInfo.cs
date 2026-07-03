@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("PMIMS.WebAPI")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+811960d4421338ffa4fc6dcd936ab5a7d60f4634")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+c94afd7a9110175234776e9d1d4eb1ca7b2f27d3")]
 [assembly: System.Reflection.AssemblyProductAttribute("PMIMS.WebAPI")]
 [assembly: System.Reflection.AssemblyTitleAttribute("PMIMS.WebAPI")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

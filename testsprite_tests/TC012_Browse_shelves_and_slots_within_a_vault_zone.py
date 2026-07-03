@@ -40,37 +40,44 @@ async def run_test():
         except Exception:
             pass
         
-        # -> Fill the 'AD Username' field with 'system-admin', fill the 'Password' field with 'Password123', and click the 'LDAP Corporate Authentication' button to sign in.
+        # -> Submit the sign-in form by clicking the 'LDAP Corporate Authentication' button
         # text field
         elem = page.locator('xpath=/html/body/div/div/form/div[2]/input')
         await elem.wait_for(state="visible", timeout=10000)
         await elem.fill("system-admin")
         
-        # -> Fill the 'AD Username' field with 'system-admin', fill the 'Password' field with 'Password123', and click the 'LDAP Corporate Authentication' button to sign in.
+        # -> Submit the sign-in form by clicking the 'LDAP Corporate Authentication' button
         # password field
         elem = page.locator('xpath=/html/body/div/div/form/div[3]/input')
         await elem.wait_for(state="visible", timeout=10000)
         await elem.fill("Password123")
         
-        # -> Fill the 'AD Username' field with 'system-admin', fill the 'Password' field with 'Password123', and click the 'LDAP Corporate Authentication' button to sign in.
+        # -> Submit the sign-in form by clicking the 'LDAP Corporate Authentication' button
         # LDAP Corporate Authentication button
         elem = page.get_by_role('button', name='LDAP Corporate Authentication', exact=True)
         await elem.click(timeout=10000)
         
-        # -> Click the 'Vault Spatial Map' navigation link in the left-hand menu to open the spatial vault map view.
+        # -> Click the 'Vault Spatial Map' navigation link
         # Vault Spatial Map
-        elem = page.locator('xpath=/html/body/div/div/aside/nav/div[6]')
+        elem = page.get_by_text('Vault Spatial Map', exact=True)
         await elem.click(timeout=10000)
         
-        # -> Click the 'Main Vault Zone Alpha - الرف صف 1' zone card to select that vault zone and reveal its shelf rows.
-        # Main Vault Zone Alpha - الرف صف 1 23 %
-        elem = page.get_by_text('Main Vault Zone Alpha - الرف صف 1 23%', exact=True)
+        # -> Select the vault zone by clicking the 'Main Vault Zone Alpha - الرف صف 1' header to open that zone.
+        # Main Vault Zone Alpha - الرف صف 1
+        elem = page.get_by_text('Main Vault Zone Alpha - الرف صف 1', exact=True)
         await elem.click(timeout=10000)
         
-        # --> Test passed — verified by AI agent
-        frame = context.pages[-1]
-        current_url = await frame.evaluate("() => window.location.href")
-        assert current_url is not None, "Test completed successfully"
+        # --> Assertions to verify final state
+        
+        # --> Verify shelves for the selected zone are displayed
+        # Assert: Shelf details modal for 'Main Vault Zone Alpha - Shelf Row 1' is visible.
+        await expect(page.locator("xpath=/html/body/div[1]/div/main/section[10]/div[2]").nth(0)).to_contain_text("Main Vault Zone Alpha - Shelf Row 1", timeout=15000), "Shelf details modal for 'Main Vault Zone Alpha - Shelf Row 1' is visible."
+        await page.locator("xpath=/html/body/div[1]/div/main/section[10]/div[2]/div/div[2]/table/tbody/tr[1]").nth(0).scroll_into_view_if_needed()
+        # Assert: At least one slot row (Slot 1) is visible in the shelf details, indicating shelves for the selected zone are displayed.
+        await expect(page.locator("xpath=/html/body/div[1]/div/main/section[10]/div[2]/div/div[2]/table/tbody/tr[1]").nth(0)).to_be_visible(timeout=15000), "At least one slot row (Slot 1) is visible in the shelf details, indicating shelves for the selected zone are displayed."
+        current_url = await page.evaluate("() => window.location.href")
+        # Assert: page loaded with a URL (final outcome verified by the AI judge during the run)
+        assert current_url, 'Page should have loaded with a URL'
         await asyncio.sleep(5)
 
     finally:

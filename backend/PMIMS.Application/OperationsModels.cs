@@ -92,6 +92,46 @@ public class DetailedHealthStatus
     public Dictionary<string, string> Dependencies { get; set; } = new(); // e.g. "Database" -> "Healthy"
 }
 
+// ---- Barcode/QR Code Tracking (RFP Section 3) ----
+// One label per serialized bar: a GS1-128 barcode (Application Identifiers 01/10/21)
+// plus an ISO/IEC 18004 QR code carrying the same GS1 data in its conventional
+// parenthesized "human readable interpretation" form. See BarcodeLabelService for the
+// encoding details and the honesty note on the GTIN company-prefix placeholder.
+public class BarcodeLabelDto
+{
+    public int ItemId { get; set; }
+    public string SerialNumber { get; set; } = null!;
+    public string ProductLabel { get; set; } = null!;
+    public string Gtin14 { get; set; } = null!;
+    public string? LotNumber { get; set; }
+    public string OwnershipType { get; set; } = null!;
+    public string StatusCode { get; set; } = null!;
+    public string? LocationDescription { get; set; }
+    // Machine-encoded content actually stored in the symbols (contains the raw FNC1
+    // control character for the barcode's GS1-128 encoding).
+    public string Gs1ElementString { get; set; } = null!;
+    // Printable "(01)...(10)...(21)..." representation for the label's text line.
+    public string Gs1HumanReadable { get; set; } = null!;
+    public string BarcodeSvg { get; set; } = null!;
+    public string QrCodeSvg { get; set; } = null!;
+}
+
+public class LotLabelSheetDto
+{
+    public int LotId { get; set; }
+    public string LotNumber { get; set; } = null!;
+    public string? VendorName { get; set; }
+    public DateTime AcquisitionDate { get; set; }
+    public List<BarcodeLabelDto> Labels { get; set; } = new();
+}
+
+public interface IBarcodeLabelService
+{
+    Task<BarcodeLabelDto?> GenerateItemLabelAsync(string serialNumber);
+    Task<BarcodeLabelDto?> GenerateItemLabelByIdAsync(int itemId);
+    Task<LotLabelSheetDto?> GenerateLotLabelSheetAsync(string lotNumber);
+}
+
 // ============================================================
 // Service interfaces (items 5-8)
 // ============================================================

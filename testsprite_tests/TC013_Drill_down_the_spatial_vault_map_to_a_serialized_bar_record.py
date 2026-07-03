@@ -40,65 +40,66 @@ async def run_test():
         except Exception:
             pass
         
-        # -> Fill the 'AD Username' field with 'system-admin', fill the 'Password' field with 'Password123', then click the 'LDAP Corporate Authentication' button to submit the sign-in form.
+        # -> Fill 'system-admin' into the AD Username field, fill 'Password123' into the Password field, then click the 'LDAP Corporate Authentication' button.
         # text field
         elem = page.locator('xpath=/html/body/div/div/form/div[2]/input')
         await elem.wait_for(state="visible", timeout=10000)
         await elem.fill("system-admin")
         
-        # -> Fill the 'AD Username' field with 'system-admin', fill the 'Password' field with 'Password123', then click the 'LDAP Corporate Authentication' button to submit the sign-in form.
+        # -> Fill 'system-admin' into the AD Username field, fill 'Password123' into the Password field, then click the 'LDAP Corporate Authentication' button.
         # password field
         elem = page.locator('xpath=/html/body/div/div/form/div[3]/input')
         await elem.wait_for(state="visible", timeout=10000)
         await elem.fill("Password123")
         
-        # -> Fill the 'AD Username' field with 'system-admin', fill the 'Password' field with 'Password123', then click the 'LDAP Corporate Authentication' button to submit the sign-in form.
+        # -> Fill 'system-admin' into the AD Username field, fill 'Password123' into the Password field, then click the 'LDAP Corporate Authentication' button.
         # LDAP Corporate Authentication button
         elem = page.get_by_role('button', name='LDAP Corporate Authentication', exact=True)
         await elem.click(timeout=10000)
         
-        # -> Click the 'Vault Spatial Map' item in the left-hand navigation to open the Spatial Map page.
+        # -> Click the 'Vault Spatial Map' menu item in the left navigation to open the spatial map page.
         # Vault Spatial Map
-        elem = page.get_by_text('Vault Spatial Map', exact=True)
+        elem = page.locator('xpath=/html/body/div/div/aside/nav/div[8]')
         await elem.click(timeout=10000)
         
-        # -> Click the 'Main Vault Zone Alpha - الرف صف 1' zone card to select/expand it, then click the 'Slot 2: CH-88371-92' slot tile to open the serialized bar details and view the location context.
+        # -> Click the shelf card titled 'Main Vault Zone Alpha - الرف صف 1' to open that shelf's slot contents.
         # Main Vault Zone Alpha - الرف صف 1
         elem = page.get_by_text('Main Vault Zone Alpha - الرف صف 1', exact=True)
         await elem.click(timeout=10000)
         
-        # -> Click the 'Main Vault Zone Alpha - الرف صف 1' zone card to select/expand it, then click the 'Slot 2: CH-88371-92' slot tile to open the serialized bar details and view the location context.
-        # Slot 2: CH-88371-92
-        elem = page.get_by_text('Slot 2: CH-88371-92', exact=True)
+        # -> Click the 'Slot 1' row in the shelf details table to attempt to open its inventory details.
+        # Slot 1 Empty - Delete
+        elem = page.get_by_text('Slot 1 Empty - Delete', exact=True)
         await elem.click(timeout=10000)
         
-        # -> Click the 'CH-88371-92' bar serial number in the shelf details table to open the serialized bar inventory details for review.
-        # CH-88371-92
-        elem = page.locator('xpath=//section[contains(@class, \"active\")]/div[2]/div/div[2]/table/tbody/tr[2]/td[2]')
+        # -> Close the 'Shelf details: Main Vault Zone Alpha - Shelf Row 1' modal by clicking the modal's close 'X' button so other shelf cards can be selected.
+        # ×
+        elem = page.locator('xpath=/html/body/div/div/main/section[10]/div[2]/div/div/span')
         await elem.click(timeout=10000)
         
-        # -> Click the 'CH-88371-92' bar serial number in the shelf details table to open its serialized bar inventory details.
-        # CH-88371-92
-        elem = page.locator('xpath=//section[contains(@class, \"active\")]/div[2]/div/div[2]/table/tbody/tr[2]/td[2]')
+        # -> Click the shelf card titled 'Main Vault Zone Alpha - الرف صف 2' to open that shelf's slot contents and check for occupied slots.
+        # Main Vault Zone Alpha - الرف صف 2
+        elem = page.get_by_text('Main Vault Zone Alpha - الرف صف 2', exact=True)
         await elem.click(timeout=10000)
         
-        # -> Click the 'CH-88371-92' bar serial number in the shelf details modal to attempt to open the serialized bar inventory details for review.
-        # CH-88371-92
-        elem = page.locator('xpath=//section[contains(@class, \"active\")]/div[2]/div/div[2]/table/tbody/tr[2]/td[2]')
-        await elem.click(timeout=10000)
-        
-        # -> Click the table row for 'Slot 2' (the row showing 'CH-88371-92') in the Shelf details modal to attempt opening the serialized bar details.
-        # Slot 2 CH-88371-92 Gold - 1 Kilogram Bar View Delete
-        elem = page.locator('.modal-overlay tr:has-text("CH-88371-92")')
+        # -> Close the 'Shelf details: Main Vault Zone Alpha - Shelf Row 2' modal by clicking the modal's '×' close button so other shelf cards can be selected.
+        # ×
+        elem = page.locator('xpath=/html/body/div/div/main/section[10]/div[2]/div/div/span')
         await elem.click(timeout=10000)
         
         # --> Assertions to verify final state
         
         # --> Verify the selected location context is displayed
-        # Assert: Expected the shelf details header to display the selected slot 'Slot 2'.
-        await expect(page.locator("xpath=//section[contains(@class, \"active\")]/div[2]").nth(0)).to_contain_text("Slot 2", timeout=15000), "Expected the shelf details header to display the selected slot 'Slot 2'."
+        # Assert: Expected the selected location header to include the slot identifier.
+        await expect(page.locator("xpath=/html/body/div/div/main/section[10]/div/div/div[2]/div[1]/div[1]/h4").nth(0)).to_contain_text("Slot 1", timeout=15000), "Expected the selected location header to include the slot identifier."
+        # Assert: Expected the selected slot tile's title to indicate occupancy.
+        await expect(page.locator("xpath=/html/body/div/div/main/section[10]/div/div/div[2]/div[1]/div[2]/div[1]").nth(0)).to_have_attribute("title", "Slot 1: Occupied", timeout=15000), "Expected the selected slot tile's title to indicate occupancy."
         # Assert: Verify serialized bar details are displayed
-        await expect(page.locator("text=Serialized Bar Details")).to_be_visible(timeout=15000)
+        assert False, "Expected: Verify serialized bar details are displayed (could not be verified on the page)"
+        
+        # --> Test blocked by environment/access constraints during agent run
+        # Reason: TEST BLOCKED The test could not be run — there are no occupied slot records available to open a serialized bar detail. Observations: - All slot tiles in the displayed shelves (Main Vault Zone Alpha - Shelf Row 1/2/3) are labeled 'Slot N: Empty'. - The page legend shows 'Occupied with Gold' and 'Occupied with Silver' but no slot tile on the page displays an occupied state.
+        raise AssertionError("Test blocked during agent run: " + "TEST BLOCKED The test could not be run \u2014 there are no occupied slot records available to open a serialized bar detail. Observations: - All slot tiles in the displayed shelves (Main Vault Zone Alpha - Shelf Row 1/2/3) are labeled 'Slot N: Empty'. - The page legend shows 'Occupied with Gold' and 'Occupied with Silver' but no slot tile on the page displays an occupied state." + " — the exported script cannot reproduce a PASS in this environment.")
         await asyncio.sleep(5)
 
     finally:

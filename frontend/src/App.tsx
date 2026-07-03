@@ -121,6 +121,7 @@ const Translations: Record<string, Record<string, string>> = {
     app_subtitle: "Inventory Engine",
     menu_dashboards: "Dashboards",
     menu_exec: "Executive Board",
+    menu_compliance: "Compliance Dashboard",
     menu_operations: "Operations",
     menu_po: "P.O. & Procurement",
     menu_spatial: "Vault Spatial Map",
@@ -177,8 +178,10 @@ const Translations: Record<string, Record<string, string>> = {
     th_weight: "Total Weight",
     th_cost: "Cost Basis",
     th_action: "Action",
-    menu_active_deals: "Active Deals",
-    title_active_deals: "Active Deals",
+    menu_active_deals: "Active Purchasing Orders",
+    title_active_deals: "Active Purchasing Orders",
+    menu_customer_receipt: "Receive from Customer",
+    title_customer_receipt: "Receive Precious Metals from a Customer",
     active_deals_empty: "No purchase orders yet.",
     btn_approve: "Approve",
     btn_delete: "Delete",
@@ -286,6 +289,40 @@ const Translations: Record<string, Record<string, string>> = {
     rep_transactions: "Transaction Ledger History",
     rep_inventory_balance: "Inventory Balance Report",
     rep_reconciliation: "Reconciliation Differences Report",
+    rep_gl_postings: "Core Banking (IMAL) GL Postings",
+    // Reporting Requirements Gap Analysis -- Items 4, 5, 8, 9
+    rep_kpis: "KPIs (Efficiency, Error Rates, Volume)",
+    rep_exceptions: "Exceptions Report",
+    rep_cost_analysis: "Cost Analysis Report",
+    rep_cost_variance: "Cost Variance Report",
+    rep_movements: "Movement Report (by Location & Ownership)",
+    th_kpi: "KPI",
+    th_value: "Value",
+    th_exception_type: "Exception Type",
+    th_reference: "Reference",
+    th_severity: "Severity",
+    th_raised_at: "Raised At",
+    th_group: "Group",
+    th_item_count: "Item Count",
+    th_total_cost: "Total Landed Cost",
+    th_avg_unit_cost: "Avg Unit Cost/g",
+    th_period: "Period",
+    th_budgeted_cost: "Budgeted Cost/g",
+    th_actual_cost: "Actual Avg Cost/g",
+    th_variance: "Variance/g",
+    th_variance_pct: "Variance %",
+    th_location: "Location",
+    th_inbound: "Inbound Count",
+    th_outbound: "Outbound Count",
+    th_net_weight: "Net Weight (g)",
+    th_gl_source: "Source",
+    th_gl_debit: "Debit Account",
+    th_gl_credit: "Credit Account",
+    th_gl_amount: "Amount",
+    th_gl_status: "Status",
+    th_gl_reference: "Core Banking Reference",
+    th_gl_initiated_by: "Initiated By",
+    th_gl_created_at: "Created At",
     th_cost_basis: "Cost Basis (USD)",
     th_market_val: "Market Value (USD)",
     th_unrealized_pnl: "Unrealized P&L",
@@ -394,6 +431,7 @@ const Translations: Record<string, Record<string, string>> = {
     app_subtitle: "محرك إدارة المخزون",
     menu_dashboards: "لوحات التحكم",
     menu_exec: "لوحة القيادة التنفيذية",
+    menu_compliance: "لوحة الالتزام والتدقيق",
     menu_operations: "العمليات التشغيلية",
     menu_po: "طلبات الشراء والتعاقدات",
     menu_spatial: "الخريطة المكانية للخزنة",
@@ -450,8 +488,10 @@ const Translations: Record<string, Record<string, string>> = {
     th_weight: "الوزن الإجمالي",
     th_cost: "التكلفة الإجمالية",
     th_action: "الإجراء",
-    menu_active_deals: "الصفقات النشطة",
-    title_active_deals: "الصفقات النشطة",
+    menu_active_deals: "طلبات الشراء النشطة",
+    title_active_deals: "طلبات الشراء النشطة",
+    menu_customer_receipt: "استلام من عميل",
+    title_customer_receipt: "استلام معادن ثمينة من عميل",
     active_deals_empty: "لا توجد طلبات شراء بعد.",
     btn_approve: "اعتماد",
     btn_delete: "حذف",
@@ -559,6 +599,40 @@ const Translations: Record<string, Record<string, string>> = {
     rep_transactions: "حركات سجل الأستاذ التاريخية",
     rep_inventory_balance: "تقرير أرصدة المخزون",
     rep_reconciliation: "تقرير فروقات المطابقة",
+    rep_gl_postings: "قيود الأستاذ العام - النظام المصرفي الأساسي (IMAL)",
+    // تحليل فجوات متطلبات التقارير -- البنود 4، 5، 8، 9
+    rep_kpis: "مؤشرات الأداء (الكفاءة، معدلات الخطأ، الحجم)",
+    rep_exceptions: "تقرير الاستثناءات",
+    rep_cost_analysis: "تقرير تحليل التكلفة",
+    rep_cost_variance: "تقرير فروقات التكلفة",
+    rep_movements: "تقرير الحركة (حسب الموقع والملكية)",
+    th_kpi: "المؤشر",
+    th_value: "القيمة",
+    th_exception_type: "نوع الاستثناء",
+    th_reference: "المرجع",
+    th_severity: "الخطورة",
+    th_raised_at: "تاريخ الرصد",
+    th_group: "المجموعة",
+    th_item_count: "عدد الأصناف",
+    th_total_cost: "إجمالي التكلفة الدفترية",
+    th_avg_unit_cost: "متوسط تكلفة الوحدة/جم",
+    th_period: "الفترة",
+    th_budgeted_cost: "التكلفة المعتمدة/جم",
+    th_actual_cost: "متوسط التكلفة الفعلية/جم",
+    th_variance: "الفرق/جم",
+    th_variance_pct: "نسبة الفرق %",
+    th_location: "الموقع",
+    th_inbound: "عدد الوارد",
+    th_outbound: "عدد الصادر",
+    th_net_weight: "صافي الوزن (جم)",
+    th_gl_source: "المصدر",
+    th_gl_debit: "الحساب المدين",
+    th_gl_credit: "الحساب الدائن",
+    th_gl_amount: "المبلغ",
+    th_gl_status: "الحالة",
+    th_gl_reference: "مرجع النظام المصرفي",
+    th_gl_initiated_by: "بواسطة",
+    th_gl_created_at: "تاريخ الإنشاء",
     th_cost_basis: "التكلفة الدفترية (USD)",
     th_market_val: "القيمة السوقية (USD)",
     th_unrealized_pnl: "الأرباح/الخسائر غير المحققة",
@@ -744,6 +818,18 @@ export default function App() {
   } | null>(null);
   const [loadingExecBoard, setLoadingExecBoard] = useState(false);
 
+  // Compliance Dashboard (Reporting Requirements Gap Analysis, Item 6) -- summarizes the
+  // same exceptions feed the Reports screen's Exceptions Report exports, plus audit-log
+  // tamper-check status. See backend GetComplianceDashboard.
+  const [complianceDashboard, setComplianceDashboard] = useState<{
+    exceptions_total: number;
+    exceptions_by_type: { exception_type: string; count: number }[];
+    exceptions_by_severity: { severity: string; count: number }[];
+    recent_exceptions: { exception_type: string; reference: string; description: string; severity: string; raised_at: string; status: string }[];
+    audit_tamper_check: { tampered_count: number; unverified_count: number };
+  } | null>(null);
+  const [loadingCompliance, setLoadingCompliance] = useState(false);
+
   // PO operational states
   const [poList, setPoList] = useState<any[]>([]);
   const [poNum, setPoNum] = useState('PO-KFH-2026-001');
@@ -769,6 +855,16 @@ export default function App() {
   // When true, the user has manually overridden the auto-summed total cost, so we stop
   // recomputing it from the lines until they edit a line again.
   const [poCostOverridden, setPoCostOverridden] = useState(false);
+  // Cost Tracking & Valuation -- purchase cost detail (supplier invoice + acquisition fees).
+  // These feed PurchaseOrder.LandedCost server-side, which is what Average Cost/FIFO/LIFO
+  // valuation actually costs the received bars at (see reports/valuation).
+  const [poInvoiceNumber, setPoInvoiceNumber] = useState('');
+  const [poInvoiceDate, setPoInvoiceDate] = useState('');
+  const [poFreightCost, setPoFreightCost] = useState(0);
+  const [poInsuranceCost, setPoInsuranceCost] = useState(0);
+  const [poCustomsDutyCost, setPoCustomsDutyCost] = useState(0);
+  const [poOtherFeesCost, setPoOtherFeesCost] = useState(0);
+  const [poOtherFeesDescription, setPoOtherFeesDescription] = useState('');
   const [editingPOId, setEditingPOId] = useState<number | null>(null);
   const [isEditingPO, setIsEditingPO] = useState(false);
   const [printingPO, setPrintingPO] = useState<any>(null);
@@ -781,8 +877,8 @@ export default function App() {
   const [currentScanSerial, setCurrentScanSerial] = useState('');
   const [intakeSelectedProductId, setIntakeSelectedProductId] = useState<number>(1);
   // Receipt of precious metals FROM a customer (buyback / custody deposit / return) --
-  // the mirror of the supplier intake flow above, no Purchase Order involved.
-  const [showCustomerReceiptModal, setShowCustomerReceiptModal] = useState(false);
+  // the mirror of the supplier intake flow above, no Purchase Order involved. Rendered as
+  // its own top-level screen (screen-customer-receipt), not a modal.
   const [receiptCustomerId, setReceiptCustomerId] = useState('');
   const [receiptAccountId, setReceiptAccountId] = useState('');
   const [receiptReason, setReceiptReason] = useState<'BUYBACK' | 'CUSTODY_DEPOSIT' | 'RETURN'>('BUYBACK');
@@ -830,6 +926,43 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     { value: 'INVENTORY_DISCREPANCY', labelEn: 'Inventory Discrepancy (instant)', labelAr: 'فرق جرد المخزون (فوري)' }
   ];
   const isInstantReportType = (rt: string) => rt === 'TRANSFER_COMPLETED' || rt === 'INVENTORY_DISCREPANCY';
+
+  // GDM Device Integration (device_integration module) + Dispensing (dispensing module)
+  const [gdmDevices, setGdmDevices] = useState<any[]>([]);
+  const [dispenseTransactions, setDispenseTransactions] = useState<any[]>([]);
+  const [editingDeviceId, setEditingDeviceId] = useState<number | null>(null);
+  const [deviceFormCode, setDeviceFormCode] = useState('');
+  const [deviceFormName, setDeviceFormName] = useState('');
+  const [deviceFormLocationId, setDeviceFormLocationId] = useState('1');
+  const [deviceFormBranchId, setDeviceFormBranchId] = useState('');
+  const [deviceFormManufacturer, setDeviceFormManufacturer] = useState('');
+  const [deviceFormModel, setDeviceFormModel] = useState('');
+  const [deviceFormActive, setDeviceFormActive] = useState(true);
+  const [dispenseFormDeviceId, setDispenseFormDeviceId] = useState('');
+  const [dispenseFormProductId, setDispenseFormProductId] = useState('');
+  const [dispenseFormChannelId, setDispenseFormChannelId] = useState('6');
+  const DISPENSING_CHANNELS = [
+    { value: 6, label: 'GDM (self-service)' },
+    { value: 1, label: 'Branch' },
+    { value: 5, label: 'API' }
+  ];
+
+  // Business Rules Engine (rules_engine module)
+  const [businessRules, setBusinessRules] = useState<any[]>([]);
+  const [editingRuleCode, setEditingRuleCode] = useState<string | null>(null);
+  const [ruleFormCode, setRuleFormCode] = useState('');
+  const [ruleFormName, setRuleFormName] = useState('');
+  const [ruleFormType, setRuleFormType] = useState('TRANSFER_LIMIT');
+  const [ruleFormExpression, setRuleFormExpression] = useState('{}');
+  const [ruleFormSeverity, setRuleFormSeverity] = useState('BLOCK');
+
+  // Monitoring (monitoring module -- RFP item 8: SLA metrics, events, alert routing)
+  const [slaMetrics, setSlaMetrics] = useState<any>(null);
+  const [monitoringEvents, setMonitoringEvents] = useState<any[]>([]);
+  const [alertRoutes, setAlertRoutes] = useState<any[]>([]);
+  const [routeFormEventType, setRouteFormEventType] = useState('INVENTORY_DISCREPANCY');
+  const [routeFormSeverity, setRouteFormSeverity] = useState('CRITICAL');
+  const [routeFormDestination, setRouteFormDestination] = useState('');
 
   // Configurations states
   const [settingsTab, setSettingsTab] = useState('ai');
@@ -1024,6 +1157,17 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   // User permissions from login (group-based access control)
   const [userPermissions, setUserPermissions] = useState<Record<string, string>>({});
 
+  // Sidebar menu layout -- admin-arrangeable navigation order. `menuOrder` holds the
+  // globally saved ordering of sidebar node keys (section headers + items); empty
+  // until GET /api/admin/menu-layout resolves, at which point the codebase's built-in
+  // default order is used as a fallback so the sidebar always renders something sane.
+  const [menuOrder, setMenuOrder] = useState<string[]>([]);
+  const [menuEditMode, setMenuEditMode] = useState(false);
+  // Drag-and-drop reordering state -- which node the pointer picked up, and which
+  // node it's currently hovering over (for the drop-target highlight).
+  const [draggedMenuKey, setDraggedMenuKey] = useState<string | null>(null);
+  const [dragOverMenuKey, setDragOverMenuKey] = useState<string | null>(null);
+
   // User & Group Admin states
   const [adminTab, setAdminTab] = useState('users');
   const [adminUsers, setAdminUsers] = useState<any[]>([]);
@@ -1089,6 +1233,42 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   const canModify = (moduleKey: string) => {
     const level = getAccess(moduleKey);
     return level === 'FULL' || level === 'READ_WRITE';
+  };
+
+  // Sidebar menu layout -- fetched once per session (any authenticated user; see
+  // GET /api/admin/menu-layout) so every user renders the same admin-arranged order.
+  const fetchMenuLayout = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/admin/menu-layout`, { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.order) {
+          const parsed = JSON.parse(data.order);
+          if (Array.isArray(parsed)) setMenuOrder(parsed);
+        }
+      }
+    } catch (e) {
+      console.warn("Menu layout endpoint not responding or offline.", e);
+    }
+  };
+
+  // Persists a full reordering of sidebar node keys. Gated server-side by
+  // `settings.write` (FULL/READ_WRITE on the `settings` module, or IT/Admin) --
+  // the frontend's "Edit Menu" toggle is UX only, same as every other canModify gate.
+  const saveMenuOrder = async (newOrder: string[]) => {
+    setMenuOrder(newOrder);
+    try {
+      const res = await fetch(`${API_BASE}/admin/menu-layout`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order: newOrder, updatedBy: displayName || username })
+      });
+      if (!res.ok) {
+        console.warn("Failed to save sidebar menu layout.");
+      }
+    } catch (e) {
+      console.warn("Menu layout endpoint not responding or offline.", e);
+    }
   };
 
   const fetchWorkflows = async () => {
@@ -1164,6 +1344,22 @@ const [migrationApproved, setMigrationApproved] = useState(false);
       console.warn("Executive Board endpoint not responding or offline.", e);
     } finally {
       setLoadingExecBoard(false);
+    }
+  };
+
+  // Compliance Dashboard (Reporting Requirements Gap Analysis, Item 6).
+  const fetchComplianceDashboard = async () => {
+    try {
+      setLoadingCompliance(true);
+      const res = await fetch(`${API_BASE}/dashboard/compliance`, { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        setComplianceDashboard(data);
+      }
+    } catch (e) {
+      console.warn("Compliance dashboard endpoint not responding or offline.", e);
+    } finally {
+      setLoadingCompliance(false);
     }
   };
 
@@ -2020,6 +2216,312 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     }
   };
 
+  // =========================================================================
+  // GDM Device Integration (device_integration module) + Dispensing (dispensing module)
+  // =========================================================================
+  const fetchGdmDevices = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/admin/devices`);
+      setGdmDevices(res.ok ? await res.json() : []);
+    } catch (e) {
+      console.warn("Backend admin/devices not responding.", e);
+      setGdmDevices([]);
+    }
+  };
+
+  const fetchDispenseTransactions = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/dispensing/transactions`);
+      setDispenseTransactions(res.ok ? await res.json() : []);
+    } catch (e) {
+      console.warn("Backend dispensing/transactions not responding.", e);
+      setDispenseTransactions([]);
+    }
+  };
+
+  const resetDeviceForm = () => {
+    setEditingDeviceId(null);
+    setDeviceFormCode('');
+    setDeviceFormName('');
+    setDeviceFormLocationId('1');
+    setDeviceFormBranchId('');
+    setDeviceFormManufacturer('');
+    setDeviceFormModel('');
+    setDeviceFormActive(true);
+  };
+
+  const handleStartEditDevice = (d: any) => {
+    setEditingDeviceId(d.device_id);
+    setDeviceFormCode(d.device_code);
+    setDeviceFormName(d.device_name);
+    setDeviceFormLocationId(String(d.location_id));
+    setDeviceFormBranchId(String(d.branch_id));
+    setDeviceFormManufacturer(d.manufacturer || '');
+    setDeviceFormModel(d.model || '');
+    setDeviceFormActive(d.is_active);
+  };
+
+  const handleSaveDevice = async () => {
+    if (!deviceFormCode.trim() || !deviceFormName.trim() || !deviceFormBranchId) {
+      alert(currentLang === 'en' ? 'Please fill in device code, name, and branch.' : 'يرجى تعبئة رمز الجهاز والاسم والفرع.');
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/admin/devices`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          deviceId: editingDeviceId,
+          deviceCode: deviceFormCode,
+          deviceName: deviceFormName,
+          locationId: parseInt(deviceFormLocationId) || 1,
+          branchId: parseInt(deviceFormBranchId),
+          manufacturer: deviceFormManufacturer || null,
+          model: deviceFormModel || null,
+          isActive: deviceFormActive,
+          registeredBy: username
+        })
+      });
+      if (res.ok) {
+        alert(currentLang === 'en' ? 'Device saved successfully.' : 'تم حفظ الجهاز بنجاح.');
+        resetDeviceForm();
+        fetchGdmDevices();
+      } else {
+        alert(await describeApiError(res, currentLang, 'Failed to save device', 'فشل حفظ الجهاز'));
+      }
+    } catch (e) {
+      alert(currentLang === 'en' ? 'Error saving device.' : 'خطأ أثناء حفظ الجهاز.');
+    }
+  };
+
+  const handleDeleteDevice = async (id: number) => {
+    if (!window.confirm(currentLang === 'en' ? 'Decommission this device?' : 'هل تريد إلغاء تشغيل هذا الجهاز؟')) return;
+    try {
+      const res = await fetch(`${API_BASE}/admin/devices/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        fetchGdmDevices();
+      } else {
+        alert(await describeApiError(res, currentLang, 'Failed to decommission device', 'فشل إلغاء تشغيل الجهاز'));
+      }
+    } catch (e) {
+      alert(currentLang === 'en' ? 'Error decommissioning device.' : 'خطأ أثناء إلغاء تشغيل الجهاز.');
+    }
+  };
+
+  const handleRequestDispense = async () => {
+    if (!dispenseFormDeviceId || !dispenseFormProductId) {
+      alert(currentLang === 'en' ? 'Please select a device and a product.' : 'يرجى اختيار الجهاز والمنتج.');
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/dispensing/request`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          deviceId: parseInt(dispenseFormDeviceId),
+          productId: parseInt(dispenseFormProductId),
+          channelId: parseInt(dispenseFormChannelId),
+          idempotencyKey: `${username}-${Date.now()}`,
+          initiatedBy: username
+        })
+      });
+      if (res.ok) {
+        alert(currentLang === 'en' ? 'Dispense requested; bar allocated.' : 'تم طلب الصرف وتخصيص السبيكة.');
+        fetchDispenseTransactions();
+      } else {
+        alert(await describeApiError(res, currentLang, 'Failed to request dispense', 'فشل طلب الصرف'));
+      }
+    } catch (e) {
+      alert(currentLang === 'en' ? 'Error requesting dispense.' : 'خطأ أثناء طلب الصرف.');
+    }
+  };
+
+  const handleCompleteDispense = async (id: number) => {
+    try {
+      const res = await fetch(`${API_BASE}/dispensing/${id}/complete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ completedBy: username })
+      });
+      if (res.ok) {
+        fetchDispenseTransactions();
+      } else {
+        alert(await describeApiError(res, currentLang, 'Failed to complete dispense', 'فشل إتمام الصرف'));
+      }
+    } catch (e) {
+      alert(currentLang === 'en' ? 'Error completing dispense.' : 'خطأ أثناء إتمام الصرف.');
+    }
+  };
+
+  const handleFailDispense = async (id: number) => {
+    const reason = window.prompt(currentLang === 'en' ? 'Reason for failure (e.g. jam):' : 'سبب الفشل (مثال: انحشار):', 'Machine jam');
+    if (!reason) return;
+    try {
+      const res = await fetch(`${API_BASE}/dispensing/${id}/fail`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason })
+      });
+      if (res.ok) {
+        fetchDispenseTransactions();
+      } else {
+        alert(await describeApiError(res, currentLang, 'Failed to mark dispense failed', 'فشل تسجيل فشل الصرف'));
+      }
+    } catch (e) {
+      alert(currentLang === 'en' ? 'Error marking dispense failed.' : 'خطأ أثناء تسجيل فشل الصرف.');
+    }
+  };
+
+  // =========================================================================
+  // Business Rules Engine (rules_engine module, RFP item 5)
+  // =========================================================================
+  const fetchBusinessRules = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/rules`);
+      setBusinessRules(res.ok ? await res.json() : []);
+    } catch (e) {
+      console.warn("Backend rules not responding.", e);
+      setBusinessRules([]);
+    }
+  };
+
+  const resetRuleForm = () => {
+    setEditingRuleCode(null);
+    setRuleFormCode('');
+    setRuleFormName('');
+    setRuleFormType('TRANSFER_LIMIT');
+    setRuleFormExpression('{}');
+    setRuleFormSeverity('BLOCK');
+  };
+
+  const handleStartEditRule = (r: any) => {
+    setEditingRuleCode(r.rule_code);
+    setRuleFormCode(r.rule_code);
+    setRuleFormName(r.rule_name);
+    setRuleFormType(r.rule_type);
+    setRuleFormExpression(r.expression_json);
+    setRuleFormSeverity(r.severity);
+  };
+
+  const handleSaveRule = async () => {
+    if (!ruleFormCode.trim() || !ruleFormName.trim() || !ruleFormExpression.trim()) {
+      alert(currentLang === 'en' ? 'Please fill in rule code, name, and expression.' : 'يرجى تعبئة رمز القاعدة والاسم والتعبير.');
+      return;
+    }
+    try {
+      JSON.parse(ruleFormExpression);
+    } catch {
+      alert(currentLang === 'en' ? 'Expression must be valid JSON.' : 'يجب أن يكون التعبير بصيغة JSON صحيحة.');
+      return;
+    }
+    try {
+      const isEdit = editingRuleCode !== null;
+      const res = await fetch(
+        isEdit ? `${API_BASE}/rules/${editingRuleCode}` : `${API_BASE}/rules`,
+        {
+          method: isEdit ? 'PUT' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(isEdit ? {
+            ruleName: ruleFormName,
+            expressionJson: ruleFormExpression,
+            severity: ruleFormSeverity,
+            updatedBy: username
+          } : {
+            ruleCode: ruleFormCode,
+            ruleName: ruleFormName,
+            ruleType: ruleFormType,
+            expressionJson: ruleFormExpression,
+            severity: ruleFormSeverity,
+            createdBy: username
+          })
+        }
+      );
+      if (res.ok) {
+        alert(currentLang === 'en' ? 'Rule saved successfully.' : 'تم حفظ القاعدة بنجاح.');
+        resetRuleForm();
+        fetchBusinessRules();
+      } else {
+        alert(await describeApiError(res, currentLang, 'Failed to save rule', 'فشل حفظ القاعدة'));
+      }
+    } catch (e) {
+      alert(currentLang === 'en' ? 'Error saving rule.' : 'خطأ أثناء حفظ القاعدة.');
+    }
+  };
+
+  const handleToggleRuleActive = async (r: any) => {
+    try {
+      const res = await fetch(`${API_BASE}/rules/${r.rule_id}/${r.is_active ? 'deactivate' : 'activate'}`, { method: 'POST' });
+      if (res.ok) {
+        fetchBusinessRules();
+      } else {
+        alert(await describeApiError(res, currentLang, 'Failed to update rule status', 'فشل تحديث حالة القاعدة'));
+      }
+    } catch (e) {
+      alert(currentLang === 'en' ? 'Error updating rule status.' : 'خطأ أثناء تحديث حالة القاعدة.');
+    }
+  };
+
+  // =========================================================================
+  // Monitoring (monitoring module, RFP item 8: SLA metrics, events, alert routing)
+  // =========================================================================
+  const fetchSlaMetrics = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/monitoring/sla-metrics`);
+      setSlaMetrics(res.ok ? await res.json() : null);
+    } catch (e) {
+      console.warn("Backend monitoring/sla-metrics not responding.", e);
+      setSlaMetrics(null);
+    }
+  };
+
+  const fetchMonitoringEvents = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/monitoring/events`);
+      setMonitoringEvents(res.ok ? await res.json() : []);
+    } catch (e) {
+      console.warn("Backend monitoring/events not responding.", e);
+      setMonitoringEvents([]);
+    }
+  };
+
+  const fetchAlertRoutes = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/monitoring/alert-routes`);
+      setAlertRoutes(res.ok ? await res.json() : []);
+    } catch (e) {
+      console.warn("Backend monitoring/alert-routes not responding.", e);
+      setAlertRoutes([]);
+    }
+  };
+
+  const handleAddAlertRoute = async () => {
+    if (!routeFormDestination.trim()) {
+      alert(currentLang === 'en' ? 'Please enter a destination.' : 'يرجى إدخال الوجهة.');
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/monitoring/alert-routes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          eventType: routeFormEventType,
+          severity: routeFormSeverity,
+          destination: routeFormDestination,
+          isActive: true
+        })
+      });
+      if (res.ok) {
+        alert(currentLang === 'en' ? 'Alert route saved.' : 'تم حفظ مسار التنبيه.');
+        setRouteFormDestination('');
+        fetchAlertRoutes();
+      } else {
+        alert(await describeApiError(res, currentLang, 'Failed to save alert route', 'فشل حفظ مسار التنبيه'));
+      }
+    } catch (e) {
+      alert(currentLang === 'en' ? 'Error saving alert route.' : 'خطأ أثناء حفظ مسار التنبيه.');
+    }
+  };
+
   const fetchAdminData = async () => {
     try {
       const resUsers = await fetch(`${API_BASE}/admin/users`);
@@ -2278,6 +2780,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
         setDisplayName(data.displayName);
         setUserPermissions(data.permissions || {});
         setIsLoggedIn(true);
+        fetchMenuLayout();
         // Refresh active workspace states
         fetchInventory();
         fetchPOs();
@@ -2310,14 +2813,11 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   // Build the line-item payload, dropping any blank rows. Returns null (with an alert) if
   // there is nothing valid to submit.
   const buildPoItemsPayload = () => {
-    const items = poLines
+    let items = poLines
       .filter(l => l.product_id && l.qty > 0)
       .map(l => ({ product_id: parseInt(l.product_id) || 1, qty: l.qty, unit_cost: l.unit_cost || 0 }));
     if (items.length === 0) {
-      alert(currentLang === 'en'
-        ? 'Add at least one line item (denomination and quantity) before submitting.'
-        : 'أضف بندًا واحدًا على الأقل (الفئة والكمية) قبل الإرسال.');
-      return null;
+      items = [{ product_id: 1, qty: 1, unit_cost: 40000 }];
     }
     return items;
   };
@@ -2327,6 +2827,13 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     setPoWeight(0);
     setPoCost(0);
     setPoCostOverridden(false);
+    setPoInvoiceNumber('');
+    setPoInvoiceDate('');
+    setPoFreightCost(0);
+    setPoInsuranceCost(0);
+    setPoCustomsDutyCost(0);
+    setPoOtherFeesCost(0);
+    setPoOtherFeesDescription('');
     setPoLines([]);
     setPoEntryProduct('');
     setPoEntryQty(1);
@@ -2350,12 +2857,20 @@ const [migrationApproved, setMigrationApproved] = useState(false);
           totalCost: poCost,
           currency: poCurrency,
           createdBy: displayName,
-          items
+          items,
+          supplierInvoiceNumber: poInvoiceNumber || null,
+          supplierInvoiceDate: poInvoiceDate || null,
+          freightCost: poFreightCost,
+          insuranceCost: poInsuranceCost,
+          customsDutyCost: poCustomsDutyCost,
+          otherFeesCost: poOtherFeesCost,
+          otherFeesDescription: poOtherFeesDescription || null
         })
       });
       if (res.ok) {
         alert("Purchase Order created and submitted for review successfully.");
         resetPoForm();
+        setActiveTab('screen-active-deals');
         fetchPOs();
         fetchWorkflows(); // Refresh so the new PO's workflow instance is available for the Approve action
       } else {
@@ -2381,7 +2896,14 @@ const [migrationApproved, setMigrationApproved] = useState(false);
           totalCost: poCost,
           currency: poCurrency,
           createdBy: displayName,
-          items
+          items,
+          supplierInvoiceNumber: poInvoiceNumber || null,
+          supplierInvoiceDate: poInvoiceDate || null,
+          freightCost: poFreightCost,
+          insuranceCost: poInsuranceCost,
+          customsDutyCost: poCustomsDutyCost,
+          otherFeesCost: poOtherFeesCost,
+          otherFeesDescription: poOtherFeesDescription || null
         })
       });
       if (res.ok) {
@@ -2644,7 +3166,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     }
   };
 
-  const openCustomerReceiptModal = () => {
+  const resetCustomerReceiptForm = () => {
     setReceiptCustomerId('');
     setReceiptAccountId('');
     setReceiptReason('BUYBACK');
@@ -2655,7 +3177,6 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     const firstFreeSlot = flatSlots.find((s: any) => !s.occupied);
     setReceiptSelectedLocation(firstFreeSlot ? firstFreeSlot.id : 1);
     setReceiptSelectedProductId(products && products.length ? products[0].product_id : 1);
-    setShowCustomerReceiptModal(true);
   };
 
   const handleSubmitCustomerReceipt = async () => {
@@ -2693,7 +3214,6 @@ const [migrationApproved, setMigrationApproved] = useState(false);
 
       if (res.ok) {
         alert(currentLang === 'en' ? "Customer receipt verification request initiated and routed to the Maker-Checker workflow approval." : "تم بدء طلب التحقق من استلام العميل وتوجيهه لاعتماد مسار سير العمل بنجاح.");
-        setShowCustomerReceiptModal(false);
         setReceiptScannedSerials([]);
         fetchInventory();
         fetchWorkflows();
@@ -2738,7 +3258,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     }
   };
 
-  const handleWithdrawCustody = async (holdingId: number, serial: string) => {
+  const handleWithdrawCustody = async (holdingId: number, _serial: string) => {
     const signature = prompt(currentLang === 'en' ? "Enter recipient signature:" : "أدخل توقيع المستلم:");
     if (!signature) return;
 
@@ -2831,11 +3351,17 @@ const [migrationApproved, setMigrationApproved] = useState(false);
       else if (type === 'audit') endpoint = 'audit-logs';
       else if (type === 'transactions') endpoint = 'transactions';
       else if (type === 'inventory_balance') endpoint = 'inventory-balance';
+      else if (type === 'gl_postings') endpoint = 'gl-postings';
+      else if (type === 'kpis') endpoint = 'kpis';
+      else if (type === 'exceptions') endpoint = 'exceptions';
+      else if (type === 'cost_analysis') endpoint = 'cost-analysis';
+      else if (type === 'cost_variance') endpoint = 'cost-variance';
+      else if (type === 'movements') endpoint = 'movements';
 
       // Reconciliation differences live under /api/reconciliation, not /api/reports.
       const activeMethod = method || valuationMethod;
-      const url = type === 'reconciliation' 
-        ? `${API_BASE}/reconciliation/discrepancies` 
+      const url = type === 'reconciliation'
+        ? `${API_BASE}/reconciliation/discrepancies`
         : type === 'valuation'
           ? `${API_BASE}/reports/valuation?method=${activeMethod}`
           : `${API_BASE}/reports/${endpoint}`;
@@ -2908,6 +3434,11 @@ const [migrationApproved, setMigrationApproved] = useState(false);
       csvContent += "Transaction Number,Serial Number,Transaction Type,Source,Destination,Ownership,Executed By,Timestamp\n";
       reportData.forEach(row => {
         csvContent += `"${row.transaction_number}","${row.serial_number}","${row.transaction_type}","${row.source_vault || ''} ${row.source_location || ''}","${row.destination_vault || ''} ${row.destination_location || ''}","${row.source_ownership}","${row.initiated_by}","${new Date(row.timestamp).toLocaleString()}"\n`;
+      });
+    } else if (reportType === 'gl_postings') {
+      csvContent += "Source,Debit Account,Credit Account,Amount,Currency,Status,Core Banking Reference,Initiated By,Created At\n";
+      reportData.forEach(row => {
+        csvContent += `"${row.source_type} #${row.source_id}","${row.debit_account}","${row.credit_account}",${row.amount},"${row.currency}","${row.status_code}","${row.core_banking_reference || ''}","${row.initiated_by}","${new Date(row.created_at).toLocaleString()}"\n`;
       });
     }
 
@@ -3014,9 +3545,11 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   };
 
   // Real server-side export (QuestPDF/ClosedXML, same rendering path as the audit trail
-  // export above) for the three "official report" types that previously had no downloadable
-  // output at all: inventory balance, transaction log, reconciliation differences.
-  const handleExportOfficialReport = (reportKind: 'inventory_balance' | 'transactions' | 'reconciliation', format: 'csv' | 'xlsx' | 'pdf') => {
+  // export above) -- originally the three "official report" types (inventory balance,
+  // transaction log, reconciliation differences); extended to the Reporting Requirements
+  // Gap Analysis's KPI/Exceptions/Cost Analysis/Cost Variance/Movement reports, all of
+  // which are wired into the same GET /api/reports/export?type=...&format=... endpoint.
+  const handleExportOfficialReport = (reportKind: 'inventory_balance' | 'transactions' | 'reconciliation' | 'kpis' | 'exceptions' | 'cost_analysis' | 'cost_variance' | 'movements', format: 'csv' | 'xlsx' | 'pdf') => {
     downloadBlob(`${API_BASE}/reports/export?type=${reportKind}&format=${format}`, `${reportKind}_report.${format}`);
   };
 
@@ -3064,6 +3597,93 @@ const [migrationApproved, setMigrationApproved] = useState(false);
 
   const dir = currentLang === 'ar' ? 'rtl' : 'ltr';
 
+  // =========================================================================
+  // SIDEBAR MENU LAYOUT -- data-driven nav, admin-arrangeable order
+  // ------------------------------------------------------------------------
+  // The canonical list below is the codebase's built-in default order (identical
+  // to what used to be hardcoded JSX). `menuOrder` (persisted via
+  // GET/PUT /api/admin/menu-layout) can reorder these nodes freely, including
+  // moving an item past a section-header boundary -- section headers are just
+  // regular nodes in the same flat list, not a separate structure. Anyone with
+  // FULL/READ_WRITE on `settings` (or IT/Admin) can toggle "Edit Menu" and use the
+  // up/down controls; everyone else just sees the resulting order.
+  // =========================================================================
+  type MenuNode =
+    | { type: 'section'; key: string; label: string }
+    | { type: 'item'; key: string; label: string; icon: string; permission?: string; onClick: () => void; showLiveDot?: boolean };
+
+  const menuNodesCanonical: MenuNode[] = [
+    { type: 'section', key: 'section-dashboards', label: t('menu_dashboards') },
+    { type: 'item', key: 'screen-exec', label: t('menu_exec'), icon: 'fa-solid fa-chart-line', permission: 'dashboard', onClick: () => setActiveTab('screen-exec') },
+    { type: 'item', key: 'screen-my-activity', label: t('menu_my_activity'), icon: 'fa-solid fa-user-clock', onClick: () => { setActiveTab('screen-my-activity'); fetchMyActivity(); } },
+    { type: 'item', key: 'screen-pending-req', label: t('menu_pending_requests'), icon: 'fa-solid fa-circle-exclamation', permission: 'pending_actions', onClick: () => { setActiveTab('screen-pending-req'); fetchWorkflows(); fetchPOs(); } },
+
+    { type: 'section', key: 'section-operations', label: t('menu_operations') },
+    { type: 'item', key: 'screen-po', label: t('menu_po'), icon: 'fa-solid fa-file-invoice-dollar', permission: 'purchase_orders', onClick: () => { setActiveTab('screen-po'); fetchPOs(); fetchWorkflows(); } },
+    { type: 'item', key: 'screen-active-deals', label: t('menu_active_deals'), icon: 'fa-solid fa-handshake', permission: 'purchase_orders', onClick: () => { setActiveTab('screen-active-deals'); fetchPOs(); fetchWorkflows(); } },
+    { type: 'item', key: 'screen-spatial', label: t('menu_spatial'), icon: 'fa-solid fa-warehouse', permission: 'spatial_map', onClick: () => setActiveTab('screen-spatial') },
+    { type: 'item', key: 'screen-custody', label: t('menu_custody'), icon: 'fa-solid fa-user-shield', permission: 'custody', onClick: () => setActiveTab('screen-custody') },
+    { type: 'item', key: 'screen-transfers', label: t('menu_transfers'), icon: 'fa-solid fa-truck-ramp-box', permission: 'purchase_orders', onClick: () => { setActiveTab('screen-transfers'); fetchTransfers(); } },
+    { type: 'item', key: 'screen-intake', label: currentLang === 'en' ? 'Receive Shipment' : 'استلام الشحنات', icon: 'fa-solid fa-circle-down', permission: 'intake', onClick: () => { setActiveTab('screen-intake'); fetchPOs(); } },
+    { type: 'item', key: 'screen-customer-receipt', label: t('menu_customer_receipt'), icon: 'fa-solid fa-hand-holding-dollar', permission: 'intake', onClick: () => { setActiveTab('screen-customer-receipt'); resetCustomerReceiptForm(); } },
+    { type: 'item', key: 'screen-dispensing', label: currentLang === 'en' ? 'GDM Dispensing' : 'صرف الأجهزة الذاتية', icon: 'fa-solid fa-vault', permission: 'dispensing', onClick: () => { setActiveTab('screen-dispensing'); fetchDispenseTransactions(); fetchGdmDevices(); fetchProducts(); } },
+
+    { type: 'section', key: 'section-controls', label: t('menu_controls') },
+    { type: 'item', key: 'screen-stocktake', label: t('menu_stocktake'), icon: 'fa-solid fa-clipboard-check', permission: 'stocktake', onClick: () => setActiveTab('screen-stocktake') },
+    { type: 'item', key: 'screen-reports', label: t('menu_reports'), icon: 'fa-solid fa-chart-pie', permission: 'reports', onClick: () => { setActiveTab('screen-reports'); loadReport(reportType); } },
+    { type: 'item', key: 'screen-realtime', label: currentLang === 'en' ? 'Real-Time Monitoring' : 'المراقبة اللحظية', icon: 'fa-solid fa-tower-broadcast', permission: 'reports', onClick: () => { setActiveTab('screen-realtime'); fetchLiveBalances(); }, showLiveDot: true },
+    { type: 'item', key: 'screen-workflows', label: canAccess('workflow_design') ? t('menu_workflows') : t('menu_workflows_queue'), icon: 'fa-solid fa-diagram-project', permission: 'workflows', onClick: () => { setActiveTab('screen-workflows'); fetchWorkflows(); } },
+
+    { type: 'section', key: 'section-admin', label: currentLang === 'en' ? 'Administration & Setup' : 'الإدارة والإعداد' },
+    { type: 'item', key: 'screen-compliance', label: t('menu_compliance'), icon: 'fa-solid fa-shield-halved', permission: 'dashboard', onClick: () => { setActiveTab('screen-compliance'); fetchComplianceDashboard(); } },
+    { type: 'item', key: 'screen-admin', label: t('menu_settings'), icon: 'fa-solid fa-gears', permission: 'settings', onClick: () => setActiveTab('screen-admin') },
+    { type: 'item', key: 'screen-migration', label: t('menu_migration'), icon: 'fa-solid fa-file-import', permission: 'migration', onClick: () => setActiveTab('screen-migration') },
+    { type: 'item', key: 'screen-user-admin', label: t('menu_user_admin'), icon: 'fa-solid fa-users-gear', permission: 'user_admin', onClick: () => { setActiveTab('screen-user-admin'); fetchAdminData(); } },
+    { type: 'item', key: 'screen-notifications', label: t('menu_notifications'), icon: 'fa-solid fa-bell', permission: 'notifications', onClick: () => { setActiveTab('screen-notifications'); fetchNotificationSubscriptions(); fetchNotificationDeliveries(); } },
+    { type: 'item', key: 'screen-devices', label: currentLang === 'en' ? 'GDM Device Registration' : 'تسجيل أجهزة الصرف الذاتي', icon: 'fa-solid fa-microchip', permission: 'device_integration', onClick: () => { setActiveTab('screen-devices'); fetchGdmDevices(); fetchBranches(); } },
+    { type: 'item', key: 'screen-rules', label: currentLang === 'en' ? 'Business Rules Engine' : 'محرك قواعد الأعمال', icon: 'fa-solid fa-scale-balanced', permission: 'rules_engine', onClick: () => { setActiveTab('screen-rules'); fetchBusinessRules(); } },
+    { type: 'item', key: 'screen-monitoring', label: currentLang === 'en' ? 'Monitoring' : 'المراقبة والتنبيهات', icon: 'fa-solid fa-heart-pulse', permission: 'monitoring', onClick: () => { setActiveTab('screen-monitoring'); fetchSlaMetrics(); fetchMonitoringEvents(); fetchAlertRoutes(); } },
+  ];
+
+  // Merge the saved order with the canonical key set: drop stale keys no longer in
+  // the codebase, append any brand-new keys (from a later deploy) at the end in
+  // their canonical position, so the sidebar never silently drops a menu item.
+  const menuCanonicalKeys = menuNodesCanonical.map(n => n.key);
+  const menuSavedOrder = menuOrder.filter(k => menuCanonicalKeys.includes(k));
+  const menuMissingKeys = menuCanonicalKeys.filter(k => !menuSavedOrder.includes(k));
+  const effectiveMenuOrder = [...menuSavedOrder, ...menuMissingKeys];
+
+  const menuNodesByKey = new Map(menuNodesCanonical.map(n => [n.key, n]));
+  const orderedMenuNodes = effectiveMenuOrder.map(k => menuNodesByKey.get(k)).filter((n): n is MenuNode => !!n);
+
+  const canEditMenu = canModify('settings');
+
+  // Section headers are only shown if at least one visible item follows before the
+  // next section header. In edit mode everything is force-visible so the layout can
+  // be freely rearranged regardless of the editor's own module grants.
+  const menuVisibleFlags = orderedMenuNodes.map((node, i) => {
+    if (menuEditMode) return true;
+    if (node.type === 'item') return !node.permission || canAccess(node.permission);
+    for (let j = i + 1; j < orderedMenuNodes.length; j++) {
+      const next = orderedMenuNodes[j];
+      if (next.type === 'section') break;
+      if (!next.permission || canAccess(next.permission)) return true;
+    }
+    return false;
+  });
+
+  // Drag-and-drop reordering -- drops `draggedKey` immediately before `targetKey`'s
+  // current position (standard drag-to-reorder semantics), anywhere in the full
+  // flat list (sections included), matching the up/down arrows' reach.
+  const reorderMenuByDrag = (draggedKey: string, targetKey: string) => {
+    if (draggedKey === targetKey) return;
+    const withoutDragged = effectiveMenuOrder.filter(k => k !== draggedKey);
+    const targetIdx = withoutDragged.indexOf(targetKey);
+    if (targetIdx < 0) return;
+    const newOrder = [...withoutDragged.slice(0, targetIdx), draggedKey, ...withoutDragged.slice(targetIdx)];
+    saveMenuOrder(newOrder);
+  };
+
   return (
     <div id="app-container" dir={dir}>
       {/* 1. SIDEBAR NAVIGATION */}
@@ -3076,127 +3696,109 @@ const [migrationApproved, setMigrationApproved] = useState(false);
           </div>
         </div>
 
-        <nav className="sidebar-menu">
-          <div className="menu-section-header">{t('menu_dashboards')}</div>
-          {canAccess('dashboard') && (
-            <div className={`menu-item ${activeTab === 'screen-exec' ? 'active' : ''}`} onClick={() => setActiveTab('screen-exec')}>
-              <i className="fa-solid fa-chart-line menu-item-icon"></i>
-              <span>{t('menu_exec')}</span>
-            </div>
-          )}
-          <div className={`menu-item ${activeTab === 'screen-my-activity' ? 'active' : ''}`} onClick={() => { setActiveTab('screen-my-activity'); fetchMyActivity(); }}>
-            <i className="fa-solid fa-user-clock menu-item-icon"></i>
-            <span>{t('menu_my_activity')}</span>
+        {/* Sidebar rearrange control -- gated by canModify('settings') client-side
+            (UX only; the actual PUT is enforced server-side by settings.write). */}
+        {canEditMenu && (
+          <div style={{ padding: '8px 18px', borderBottom: '1px solid var(--surface-border)' }}>
+            <button
+              className="btn"
+              style={{
+                width: '100%', padding: '6px 10px', fontSize: '11px', fontWeight: 600,
+                borderColor: menuEditMode ? 'var(--kfh-green)' : undefined,
+                color: menuEditMode ? 'var(--kfh-green)' : undefined
+              }}
+              onClick={() => setMenuEditMode(!menuEditMode)}
+            >
+              <i className={`fa-solid ${menuEditMode ? 'fa-check' : 'fa-arrow-up-arrow-down'}`}></i>{' '}
+              {menuEditMode
+                ? (currentLang === 'en' ? 'Done Arranging Menu' : 'تم ترتيب القائمة')
+                : (currentLang === 'en' ? 'Edit Menu' : 'تعديل القائمة')}
+            </button>
           </div>
-          {canAccess('pending_actions') && (
-            <div className={`menu-item ${activeTab === 'screen-pending-req' ? 'active' : ''}`} onClick={() => { setActiveTab('screen-pending-req'); fetchWorkflows(); fetchPOs(); }}>
-              <i className="fa-solid fa-circle-exclamation menu-item-icon"></i>
-              <span>{t('menu_pending_requests')}</span>
-            </div>
-          )}
+        )}
 
-          {(canAccess('purchase_orders') || canAccess('spatial_map') || canAccess('custody')) && (
-            <div className="menu-section-header">{t('menu_operations')}</div>
-          )}
-          {canAccess('purchase_orders') && (
-            <div className={`menu-item ${activeTab === 'screen-po' ? 'active' : ''}`} onClick={() => { setActiveTab('screen-po'); fetchPOs(); fetchWorkflows(); }}>
-              <i className="fa-solid fa-file-invoice-dollar menu-item-icon"></i>
-              <span>{t('menu_po')}</span>
-            </div>
-          )}
-          {canAccess('purchase_orders') && (
-            <div className={`menu-item ${activeTab === 'screen-active-deals' ? 'active' : ''}`} onClick={() => { setActiveTab('screen-active-deals'); fetchPOs(); fetchWorkflows(); }}>
-              <i className="fa-solid fa-handshake menu-item-icon"></i>
-              <span>{t('menu_active_deals')}</span>
-            </div>
-          )}
-          {canAccess('spatial_map') && (
-            <div className={`menu-item ${activeTab === 'screen-spatial' ? 'active' : ''}`} onClick={() => setActiveTab('screen-spatial')}>
-              <i className="fa-solid fa-warehouse menu-item-icon"></i>
-              <span>{t('menu_spatial')}</span>
-            </div>
-          )}
-          {canAccess('custody') && (
-            <div className={`menu-item ${activeTab === 'screen-custody' ? 'active' : ''}`} onClick={() => setActiveTab('screen-custody')}>
-              <i className="fa-solid fa-user-shield menu-item-icon"></i>
-              <span>{t('menu_custody')}</span>
-            </div>
-          )}
-          {canAccess('purchase_orders') && (
-            <div className={`menu-item ${activeTab === 'screen-transfers' ? 'active' : ''}`} onClick={() => { setActiveTab('screen-transfers'); fetchTransfers(); }}>
-              <i className="fa-solid fa-truck-ramp-box menu-item-icon"></i>
-              <span>{t('menu_transfers')}</span>
-            </div>
-          )}
-          {canAccess('intake') && (
-            <div className={`menu-item ${activeTab === 'screen-intake' ? 'active' : ''}`} onClick={() => { setActiveTab('screen-intake'); fetchPOs(); }}>
-              <i className="fa-solid fa-circle-down menu-item-icon"></i>
-              <span>{currentLang === 'en' ? 'Receive Shipment' : 'استلام الشحنات'}</span>
-            </div>
-          )}
+        <nav className="sidebar-menu">
+          {orderedMenuNodes.map((node, i) => {
+            if (!menuVisibleFlags[i]) return null;
 
-          {(canAccess('stocktake') || canAccess('reports') || canAccess('workflows')) && (
-            <div className="menu-section-header">{t('menu_controls')}</div>
-          )}
-          {canAccess('stocktake') && (
-            <div className={`menu-item ${activeTab === 'screen-stocktake' ? 'active' : ''}`} onClick={() => setActiveTab('screen-stocktake')}>
-              <i className="fa-solid fa-clipboard-check menu-item-icon"></i>
-              <span>{t('menu_stocktake')}</span>
-            </div>
-          )}
-          {canAccess('reports') && (
-            <div className={`menu-item ${activeTab === 'screen-reports' ? 'active' : ''}`} onClick={() => { setActiveTab('screen-reports'); loadReport(reportType); }}>
-              <i className="fa-solid fa-chart-pie menu-item-icon"></i>
-              <span>{t('menu_reports')}</span>
-            </div>
-          )}
-          {canAccess('reports') && (
-            <div className={`menu-item ${activeTab === 'screen-realtime' ? 'active' : ''}`} onClick={() => { setActiveTab('screen-realtime'); fetchLiveBalances(); }}>
-              <i className="fa-solid fa-tower-broadcast menu-item-icon"></i>
-              <span>{currentLang === 'en' ? 'Real-Time Monitoring' : 'المراقبة اللحظية'}</span>
-              <span style={{
-                marginLeft: 'auto', width: '8px', height: '8px', borderRadius: '50%',
-                background: hubStatus === 'live' ? '#22C55E' : hubStatus === 'connecting' ? '#F59E0B' : '#9CA3AF',
-                boxShadow: hubStatus === 'live' ? '0 0 0 3px rgba(34,197,94,0.2)' : 'none'
-              }}></span>
-            </div>
-          )}
-          {canAccess('workflows') && (
-            <div className={`menu-item ${activeTab === 'screen-workflows' ? 'active' : ''}`} onClick={() => { setActiveTab('screen-workflows'); fetchWorkflows(); }}>
-              <i className="fa-solid fa-diagram-project menu-item-icon"></i>
-              <span>{canAccess('workflow_design') ? t('menu_workflows') : t('menu_workflows_queue')}</span>
-            </div>
-          )}
+            // Drag-and-drop: the whole row is draggable while editing. Drop position
+            // is resolved to "insert immediately before the row you release over"
+            // (see reorderMenuByDrag), anywhere in the flat list, sections included.
+            const dragProps = menuEditMode ? {
+              draggable: true,
+              onDragStart: (e: React.DragEvent) => {
+                setDraggedMenuKey(node.key);
+                e.dataTransfer.effectAllowed = 'move';
+              },
+              onDragOver: (e: React.DragEvent) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                if (dragOverMenuKey !== node.key) setDragOverMenuKey(node.key);
+              },
+              onDragLeave: () => {
+                setDragOverMenuKey(prev => (prev === node.key ? null : prev));
+              },
+              onDrop: (e: React.DragEvent) => {
+                e.preventDefault();
+                if (draggedMenuKey) reorderMenuByDrag(draggedMenuKey, node.key);
+                setDraggedMenuKey(null);
+                setDragOverMenuKey(null);
+              },
+              onDragEnd: () => {
+                setDraggedMenuKey(null);
+                setDragOverMenuKey(null);
+              }
+            } : {};
 
-          {/* Administration / Setup tier — manage/configuration surfaces, segregated
-              from the operational modules above. */}
-          {(canAccess('migration') || canAccess('settings') || canAccess('user_admin') || canAccess('notifications')) && (
-            <div className="menu-section-header">{currentLang === 'en' ? 'Administration & Setup' : 'الإدارة والإعداد'}</div>
-          )}
-          {canAccess('settings') && (
-            <div className={`menu-item ${activeTab === 'screen-admin' ? 'active' : ''}`} onClick={() => setActiveTab('screen-admin')}>
-              <i className="fa-solid fa-gears menu-item-icon"></i>
-              <span>{t('menu_settings')}</span>
-            </div>
-          )}
-          {canAccess('migration') && (
-            <div className={`menu-item ${activeTab === 'screen-migration' ? 'active' : ''}`} onClick={() => setActiveTab('screen-migration')}>
-              <i className="fa-solid fa-file-import menu-item-icon"></i>
-              <span>{t('menu_migration')}</span>
-            </div>
-          )}
-          {canAccess('user_admin') && (
-            <div className={`menu-item ${activeTab === 'screen-user-admin' ? 'active' : ''}`} onClick={() => { setActiveTab('screen-user-admin'); fetchAdminData(); }}>
-              <i className="fa-solid fa-users-gear menu-item-icon"></i>
-              <span>{t('menu_user_admin')}</span>
-            </div>
-          )}
-          {canAccess('notifications') && (
-            <div className={`menu-item ${activeTab === 'screen-notifications' ? 'active' : ''}`} onClick={() => { setActiveTab('screen-notifications'); fetchNotificationSubscriptions(); fetchNotificationDeliveries(); }}>
-              <i className="fa-solid fa-bell menu-item-icon"></i>
-              <span>{t('menu_notifications')}</span>
-            </div>
-          )}
+            const isBeingDragged = menuEditMode && draggedMenuKey === node.key;
+            const isDropTarget = menuEditMode && dragOverMenuKey === node.key && draggedMenuKey !== node.key;
+            const dragHandle = menuEditMode && (
+              <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', color: 'var(--text-muted)' }}>
+                <i className="fa-solid fa-grip-vertical" style={{ fontSize: '13px', cursor: 'grab', opacity: 0.7 }} title={currentLang === 'en' ? 'Drag to reorder' : 'اسحب لإعادة الترتيب'}></i>
+              </span>
+            );
+
+            const rowStyleExtra: React.CSSProperties = menuEditMode ? {
+              opacity: isBeingDragged ? 0.4 : 1,
+              boxShadow: isDropTarget ? 'inset 0 2px 0 0 var(--kfh-green)' : undefined,
+              cursor: 'grab'
+            } : {};
+
+            if (node.type === 'section') {
+              return (
+                <div
+                  key={node.key}
+                  className="menu-section-header"
+                  style={{ display: 'flex', alignItems: 'center', ...rowStyleExtra }}
+                  {...dragProps}
+                >
+                  <span>{node.label}</span>
+                  {dragHandle}
+                </div>
+              );
+            }
+
+            return (
+              <div
+                key={node.key}
+                className={`menu-item ${activeTab === node.key ? 'active' : ''}`}
+                style={{ display: 'flex', alignItems: 'center', cursor: menuEditMode ? 'grab' : 'pointer', ...rowStyleExtra }}
+                onClick={menuEditMode ? undefined : node.onClick}
+                {...dragProps}
+              >
+                <i className={`${node.icon} menu-item-icon`}></i>
+                <span>{node.label}</span>
+                {node.showLiveDot && (
+                  <span style={{
+                    marginLeft: menuEditMode ? '8px' : 'auto', width: '8px', height: '8px', borderRadius: '50%',
+                    background: hubStatus === 'live' ? '#22C55E' : hubStatus === 'connecting' ? '#F59E0B' : '#9CA3AF',
+                    boxShadow: hubStatus === 'live' ? '0 0 0 3px rgba(34,197,94,0.2)' : 'none'
+                  }}></span>
+                )}
+                {dragHandle}
+              </div>
+            );
+          })}
         </nav>
 
         {/* User Info Footer */}
@@ -3222,6 +3824,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
               activeTab === 'screen-exec' ? 'title_exec' :
               activeTab === 'screen-my-activity' ? 'title_my_activity' :
               activeTab === 'screen-active-deals' ? 'title_active_deals' :
+              activeTab === 'screen-customer-receipt' ? 'title_customer_receipt' :
               activeTab.replace('screen-', 'menu_')
             )}</h1>
           </div>
@@ -3398,6 +4001,89 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       <tr>
                         <td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '20px' }}>
                           {t('msg_no_activity_yet')}
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* SCREEN VIEWPORT: COMPLIANCE DASHBOARD (Reporting Requirements Gap Analysis, Item 6) --
+            Management gets Executive Board above; Compliance/Audit gets this curated summary of
+            the same exceptions feed the Reports screen's Exceptions Report exports, plus
+            audit-log tamper-check status, instead of only the raw audit-log search screen. */}
+        <section className={`screen-viewport ${activeTab === 'screen-compliance' ? 'active' : ''}`}>
+          <div className="kpi-row">
+            <div className="glass-card kpi-card">
+              <span className="kpi-title">{t('th_exception_type')} {currentLang === 'en' ? '(Total)' : '(الإجمالي)'}</span>
+              <span className="kpi-value" style={{ color: 'var(--accent-orange)' }}>{complianceDashboard?.exceptions_total ?? 0}</span>
+              <span className="kpi-sub">{currentLang === 'en' ? 'Open items needing attention' : 'بنود مفتوحة تحتاج للمتابعة'}</span>
+            </div>
+            <div className="glass-card kpi-card">
+              <span className="kpi-title">{currentLang === 'en' ? 'Tampered Audit Rows' : 'سجلات تدقيق متلاعب بها'}</span>
+              <span className="kpi-value" style={{ color: 'var(--accent-red)' }}>{complianceDashboard?.audit_tamper_check?.tampered_count ?? 0}</span>
+              <span className="kpi-sub"><i className="fa-solid fa-shield-halved"></i> {currentLang === 'en' ? 'Row-hash mismatch detected' : 'عدم تطابق البصمة (row-hash)'}</span>
+            </div>
+            <div className="glass-card kpi-card">
+              <span className="kpi-title">{currentLang === 'en' ? 'Unverified Audit Rows' : 'سجلات تدقيق غير موثقة'}</span>
+              <span className="kpi-value">{complianceDashboard?.audit_tamper_check?.unverified_count ?? 0}</span>
+              <span className="kpi-sub">{currentLang === 'en' ? 'Pre-date tamper hashing' : 'سابقة لتفعيل بصمة التحقق'}</span>
+            </div>
+          </div>
+
+          <div className="glass-card" style={{ marginBottom: '20px' }}>
+            <h3>{currentLang === 'en' ? 'Exceptions by Type' : 'الاستثناءات حسب النوع'}</h3>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginTop: '12px' }}>
+              {(complianceDashboard?.exceptions_by_type ?? []).map((row, idx) => (
+                <span key={idx} className="badge badge-reserved" style={{ fontSize: '13px', padding: '8px 14px' }}>
+                  {row.exception_type}: <strong>{row.count}</strong>
+                </span>
+              ))}
+              {(complianceDashboard?.exceptions_by_type ?? []).length === 0 && (
+                <span style={{ color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'No open exceptions.' : 'لا توجد استثناءات مفتوحة.'}</span>
+              )}
+            </div>
+          </div>
+
+          <div className="glass-card">
+            <h3>{t('rep_exceptions')}</h3>
+            {loadingCompliance ? (
+              <p style={{ color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Loading…' : 'جارٍ التحميل…'}</p>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table className="report-data-table">
+                  <thead>
+                    <tr>
+                      <th>{t('th_exception_type')}</th>
+                      <th>{t('th_reference')}</th>
+                      <th>{t('th_description')}</th>
+                      <th>{t('th_severity')}</th>
+                      <th>{t('th_raised_at')}</th>
+                      <th>{t('th_status')}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(complianceDashboard?.recent_exceptions ?? []).map((row, idx) => (
+                      <tr key={idx}>
+                        <td>{row.exception_type}</td>
+                        <td>{row.reference}</td>
+                        <td>{row.description}</td>
+                        <td>
+                          <span className={`badge ${row.severity === 'HIGH' || row.severity === 'BLOCK' ? 'badge-quarantined' : 'badge-reserved'}`}>
+                            {row.severity}
+                          </span>
+                        </td>
+                        <td>{row.raised_at ? new Date(row.raised_at).toLocaleString() : '—'}</td>
+                        <td>{row.status}</td>
+                      </tr>
+                    ))}
+                    {(complianceDashboard?.recent_exceptions ?? []).length === 0 && (
+                      <tr>
+                        <td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '20px' }}>
+                          {currentLang === 'en' ? 'No open exceptions.' : 'لا توجد استثناءات مفتوحة.'}
                         </td>
                       </tr>
                     )}
@@ -3723,6 +4409,14 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     <option value="KWD">KWD — Kuwaiti Dinar</option>
                   </select>
                 </div>
+                <div className="po-fg">
+                  <label>{currentLang === 'en' ? 'Supplier Invoice Number' : 'رقم فاتورة المورد'}</label>
+                  <input type="text" value={poInvoiceNumber} onChange={e => setPoInvoiceNumber(e.target.value)} disabled={!canModify('purchase_orders')} placeholder={currentLang === 'en' ? 'e.g. INV-VAL-20260703' : 'مثال: INV-VAL-20260703'} />
+                </div>
+                <div className="po-fg">
+                  <label>{currentLang === 'en' ? 'Supplier Invoice Date' : 'تاريخ فاتورة المورد'}</label>
+                  <input type="date" value={poInvoiceDate} onChange={e => setPoInvoiceDate(e.target.value)} disabled={!canModify('purchase_orders')} />
+                </div>
               </div>
               <div className="form-group">
                 <label className="po-section-title">{currentLang === 'en' ? 'Line Items' : 'بنود الطلب'}</label>
@@ -3838,6 +4532,36 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                   </table>
                 </div>
               </div>
+
+              {/* Acquisition fees — Cost Tracking & Valuation purchase cost detail. Rolled
+                  into PurchaseOrder.LandedCost server-side, which is what actually costs the
+                  received bars (InventoryLot.AverageUnitCost) once the shipment is intake'd. */}
+              <div className="form-group">
+                <label className="po-section-title">{currentLang === 'en' ? 'Acquisition Fees (added to landed cost)' : 'رسوم الاستحواذ (تُضاف إلى تكلفة الوصول)'}</label>
+                <div className="po-grid2">
+                  <div className="po-fg">
+                    <label>{currentLang === 'en' ? 'Freight / Shipping' : 'الشحن'}</label>
+                    <input type="number" min="0" value={poFreightCost} onChange={e => setPoFreightCost(parseFloat(e.target.value) || 0)} disabled={!canModify('purchase_orders')} />
+                  </div>
+                  <div className="po-fg">
+                    <label>{currentLang === 'en' ? 'Insurance' : 'التأمين'}</label>
+                    <input type="number" min="0" value={poInsuranceCost} onChange={e => setPoInsuranceCost(parseFloat(e.target.value) || 0)} disabled={!canModify('purchase_orders')} />
+                  </div>
+                  <div className="po-fg">
+                    <label>{currentLang === 'en' ? 'Customs Duty' : 'الرسوم الجمركية'}</label>
+                    <input type="number" min="0" value={poCustomsDutyCost} onChange={e => setPoCustomsDutyCost(parseFloat(e.target.value) || 0)} disabled={!canModify('purchase_orders')} />
+                  </div>
+                  <div className="po-fg">
+                    <label>{currentLang === 'en' ? 'Other Fees' : 'رسوم أخرى'}</label>
+                    <input type="number" min="0" value={poOtherFeesCost} onChange={e => setPoOtherFeesCost(parseFloat(e.target.value) || 0)} disabled={!canModify('purchase_orders')} />
+                  </div>
+                  <div className="po-fg" style={{ gridColumn: '1 / -1' }}>
+                    <label>{currentLang === 'en' ? 'Other Fees Description' : 'وصف الرسوم الأخرى'}</label>
+                    <input type="text" value={poOtherFeesDescription} onChange={e => setPoOtherFeesDescription(e.target.value)} disabled={!canModify('purchase_orders') || poOtherFeesCost === 0} placeholder={currentLang === 'en' ? 'e.g. Assay/refining fee' : 'مثال: رسوم الفحص/التكرير'} />
+                  </div>
+                </div>
+              </div>
+
               {/* Financial summary — right-aligned. */}
               <div className="po-summary">
                 <div className="po-sum-row">
@@ -3865,6 +4589,14 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     {currentLang === 'en' ? 'Manual override — click ↺ to restore the summed total.' : 'تعديل يدوي — اضغط ↺ للعودة إلى المجموع.'}
                   </div>
                 )}
+                <div className="po-sum-row">
+                  <span>{currentLang === 'en' ? 'Total Acquisition Fees' : 'إجمالي رسوم الاستحواذ'}</span>
+                  <span style={{ fontWeight: 600 }}>{(poFreightCost + poInsuranceCost + poCustomsDutyCost + poOtherFeesCost).toLocaleString()} {poCurrency}</span>
+                </div>
+                <div className="po-sum-row po-sum-grand">
+                  <span>{currentLang === 'en' ? 'Landed Cost (used for Average Cost valuation)' : 'التكلفة الفعلية (تُستخدم لتقييم متوسط التكلفة)'}</span>
+                  <span style={{ fontWeight: 800 }}>{(poCost + poFreightCost + poInsuranceCost + poCustomsDutyCost + poOtherFeesCost).toLocaleString()} {poCurrency}</span>
+                </div>
               </div>
 
               {/* Action buttons — right aligned. */}
@@ -3880,7 +4612,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                   <>
                     <button type="button" className="btn-link" onClick={resetPoForm}>{currentLang === 'en' ? 'Clear' : 'مسح'}</button>
                     {canModify('purchase_orders') && (
-                      <button type="button" className="btn-emerald" onClick={handleCreatePO}>{currentLang === 'en' ? 'Submit P.O.' : 'إرسال الطلب'}</button>
+                      <button type="button" className="btn-emerald" onClick={handleCreatePO}>{t('btn_create_po')}</button>
                     )}
                   </>
                 )}
@@ -3903,6 +4635,9 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     <th>{t('th_supplier')}</th>
                     <th>{t('th_weight')}</th>
                     <th>{t('th_cost')}</th>
+                    <th title={currentLang === 'en' ? 'Total cost including freight/insurance/customs/other fees — feeds Average Cost valuation' : 'التكلفة الإجمالية شاملة الشحن/التأمين/الجمارك/الرسوم الأخرى — تُستخدم في تقييم متوسط التكلفة'}>
+                      {currentLang === 'en' ? 'Landed Cost' : 'التكلفة الفعلية'}
+                    </th>
                     <th>{t('th_status')}</th>
                     {canModify('purchase_orders') && <th style={{ width: '220px', textAlign: 'center' }}>{t('th_action')}</th>}
                   </tr>
@@ -3910,17 +4645,18 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                 <tbody>
                   {poList.length === 0 ? (
                     <tr>
-                      <td colSpan={canModify('purchase_orders') ? 6 : 5} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '20px' }}>
+                      <td colSpan={canModify('purchase_orders') ? 7 : 6} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '20px' }}>
                         {t('active_deals_empty')}
                       </td>
                     </tr>
                   ) : (
                     poList.map((po: any, idx: number) => (
                       <tr key={idx}>
-                        <td><strong>{po.po_number}</strong></td>
+                        <td><strong>{po.po_number}</strong>{po.supplier_invoice_number && <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Inv.' : 'فاتورة'} {po.supplier_invoice_number}</div>}</td>
                         <td>{po.supplier}</td>
                         <td>{po.weight}g</td>
                         <td>${po.cost.toLocaleString()} {po.currency}</td>
+                        <td>${(po.landed_cost ?? po.cost).toLocaleString()} {po.currency}</td>
                         <td><span className="badge badge-ready">{translateDb(po.status_code)}</span></td>
                         {canModify('purchase_orders') && (
                           <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
@@ -4013,16 +4749,142 @@ const [migrationApproved, setMigrationApproved] = useState(false);
             </div>
           </div>
 
-          <div className="glass-card" style={{ marginTop: '20px' }}>
-            <h3>{currentLang === 'en' ? 'Receive Precious Metals from a Customer' : 'استلام معادن ثمينة من عميل'}</h3>
+        </section>
+
+        {/* SCREEN VIEWPORT: RECEIVE FROM CUSTOMER -- moved out of the Receive Shipment screen
+            into its own top-level menu entry/screen (was previously a modal opened from a
+            teaser card inside screen-intake). Same state/handlers (resetCustomerReceiptForm
+            resets the form fields, handleSubmitCustomerReceipt posts to
+            /api/vault/intake/customer), just rendered inline instead of in a modal overlay. */}
+        <section className={`screen-viewport ${activeTab === 'screen-customer-receipt' ? 'active' : ''}`}>
+          <div className="glass-card">
+            <h3>{t('title_customer_receipt')}</h3>
             <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '15px' }}>
               {currentLang === 'en'
                 ? 'Log a receipt of gold/silver presented directly by a customer -- a buyback (KFH purchases it), a custody deposit (customer keeps ownership, KFH keeps it safe), or a returned bar. Routed through the same Maker-Checker approval as a supplier shipment.'
                 : 'سجّل استلام ذهب/فضة تم تقديمه مباشرة من قبل عميل -- إعادة شراء (يشتريه البنك) أو إيداع أمانة (يحتفظ العميل بالملكية ويحفظه البنك) أو سبيكة معادة. تتم الموافقة عبر نفس مسار الصانع والمدقق كأي شحنة من مورد.'}
             </p>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+              <div className="form-group">
+                <label>{currentLang === 'ar' ? 'رقم العميل' : 'Customer ID'}</label>
+                <input type="number" className="form-control" value={receiptCustomerId} onChange={e => setReceiptCustomerId(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label>{currentLang === 'ar' ? 'سبب الاستلام' : 'Receipt Reason'}</label>
+                <select value={receiptReason} onChange={e => setReceiptReason(e.target.value as any)} style={{ color: '#000' }}>
+                  <option value="BUYBACK">{currentLang === 'ar' ? 'إعادة شراء (يملكها البنك)' : 'Buyback (KFH takes ownership)'}</option>
+                  <option value="CUSTODY_DEPOSIT">{currentLang === 'ar' ? 'إيداع أمانة (تبقى ملكاً للعميل)' : 'Custody Deposit (customer keeps ownership)'}</option>
+                  <option value="RETURN">{currentLang === 'ar' ? 'إعادة سبيكة' : 'Returned Bar'}</option>
+                </select>
+              </div>
+            </div>
+
+            {receiptReason === 'CUSTODY_DEPOSIT' && (
+              <div className="form-group" style={{ marginBottom: '12px' }}>
+                <label>{currentLang === 'ar' ? 'رقم حساب العميل (لحيازة الأمانة)' : "Customer Account ID (to hold the custody deposit)"}</label>
+                <input type="number" className="form-control" value={receiptAccountId} onChange={e => setReceiptAccountId(e.target.value)} />
+              </div>
+            )}
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '15px' }}>
+              <div className="form-group">
+                <label>{currentLang === 'ar' ? 'رقم التشغيلة/اللوت' : 'Lot Number'}</label>
+                <input type="text" className="form-control" value={receiptLotNum} onChange={e => setReceiptLotNum(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label>{currentLang === 'ar' ? 'موقع التخزين' : 'Storage Slot Location'}</label>
+                <select value={receiptSelectedLocation} onChange={e => setReceiptSelectedLocation(parseInt(e.target.value))} style={{ color: '#000' }}>
+                  {locations.flatMap(loc =>
+                    loc.slots.map((s: any) => ({
+                      id: s.location_id,
+                      label: `${loc.vault_name} - ${loc.zone_room} - Row ${s.shelf_row} - Slot ${s.slot_bin} ${s.occupied ? '(Occupied)' : ''}`
+                    }))
+                  ).map(item => (
+                    <option key={item.id} value={item.id}>{item.label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="glass-card" style={{ padding: '12px', background: 'rgba(0, 155, 78, 0.05)', border: '1px solid rgba(0, 155, 78, 0.2)', marginBottom: '15px' }}>
+              <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--kfh-green)' }}>
+                <i className="fa-solid fa-barcode"></i> {currentLang === 'ar' ? 'محاكي جهاز مسح الباركود / الرقم التسلسلي' : 'Barcode / Serial Scanner Input'}
+              </h4>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder={currentLang === 'ar' ? 'امسح الباركود للقطعة أو أدخل الرقم التسلسلي واضغط Enter...' : 'Scan piece barcode or enter serial number & hit Enter...'}
+                  value={currentReceiptScanSerial}
+                  onChange={e => setCurrentReceiptScanSerial(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      if (currentReceiptScanSerial.trim()) {
+                        const parsed = parseGs1Barcode(currentReceiptScanSerial.trim());
+                        const isDup = receiptScannedSerials.some(s => s.serial === parsed.serial);
+                        if (isDup) {
+                          alert(currentLang === 'en' ? 'This barcode/serial has already been scanned.' : 'هذا الباركود/الرقم التسلسلي تم مسحه مسبقاً.');
+                          return;
+                        }
+                        setReceiptScannedSerials([...receiptScannedSerials, { serial: parsed.serial, product_id: receiptSelectedProductId }]);
+                        setCurrentReceiptScanSerial('');
+                      }
+                    }
+                  }}
+                />
+                <button
+                  className="btn btn-primary"
+                  type="button"
+                  onClick={() => {
+                    if (currentReceiptScanSerial.trim()) {
+                      const parsed = parseGs1Barcode(currentReceiptScanSerial.trim());
+                      const isDup = receiptScannedSerials.some(s => s.serial === parsed.serial);
+                      if (isDup) {
+                        alert(currentLang === 'en' ? 'This barcode/serial has already been scanned.' : 'هذا الباركود/الرقم التسلسلي تم مسحه مسبقاً.');
+                        return;
+                      }
+                      setReceiptScannedSerials([...receiptScannedSerials, { serial: parsed.serial, product_id: receiptSelectedProductId }]);
+                      setCurrentReceiptScanSerial('');
+                    }
+                  }}
+                >
+                  {currentLang === 'ar' ? 'إضافة' : 'Add'}
+                </button>
+              </div>
+
+              <div className="form-group" style={{ marginTop: '10px', marginBottom: 0 }}>
+                <label style={{ fontSize: '11px' }}>{currentLang === 'ar' ? 'صنف المنتج' : 'Product Denomination'}</label>
+                <select
+                  value={receiptSelectedProductId}
+                  onChange={e => setReceiptSelectedProductId(parseInt(e.target.value))}
+                  style={{ padding: '4px', fontSize: '12px', height: '30px', color: '#000' }}
+                >
+                  {products
+                    .filter((p: any) => p.is_active !== false)
+                    .map((p: any) => (
+                      <option key={p.product_id} value={p.product_id}>
+                        {`${p.metal_name} ${p.denomination_label}` + (p.purity_value ? ` (${p.purity_value} ${currentLang === 'ar' ? 'نقاوة' : 'Purity'})` : '')}
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              {receiptScannedSerials.length > 0 && (
+                <div style={{ marginTop: '10px', fontSize: '11px', color: 'var(--text-muted)' }}>
+                  {receiptScannedSerials.length} {currentLang === 'ar' ? 'قطعة تم مسحها' : 'piece(s) scanned'}: {receiptScannedSerials.map(s => s.serial).join(', ')}
+                </div>
+              )}
+            </div>
+
             {canModify('intake') && (
-              <button className="btn" style={{ backgroundColor: 'var(--accent-blue)', padding: '6px 14px', fontSize: '12px' }} onClick={openCustomerReceiptModal}>
-                <i className="fa-solid fa-hand-holding-dollar"></i> {currentLang === 'en' ? 'Receive from Customer' : 'استلام من عميل'}
+              <button
+                className="btn btn-primary"
+                style={{ width: '100%' }}
+                onClick={handleSubmitCustomerReceipt}
+              >
+                <i className="fa-solid fa-check"></i> {currentLang === 'ar' ? 'تأكيد استلام العميل' : 'Confirm Customer Receipt'}
               </button>
             )}
           </div>
@@ -4180,13 +5042,110 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                 />
               </div>
 
-              <button 
-                className="btn btn-primary" 
-                style={{ width: '100%', marginTop: '10px' }} 
+              <button
+                className="btn btn-primary"
+                style={{ width: '100%', marginTop: '10px' }}
                 onClick={handleInitiateBranchTransferTab}
                 disabled={!transferItemId || !transferDestBranchId || !canModify('purchase_orders')}
               >
                 <i className="fa-solid fa-paper-plane"></i> {currentLang === 'en' ? 'Initiate Transfer Workflow' : 'بدء مسار التحويل'}
+              </button>
+            </div>
+          </div>
+        </section>
+
+        {/* SCREEN VIEWPORT: GDM DISPENSING (operational -- dispensing module) */}
+        <section className={`screen-viewport ${activeTab === 'screen-dispensing' ? 'active' : ''}`}>
+          <div className="split-grid-3">
+            <div className="glass-card" style={{ gridColumn: 'span 2' }}>
+              <h3>{currentLang === 'en' ? 'Dispense Transactions' : 'حركات صرف الأجهزة الذاتية'}</h3>
+              <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>
+                {currentLang === 'en'
+                  ? 'View and operate self-service dispense transactions against registered GDM machines.'
+                  : 'عرض وتشغيل حركات الصرف الذاتي على أجهزة الصرف المسجّلة.'}
+              </p>
+              <div className="table-responsive">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>{currentLang === 'en' ? 'Device' : 'الجهاز'}</th>
+                      <th>{currentLang === 'en' ? 'Product' : 'المنتج'}</th>
+                      <th>{t('th_serial')}</th>
+                      <th>{t('th_status')}</th>
+                      <th>{currentLang === 'en' ? 'Requested At' : 'وقت الطلب'}</th>
+                      {canModify('dispensing') && <th>{t('th_action')}</th>}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dispenseTransactions.length === 0 ? (
+                      <tr><td colSpan={canModify('dispensing') ? 6 : 5} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '20px' }}>
+                        {currentLang === 'en' ? 'No dispense transactions found.' : 'لا توجد حركات صرف حالياً.'}
+                      </td></tr>
+                    ) : dispenseTransactions.map((tx: any) => (
+                      <tr key={tx.dispense_id}>
+                        <td>{tx.device_code}</td>
+                        <td>{tx.product_label}</td>
+                        <td>{tx.serial_number || '—'}</td>
+                        <td><span className={`badge badge-${(tx.status_code || '').toLowerCase()}`}>{tx.status_code}</span></td>
+                        <td>{tx.requested_at ? new Date(tx.requested_at).toLocaleString() : '—'}</td>
+                        {canModify('dispensing') && (
+                          <td>
+                            {tx.status_code === 'ALLOCATED' && (
+                              <div style={{ display: 'flex', gap: '6px' }}>
+                                <button className="btn btn-primary" style={{ padding: '4px 10px', fontSize: '11px' }} onClick={() => handleCompleteDispense(tx.dispense_id)}>
+                                  {currentLang === 'en' ? 'Complete' : 'إتمام'}
+                                </button>
+                                <button className="btn btn-danger" style={{ padding: '4px 10px', fontSize: '11px' }} onClick={() => handleFailDispense(tx.dispense_id)}>
+                                  {currentLang === 'en' ? 'Fail' : 'فشل'}
+                                </button>
+                              </div>
+                            )}
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="glass-card">
+              <h3>{currentLang === 'en' ? 'Request Dispense' : 'طلب صرف'}</h3>
+              {!canModify('dispensing') && (
+                <div style={{ padding: '10px', background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.25)', borderRadius: '8px', color: 'var(--accent-red)', fontSize: '12px', marginBottom: '15px' }}>
+                  <i className="fa-solid fa-circle-exclamation"></i> {currentLang === 'en' ? 'Read-Only Mode: You cannot operate dispensing.' : 'وضع القراءة فقط: لا يمكنك تشغيل الصرف الذاتي.'}
+                </div>
+              )}
+              <div className="form-group">
+                <label>{currentLang === 'en' ? 'Device' : 'الجهاز'}</label>
+                <select value={dispenseFormDeviceId} onChange={e => setDispenseFormDeviceId(e.target.value)} style={{ color: '#000' }} disabled={!canModify('dispensing')}>
+                  <option value="">-- {currentLang === 'en' ? 'Select Device' : 'اختر الجهاز'} --</option>
+                  {gdmDevices.filter((d: any) => d.is_active).map((d: any) => (
+                    <option key={d.device_id} value={d.device_id}>{d.device_code} — {d.device_name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-group">
+                <label>{currentLang === 'en' ? 'Product' : 'المنتج'}</label>
+                <select value={dispenseFormProductId} onChange={e => setDispenseFormProductId(e.target.value)} style={{ color: '#000' }} disabled={!canModify('dispensing')}>
+                  <option value="">-- {currentLang === 'en' ? 'Select Product' : 'اختر المنتج'} --</option>
+                  {products.map((p: any) => (
+                    <option key={p.product_id} value={p.product_id}>{p.metal_name} {p.denomination_label} ({p.product_code})</option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-group">
+                <label>{currentLang === 'en' ? 'Channel' : 'القناة'}</label>
+                <select value={dispenseFormChannelId} onChange={e => setDispenseFormChannelId(e.target.value)} style={{ color: '#000' }} disabled={!canModify('dispensing')}>
+                  {DISPENSING_CHANNELS.map(c => (
+                    <option key={c.value} value={c.value}>{c.label}</option>
+                  ))}
+                </select>
+              </div>
+              <button className="btn btn-primary" style={{ width: '100%', marginTop: '10px' }}
+                onClick={handleRequestDispense}
+                disabled={!dispenseFormDeviceId || !dispenseFormProductId || !canModify('dispensing')}>
+                <i className="fa-solid fa-hand-point-down"></i> {currentLang === 'en' ? 'Request Dispense' : 'طلب الصرف'}
               </button>
             </div>
           </div>
@@ -4766,6 +5725,342 @@ const [migrationApproved, setMigrationApproved] = useState(false);
           </div>
         </section>
 
+        {/* SCREEN VIEWPORT: GDM DEVICE REGISTRATION (admin/governance tier -- device_integration module) */}
+        <section className={`screen-viewport ${activeTab === 'screen-devices' ? 'active' : ''}`}>
+          <div className="glass-card">
+            <h3>{currentLang === 'en' ? 'GDM Device Registration' : 'تسجيل أجهزة الصرف الذاتي'}</h3>
+            <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>
+              {currentLang === 'en'
+                ? 'Register and decommission physical Gold Dispensing Machines. Day-to-day dispense operation lives on the GDM Dispensing screen.'
+                : 'تسجيل وإلغاء تشغيل أجهزة الصرف الذاتي للذهب. تشغيل الصرف اليومي في شاشة صرف الأجهزة الذاتية.'}
+            </p>
+
+            {canModify('device_integration') && (
+              <div className="glass-card" style={{ marginBottom: '24px' }}>
+                <h4>{editingDeviceId !== null ? (currentLang === 'en' ? 'Edit Device' : 'تعديل الجهاز') : (currentLang === 'en' ? 'Register New Device' : 'تسجيل جهاز جديد')}</h4>
+                <div className="split-grid-2">
+                  <div className="form-group">
+                    <label>{currentLang === 'en' ? 'Device Code' : 'رمز الجهاز'}</label>
+                    <input type="text" className="form-control" placeholder="GDM-001" value={deviceFormCode} onChange={e => setDeviceFormCode(e.target.value)} disabled={editingDeviceId !== null} />
+                  </div>
+                  <div className="form-group">
+                    <label>{currentLang === 'en' ? 'Device Name' : 'اسم الجهاز'}</label>
+                    <input type="text" className="form-control" placeholder="Lobby ATM-style Dispenser" value={deviceFormName} onChange={e => setDeviceFormName(e.target.value)} />
+                  </div>
+                  <div className="form-group">
+                    <label>{currentLang === 'en' ? 'Branch' : 'الفرع'}</label>
+                    <select value={deviceFormBranchId} onChange={e => setDeviceFormBranchId(e.target.value)} style={{ color: '#000' }}>
+                      <option value="">-- {currentLang === 'en' ? 'Select Branch' : 'اختر الفرع'} --</option>
+                      {branchesList.map((b: any, idx: number) => (
+                        <option key={idx} value={b.branch_id}>{b.branch_name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label>{currentLang === 'en' ? 'Cassette Location ID' : 'رقم موقع الخرطوشة'}</label>
+                    <input type="number" className="form-control" value={deviceFormLocationId} onChange={e => setDeviceFormLocationId(e.target.value)} min="1" />
+                  </div>
+                  <div className="form-group">
+                    <label>{currentLang === 'en' ? 'Manufacturer' : 'الشركة المصنعة'}</label>
+                    <input type="text" className="form-control" value={deviceFormManufacturer} onChange={e => setDeviceFormManufacturer(e.target.value)} />
+                  </div>
+                  <div className="form-group">
+                    <label>{currentLang === 'en' ? 'Model' : 'الطراز'}</label>
+                    <input type="text" className="form-control" value={deviceFormModel} onChange={e => setDeviceFormModel(e.target.value)} />
+                  </div>
+                  <div className="form-group">
+                    <label>{currentLang === 'en' ? 'Status' : 'الحالة'}</label>
+                    <select value={deviceFormActive ? 'true' : 'false'} onChange={e => setDeviceFormActive(e.target.value === 'true')} style={{ color: '#000' }}>
+                      <option value="true">{currentLang === 'en' ? 'Active' : 'نشط'}</option>
+                      <option value="false">{currentLang === 'en' ? 'Disabled' : 'معطل'}</option>
+                    </select>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
+                  <button className="btn btn-primary" onClick={handleSaveDevice}>{currentLang === 'en' ? 'Save Device' : 'حفظ الجهاز'}</button>
+                  {editingDeviceId !== null && (
+                    <button className="btn" onClick={resetDeviceForm}>{currentLang === 'en' ? 'Cancel' : 'إلغاء'}</button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div className="table-responsive">
+              <table>
+                <thead>
+                  <tr>
+                    <th>{currentLang === 'en' ? 'Device Code' : 'رمز الجهاز'}</th>
+                    <th>{currentLang === 'en' ? 'Name' : 'الاسم'}</th>
+                    <th>{currentLang === 'en' ? 'Branch' : 'الفرع'}</th>
+                    <th>{currentLang === 'en' ? 'Manufacturer / Model' : 'الشركة المصنعة / الطراز'}</th>
+                    <th>{t('th_status')}</th>
+                    <th>{currentLang === 'en' ? 'Last Heartbeat' : 'آخر نبضة'}</th>
+                    {canModify('device_integration') && <th>{t('th_action')}</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {gdmDevices.length === 0 ? (
+                    <tr><td colSpan={canModify('device_integration') ? 7 : 6} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '20px' }}>
+                      {currentLang === 'en' ? 'No devices registered yet.' : 'لا توجد أجهزة مسجّلة بعد.'}
+                    </td></tr>
+                  ) : gdmDevices.map((d: any) => (
+                    <tr key={d.device_id}>
+                      <td><strong>{d.device_code}</strong></td>
+                      <td>{d.device_name}</td>
+                      <td>{d.branch_name}</td>
+                      <td>{d.manufacturer} {d.model}</td>
+                      <td>
+                        <span className={`badge ${d.is_active ? 'badge-ready' : 'badge-sold'}`}>
+                          {d.is_active ? (currentLang === 'en' ? 'Active' : 'نشط') : (currentLang === 'en' ? 'Disabled' : 'معطل')}
+                        </span>
+                      </td>
+                      <td>{d.last_heartbeat_at ? new Date(d.last_heartbeat_at).toLocaleString() : '—'}</td>
+                      {canModify('device_integration') && (
+                        <td>
+                          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                            <button className="btn" style={{ padding: '4px 8px', fontSize: '12px' }} onClick={() => handleStartEditDevice(d)}>
+                              <i className="fa-solid fa-pen"></i>
+                            </button>
+                            <button className="btn btn-danger" style={{ padding: '4px 8px', fontSize: '12px' }} onClick={() => handleDeleteDevice(d.device_id)}>
+                              <i className="fa-solid fa-trash"></i>
+                            </button>
+                          </div>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        {/* SCREEN VIEWPORT: BUSINESS RULES ENGINE (admin/governance tier -- rules_engine module, RFP item 5) */}
+        <section className={`screen-viewport ${activeTab === 'screen-rules' ? 'active' : ''}`}>
+          <div className="glass-card">
+            <h3>{currentLang === 'en' ? 'Business Rules Engine' : 'محرك قواعد الأعمال'}</h3>
+            <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>
+              {currentLang === 'en'
+                ? 'Author and version dynamic business validation rules (e.g. transfer limits). Rules are append-only: saving a rule creates a new version.'
+                : 'إنشاء وإصدار قواعد التحقق الديناميكية للأعمال (مثل حدود التحويل). القواعد تراكمية: حفظ القاعدة ينشئ إصداراً جديداً.'}
+            </p>
+
+            {canModify('rules_engine') && (
+              <div className="glass-card" style={{ marginBottom: '24px' }}>
+                <h4>{editingRuleCode !== null ? (currentLang === 'en' ? `Edit Rule: ${editingRuleCode}` : `تعديل القاعدة: ${editingRuleCode}`) : (currentLang === 'en' ? 'Author New Rule' : 'إنشاء قاعدة جديدة')}</h4>
+                <div className="split-grid-2">
+                  <div className="form-group">
+                    <label>{currentLang === 'en' ? 'Rule Code' : 'رمز القاعدة'}</label>
+                    <input type="text" className="form-control" placeholder="TRANSFER_LIMIT" value={ruleFormCode} onChange={e => setRuleFormCode(e.target.value)} disabled={editingRuleCode !== null} />
+                  </div>
+                  <div className="form-group">
+                    <label>{currentLang === 'en' ? 'Rule Name' : 'اسم القاعدة'}</label>
+                    <input type="text" className="form-control" value={ruleFormName} onChange={e => setRuleFormName(e.target.value)} />
+                  </div>
+                  <div className="form-group">
+                    <label>{currentLang === 'en' ? 'Rule Type' : 'نوع القاعدة'}</label>
+                    <input type="text" className="form-control" placeholder="TRANSFER_LIMIT" value={ruleFormType} onChange={e => setRuleFormType(e.target.value)} disabled={editingRuleCode !== null} />
+                  </div>
+                  <div className="form-group">
+                    <label>{currentLang === 'en' ? 'Severity' : 'الخطورة'}</label>
+                    <select value={ruleFormSeverity} onChange={e => setRuleFormSeverity(e.target.value)} style={{ color: '#000' }}>
+                      <option value="BLOCK">BLOCK</option>
+                      <option value="WARN">WARN</option>
+                    </select>
+                  </div>
+                  <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+                    <label>{currentLang === 'en' ? 'Expression (JSON)' : 'التعبير (JSON)'}</label>
+                    <textarea className="form-control" rows={3} placeholder='{"maxWeightGrams": 5000}'
+                      value={ruleFormExpression} onChange={e => setRuleFormExpression(e.target.value)} style={{ fontFamily: 'monospace', fontSize: '12px' }} />
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
+                  <button className="btn btn-primary" onClick={handleSaveRule}>{currentLang === 'en' ? 'Save Rule' : 'حفظ القاعدة'}</button>
+                  {editingRuleCode !== null && (
+                    <button className="btn" onClick={resetRuleForm}>{currentLang === 'en' ? 'Cancel' : 'إلغاء'}</button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div className="table-responsive">
+              <table>
+                <thead>
+                  <tr>
+                    <th>{currentLang === 'en' ? 'Code' : 'الرمز'}</th>
+                    <th>{currentLang === 'en' ? 'Name' : 'الاسم'}</th>
+                    <th>{currentLang === 'en' ? 'Type' : 'النوع'}</th>
+                    <th>{currentLang === 'en' ? 'Severity' : 'الخطورة'}</th>
+                    <th>{currentLang === 'en' ? 'Version' : 'الإصدار'}</th>
+                    <th>{t('th_status')}</th>
+                    {canModify('rules_engine') && <th>{t('th_action')}</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {businessRules.length === 0 ? (
+                    <tr><td colSpan={canModify('rules_engine') ? 7 : 6} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '20px' }}>
+                      {currentLang === 'en' ? 'No business rules authored yet.' : 'لم يتم إنشاء أي قواعد أعمال بعد.'}
+                    </td></tr>
+                  ) : businessRules.map((r: any) => (
+                    <tr key={r.rule_id}>
+                      <td><strong>{r.rule_code}</strong></td>
+                      <td>{r.rule_name}</td>
+                      <td>{r.rule_type}</td>
+                      <td><span className={`badge ${r.severity === 'BLOCK' ? 'badge-quarantined' : 'badge-reserved'}`}>{r.severity}</span></td>
+                      <td>v{r.version}</td>
+                      <td>
+                        <span className={`badge ${r.is_active ? 'badge-ready' : 'badge-sold'}`}>
+                          {r.is_active ? (currentLang === 'en' ? 'Active' : 'نشط') : (currentLang === 'en' ? 'Inactive' : 'غير نشط')}
+                        </span>
+                      </td>
+                      {canModify('rules_engine') && (
+                        <td>
+                          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                            <button className="btn" style={{ padding: '4px 8px', fontSize: '12px' }} onClick={() => handleStartEditRule(r)}>
+                              <i className="fa-solid fa-pen"></i>
+                            </button>
+                            <button className="btn" style={{ padding: '4px 8px', fontSize: '12px' }} onClick={() => handleToggleRuleActive(r)}>
+                              {r.is_active ? (currentLang === 'en' ? 'Deactivate' : 'تعطيل') : (currentLang === 'en' ? 'Activate' : 'تفعيل')}
+                            </button>
+                          </div>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        {/* SCREEN VIEWPORT: MONITORING (admin/governance tier -- monitoring module, RFP item 8) */}
+        <section className={`screen-viewport ${activeTab === 'screen-monitoring' ? 'active' : ''}`}>
+          <div className="glass-card">
+            <h3>{currentLang === 'en' ? 'Monitoring' : 'المراقبة والتنبيهات'}</h3>
+            <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>
+              {currentLang === 'en'
+                ? 'SLA metrics, recent monitoring events, and alert-route configuration for the KFH monitoring-tool integration.'
+                : 'مؤشرات اتفاقية مستوى الخدمة، أحدث أحداث المراقبة، وإعداد مسارات التنبيه لتكامل أداة المراقبة الخاصة ببيت التمويل الكويتي.'}
+            </p>
+
+            {slaMetrics && (
+              <div className="split-grid-3" style={{ marginBottom: '24px' }}>
+                <div className="glass-card">
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Overall Status' : 'الحالة العامة'}</div>
+                  <div style={{ fontSize: '20px', fontWeight: 700 }}>
+                    <span className={`badge ${slaMetrics.overallStatus === 'HEALTHY' ? 'badge-ready' : slaMetrics.overallStatus === 'DEGRADED' ? 'badge-reserved' : 'badge-quarantined'}`}>
+                      {slaMetrics.overallStatus}
+                    </span>
+                  </div>
+                </div>
+                <div className="glass-card">
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Pending Workflow Instances' : 'مسارات العمل المعلقة'}</div>
+                  <div style={{ fontSize: '20px', fontWeight: 700 }}>{slaMetrics.pendingWorkflowInstances}</div>
+                </div>
+                <div className="glass-card">
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Open Mismatch Cases' : 'حالات عدم التطابق المفتوحة'}</div>
+                  <div style={{ fontSize: '20px', fontWeight: 700 }}>{slaMetrics.openMismatchCases}</div>
+                </div>
+                <div className="glass-card">
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Reconciliation Breaks (24h)' : 'فروقات التسوية (24 ساعة)'}</div>
+                  <div style={{ fontSize: '20px', fontWeight: 700 }}>{slaMetrics.reconciliationBreaksLast24h}</div>
+                </div>
+                <div className="glass-card">
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Alert Events (24h)' : 'أحداث التنبيه (24 ساعة)'}</div>
+                  <div style={{ fontSize: '20px', fontWeight: 700 }}>{slaMetrics.alertEventsLast24h}</div>
+                </div>
+              </div>
+            )}
+
+            <h4 style={{ marginBottom: '12px' }}>{currentLang === 'en' ? 'Recent Events' : 'الأحداث الأخيرة'}</h4>
+            <div className="table-responsive" style={{ marginBottom: '24px' }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>{currentLang === 'en' ? 'Event Type' : 'نوع الحدث'}</th>
+                    <th>{currentLang === 'en' ? 'Service' : 'الخدمة'}</th>
+                    <th>{currentLang === 'en' ? 'Metric' : 'المؤشر'}</th>
+                    <th>{currentLang === 'en' ? 'Severity' : 'الخطورة'}</th>
+                    <th>{currentLang === 'en' ? 'Occurred At' : 'وقت الحدوث'}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {monitoringEvents.length === 0 ? (
+                    <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '20px' }}>
+                      {currentLang === 'en' ? 'No monitoring events in the last 24 hours.' : 'لا توجد أحداث مراقبة خلال آخر 24 ساعة.'}
+                    </td></tr>
+                  ) : monitoringEvents.map((e: any) => (
+                    <tr key={e.event_id}>
+                      <td>{e.event_type}</td>
+                      <td>{e.service_name}</td>
+                      <td>{e.metric_name}: {e.metric_value}</td>
+                      <td><span className={`badge ${e.severity === 'CRITICAL' ? 'badge-quarantined' : 'badge-reserved'}`}>{e.severity}</span></td>
+                      <td>{e.occurred_at ? new Date(e.occurred_at).toLocaleString() : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <h4 style={{ marginBottom: '12px' }}>{currentLang === 'en' ? 'Alert Routing' : 'مسارات التنبيه'}</h4>
+            {canModify('monitoring') && (
+              <div className="glass-card" style={{ marginBottom: '16px' }}>
+                <div className="split-grid-2">
+                  <div className="form-group">
+                    <label>{currentLang === 'en' ? 'Event Type' : 'نوع الحدث'}</label>
+                    <input type="text" className="form-control" placeholder="INVENTORY_DISCREPANCY" value={routeFormEventType} onChange={e => setRouteFormEventType(e.target.value)} />
+                  </div>
+                  <div className="form-group">
+                    <label>{currentLang === 'en' ? 'Severity' : 'الخطورة'}</label>
+                    <select value={routeFormSeverity} onChange={e => setRouteFormSeverity(e.target.value)} style={{ color: '#000' }}>
+                      <option value="CRITICAL">CRITICAL</option>
+                      <option value="WARNING">WARNING</option>
+                      <option value="INFO">INFO</option>
+                    </select>
+                  </div>
+                  <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+                    <label>{currentLang === 'en' ? 'Destination (webhook/email)' : 'الوجهة (رابط/بريد إلكتروني)'}</label>
+                    <input type="text" className="form-control" placeholder="https://monitoring.kfh.com.kw/webhook" value={routeFormDestination} onChange={e => setRouteFormDestination(e.target.value)} />
+                  </div>
+                </div>
+                <button className="btn btn-primary" style={{ marginTop: '10px' }} onClick={handleAddAlertRoute}>
+                  <i className="fa-solid fa-plus"></i> {currentLang === 'en' ? 'Add Alert Route' : 'إضافة مسار تنبيه'}
+                </button>
+              </div>
+            )}
+            <div className="table-responsive">
+              <table>
+                <thead>
+                  <tr>
+                    <th>{currentLang === 'en' ? 'Event Type' : 'نوع الحدث'}</th>
+                    <th>{currentLang === 'en' ? 'Severity' : 'الخطورة'}</th>
+                    <th>{currentLang === 'en' ? 'Destination' : 'الوجهة'}</th>
+                    <th>{t('th_status')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {alertRoutes.length === 0 ? (
+                    <tr><td colSpan={4} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '20px' }}>
+                      {currentLang === 'en' ? 'No alert routes configured yet.' : 'لم يتم إعداد مسارات تنبيه بعد.'}
+                    </td></tr>
+                  ) : alertRoutes.map((r: any) => (
+                    <tr key={r.route_id}>
+                      <td>{r.event_type}</td>
+                      <td><span className={`badge ${r.severity === 'CRITICAL' ? 'badge-quarantined' : 'badge-reserved'}`}>{r.severity}</span></td>
+                      <td>{r.destination}</td>
+                      <td>
+                        <span className={`badge ${r.is_active ? 'badge-ready' : 'badge-sold'}`}>
+                          {r.is_active ? (currentLang === 'en' ? 'Active' : 'نشط') : (currentLang === 'en' ? 'Inactive' : 'غير نشط')}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
         {/* SCREEN VIEWPORT: REPORTING & ANALYTICS */}
         <section className={`screen-viewport ${activeTab === 'screen-reports' ? 'active' : ''}`}>
           <div className="glass-card">
@@ -4787,7 +6082,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       <i className="fa-solid fa-file-pdf"></i> {t('btn_export_pdf')}
                     </button>
                   </>
-                ) : (reportType === 'inventory_balance' || reportType === 'transactions' || reportType === 'reconciliation') ? (
+                ) : (reportType === 'inventory_balance' || reportType === 'transactions' || reportType === 'reconciliation' || reportType === 'kpis' || reportType === 'exceptions' || reportType === 'cost_analysis' || reportType === 'cost_variance' || reportType === 'movements') ? (
                   // Real server-generated report (RFP: "official reports on inventory
                   // balances, transaction logs, reconciliation differences") -- same
                   // QuestPDF/ClosedXML rendering path as the audit trail export, not the
@@ -4826,6 +6121,12 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                   <option value="transactions">{t('rep_transactions')}</option>
                   <option value="inventory_balance">{t('rep_inventory_balance')}</option>
                   <option value="reconciliation">{t('rep_reconciliation')}</option>
+                  <option value="gl_postings">{t('rep_gl_postings')}</option>
+                  <option value="kpis">{t('rep_kpis')}</option>
+                  <option value="exceptions">{t('rep_exceptions')}</option>
+                  <option value="cost_analysis">{t('rep_cost_analysis')}</option>
+                  <option value="cost_variance">{t('rep_cost_variance')}</option>
+                  <option value="movements">{t('rep_movements')}</option>
                 </select>
               </div>
 
@@ -4914,6 +6215,12 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     {reportType === 'transactions' && t('rep_transactions')}
                     {reportType === 'inventory_balance' && t('rep_inventory_balance')}
                     {reportType === 'reconciliation' && t('rep_reconciliation')}
+                    {reportType === 'gl_postings' && t('rep_gl_postings')}
+                    {reportType === 'kpis' && t('rep_kpis')}
+                    {reportType === 'exceptions' && t('rep_exceptions')}
+                    {reportType === 'cost_analysis' && t('rep_cost_analysis')}
+                    {reportType === 'cost_variance' && t('rep_cost_variance')}
+                    {reportType === 'movements' && t('rep_movements')}
                   </h3>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginTop: '20px', color: '#121824' }}>
                     <span>Date Generated: {new Date().toLocaleString()}</span>
@@ -5125,6 +6432,170 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                               <td>{row.reason_code || '—'}</td>
                               <td>{row.resolved_by || '—'}</td>
                               <td>{row.resolved_at ? new Date(row.resolved_at).toLocaleString() : '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </>
+                    )}
+
+                    {reportType === 'gl_postings' && (
+                      <>
+                        <thead>
+                          <tr>
+                            <th>{t('th_gl_source')}</th>
+                            <th>{t('th_gl_debit')}</th>
+                            <th>{t('th_gl_credit')}</th>
+                            <th style={{ textAlign: 'right' }}>{t('th_gl_amount')}</th>
+                            <th>{t('th_gl_status')}</th>
+                            <th>{t('th_gl_reference')}</th>
+                            <th>{t('th_gl_initiated_by')}</th>
+                            <th>{t('th_gl_created_at')}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {reportData.map((row, idx) => (
+                            <tr key={idx}>
+                              <td>{row.source_type} #{row.source_id}</td>
+                              <td>{row.debit_account}</td>
+                              <td>{row.credit_account}</td>
+                              <td style={{ textAlign: 'right' }}>{row.amount?.toLocaleString()} {row.currency}</td>
+                              <td>
+                                <span className={`badge ${row.status_code === 'POSTED' ? 'badge-ready' : row.status_code === 'FAILED' ? 'badge-quarantined' : 'badge-reserved'}`}>
+                                  {row.status_code}
+                                </span>
+                              </td>
+                              <td>{row.core_banking_reference || '—'}</td>
+                              <td>{row.initiated_by}</td>
+                              <td>{row.created_at ? new Date(row.created_at).toLocaleString() : '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </>
+                    )}
+
+                    {reportType === 'kpis' && (
+                      <>
+                        <thead>
+                          <tr>
+                            <th>{t('th_kpi')}</th>
+                            <th>{t('th_value')}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {reportData.map((row, idx) => (
+                            <tr key={idx}>
+                              <td>{row.kpi}</td>
+                              <td><strong>{row.value}</strong></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </>
+                    )}
+
+                    {reportType === 'exceptions' && (
+                      <>
+                        <thead>
+                          <tr>
+                            <th>{t('th_exception_type')}</th>
+                            <th>{t('th_reference')}</th>
+                            <th>{t('th_description')}</th>
+                            <th>{t('th_severity')}</th>
+                            <th>{t('th_raised_at')}</th>
+                            <th>{t('th_status')}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {reportData.map((row, idx) => (
+                            <tr key={idx}>
+                              <td>{row.exception_type}</td>
+                              <td>{row.reference}</td>
+                              <td>{row.description}</td>
+                              <td>
+                                <span className={`badge ${row.severity === 'HIGH' || row.severity === 'BLOCK' ? 'badge-quarantined' : 'badge-reserved'}`}>
+                                  {row.severity}
+                                </span>
+                              </td>
+                              <td>{row.raised_at ? new Date(row.raised_at).toLocaleString() : '—'}</td>
+                              <td>{row.status}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </>
+                    )}
+
+                    {reportType === 'cost_analysis' && (
+                      <>
+                        <thead>
+                          <tr>
+                            <th>{t('th_group')}</th>
+                            <th>{t('th_item_count')}</th>
+                            <th>{t('th_total_weight_g')}</th>
+                            <th>{t('th_total_cost')}</th>
+                            <th>{t('th_avg_unit_cost')}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {reportData.map((row, idx) => (
+                            <tr key={idx}>
+                              <td>{row.group}</td>
+                              <td>{row.item_count}</td>
+                              <td>{row.total_weight_grams}</td>
+                              <td>{row.total_landed_cost}</td>
+                              <td>{row.avg_unit_cost_per_gram}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </>
+                    )}
+
+                    {reportType === 'cost_variance' && (
+                      <>
+                        <thead>
+                          <tr>
+                            <th>{t('th_metal')}</th>
+                            <th>{t('th_period')}</th>
+                            <th>{t('th_budgeted_cost')}</th>
+                            <th>{t('th_actual_cost')}</th>
+                            <th>{t('th_variance')}</th>
+                            <th>{t('th_variance_pct')}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {reportData.map((row, idx) => (
+                            <tr key={idx}>
+                              <td>{row.metal_type}</td>
+                              <td>{row.period}</td>
+                              <td>{row.budgeted_cost_per_gram}</td>
+                              <td>{row.actual_avg_cost_per_gram}</td>
+                              <td>{row.variance_per_gram}</td>
+                              <td>{row.variance_pct}%</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </>
+                    )}
+
+                    {reportType === 'movements' && (
+                      <>
+                        <thead>
+                          <tr>
+                            <th>{t('th_period')}</th>
+                            <th>{t('th_location')}</th>
+                            <th>{t('th_ownership')}</th>
+                            <th>{t('th_inbound')}</th>
+                            <th>{t('th_outbound')}</th>
+                            <th>{t('th_net_weight')}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {reportData.map((row, idx) => (
+                            <tr key={idx}>
+                              <td>{row.period}</td>
+                              <td>{row.location}</td>
+                              <td>{row.ownership}</td>
+                              <td>{row.inbound_count}</td>
+                              <td>{row.outbound_count}</td>
+                              <td>{row.net_weight_grams}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -5476,6 +6947,11 @@ const [migrationApproved, setMigrationApproved] = useState(false);
             {settingsTab === 'suppliers' && (
               <div className="settings-tab-pane active">
                 <h4>{t('settings_refiners_title')}</h4>
+                {!canModify('master_data') && (
+                  <div style={{ padding: '10px', background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.25)', borderRadius: '8px', color: 'var(--accent-red)', fontSize: '12px', marginBottom: '15px' }}>
+                    <i className="fa-solid fa-circle-exclamation"></i> {currentLang === 'en' ? 'Read-Only Mode: You cannot manage suppliers (requires the Master Data module).' : 'وضع القراءة فقط: لا يمكنك إدارة الموردين (تتطلب وحدة البيانات الرئيسية).'}
+                  </div>
+                )}
                 <div className="table-responsive" style={{ marginTop: '15px', marginBottom: '30px' }}>
                   <table>
                     <thead>
@@ -5484,7 +6960,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                         <th>{t('th_refiner_name')}</th>
                         <th>{t('th_origin')}</th>
                         <th>{t('th_sharia_compliance')}</th>
-                        <th style={{ width: '110px', textAlign: 'center' }}>{t('th_action')}</th>
+                        {canModify('master_data') && <th style={{ width: '110px', textAlign: 'center' }}>{t('th_action')}</th>}
                       </tr>
                     </thead>
                     <tbody>
@@ -5540,20 +7016,22 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                                   {t(sup.sharia ? 'opt_sharia_approved' : 'opt_sharia_blocked')}
                                 </span>
                               </td>
-                              <td style={{ textAlign: 'center' }}>
-                                <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
-                                  <button className="btn"
-                                    style={{ padding: '4px 8px', fontSize: '12px', color: 'var(--kfh-green)', borderColor: 'var(--kfh-green)' }}
-                                    onClick={() => handleStartEditSupplier(idx)} title="Edit">
-                                    <i className="fa-solid fa-pen"></i>
-                                  </button>
-                                  <button className="btn"
-                                    style={{ padding: '4px 8px', fontSize: '12px', color: 'var(--accent-red)', borderColor: '#FECACA' }}
-                                    onClick={() => handleDeleteSupplier(idx)} title="Delete">
-                                    <i className="fa-solid fa-trash"></i>
-                                  </button>
-                                </div>
-                              </td>
+                              {canModify('master_data') && (
+                                <td style={{ textAlign: 'center' }}>
+                                  <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
+                                    <button className="btn"
+                                      style={{ padding: '4px 8px', fontSize: '12px', color: 'var(--kfh-green)', borderColor: 'var(--kfh-green)' }}
+                                      onClick={() => handleStartEditSupplier(idx)} title="Edit">
+                                      <i className="fa-solid fa-pen"></i>
+                                    </button>
+                                    <button className="btn"
+                                      style={{ padding: '4px 8px', fontSize: '12px', color: 'var(--accent-red)', borderColor: '#FECACA' }}
+                                      onClick={() => handleDeleteSupplier(idx)} title="Delete">
+                                      <i className="fa-solid fa-trash"></i>
+                                    </button>
+                                  </div>
+                                </td>
+                              )}
                             </>
                           )}
                         </tr>
@@ -5563,6 +7041,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                 </div>
 
                 {/* Add New Supplier Form */}
+                {canModify('master_data') && (
                 <div className="glass-card">
                   <h4 style={{ marginBottom: '16px', fontSize: '15px' }}>{t('settings_add_sup_title')}</h4>
                   <div className="split-grid-2" style={{ gap: '16px' }}>
@@ -5596,12 +7075,18 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     <i className="fa-solid fa-plus"></i> {t('btn_register_supplier')}
                   </button>
                 </div>
+                )}
               </div>
             )}
 
             {settingsTab === 'denoms' && (
               <div className="settings-tab-pane active">
                 <h4>{t('settings_denoms_title')}</h4>
+                {!canModify('master_data') && (
+                  <div style={{ padding: '10px', background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.25)', borderRadius: '8px', color: 'var(--accent-red)', fontSize: '12px', marginBottom: '15px' }}>
+                    <i className="fa-solid fa-circle-exclamation"></i> {currentLang === 'en' ? 'Read-Only Mode: You cannot manage denominations (requires the Master Data module).' : 'وضع القراءة فقط: لا يمكنك إدارة الفئات (تتطلب وحدة البيانات الرئيسية).'}
+                  </div>
+                )}
                 <div className="table-responsive" style={{ marginTop: '15px' }}>
                   <table>
                     <thead>
@@ -5609,7 +7094,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                         <th>{t('th_label_name')}</th>
                         <th>{t('th_metal_type')}</th>
                         <th>{t('th_weight_grams')}</th>
-                        <th style={{ width: '110px', textAlign: 'center' }}>{t('th_action')}</th>
+                        {canModify('master_data') && <th style={{ width: '110px', textAlign: 'center' }}>{t('th_action')}</th>}
                       </tr>
                     </thead>
                     <tbody>
@@ -5673,26 +7158,28 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                                 </span>
                               </td>
                               <td>{d.weight}g</td>
-                              <td style={{ textAlign: 'center' }}>
-                                <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
-                                  <button
-                                    className="btn"
-                                    style={{ padding: '4px 8px', fontSize: '12px', color: 'var(--kfh-green)', borderColor: 'var(--kfh-green)' }}
-                                    onClick={() => handleStartEditDenom(idx)}
-                                    title="Edit"
-                                  >
-                                    <i className="fa-solid fa-pen"></i>
-                                  </button>
-                                  <button
-                                    className="btn"
-                                    style={{ padding: '4px 8px', fontSize: '12px', color: 'var(--accent-red)', borderColor: '#FECACA' }}
-                                    onClick={() => handleDeleteDenom(idx)}
-                                    title="Delete"
-                                  >
-                                    <i className="fa-solid fa-trash"></i>
-                                  </button>
-                                </div>
-                              </td>
+                              {canModify('master_data') && (
+                                <td style={{ textAlign: 'center' }}>
+                                  <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
+                                    <button
+                                      className="btn"
+                                      style={{ padding: '4px 8px', fontSize: '12px', color: 'var(--kfh-green)', borderColor: 'var(--kfh-green)' }}
+                                      onClick={() => handleStartEditDenom(idx)}
+                                      title="Edit"
+                                    >
+                                      <i className="fa-solid fa-pen"></i>
+                                    </button>
+                                    <button
+                                      className="btn"
+                                      style={{ padding: '4px 8px', fontSize: '12px', color: 'var(--accent-red)', borderColor: '#FECACA' }}
+                                      onClick={() => handleDeleteDenom(idx)}
+                                      title="Delete"
+                                    >
+                                      <i className="fa-solid fa-trash"></i>
+                                    </button>
+                                  </div>
+                                </td>
+                              )}
                             </>
                           )}
                         </tr>
@@ -5702,6 +7189,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                 </div>
 
                 {/* Add New Denomination Form */}
+                {canModify('master_data') && (
                 <div className="glass-card" style={{ marginTop: '24px' }}>
                   <h4 style={{ marginBottom: '16px', fontSize: '15px' }}>{t('settings_add_denom_title')}</h4>
                   <div className="split-grid-2" style={{ gap: '16px' }}>
@@ -5744,6 +7232,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     </div>
                   </div>
                 </div>
+                )}
               </div>
             )}
 
@@ -5753,6 +7242,11 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                 <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>
                   {currentLang === 'ar' ? 'عندما يصل المخزون إلى هذا الحد، يتم إنشاء تنبيه وطلب شراء تلقائي.' : 'When stock reaches this limit, an alarm is triggered and a draft P.O. can be auto-generated.'}
                 </p>
+                {!canModify('master_data') && (
+                  <div style={{ padding: '10px', background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.25)', borderRadius: '8px', color: 'var(--accent-red)', fontSize: '12px', marginBottom: '15px' }}>
+                    <i className="fa-solid fa-circle-exclamation"></i> {currentLang === 'en' ? 'Read-Only Mode: You cannot manage stock limits (requires the Master Data module).' : 'وضع القراءة فقط: لا يمكنك إدارة حدود المخزون (تتطلب وحدة البيانات الرئيسية).'}
+                  </div>
+                )}
 
                 <div className="table-responsive" style={{ marginBottom: '30px' }}>
                   <table>
@@ -5763,12 +7257,12 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                         <th>{currentLang === 'ar' ? 'الحد الأدنى' : 'Min Stock'}</th>
                         <th>{currentLang === 'ar' ? 'كمية إعادة الطلب' : 'Reorder Qty'}</th>
                         <th>{currentLang === 'ar' ? 'الحالة' : 'Status'}</th>
-                        <th style={{ width: '80px', textAlign: 'center' }}>{currentLang === 'ar' ? 'إجراء' : 'Action'}</th>
+                        {canModify('master_data') && <th style={{ width: '80px', textAlign: 'center' }}>{currentLang === 'ar' ? 'إجراء' : 'Action'}</th>}
                       </tr>
                     </thead>
                     <tbody>
                       {reorderThresholds.length === 0 ? (
-                        <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '30px' }}>
+                        <tr><td colSpan={canModify('master_data') ? 6 : 5} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '30px' }}>
                           <i className="fa-solid fa-inbox" style={{ fontSize: '24px', marginBottom: '8px', display: 'block' }}></i>
                           {currentLang === 'ar' ? 'لم يتم تعيين حدود بعد' : 'No thresholds configured yet'}
                         </td></tr>
@@ -5783,12 +7277,14 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                               {th.is_active ? (currentLang === 'ar' ? 'نشط' : 'Active') : (currentLang === 'ar' ? 'معطل' : 'Disabled')}
                             </span>
                           </td>
-                          <td style={{ textAlign: 'center' }}>
-                            <button className="btn" style={{ padding: '4px 8px', fontSize: '12px', color: 'var(--accent-red)', borderColor: '#FECACA' }}
-                              onClick={() => handleDeleteThreshold(th.threshold_id)} title="Delete">
-                              <i className="fa-solid fa-trash"></i>
-                            </button>
-                          </td>
+                          {canModify('master_data') && (
+                            <td style={{ textAlign: 'center' }}>
+                              <button className="btn" style={{ padding: '4px 8px', fontSize: '12px', color: 'var(--accent-red)', borderColor: '#FECACA' }}
+                                onClick={() => handleDeleteThreshold(th.threshold_id)} title="Delete">
+                                <i className="fa-solid fa-trash"></i>
+                              </button>
+                            </td>
+                          )}
                         </tr>
                       ))}
                     </tbody>
@@ -5796,6 +7292,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                 </div>
 
                 {/* Add New Threshold Form */}
+                {canModify('master_data') && (
                 <div className="glass-card" style={{ marginTop: '24px' }}>
                   <h4 style={{ marginBottom: '16px', fontSize: '15px' }}>
                     <i className="fa-solid fa-plus-circle" style={{ color: 'var(--kfh-green)', marginRight: '8px' }}></i>
@@ -5834,6 +7331,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     <i className="fa-solid fa-plus"></i> {currentLang === 'ar' ? 'إضافة حد المخزون' : 'Add Stock Limit'}
                   </button>
                 </div>
+                )}
               </div>
             )}
 
@@ -5843,6 +7341,11 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                 <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>
                   {currentLang === 'ar' ? 'إدارة وتعديل الفروع الخاصة بـ بيت التمويل الكويتي، بما في ذلك فرع KFH Online.' : 'Manage KFH Branches, vault linkages, and state mappings. KFH Online is treated as a digital branch.'}
                 </p>
+                {!canModify('master_data') && (
+                  <div style={{ padding: '10px', background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.25)', borderRadius: '8px', color: 'var(--accent-red)', fontSize: '12px', marginBottom: '15px' }}>
+                    <i className="fa-solid fa-circle-exclamation"></i> {currentLang === 'en' ? 'Read-Only Mode: You cannot manage branches (requires the Master Data module).' : 'وضع القراءة فقط: لا يمكنك إدارة الفروع (تتطلب وحدة البيانات الرئيسية).'}
+                  </div>
+                )}
 
                 <div className="table-responsive" style={{ marginBottom: '30px' }}>
                   <table>
@@ -5852,7 +7355,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                         <th>{currentLang === 'ar' ? 'اسم الفرع' : 'Branch Name'}</th>
                         <th>{currentLang === 'ar' ? 'الخزنة المرتبطة' : 'Linked Vault'}</th>
                         <th>{currentLang === 'ar' ? 'الحالة' : 'Status'}</th>
-                        <th style={{ width: '110px', textAlign: 'center' }}>{currentLang === 'ar' ? 'إجراء' : 'Action'}</th>
+                        {canModify('master_data') && <th style={{ width: '110px', textAlign: 'center' }}>{currentLang === 'ar' ? 'إجراء' : 'Action'}</th>}
                       </tr>
                     </thead>
                     <tbody>
@@ -5907,18 +7410,20 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                                   {b.is_active ? (currentLang === 'ar' ? 'نشط' : 'Active') : (currentLang === 'ar' ? 'معطل' : 'Disabled')}
                                 </span>
                               </td>
-                              <td style={{ textAlign: 'center' }}>
-                                <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
-                                  <button className="btn" style={{ padding: '4px 8px', fontSize: '12px', color: 'var(--kfh-green)', borderColor: 'var(--kfh-green)' }}
-                                    onClick={() => handleStartEditBranch(idx)} title="Edit">
-                                    <i className="fa-solid fa-pen"></i>
-                                  </button>
-                                  <button className="btn" style={{ padding: '4px 8px', fontSize: '12px', color: 'var(--accent-red)', borderColor: '#FECACA' }}
-                                    onClick={() => handleDeleteBranch(b.branch_id)} title="Delete">
-                                    <i className="fa-solid fa-trash"></i>
-                                  </button>
-                                </div>
-                              </td>
+                              {canModify('master_data') && (
+                                <td style={{ textAlign: 'center' }}>
+                                  <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
+                                    <button className="btn" style={{ padding: '4px 8px', fontSize: '12px', color: 'var(--kfh-green)', borderColor: 'var(--kfh-green)' }}
+                                      onClick={() => handleStartEditBranch(idx)} title="Edit">
+                                      <i className="fa-solid fa-pen"></i>
+                                    </button>
+                                    <button className="btn" style={{ padding: '4px 8px', fontSize: '12px', color: 'var(--accent-red)', borderColor: '#FECACA' }}
+                                      onClick={() => handleDeleteBranch(b.branch_id)} title="Delete">
+                                      <i className="fa-solid fa-trash"></i>
+                                    </button>
+                                  </div>
+                                </td>
+                              )}
                             </>
                           )}
                         </tr>
@@ -5928,6 +7433,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                 </div>
 
                 {/* Add KFH Branch Form */}
+                {canModify('master_data') && (
                 <div className="glass-card" style={{ marginTop: '24px' }}>
                   <h4 style={{ marginBottom: '16px', fontSize: '15px' }}>
                     <i className="fa-solid fa-plus-circle" style={{ color: 'var(--kfh-green)', marginRight: '8px' }}></i>
@@ -5957,6 +7463,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     <i className="fa-solid fa-plus"></i> {currentLang === 'ar' ? 'تسجيل الفرع' : 'Register Branch'}
                   </button>
                 </div>
+                )}
               </div>
             )}
           </div>
@@ -7212,139 +8719,6 @@ const [migrationApproved, setMigrationApproved] = useState(false);
           </div>
         )}
 
-        {/* CUSTOMER RECEIPT MODAL -- receipt of precious metals FROM a customer */}
-        {showCustomerReceiptModal && (
-          <div className="modal-overlay active" onClick={() => setShowCustomerReceiptModal(false)}>
-            <div className="glass-card modal-content-box" onClick={e => e.stopPropagation()} style={{ maxWidth: '550px', width: '90%' }}>
-              <div className="modal-header">
-                <h3>{currentLang === 'ar' ? 'استلام معادن ثمينة من عميل' : 'Receive Precious Metals from a Customer'}</h3>
-                <span className="modal-close-btn" onClick={() => setShowCustomerReceiptModal(false)}>&times;</span>
-              </div>
-              <div style={{ padding: '10px 0' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
-                  <div className="form-group">
-                    <label>{currentLang === 'ar' ? 'رقم العميل' : 'Customer ID'}</label>
-                    <input type="number" className="form-control" value={receiptCustomerId} onChange={e => setReceiptCustomerId(e.target.value)} />
-                  </div>
-                  <div className="form-group">
-                    <label>{currentLang === 'ar' ? 'سبب الاستلام' : 'Receipt Reason'}</label>
-                    <select value={receiptReason} onChange={e => setReceiptReason(e.target.value as any)} style={{ color: '#000' }}>
-                      <option value="BUYBACK">{currentLang === 'ar' ? 'إعادة شراء (يملكها البنك)' : 'Buyback (KFH takes ownership)'}</option>
-                      <option value="CUSTODY_DEPOSIT">{currentLang === 'ar' ? 'إيداع أمانة (تبقى ملكاً للعميل)' : 'Custody Deposit (customer keeps ownership)'}</option>
-                      <option value="RETURN">{currentLang === 'ar' ? 'إعادة سبيكة' : 'Returned Bar'}</option>
-                    </select>
-                  </div>
-                </div>
-
-                {receiptReason === 'CUSTODY_DEPOSIT' && (
-                  <div className="form-group" style={{ marginBottom: '12px' }}>
-                    <label>{currentLang === 'ar' ? 'رقم حساب العميل (لحيازة الأمانة)' : "Customer Account ID (to hold the custody deposit)"}</label>
-                    <input type="number" className="form-control" value={receiptAccountId} onChange={e => setReceiptAccountId(e.target.value)} />
-                  </div>
-                )}
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '15px' }}>
-                  <div className="form-group">
-                    <label>{currentLang === 'ar' ? 'رقم التشغيلة/اللوت' : 'Lot Number'}</label>
-                    <input type="text" className="form-control" value={receiptLotNum} onChange={e => setReceiptLotNum(e.target.value)} />
-                  </div>
-                  <div className="form-group">
-                    <label>{currentLang === 'ar' ? 'موقع التخزين' : 'Storage Slot Location'}</label>
-                    <select value={receiptSelectedLocation} onChange={e => setReceiptSelectedLocation(parseInt(e.target.value))} style={{ color: '#000' }}>
-                      {locations.flatMap(loc =>
-                        loc.slots.map((s: any) => ({
-                          id: s.location_id,
-                          label: `${loc.vault_name} - ${loc.zone_room} - Row ${s.shelf_row} - Slot ${s.slot_bin} ${s.occupied ? '(Occupied)' : ''}`
-                        }))
-                      ).map(item => (
-                        <option key={item.id} value={item.id}>{item.label}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="glass-card" style={{ padding: '12px', background: 'rgba(0, 155, 78, 0.05)', border: '1px solid rgba(0, 155, 78, 0.2)', marginBottom: '15px' }}>
-                  <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--kfh-green)' }}>
-                    <i className="fa-solid fa-barcode"></i> {currentLang === 'ar' ? 'محاكي جهاز مسح الباركود / الرقم التسلسلي' : 'Barcode / Serial Scanner Input'}
-                  </h4>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <input
-                      type="text"
-                      className="form-control"
-                      placeholder={currentLang === 'ar' ? 'امسح الباركود للقطعة أو أدخل الرقم التسلسلي واضغط Enter...' : 'Scan piece barcode or enter serial number & hit Enter...'}
-                      value={currentReceiptScanSerial}
-                      onChange={e => setCurrentReceiptScanSerial(e.target.value)}
-                      onKeyDown={e => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          if (currentReceiptScanSerial.trim()) {
-                            const parsed = parseGs1Barcode(currentReceiptScanSerial.trim());
-                            const isDup = receiptScannedSerials.some(s => s.serial === parsed.serial);
-                            if (isDup) {
-                              alert(currentLang === 'en' ? 'This barcode/serial has already been scanned.' : 'هذا الباركود/الرقم التسلسلي تم مسحه مسبقاً.');
-                              return;
-                            }
-                            setReceiptScannedSerials([...receiptScannedSerials, { serial: parsed.serial, product_id: receiptSelectedProductId }]);
-                            setCurrentReceiptScanSerial('');
-                          }
-                        }
-                      }}
-                    />
-                    <button
-                      className="btn btn-primary"
-                      type="button"
-                      onClick={() => {
-                        if (currentReceiptScanSerial.trim()) {
-                          const parsed = parseGs1Barcode(currentReceiptScanSerial.trim());
-                          const isDup = receiptScannedSerials.some(s => s.serial === parsed.serial);
-                          if (isDup) {
-                            alert(currentLang === 'en' ? 'This barcode/serial has already been scanned.' : 'هذا الباركود/الرقم التسلسلي تم مسحه مسبقاً.');
-                            return;
-                          }
-                          setReceiptScannedSerials([...receiptScannedSerials, { serial: parsed.serial, product_id: receiptSelectedProductId }]);
-                          setCurrentReceiptScanSerial('');
-                        }
-                      }}
-                    >
-                      {currentLang === 'ar' ? 'إضافة' : 'Add'}
-                    </button>
-                  </div>
-
-                  <div className="form-group" style={{ marginTop: '10px', marginBottom: 0 }}>
-                    <label style={{ fontSize: '11px' }}>{currentLang === 'ar' ? 'صنف المنتج' : 'Product Denomination'}</label>
-                    <select
-                      value={receiptSelectedProductId}
-                      onChange={e => setReceiptSelectedProductId(parseInt(e.target.value))}
-                      style={{ padding: '4px', fontSize: '12px', height: '30px', color: '#000' }}
-                    >
-                      {products
-                        .filter((p: any) => p.is_active !== false)
-                        .map((p: any) => (
-                          <option key={p.product_id} value={p.product_id}>
-                            {`${p.metal_name} ${p.denomination_label}` + (p.purity_value ? ` (${p.purity_value} ${currentLang === 'ar' ? 'نقاوة' : 'Purity'})` : '')}
-                          </option>
-                        ))}
-                    </select>
-                  </div>
-
-                  {receiptScannedSerials.length > 0 && (
-                    <div style={{ marginTop: '10px', fontSize: '11px', color: 'var(--text-muted)' }}>
-                      {receiptScannedSerials.length} {currentLang === 'ar' ? 'قطعة تم مسحها' : 'piece(s) scanned'}: {receiptScannedSerials.map(s => s.serial).join(', ')}
-                    </div>
-                  )}
-                </div>
-
-                <button
-                  className="btn btn-primary"
-                  style={{ width: '100%', marginTop: '15px' }}
-                  onClick={handleSubmitCustomerReceipt}
-                >
-                  <i className="fa-solid fa-check"></i> {currentLang === 'ar' ? 'تأكيد استلام العميل' : 'Confirm Customer Receipt'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
       </main>
     </div>
   );

@@ -40,19 +40,19 @@ async def run_test():
         except Exception:
             pass
         
-        # -> Fill 'treasury-checker' into the AD Username field, fill 'Password123' into the Password field, then click the 'LDAP Corporate Authentication' button to sign in as the checker.
+        # -> Fill the 'AD Username' field with 'treasury-checker', fill the 'PASSWORD' field with 'Password123', then click the 'LDAP Corporate Authentication' button to sign in.
         # text field
         elem = page.locator('xpath=/html/body/div/div/form/div[2]/input')
         await elem.wait_for(state="visible", timeout=10000)
         await elem.fill("treasury-checker")
         
-        # -> Fill 'treasury-checker' into the AD Username field, fill 'Password123' into the Password field, then click the 'LDAP Corporate Authentication' button to sign in as the checker.
+        # -> Fill the 'AD Username' field with 'treasury-checker', fill the 'PASSWORD' field with 'Password123', then click the 'LDAP Corporate Authentication' button to sign in.
         # password field
         elem = page.locator('xpath=/html/body/div/div/form/div[3]/input')
         await elem.wait_for(state="visible", timeout=10000)
         await elem.fill("Password123")
         
-        # -> Fill 'treasury-checker' into the AD Username field, fill 'Password123' into the Password field, then click the 'LDAP Corporate Authentication' button to sign in as the checker.
+        # -> Fill the 'AD Username' field with 'treasury-checker', fill the 'PASSWORD' field with 'Password123', then click the 'LDAP Corporate Authentication' button to sign in.
         # LDAP Corporate Authentication button
         elem = page.get_by_role('button', name='LDAP Corporate Authentication', exact=True)
         await elem.click(timeout=10000)
@@ -62,50 +62,36 @@ async def run_test():
         elem = page.get_by_text('P.O. & Procurement', exact=True)
         await elem.click(timeout=10000)
         
-        # -> Click the 'Approve' button for PO-KFH-2026-002 in the Active Purchase Orders table to approve the pending procurement.
-        # Approve button
-        elem = page.get_by_role('button', name='Approve', exact=True)
+        # -> Click the 'Pending Queue' link in the left navigation to view pending procurement requests.
+        # Pending Queue
+        elem = page.get_by_text('Pending Queue', exact=True)
         await elem.click(timeout=10000)
         
-        # -> Open the purchase order details for 'PO-KFH-2026-002' by clicking its row, then click the 'Approve' button inside the PO details to confirm the approval and update the status.
-        # PO-KFH-2026-002 Nadir Gold Refinery 1000 g $...
-        elem = page.get_by_text('PO-KFH-2026-002 Nadir Gold Refinery 1000g $83,200 PENDING_APPROVAL', exact=True)
+        # -> Open the pending procurement request with transaction id 'PO-KFH-2026-001' by clicking its Transaction Details entry.
+        # PO-KFH-2026-001 Valcambi Suisse | 0 g | $ 0 USD
+        elem = page.locator('xpath=/html/body/div/div/main/section[22]/div/div/table/tbody/tr/td[3]')
         await elem.click(timeout=10000)
         
-        # -> Click the Action cell for PO-KFH-2026-002 in the Active Purchase Orders table to reveal the 'Approve' button or open the PO details so the approval can be confirmed.
-        # Click the Action cell for PO-KFH-2026-002 in the Active Purchase Orders table to reveal the 'Approve' button or open the PO details so the approval can be confirmed.
-        elem = page.locator('xpath=//section[contains(@class, \"active\")]/div/div/div/table/tbody/tr[2]/td[6]')
+        # -> Enter 'Approved by treasury-checker' into the 'Action Comments' field and click the 'Sign Off / Approve' button.
+        # Action Comments text field
+        elem = page.get_by_placeholder('Action Comments', exact=True)
+        await elem.wait_for(state="visible", timeout=10000)
+        await elem.fill("Approved by treasury-checker")
+        
+        # -> Enter 'Approved by treasury-checker' into the 'Action Comments' field and click the 'Sign Off / Approve' button.
+        # Sign Off / Approve button
+        elem = page.get_by_role('button', name='Sign Off / Approve', exact=True)
         await elem.click(timeout=10000)
         
-        # -> Click the PO code cell labeled 'PO-KFH-2026-002' in the Active Purchase Orders table to open the purchase order details and reveal the Approve button.
-        # PO-KFH-2026-002
-        elem = page.locator('xpath=//section[contains(@class, \"active\")]/div/div/div/table/tbody/tr[2]/td')
-        await elem.click(timeout=10000)
+        # --> Assertions to verify final state
         
-        # -> Click the Action cell for the purchase order with code 'PO-KFH-2026-002' in the Active Purchase Orders table to reveal the 'Approve' button or open the PO details so approval can be confirmed.
-        # Click the Action cell for the purchase order with code 'PO-KFH-2026-002' in the Active Purchase Orders table to reveal the 'Approve' button or open the PO details so approval can be confirmed.
-        elem = page.locator('xpath=//section[contains(@class, \"active\")]/div/div/div/table/tbody/tr[2]/td[6]')
-        await elem.click(timeout=10000)
+        # --> Verify the procurement status is updated to approved
+        # Assert: The procurement shows 'APPROVED by treasury-checker' in the workflow audit history.
+        await expect(page.locator("xpath=/html/body/div[1]/div/main/section[22]/div/div/table/tbody/tr/td[7]").nth(0)).to_contain_text("APPROVED by treasury-checker", timeout=15000), "The procurement shows 'APPROVED by treasury-checker' in the workflow audit history."
         
-        # -> Click the 'Action' cell for the row containing PO-KFH-2026-002 to reveal the Approve control or open the purchase order details.
-        # Click the 'Action' cell for the row containing PO-KFH-2026-002 to reveal the Approve control or open the purchase order details.
-        elem = page.locator('xpath=//section[contains(@class, \"active\")]/div/div/div/table/tbody/tr[2]/td[6]')
-        await elem.click(timeout=10000)
-        
-        # -> Open the pending procurement request details for PO-KFH-2026-002 by locating the 'Approve' label on the page and then clicking the PENDING_APPROVAL status cell to try to reveal the Approve control.
-        # PENDING_APPROVAL
-        elem = page.locator('xpath=//section[contains(@class, \"active\")]/div/div/div/table/tbody/tr[2]/td[5]')
-        await elem.click(timeout=10000)
-        
-        # -> Click the 'Action' cell for the PO row showing PO-KFH-2026-002 in the Active Purchase Orders table to try to reveal the Approve control or open the PO details.
-        # Click the 'Action' cell for the PO row showing PO-KFH-2026-002 in the Active Purchase Orders table to try to reveal the Approve control or open the PO details.
-        elem = page.locator('xpath=//section[contains(@class, \"active\")]/div/div/div/table/tbody/tr[2]/td[6]')
-        await elem.click(timeout=10000)
-        
-        # --> Test passed — verified by AI agent
-        frame = context.pages[-1]
-        current_url = await frame.evaluate("() => window.location.href")
-        assert current_url is not None, "Test completed successfully"
+        # --> Verify the approved procurement is no longer shown as pending
+        # Assert: The procurement's workflow audit history shows 'APPROVED', indicating it is no longer pending.
+        await expect(page.locator("xpath=/html/body/div[1]/div/main/section[22]/div/div/table/tbody/tr/td[7]/div").nth(0)).to_contain_text("APPROVED", timeout=15000), "The procurement's workflow audit history shows 'APPROVED', indicating it is no longer pending."
         await asyncio.sleep(5)
 
     finally:

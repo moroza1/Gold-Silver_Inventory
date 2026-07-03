@@ -41,9 +41,15 @@ builder.Services.AddScoped<IRuleEngineService, RuleEngineService>();
 builder.Services.AddScoped<IAuditExportService, AuditExportService>();
 builder.Services.AddScoped<IEmailSenderService, EmailSenderService>();
 builder.Services.AddScoped<IMonitoringAdapter, GenericWebhookMonitoringAdapter>();
+// Cost Tracking & Valuation -- Core Banking (IMAL) GL Integration (pushes purchase-order
+// receipt landed-cost journal entries; see InventoryRepository.IntakeInventoryItemsAsync).
+builder.Services.AddScoped<ICoreBankingLedgerService, CoreBankingGlAdapter>();
 // Item 7 extension -- immediate event-triggered notifications (transfer completed,
 // inventory discrepancy found), shared by ReconciliationService and PMIMSControllers.
 builder.Services.AddScoped<INotificationDispatchService, NotificationDispatchService>();
+
+// Barcode/QR Code Tracking (RFP Section 3) -- GS1-128 + ISO/IEC 18004 label generation.
+builder.Services.AddScoped<IBarcodeLabelService, BarcodeLabelService>();
 
 // 2b. Real-Time Inventory Monitoring (precious-metal quantities & movements --
 // to/from main vault, between branches, and with customers). AppDbContext pushes
@@ -226,6 +232,23 @@ builder.Services.AddAuthorization(options =>
     Write("dispensing.write", "dispensing");
     Read("device_integration.read", "device_integration");
     Write("device_integration.write", "device_integration");
+
+    // Barcode/QR Code Tracking (RFP Section 3) -- generating/printing GS1-128 + QR
+    // labels is an operational task (same tier as intake/dispensing); the write side
+    // is only used to log a "label printed" chain-of-custody event, not to mutate
+    // the label content itself (labels are derived/computed, never stored).
+    Read("barcode_qr_labeling.read", "barcode_qr_labeling");
+    Write("barcode_qr_labeling.write", "barcode_qr_labeling");
+
+    // "settings" module key existed in the seed data (DbSeeder) and the frontend's
+    // MODULE_KEYS catalog, but had no registered policy anywhere -- decorative like
+    // "dashboard" used to be. Backs the sidebar menu-layout write endpoint (arranging
+    // the nav order is a system-wide administrative change, same tier as
+    // vault_location/master_data/rules_engine). The read side of the menu layout is
+    // intentionally a plain any-authenticated-user [Authorize] (every user needs the
+    // current order to render their own sidebar), not gated by settings.read.
+    Read("settings.read", "settings");
+    Write("settings.write", "settings");
 });
 
 var app = builder.Build();

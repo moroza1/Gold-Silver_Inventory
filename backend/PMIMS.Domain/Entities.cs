@@ -142,6 +142,32 @@ public class PurchaseOrder
     public string? ApprovedBy { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
+    // ============================================================
+    // Cost Tracking & Valuation -- purchase cost detail (RFP: "Record purchase
+    // cost details (supplier, invoice, fees)"). Supplier is already captured
+    // via VendorId/Vendor; these add the supplier invoice reference and the
+    // landed-cost fee breakdown (freight/insurance/customs/other) that a real
+    // acquisition incurs on top of the line-item cost (TotalCost). All
+    // nullable/defaulted to 0 so this is purely additive -- every existing PO
+    // (seeded or created before this field set existed) just has no fees.
+    // ============================================================
+    public string? SupplierInvoiceNumber { get; set; }
+    public DateTime? SupplierInvoiceDate { get; set; }
+    public decimal FreightCost { get; set; } = 0;
+    public decimal InsuranceCost { get; set; } = 0;
+    public decimal CustomsDutyCost { get; set; } = 0;
+    public decimal OtherFeesCost { get; set; } = 0;
+    public string? OtherFeesDescription { get; set; }
+
+    // Total acquisition ("landed") cost = line-item cost plus every acquisition
+    // fee above. This -- not the bare TotalCost -- is what actually flows into
+    // InventoryLot.AverageUnitCost at intake (see
+    // InventoryRepository.IntakeInventoryItemsAsync), so the Average Cost
+    // Method valuation reflects the true cost of getting the metal into the
+    // vault, not just what the vendor invoiced for the metal itself. Computed,
+    // not persisted (see AppDbContext: Ignore(e => e.LandedCost)).
+    public decimal LandedCost => TotalCost + FreightCost + InsuranceCost + CustomsDutyCost + OtherFeesCost;
+
     public Vendor? Vendor { get; set; }
     public List<POItem> Items { get; set; } = new();
 }
@@ -996,5 +1022,97 @@ public class FimSyncLog
     public string ChangedBy { get; set; } = "SYSTEM";
     public string Source { get; set; } = "APPLICATION"; // APPLICATION or FIM (which system originated the change)
     public string? DetailsJson { get; set; }
+}
+
+// ============================================================
+// Cost Tracking & Valuation -- Core Banking (IMAL) GL Integration
+// ------------------------------------------------------------
+// A CoreBankingLedgerPosting is PMIMS's local, durable record of every
+// journal entry it has pushed (or attempted to push) to the Core Banking
+// System's general ledger -- e.g. "Debit Inventory-Precious Metals / Credit
+// Accounts Payable-Vendor" for the landed cost of a purchase-order receipt.
+// It is written PENDING *before* the outbound call and then updated to
+// POSTED/FAILED after, mirroring the MonitoringEvent adapter philosophy
+// (GenericWebhookMonitoringAdapter) so this table is a reliable local audit
+// of what was (attempted to be) posted even if Core Banking/IMAL is
+// unreachable. Adapter: ICoreBankingLedgerService (PMIMS.Application),
+// implemented by CoreBankingGlAdapter (PMIMS.Infrastructure/ExternalServices.cs).
+// This is distinct from ReconciliationService's existing (read-only,
+// simulated) comparison against Core Banking GL balances -- that reads Core
+// Banking's expected state to find breaks; this pushes PMIMS-originated
+// postings to it.
+// ============================================================
+public class CoreBankingLedgerPosting
+{
+    public int PostingId { get; set; }
+    // What PMIMS event caused this posting, e.g. "PURCHASE_ORDER_RECEIPT",
+    // "VALUATION_SNAPSHOT", "INVENTORY_ADJUSTMENT" -- and the PMIMS-native
+    // entity id it corresponds to (PoId, DisclosureId, ItemId, ...).
+    public string SourceType { get; set; } = null!;
+    public int SourceId { get; set; }
+    public string DebitAccount { get; set; } = null!;
+    public string CreditAccount { get; set; } = null!;
+    public decimal Amount { get; set; }
+    public string Currency { get; set; } = "KWD";
+    public string? Memo { get; set; }
+    // PENDING (queued locally, not yet sent) -> POSTED (Core Banking accepted
+    // it, or -- with no live endpoint configured -- accepted in simulation,
+    // same fallback posture as RateFeedService's live-feed-with-simulated-
+    // fallback pattern) | FAILED (Core Banking rejected it or was unreachable).
+    public string StatusCode { get; set; } = "PENDING";
+    // Core Banking's own confirmation/reference number for a POSTED entry.
+    public string? CoreBankingReference { get; set; }
+    public string? ResponseMessage { get; set; }
+    public string InitiatedBy { get; set; } = null!;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? PostedAt { get; set; }
+}
+
+// ============================================================
+// Reporting Requirements Gap Analysis -- Cost Analysis & Variance (Item 8)
+// ------------------------------------------------------------
+// A budgeted/standard unit cost per metal type per period, so "variance" can
+// mean what Finance/Treasury actually needs it to mean (budget vs. actual),
+// not just cost drift over time. Actual cost is read from the existing
+// InventoryLot.AverageUnitCost (already captured at intake, itself derived
+// from PurchaseOrder.LandedCost) -- this table adds only the missing half of
+// the comparison, the planned/budgeted figure, which had no representation
+// anywhere in the schema before. See
+// docs/PMIMS_Reporting_Requirements_Gap_Analysis.docx, Item 8.
+// ============================================================
+public class CostBudget
+{
+    public int BudgetId { get; set; }
+    public int MetalTypeId { get; set; }
+    // yyyy-MM (calendar month) -- matches the granularity Treasury budgets at;
+    // a metal type has at most one budget row per period (enforced by a
+    // unique index on MetalTypeId+Period, see AppDbContext).
+    public string Period { get; set; } = null!;
+    public decimal BudgetedUnitCostPerGram { get; set; }
+    public string Currency { get; set; } = "KWD";
+    public string CreatedBy { get; set; } = "SYSTEM";
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    public MetalType? MetalType { get; set; }
+}
+
+// ============================================================
+// Sidebar Menu Layout (admin-arrangeable navigation order)
+// ------------------------------------------------------------
+// A single global singleton row (Id is always 1). OrderJson holds a JSON array of
+// stable sidebar node keys -- both section headers (e.g. "section:operations") and
+// individual menu items (e.g. "item:screen-po") -- in the order they should render,
+// front to back, with no distinction enforced between sections at the storage layer.
+// This lets an IT/Admin drag/​nudge an item's position past a section boundary, which
+// is exactly what the frontend's "Edit Menu" up/down controls do. Every authenticated
+// user reads the same row so the whole org sees one consistent menu; only holders of
+// FULL/READ_WRITE on the `settings` module (or IT/Admin) may write it.
+// ============================================================
+public class SidebarMenuLayout
+{
+    public int Id { get; set; } = 1;
+    public string OrderJson { get; set; } = null!;
+    public string UpdatedBy { get; set; } = "SYSTEM";
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
 

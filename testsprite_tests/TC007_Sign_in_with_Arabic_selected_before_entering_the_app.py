@@ -43,18 +43,14 @@ async def run_test():
         # --> Assertions to verify final state
         
         # --> Verify the selected interface language is reflected in the application
-        # Assert: Expected the page header to contain Arabic script indicating the selected interface language.
-        await expect(page.locator("xpath=/html/body/div").nth(0)).to_contain_text("\u0639\u0631\u0628", timeout=15000), "Expected the page header to contain Arabic script indicating the selected interface language."
-        # Assert: Expected the sign-in form to display Arabic script indicating the selected interface language.
-        await expect(page.locator("xpath=/html/body/div/div/form").nth(0)).to_contain_text("\u0639\u0631\u0628", timeout=15000), "Expected the sign-in form to display Arabic script indicating the selected interface language."
-        # Assert: Expected the sign-in submit button to display Arabic script indicating the selected interface language.
-        await expect(page.locator("xpath=/html/body/div/div/form/button").nth(0)).to_contain_text("\u0639\u0631\u0628", timeout=15000), "Expected the sign-in submit button to display Arabic script indicating the selected interface language."
+        # Assert: Expected the sign-in form to display the username label in Arabic.
+        await expect(page.locator("xpath=/html/body/div/div/form").nth(0)).to_contain_text("\u0627\u0633\u0645 \u0627\u0644\u0645\u0633\u062a\u062e\u062f\u0645", timeout=15000), "Expected the sign-in form to display the username label in Arabic."
+        # Assert: Expected the sign-in form to display the password label in Arabic.
+        await expect(page.locator("xpath=/html/body/div/div/form").nth(0)).to_contain_text("\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631", timeout=15000), "Expected the sign-in form to display the password label in Arabic."
+        # Assert: Expected the sign-in form to include an Arabic language option ("عربي").
+        await expect(page.locator("xpath=/html/body/div/div/form").nth(0)).to_contain_text("\u0639\u0631\u0628\u064a", timeout=15000), "Expected the sign-in form to include an Arabic language option (\"\u0639\u0631\u0628\u064a\")."
         # Assert: Verify the treasury dashboard is displayed
         assert False, "Expected: Verify the treasury dashboard is displayed (could not be verified on the page)"
-        
-        # --> Test blocked by environment/access constraints during agent run
-        # Reason: TEST BLOCKED The Arabic language selector is not present on the sign-in screen, so the requested verification (switch to Arabic on sign-in and still log in) cannot be completed. Observations: - The sign-in card shows English labels only: 'AD USERNAME', 'PASSWORD', and the 'LDAP Corporate Authentication' button. - Page searches for 'Arabic' and Arabic script ('عرب', 'عربي') returned no matches a...
-        raise AssertionError("Test blocked during agent run: " + "TEST BLOCKED The Arabic language selector is not present on the sign-in screen, so the requested verification (switch to Arabic on sign-in and still log in) cannot be completed. Observations: - The sign-in card shows English labels only: 'AD USERNAME', 'PASSWORD', and the 'LDAP Corporate Authentication' button. - Page searches for 'Arabic' and Arabic script ('\u0639\u0631\u0628', '\u0639\u0631\u0628\u064a') returned no matches a..." + " — the exported script cannot reproduce a PASS in this environment.")
         await asyncio.sleep(5)
 
     finally:

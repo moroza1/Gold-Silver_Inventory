@@ -40,66 +40,46 @@ async def run_test():
         except Exception:
             pass
         
-        # -> input
+        # -> Click the 'LDAP Corporate Authentication' button to sign in as the maker (after entering credentials).
         # text field
         elem = page.locator('xpath=/html/body/div/div/form/div[2]/input')
         await elem.wait_for(state="visible", timeout=10000)
         await elem.fill("treasury-maker")
         
-        # -> input
+        # -> Click the 'LDAP Corporate Authentication' button to sign in as the maker (after entering credentials).
         # password field
         elem = page.locator('xpath=/html/body/div/div/form/div[3]/input')
         await elem.wait_for(state="visible", timeout=10000)
         await elem.fill("Password123")
         
-        # -> click
+        # -> Click the 'LDAP Corporate Authentication' button to sign in as the maker (after entering credentials).
         # LDAP Corporate Authentication button
         elem = page.get_by_role('button', name='LDAP Corporate Authentication', exact=True)
         await elem.click(timeout=10000)
         
-        # -> Click the 'Transfer' button for the first listed bar (serial CH-88371-92) to start a new transfer request.
-        # Transfer button
-        elem = page.get_by_text('CH-88371-92', exact=True).locator("xpath=ancestor-or-self::*[.//button][1]").get_by_role('button', name='Transfer', exact=True)
-        await elem.click(timeout=10000)
-        
-        # -> Open the 'Destination Branch' dropdown inside the 'Initiate Branch Transfer' modal to reveal selectable destination branches.
-        # -- Select Destination Branch -- Fahaheel Branch... dropdown
-        elem = page.locator('xpath=/html/body/div/div/main/div/div/div[2]/div/select')
-        await elem.click(timeout=10000)
-        
-        # -> Select 'Main HO Vault Operations (MAIN_HO)' as the Destination Branch, fill the Courier / Security Details with 'KFH Security Escort Group Alpha', then click the 'Initiate Transfer Workflow' button to submit the transfer.
-        # -- Select Destination Branch -- Fahaheel Branch... dropdown
-        elem = page.locator("xpath=/html/body/div/div/main/div/div/div[2]/div/select").nth(0)
-        await elem.wait_for(state="visible", timeout=10000)
-        await elem.select_option("")
-        
-        # -> Select 'Main HO Vault Operations (MAIN_HO)' as the Destination Branch, fill the Courier / Security Details with 'KFH Security Escort Group Alpha', then click the 'Initiate Transfer Workflow' button to submit the transfer.
-        # e.g. KFH Security Escort Group Alpha text field
-        elem = page.get_by_placeholder('e.g. KFH Security Escort Group Alpha', exact=True)
-        await elem.wait_for(state="visible", timeout=10000)
-        await elem.fill("KFH Security Escort Group Alpha")
-        
-        # -> Select 'Main HO Vault Operations (MAIN_HO)' as the Destination Branch, fill the Courier / Security Details with 'KFH Security Escort Group Alpha', then click the 'Initiate Transfer Workflow' button to submit the transfer.
-        # Initiate Transfer Workflow button
-        elem = page.get_by_text('Selected Bar: CH-88371-92', exact=True).locator("xpath=ancestor-or-self::*[.//button][1]").get_by_role('button', name='Initiate Transfer Workflow', exact=True)
-        await elem.click(timeout=10000)
-        
-        # -> Open the 'Branch Transfers' page by clicking the 'Branch Transfers' item in the left sidebar, then inspect the pending transfers list to find the transfer for serial CH-88371-92 and confirm its status indicates it is awaiting approval.
+        # -> Click the 'Branch Transfers' link in the left sidebar to open the transfers page.
         # Branch Transfers
-        elem = page.get_by_text('Branch Transfers', exact=True)
+        elem = page.locator('xpath=/html/body/div/div/aside/nav/div[10]')
+        await elem.click(timeout=10000)
+        
+        # -> Open the 'Select Metal Item (Ready)' dropdown to reveal available bars.
+        # -- Choose Bar -- dropdown
+        elem = page.locator('xpath=/html/body/div/div/main/section[8]/div/div[2]/div[2]/select')
         await elem.click(timeout=10000)
         
         # --> Assertions to verify final state
         
         # --> Verify the transfer request is listed as pending
-        # Assert: The transfer serial CH-88371-92 appears in the Branch Transfers list.
-        await expect(page.locator("xpath=//section[contains(@class, \"active\")]/div/div[1]/div/table/tbody/tr[1]/td[1]").nth(0)).to_have_text("CH-88371-92", timeout=15000), "The transfer serial CH-88371-92 appears in the Branch Transfers list."
-        # Assert: The transfer's status is PENDING_APPROVAL, indicating it is pending approval.
-        await expect(page.locator("xpath=//section[contains(@class, \"active\")]/div/div[1]/div/table/tbody/tr[1]/td[6]").nth(0)).to_have_text("PENDING_APPROVAL", timeout=15000), "The transfer's status is PENDING_APPROVAL, indicating it is pending approval."
+        # Assert: Expected the transfers list to contain a transfer with status 'Pending'.
+        await expect(page.locator("xpath=/html/body/div[1]/div/main/section[8]/div/div[1]/div/table/tbody/tr/td").nth(0)).to_contain_text("Pending", timeout=15000), "Expected the transfers list to contain a transfer with status 'Pending'."
+        # Assert: Expected the 'No branch transfers found.' placeholder row to not be visible so the pending transfer is listed.
+        await expect(page.locator("xpath=/html/body/div[1]/div/main/section[8]/div/div[1]/div/table/tbody/tr/td").nth(0)).not_to_be_visible(timeout=15000), "Expected the 'No branch transfers found.' placeholder row to not be visible so the pending transfer is listed."
+        # Assert: Verify the transfer status indicates it is awaiting approval
+        assert False, "Expected: Verify the transfer status indicates it is awaiting approval (could not be verified on the page)"
         
-        # --> Verify the transfer status indicates it is awaiting approval
-        # Assert: Transfer status is awaiting approval (shows 'PENDING_APPROVAL').
-        await expect(page.locator("xpath=//section[contains(@class, \"active\")]/div/div[1]/div/table/tbody/tr[1]/td[6]").nth(0)).to_have_text("PENDING_APPROVAL", timeout=15000), "Transfer status is awaiting approval (shows 'PENDING_APPROVAL')."
+        # --> Test blocked by environment/access constraints during agent run
+        # Reason: TEST BLOCKED The transfer could not be created because required source items are not available in the UI. Observations: - The 'Select Metal Item (Ready)' dropdown contains only the placeholder '-- Choose Bar --' (no bars available to select) - The 'Initiate Transfer Workflow' button is disabled and cannot be submitted - The Active Branch Transfers table shows 'No branch transfers found.'
+        raise AssertionError("Test blocked during agent run: " + "TEST BLOCKED The transfer could not be created because required source items are not available in the UI. Observations: - The 'Select Metal Item (Ready)' dropdown contains only the placeholder '-- Choose Bar --' (no bars available to select) - The 'Initiate Transfer Workflow' button is disabled and cannot be submitted - The Active Branch Transfers table shows 'No branch transfers found.'" + " — the exported script cannot reproduce a PASS in this environment.")
         await asyncio.sleep(5)
 
     finally:

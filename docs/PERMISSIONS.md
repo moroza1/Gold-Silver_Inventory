@@ -70,6 +70,7 @@ Declared with `[Authorize(Policy = …)]`; policies are registered in `Program.c
 | `POST/DELETE /api/catalog/branches` | `master_data.write` | master data |
 | `POST/DELETE /api/inventory/reorder-thresholds` | `master_data.write` | master data |
 | `POST /api/inventory/low-stock-alerts/{id}/draft-po` | `purchase_orders.write` | creates a `PurchaseOrder` record from a threshold alert |
+| `POST /api/transfers`, `/transfers/workflow-initiate`, `/transfers/{id}/receive` | `purchase_orders.write` | initiate/receive a `BranchTransfer` — a "return to main vault" is just a transfer whose `DestinationBranchId` is the main vault branch, same endpoints in both directions |
 | `POST /api/catalog/products` | `master_data.write` | create product/denomination catalog entries |
 | `GET /api/dashboard/executive-board` | `dashboard.read` | executive KPIs |
 | `POST /api/migration/upload`, `/commit` | `migration.write` | bulk ingestion |
@@ -101,10 +102,16 @@ dropdowns/views work; mutations are what require a grant.
 | `GET /api/monitoring/sla-metrics`, `/events`, `/alert-routes` | `monitoring.read` | view SLA metrics & alert routing |
 | `POST /api/monitoring/alert-routes` | `monitoring.write` | configure alert routing |
 
-`TransferStockWorkflow` (`purchase_orders`/`custody` write path) also runs a `TRANSFER_LIMIT`
+`TransferStockWorkflow` (`purchase_orders.write`) also runs a `TRANSFER_LIMIT`
 rule pre-check via `IRuleEngineService.EvaluateAsync` before the transfer is initiated —
 this is a rule *evaluation* (read of the rules module), not a change to the `purchase_orders`
-policy itself.
+policy itself. (All three transfer endpoints — initiate, workflow-initiate, and receive —
+were previously gated by `custody.write` by mistake, which meant no seeded operational role
+could ever complete a receive: `custody` is `READ_ONLY` for Maker/Checker/Reconciliation and
+`FULL` only for IT Admin, while the frontend's "Receive" button was (correctly) gated on
+`purchase_orders`. Fixed to `purchase_orders.write` on all three so the policy matches the
+frontend gate and the Maker role, which is the one described in `DbSeeder.cs` as initiating
+"transfers, and branch operations.")
 
 ### Gold Dispensing Machine (GDM) integration (`PMIMSControllers.Devices.cs`)
 

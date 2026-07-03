@@ -176,6 +176,15 @@ public partial class PMIMSControllers : ControllerBase
         });
     }
 
+    // Reference lookup for the cost-budget admin form (Reporting Requirements Gap Analysis,
+    // Item 8) -- same public-reference-data tier as catalog/vendors/products below.
+    [HttpGet("catalog/metal-types")]
+    public async Task<IActionResult> GetMetalTypes()
+    {
+        var metalTypes = await _repository.GetMetalTypesAsync();
+        return Ok(metalTypes.Select(m => new { metal_type_id = m.MetalTypeId, metal_name = m.MetalName }));
+    }
+
     [HttpGet("catalog/vendors")]
     public async Task<IActionResult> GetVendors()
     {
@@ -349,7 +358,8 @@ public partial class PMIMSControllers : ControllerBase
         try
         {
             string itemsJson = JsonSerializer.Serialize(req.Items);
-            var (poId, result) = await _repository.CreatePurchaseOrderAsync(req.PoNumber, req.VendorId, req.TotalWeightGrams, req.TotalCost, req.Currency, req.CreatedBy, itemsJson);
+            var (poId, result) = await _repository.CreatePurchaseOrderAsync(req.PoNumber, req.VendorId, req.TotalWeightGrams, req.TotalCost, req.Currency, req.CreatedBy, itemsJson,
+                req.SupplierInvoiceNumber, req.SupplierInvoiceDate, req.FreightCost, req.InsuranceCost, req.CustomsDutyCost, req.OtherFeesCost, req.OtherFeesDescription);
 
             if (result != "SUCCESS") return BadRequest(result);
             return Created($"/api/purchase-orders/{poId}", new { po_id = poId, message = "Purchase Order created and staged under Maker-Checker review." });
@@ -367,7 +377,8 @@ public partial class PMIMSControllers : ControllerBase
         try
         {
             string itemsJson = JsonSerializer.Serialize(req.Items);
-            var success = await _repository.UpdatePurchaseOrderAsync(id, req.VendorId, req.TotalWeightGrams, req.TotalCost, req.Currency, req.CreatedBy, itemsJson);
+            var success = await _repository.UpdatePurchaseOrderAsync(id, req.VendorId, req.TotalWeightGrams, req.TotalCost, req.Currency, req.CreatedBy, itemsJson,
+                req.SupplierInvoiceNumber, req.SupplierInvoiceDate, req.FreightCost, req.InsuranceCost, req.CustomsDutyCost, req.OtherFeesCost, req.OtherFeesDescription);
             if (!success) return NotFound();
             return Ok(new { message = "Purchase Order amended successfully." });
         }
@@ -445,6 +456,16 @@ public partial class PMIMSControllers : ControllerBase
                 weight = po.TotalWeightGrams,
                 cost = po.TotalCost,
                 currency = po.Currency,
+                // Cost Tracking & Valuation -- purchase cost detail + the landed cost that
+                // actually feeds InventoryLot.AverageUnitCost at intake (see PurchaseOrder.LandedCost).
+                supplier_invoice_number = po.SupplierInvoiceNumber,
+                supplier_invoice_date = po.SupplierInvoiceDate,
+                freight_cost = po.FreightCost,
+                insurance_cost = po.InsuranceCost,
+                customs_duty_cost = po.CustomsDutyCost,
+                other_fees_cost = po.OtherFeesCost,
+                other_fees_description = po.OtherFeesDescription,
+                landed_cost = po.LandedCost,
                 status_code = po.StatusCode,
                 created_by = po.CreatedBy,
                 approved_by = po.ApprovedBy,
@@ -504,7 +525,7 @@ public partial class PMIMSControllers : ControllerBase
         }
     }
 
-    [Authorize(Policy = "custody.write")]
+    [Authorize(Policy = "purchase_orders.write")]
     [HttpPost("transfers")]
     public async Task<IActionResult> TransferStock([FromBody] TransferRequest req)
     {
@@ -514,7 +535,7 @@ public partial class PMIMSControllers : ControllerBase
         return Ok(new { message = "Branch transfer initiated successfully. Stock locked in TRANSIT status." });
     }
 
-    [Authorize(Policy = "custody.write")]
+    [Authorize(Policy = "purchase_orders.write")]
     [HttpPost("transfers/workflow-initiate")]
     public async Task<IActionResult> TransferStockWorkflow([FromBody] TransferWorkflowRequest req)
     {
@@ -573,7 +594,7 @@ public partial class PMIMSControllers : ControllerBase
         }));
     }
 
-    [Authorize(Policy = "custody.write")]
+    [Authorize(Policy = "purchase_orders.write")]
     [HttpPost("transfers/{id}/receive")]
     public async Task<IActionResult> ReceiveBranchTransfer([FromRoute] int id, [FromBody] ReceiveTransferRequest req)
     {
@@ -887,6 +908,35 @@ public partial class PMIMSControllers : ControllerBase
         }
 
         return Ok(valuationList);
+    }
+
+    // Cost Tracking & Valuation -- Core Banking (IMAL) GL Integration: every journal entry
+    // PMIMS has pushed (or attempted to push) to Core Banking's general ledger, newest first.
+    // Same `reports` module/tier as the rest of the financial reporting surface (valuation,
+    // transactions, reconciliation) -- this is the "did the ledger update actually happen"
+    // audit view for that integration, not a new operational workflow of its own.
+    [Authorize(Policy = "reports.read")]
+    [HttpGet("reports/gl-postings")]
+    public async Task<IActionResult> GetCoreBankingLedgerPostings()
+    {
+        var postings = await _repository.GetCoreBankingPostingsAsync();
+        return Ok(postings.Select(p => new
+        {
+            posting_id = p.PostingId,
+            source_type = p.SourceType,
+            source_id = p.SourceId,
+            debit_account = p.DebitAccount,
+            credit_account = p.CreditAccount,
+            amount = p.Amount,
+            currency = p.Currency,
+            memo = p.Memo,
+            status_code = p.StatusCode,
+            core_banking_reference = p.CoreBankingReference,
+            response_message = p.ResponseMessage,
+            initiated_by = p.InitiatedBy,
+            created_at = p.CreatedAt,
+            posted_at = p.PostedAt
+        }));
     }
 
     // =========================================================================
@@ -1230,6 +1280,58 @@ public partial class PMIMSControllers : ControllerBase
         });
     }
 
+    // =========================================================================
+    // COMPLIANCE DASHBOARD -- Reporting Requirements Gap Analysis, Item 6.
+    // ------------------------------------------------------------------------
+    // The Executive Board dashboard above serves Management; Compliance/Audit
+    // previously had no curated view of their own, just the audit-log search
+    // screen (a search tool, not a dashboard). This summarizes the same
+    // exceptions feed Item 5's report exposes (open reconciliation breaks,
+    // rule blocks/warnings, low-stock breaches, overdue approvals) plus the
+    // audit trail's tamper-check status -- both read-only rollups over data
+    // every other module already writes.
+    // =========================================================================
+    [Authorize(Policy = "dashboard.read")]
+    [HttpGet("dashboard/compliance")]
+    public async Task<IActionResult> GetComplianceDashboard()
+    {
+        var (_, exceptionRows) = await BuildExceptionsTableAsync();
+
+        var byType = exceptionRows.GroupBy(r => r[0])
+            .Select(g => new { exception_type = g.Key, count = g.Count() })
+            .OrderByDescending(g => g.count).ToList();
+        var bySeverity = exceptionRows.GroupBy(r => r[3])
+            .Select(g => new { severity = g.Key, count = g.Count() })
+            .OrderByDescending(g => g.count).ToList();
+
+        // Tamper-check status across the whole audit trail -- reuses the same row_hash
+        // recompute-and-compare SearchAuditLogsAsync already does for the audit search screen
+        // (PMIMSControllers.Audit.cs), rather than re-implementing hash verification here.
+        var tampered = await _repository.SearchAuditLogsAsync(new AuditLogFilter { StatusFilter = "Tampered", Page = 1, PageSize = 1 });
+        var unverified = await _repository.SearchAuditLogsAsync(new AuditLogFilter { StatusFilter = "Unverified", Page = 1, PageSize = 1 });
+
+        return Ok(new
+        {
+            exceptions_total = exceptionRows.Count,
+            exceptions_by_type = byType,
+            exceptions_by_severity = bySeverity,
+            recent_exceptions = exceptionRows.Take(25).Select(r => new
+            {
+                exception_type = r[0],
+                reference = r[1],
+                description = r[2],
+                severity = r[3],
+                raised_at = r[4],
+                status = r[5]
+            }),
+            audit_tamper_check = new
+            {
+                tampered_count = tampered.TotalCount,
+                unverified_count = unverified.TotalCount
+            }
+        });
+    }
+
     // Parses a yyyy-MM-dd (or any culture-invariant DateTime-parseable) query string; returns
     // null on blank/unparseable input so callers can treat the range bound as "unbounded".
     private static DateTime? ParseDateOrNull(string? value)
@@ -1279,7 +1381,18 @@ public partial class PMIMSControllers : ControllerBase
 // Request and DTO payloads
 public class LoginRequest { public string Username { get; set; } = null!; public string Password { get; set; } = null!; }
 public class CreateLocationRequest { public string ZoneRoom { get; set; } = null!; public string ShelfRow { get; set; } = null!; public string SlotBin { get; set; } = null!; }
-public class CreatePORequest { public string PoNumber { get; set; } = null!; public int VendorId { get; set; } public decimal TotalWeightGrams { get; set; } public decimal TotalCost { get; set; } public string Currency { get; set; } = "USD"; public string CreatedBy { get; set; } = null!; public List<POItemDTO> Items { get; set; } = new(); }
+public class CreatePORequest {
+    public string PoNumber { get; set; } = null!; public int VendorId { get; set; } public decimal TotalWeightGrams { get; set; } public decimal TotalCost { get; set; } public string Currency { get; set; } = "USD"; public string CreatedBy { get; set; } = null!; public List<POItemDTO> Items { get; set; } = new();
+    // Cost Tracking & Valuation -- purchase cost detail (supplier invoice + acquisition fees).
+    // All optional so an existing/simple client that doesn't know about them still works.
+    public string? SupplierInvoiceNumber { get; set; }
+    public DateTime? SupplierInvoiceDate { get; set; }
+    public decimal FreightCost { get; set; } = 0;
+    public decimal InsuranceCost { get; set; } = 0;
+    public decimal CustomsDutyCost { get; set; } = 0;
+    public decimal OtherFeesCost { get; set; } = 0;
+    public string? OtherFeesDescription { get; set; }
+}
 public class POItemDTO { public int product_id { get; set; } public int qty { get; set; } public decimal unit_cost { get; set; } }
 public class IntakeRequest { public int PoId { get; set; } public string LotNumber { get; set; } = null!; public int LocationId { get; set; } public string ReceivedBy { get; set; } = null!; public List<IntakeItemDTO> Items { get; set; } = new(); }
 public class IntakeItemDTO
@@ -1411,6 +1524,24 @@ public class SaveReorderThresholdRequest
 public class DraftPORequest
 {
     public string CreatedBy { get; set; } = "SYSTEM";
+}
+
+// Reporting Requirements Gap Analysis -- Item 8 (Cost Analysis & Variance).
+public class SaveCostBudgetRequest
+{
+    public int? BudgetId { get; set; }
+    public int MetalTypeId { get; set; }
+    public string Period { get; set; } = null!; // yyyy-MM
+    public decimal BudgetedUnitCostPerGram { get; set; }
+    public string Currency { get; set; } = "KWD";
+    public string? CreatedBy { get; set; }
+}
+
+// Sidebar Menu Layout -- admin-arrangeable navigation order.
+public class SaveMenuLayoutRequest
+{
+    public List<string> Order { get; set; } = null!;
+    public string? UpdatedBy { get; set; }
 }
 
 public class TransferWorkflowRequest

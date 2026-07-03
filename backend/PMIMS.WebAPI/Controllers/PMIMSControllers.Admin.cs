@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -226,6 +227,7 @@ public partial class PMIMSControllers
     // STOCK REORDER THRESHOLDS
     // =========================================================================
 
+    [Authorize(Policy = "master_data.read")]
     [HttpGet("inventory/reorder-thresholds")]
     public async Task<IActionResult> GetReorderThresholds()
     {
@@ -270,6 +272,12 @@ public partial class PMIMSControllers
         return Ok(new { message = "Threshold deleted successfully." });
     }
 
+    // Gated by purchase_orders.read (not master_data.read): the alert itself is what
+    // Maker/Checker/Reconciliation act on from the Executive Dashboard (Maker holds
+    // purchase_orders FULL and creates the draft P.O.; Checker/Recon hold READ_ONLY and
+    // can see it's pending). All three have master_data HIDDEN, so gating this to
+    // master_data would hide the dashboard alert banner from everyone but IT/Admin.
+    [Authorize(Policy = "purchase_orders.read")]
     [HttpGet("inventory/low-stock-alerts")]
     public async Task<IActionResult> GetLowStockAlerts()
     {
@@ -288,5 +296,97 @@ public partial class PMIMSControllers
         if (result == "THRESHOLD_NOT_FOUND") return NotFound(new { error = "Threshold not found." });
         if (result == "DRAFT_EXISTS") return Ok(new { po_id = poId, message = "A draft P.O. already exists for this supplier.", already_exists = true });
         return Created($"/api/purchase-orders/{poId}", new { po_id = poId, message = "Draft P.O. created successfully." });
+    }
+
+    // =========================================================================
+    // COST BUDGETS -- Reporting Requirements Gap Analysis, Item 8 (Cost Analysis
+    // & Variance). Same master_data tier as reorder thresholds above: a
+    // budgeted/standard unit cost per metal type per period, which
+    // GET /api/reports/cost-variance compares against the actual average cost
+    // already captured on every InventoryLot at intake.
+    // =========================================================================
+
+    [Authorize(Policy = "master_data.read")]
+    [HttpGet("master-data/cost-budgets")]
+    public async Task<IActionResult> GetCostBudgets()
+    {
+        var budgets = await _repository.GetCostBudgetsAsync();
+        return Ok(budgets.Select(MapCostBudget));
+    }
+
+    [Authorize(Policy = "master_data.write")]
+    [HttpPost("master-data/cost-budgets")]
+    public async Task<IActionResult> SaveCostBudget([FromBody] SaveCostBudgetRequest req)
+    {
+        try
+        {
+            var budget = await _repository.SaveCostBudgetAsync(new CostBudget
+            {
+                BudgetId = req.BudgetId ?? 0,
+                MetalTypeId = req.MetalTypeId,
+                Period = req.Period,
+                BudgetedUnitCostPerGram = req.BudgetedUnitCostPerGram,
+                Currency = req.Currency,
+                CreatedBy = req.CreatedBy ?? "system-admin"
+            });
+            return Ok(MapCostBudget(budget));
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
+    [Authorize(Policy = "master_data.write")]
+    [HttpDelete("master-data/cost-budgets/{id:int}")]
+    public async Task<IActionResult> DeleteCostBudget(int id)
+    {
+        var result = await _repository.DeleteCostBudgetAsync(id);
+        if (!result) return NotFound(new { error = "Cost budget not found." });
+        return Ok(new { message = "Cost budget deleted successfully." });
+    }
+
+    private static object MapCostBudget(CostBudget b) => new
+    {
+        budget_id = b.BudgetId,
+        metal_type_id = b.MetalTypeId,
+        metal_name = b.MetalType?.MetalName ?? "",
+        period = b.Period,
+        budgeted_unit_cost_per_gram = b.BudgetedUnitCostPerGram,
+        currency = b.Currency,
+        created_by = b.CreatedBy,
+        created_at = b.CreatedAt
+    };
+
+    // =========================================================================
+    // SIDEBAR MENU LAYOUT -- lets an IT/Admin (or anyone holding FULL/READ_WRITE
+    // on `settings`) reorder the sidebar navigation for the whole organization.
+    // Read is a plain any-authenticated-user [Authorize]: every logged-in user
+    // needs the current order to render their own sidebar, regardless of whether
+    // they hold the `settings` module themselves (most roles have it HIDDEN).
+    // Write is gated by settings.write, same tier as the other admin/setup
+    // surfaces (vault_location, master_data, rules_engine, ...).
+    // =========================================================================
+    [Authorize]
+    [HttpGet("admin/menu-layout")]
+    public async Task<IActionResult> GetMenuLayout()
+    {
+        var layout = await _repository.GetSidebarMenuLayoutAsync();
+        if (layout == null) return Ok(new { order = (string?)null, updatedBy = (string?)null, updatedAt = (DateTime?)null });
+        return Ok(new { order = layout.OrderJson, updatedBy = layout.UpdatedBy, updatedAt = layout.UpdatedAt });
+    }
+
+    [Authorize(Policy = "settings.write")]
+    [HttpPut("admin/menu-layout")]
+    public async Task<IActionResult> SaveMenuLayout([FromBody] SaveMenuLayoutRequest req)
+    {
+        if (req.Order == null || req.Order.Count == 0)
+        {
+            return BadRequest(new { error = "order must be a non-empty list of menu node keys." });
+        }
+        var orderJson = JsonSerializer.Serialize(req.Order);
+        var updatedBy = req.UpdatedBy ?? User.Identity?.Name ?? "unknown";
+        var layout = await _repository.SaveSidebarMenuLayoutAsync(orderJson, updatedBy);
+        return Ok(new { order = layout.OrderJson, updatedBy = layout.UpdatedBy, updatedAt = layout.UpdatedAt });
     }
 }

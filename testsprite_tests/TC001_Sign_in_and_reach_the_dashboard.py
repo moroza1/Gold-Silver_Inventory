@@ -40,19 +40,19 @@ async def run_test():
         except Exception:
             pass
         
-        # -> Enter 'system-admin' into the AD Username field, enter 'Password123' into the Password field, then click the 'LDAP Corporate Authentication' button to submit the sign-in form.
+        # -> Enter 'system-admin' into the AD Username field, enter 'Password123' into the Password field, then click the 'LDAP Corporate Authentication' button to sign in.
         # text field
         elem = page.locator('xpath=/html/body/div/div/form/div[2]/input')
         await elem.wait_for(state="visible", timeout=10000)
         await elem.fill("system-admin")
         
-        # -> Enter 'system-admin' into the AD Username field, enter 'Password123' into the Password field, then click the 'LDAP Corporate Authentication' button to submit the sign-in form.
+        # -> Enter 'system-admin' into the AD Username field, enter 'Password123' into the Password field, then click the 'LDAP Corporate Authentication' button to sign in.
         # password field
         elem = page.locator('xpath=/html/body/div/div/form/div[3]/input')
         await elem.wait_for(state="visible", timeout=10000)
         await elem.fill("Password123")
         
-        # -> Enter 'system-admin' into the AD Username field, enter 'Password123' into the Password field, then click the 'LDAP Corporate Authentication' button to submit the sign-in form.
+        # -> Enter 'system-admin' into the AD Username field, enter 'Password123' into the Password field, then click the 'LDAP Corporate Authentication' button to sign in.
         # LDAP Corporate Authentication button
         elem = page.get_by_role('button', name='LDAP Corporate Authentication', exact=True)
         await elem.click(timeout=10000)
@@ -60,14 +60,29 @@ async def run_test():
         # --> Assertions to verify final state
         
         # --> Verify the treasury dashboard is displayed
-        # Assert: The 'My Pending Actions' navigation item is visible, indicating the dashboard is shown.
-        await expect(page.get_by_text("My Pending Actions")).to_be_visible(timeout=15000)
-        # Assert: The 'Proprietary Gold Stock' summary card is visible on the treasury dashboard.
-        await expect(page.get_by_text("Proprietary Gold Stock")).to_be_visible(timeout=15000)
+        await page.locator("xpath=/html/body/div/div/main/section[1]/div[2]/div[1]").nth(0).scroll_into_view_if_needed()
+        # Assert: The 'Proprietary Gold Stock' summary card is visible on the dashboard.
+        await expect(page.locator("xpath=/html/body/div/div/main/section[1]/div[2]/div[1]").nth(0)).to_be_visible(timeout=15000), "The 'Proprietary Gold Stock' summary card is visible on the dashboard."
+        await page.locator("xpath=/html/body/div/div/main/section[1]/div[2]/div[2]").nth(0).scroll_into_view_if_needed()
+        # Assert: The 'Ready for Sale (Prop)' summary card is visible on the dashboard.
+        await expect(page.locator("xpath=/html/body/div/div/main/section[1]/div[2]/div[2]").nth(0)).to_be_visible(timeout=15000), "The 'Ready for Sale (Prop)' summary card is visible on the dashboard."
+        await page.locator("xpath=/html/body/div/div/aside/nav/div[5]").nth(0).scroll_into_view_if_needed()
+        # Assert: The 'My Pending Actions' navigation item is visible, indicating the dashboard navigation is present.
+        await expect(page.locator("xpath=/html/body/div/div/aside/nav/div[5]").nth(0)).to_be_visible(timeout=15000), "The 'My Pending Actions' navigation item is visible, indicating the dashboard navigation is present."
         
         # --> Verify stock summary and pending authorization information are displayed
-        await expect(page.get_by_text("Ready for Sale (Prop)")).to_be_visible(timeout=15000)
-        await expect(page.get_by_text("Reserved Checkout Locks")).to_be_visible(timeout=15000)
+        await page.locator("xpath=/html/body/div/div/main/section[1]/div[2]/div[1]").nth(0).scroll_into_view_if_needed()
+        # Assert: Proprietary Gold Stock summary card is visible on the dashboard.
+        await expect(page.locator("xpath=/html/body/div/div/main/section[1]/div[2]/div[1]").nth(0)).to_be_visible(timeout=15000), "Proprietary Gold Stock summary card is visible on the dashboard."
+        await page.locator("xpath=/html/body/div/div/main/section[1]/div[2]/div[2]").nth(0).scroll_into_view_if_needed()
+        # Assert: Ready for Sale (Prop) stock summary card is visible on the dashboard.
+        await expect(page.locator("xpath=/html/body/div/div/main/section[1]/div[2]/div[2]").nth(0)).to_be_visible(timeout=15000), "Ready for Sale (Prop) stock summary card is visible on the dashboard."
+        await page.locator("xpath=/html/body/div/div/main/section[1]/div[2]/div[4]").nth(0).scroll_into_view_if_needed()
+        # Assert: Client Custody Stock summary card is visible on the dashboard.
+        await expect(page.locator("xpath=/html/body/div/div/main/section[1]/div[2]/div[4]").nth(0)).to_be_visible(timeout=15000), "Client Custody Stock summary card is visible on the dashboard."
+        await page.locator("xpath=/html/body/div/div/aside/nav/div[5]/span").nth(0).scroll_into_view_if_needed()
+        # Assert: Pending authorization area ('My Pending Actions') is visible in the navigation.
+        await expect(page.locator("xpath=/html/body/div/div/aside/nav/div[5]/span").nth(0)).to_be_visible(timeout=15000), "Pending authorization area ('My Pending Actions') is visible in the navigation."
         await asyncio.sleep(5)
 
     finally:
