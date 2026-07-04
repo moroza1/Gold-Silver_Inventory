@@ -277,6 +277,11 @@ public interface IInventoryRepository
     Task<IEnumerable<CostBudget>> GetCostBudgetsAsync();
     Task<CostBudget> SaveCostBudgetAsync(CostBudget budget);
     Task<bool> DeleteCostBudgetAsync(int budgetId);
+
+    // =========================================================================
+    // Admin SQL Query Tool (Development/Debugging Only)
+    // =========================================================================
+    Task<List<Dictionary<string, object?>>> ExecuteRawSqlQueryAsync(string sqlQuery);
 }
 
 public interface IActiveDirectoryService

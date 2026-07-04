@@ -285,9 +285,23 @@ try
     // 6. Database Creation & Seeding Lifecycle
     using (var scope = app.Services.CreateScope())
     {
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        await context.Database.EnsureCreatedAsync();
-        await DbSeeder.SeedAsync(context);
+        try
+        {
+            var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            Console.WriteLine("🔄 Creating database...");
+            await context.Database.EnsureCreatedAsync();
+            Console.WriteLine("✅ Database created/verified");
+
+            Console.WriteLine("🔄 Seeding data...");
+            await DbSeeder.SeedAsync(context);
+            Console.WriteLine("✅ Database seeded successfully");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"❌ Database error: {ex.Message}");
+            Console.WriteLine($"Stack: {ex.StackTrace}");
+            throw;
+        }
     }
 
     // 7. Request Pipeline Setup

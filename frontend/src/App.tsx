@@ -972,6 +972,9 @@ const [migrationApproved, setMigrationApproved] = useState(false);
 
   // Configurations states
   const [settingsTab, setSettingsTab] = useState('ai');
+  const [sqlQuery, setSqlQuery] = useState('');
+  const [sqlResult, setSqlResult] = useState<any>(null);
+  const [sqlLoading, setSqlLoading] = useState(false);
   const [suppliersList, setSuppliersList] = useState<any[]>([]);
   const [newSupCode, setNewSupCode] = useState('');
   const [newSupName, setNewSupName] = useState('');
@@ -1532,8 +1535,10 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     }
   };
 
-  // Fetch static data and load tickers
+  // Fetch static data and load tickers (only after user is logged in)
   useEffect(() => {
+    if (!isLoggedIn) return;
+
     fetchRates();
     fetchInventory();
     fetchExecutiveBoard();
@@ -1555,7 +1560,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     }, 4000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [isLoggedIn]);
 
   const translateDb = (val: string) => {
     if (currentLang === 'en') return val;
@@ -3677,17 +3682,18 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     { type: 'item', key: 'screen-audit-trail', label: t('menu_audit_trail'), icon: 'fa-solid fa-magnifying-glass-chart', permission: 'reports', onClick: () => window.open('/pmims-audit-trail.html', '_blank') },
     { type: 'item', key: 'screen-kfhonline-logs', label: t('menu_kfhonline_logs'), icon: 'fa-solid fa-receipt', permission: 'reports', onClick: () => window.open('/kfhonline-transaction-logs.html', '_blank') },
     { type: 'item', key: 'screen-realtime', label: currentLang === 'en' ? 'Real-Time Monitoring' : 'المراقبة اللحظية', icon: 'fa-solid fa-tower-broadcast', permission: 'reports', onClick: () => { setActiveTab('screen-realtime'); fetchLiveBalances(); }, showLiveDot: true },
-    { type: 'item', key: 'screen-workflows', label: canAccess('workflow_design') ? t('menu_workflows') : t('menu_workflows_queue'), icon: 'fa-solid fa-diagram-project', permission: 'workflows', onClick: () => { setActiveTab('screen-workflows'); fetchWorkflows(); } },
 
     { type: 'section', key: 'section-admin', label: currentLang === 'en' ? 'Administration & Setup' : 'الإدارة والإعداد' },
-    { type: 'item', key: 'screen-compliance', label: t('menu_compliance'), icon: 'fa-solid fa-shield-halved', permission: 'dashboard', onClick: () => { setActiveTab('screen-compliance'); fetchComplianceDashboard(); } },
-    { type: 'item', key: 'screen-admin', label: t('menu_settings'), icon: 'fa-solid fa-gears', permission: 'settings', onClick: () => setActiveTab('screen-admin') },
-    { type: 'item', key: 'screen-migration', label: t('menu_migration'), icon: 'fa-solid fa-file-import', permission: 'migration', onClick: () => setActiveTab('screen-migration') },
+    { type: 'item', key: 'screen-workflows', label: canAccess('workflow_design') ? t('menu_workflows') : t('menu_workflows_queue'), icon: 'fa-solid fa-diagram-project', permission: 'workflows', onClick: () => { setActiveTab('screen-workflows'); fetchWorkflows(); } },
     { type: 'item', key: 'screen-user-admin', label: t('menu_user_admin'), icon: 'fa-solid fa-users-gear', permission: 'user_admin', onClick: () => { setActiveTab('screen-user-admin'); fetchAdminData(); } },
+    { type: 'item', key: 'screen-sql-admin', label: currentLang === 'en' ? 'SQL Query Tool' : 'أداة SQL', icon: 'fa-solid fa-database', permission: 'user_admin', onClick: () => setActiveTab('screen-sql-admin') },
+    { type: 'item', key: 'screen-compliance', label: t('menu_compliance'), icon: 'fa-solid fa-shield-halved', permission: 'dashboard', onClick: () => { setActiveTab('screen-compliance'); fetchComplianceDashboard(); } },
+    { type: 'item', key: 'screen-migration', label: t('menu_migration'), icon: 'fa-solid fa-file-import', permission: 'migration', onClick: () => setActiveTab('screen-migration') },
     { type: 'item', key: 'screen-notifications', label: t('menu_notifications'), icon: 'fa-solid fa-bell', permission: 'notifications', onClick: () => { setActiveTab('screen-notifications'); fetchNotificationSubscriptions(); fetchNotificationDeliveries(); } },
     { type: 'item', key: 'screen-devices', label: currentLang === 'en' ? 'GDM Device Registration' : 'تسجيل أجهزة الصرف الذاتي', icon: 'fa-solid fa-microchip', permission: 'device_integration', onClick: () => { setActiveTab('screen-devices'); fetchGdmDevices(); fetchBranches(); } },
     { type: 'item', key: 'screen-rules', label: currentLang === 'en' ? 'Business Rules Engine' : 'محرك قواعد الأعمال', icon: 'fa-solid fa-scale-balanced', permission: 'rules_engine', onClick: () => { setActiveTab('screen-rules'); fetchBusinessRules(); } },
     { type: 'item', key: 'screen-monitoring', label: currentLang === 'en' ? 'Monitoring' : 'المراقبة والتنبيهات', icon: 'fa-solid fa-heart-pulse', permission: 'monitoring', onClick: () => { setActiveTab('screen-monitoring'); fetchSlaMetrics(); fetchMonitoringEvents(); fetchAlertRoutes(); } },
+    { type: 'item', key: 'screen-admin', label: t('menu_settings'), icon: 'fa-solid fa-gears', permission: 'settings', onClick: () => setActiveTab('screen-admin') },
   ];
 
   // Merge the saved order with the canonical key set: drop stale keys no longer in
@@ -3945,24 +3951,24 @@ const [migrationApproved, setMigrationApproved] = useState(false);
           <div className="kpi-row">
             <div className="glass-card kpi-card">
               <span className="kpi-title">{t('kpi_prop_gold')}</span>
-              <span className="kpi-value gold-txt">{(execBoard?.total_gold_weight_kg ?? 0).toFixed(2)} KG</span>
+              <span className="kpi-value gold-txt">{(execBoard?.total_gold_weight_kg ?? 0).toFixed(3)} KG</span>
               <span className="kpi-sub" style={{ color: 'var(--accent-green)' }}>
                 <i className="fa-solid fa-circle-check"></i> {t('kpi_sync')}
               </span>
             </div>
             <div className="glass-card kpi-card">
               <span className="kpi-title">{t('kpi_ready')}</span>
-              <span className="kpi-value">{execBoard?.ready_qty ?? 0}</span>
+              <span className="kpi-value">{(execBoard?.available_weight_kg ?? 0).toFixed(3)} KG</span>
               <span className="kpi-sub">{t('kpi_ready_sub')}</span>
             </div>
             <div className="glass-card kpi-card">
               <span className="kpi-title">{t('kpi_reserved')}</span>
-              <span className="kpi-value" style={{ color: 'var(--accent-orange)' }}>{execBoard?.reserved_qty ?? 0}</span>
+              <span className="kpi-value" style={{ color: 'var(--accent-orange)' }}>{(execBoard?.reserved_weight_kg ?? 0).toFixed(3)} KG</span>
               <span className="kpi-sub"><i className="fa-solid fa-hourglass-start"></i> {t('kpi_reserved_sub')}</span>
             </div>
             <div className="glass-card kpi-card">
               <span className="kpi-title">{t('kpi_custody')}</span>
-              <span className="kpi-value" style={{ color: 'var(--accent-blue)' }}>{execBoard?.custody_qty ?? 0}</span>
+              <span className="kpi-value" style={{ color: 'var(--accent-blue)' }}>{(execBoard?.custody_weight_kg ?? 0).toFixed(3)} KG</span>
               <span className="kpi-sub">{t('kpi_custody_sub')}</span>
             </div>
           </div>
@@ -4676,6 +4682,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
               <table>
                 <thead>
                   <tr>
+                    <th style={{ width: '40px' }}></th>
                     <th>{t('th_po_code')}</th>
                     <th>{t('th_supplier')}</th>
                     <th>{t('th_weight')}</th>
@@ -4684,44 +4691,114 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       {currentLang === 'en' ? 'Landed Cost' : 'التكلفة الفعلية'}
                     </th>
                     <th>{t('th_status')}</th>
-                    {canModify('purchase_orders') && <th style={{ width: '220px', textAlign: 'center' }}>{t('th_action')}</th>}
+                    {canModify('purchase_orders') && <th style={{ width: '280px', textAlign: 'center' }}>{t('th_action')}</th>}
                   </tr>
                 </thead>
                 <tbody>
                   {poList.length === 0 ? (
                     <tr>
-                      <td colSpan={canModify('purchase_orders') ? 7 : 6} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '20px' }}>
+                      <td colSpan={canModify('purchase_orders') ? 8 : 7} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '20px' }}>
                         {t('active_deals_empty')}
                       </td>
                     </tr>
                   ) : (
-                    poList.map((po: any, idx: number) => (
-                      <tr key={idx}>
-                        <td><strong>{po.po_number}</strong>{po.supplier_invoice_number && <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Inv.' : 'فاتورة'} {po.supplier_invoice_number}</div>}</td>
-                        <td>{po.supplier}</td>
-                        <td>{po.weight}g</td>
-                        <td>${po.cost.toLocaleString()} {po.currency}</td>
-                        <td>${(po.landed_cost ?? po.cost).toLocaleString()} {po.currency}</td>
-                        <td><span className="badge badge-ready">{translateDb(po.status_code)}</span></td>
-                        {canModify('purchase_orders') && (
-                          <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
-                            {po.status_code !== 'APPROVED' && po.status_code !== 'REJECTED' && po.status_code !== 'RECEIVED' && (
-                              <button className="btn btn-primary" style={{ padding: '4px 8px', fontSize: '11px', marginInlineEnd: '4px' }} onClick={() => handleApprovePO(po.po_id)}>
-                                <i className="fa-solid fa-check"></i> {t('btn_approve')}
-                              </button>
+                    poList.map((po: any, poIdx: number) => {
+                      const items = po.items && po.items.length > 0 ? po.items : [{ product_id: 1, qty: po.qty || 1 }];
+                      const isExpanded = expandedPOId === po.po_id;
+
+                      return (
+                        <React.Fragment key={poIdx}>
+                          {/* HEADER ROW - Click to expand */}
+                          <tr onClick={() => setExpandedPOId(isExpanded ? null : po.po_id)} style={{ cursor: 'pointer', backgroundColor: isExpanded ? 'rgba(59, 130, 246, 0.04)' : undefined }}>
+                            <td style={{ textAlign: 'center', padding: '12px 8px' }}>
+                              <i className={`fa-solid fa-chevron-${isExpanded ? 'down' : 'right'}`} style={{ color: 'var(--accent-blue)', fontSize: '14px' }}></i>
+                            </td>
+                            <td><strong>{po.po_number}</strong>{po.supplier_invoice_number && <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Inv.' : 'فاتورة'} {po.supplier_invoice_number}</div>}</td>
+                            <td>{po.supplier}</td>
+                            <td>{po.weight}g</td>
+                            <td>${po.cost.toLocaleString()} {po.currency}</td>
+                            <td>${(po.landed_cost ?? po.cost).toLocaleString()} {po.currency}</td>
+                            <td><span className="badge badge-ready">{translateDb(po.status_code)}</span></td>
+                            {canModify('purchase_orders') && (
+                              <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
+                                {po.status_code !== 'APPROVED' && po.status_code !== 'REJECTED' && po.status_code !== 'RECEIVED' && (
+                                  <button className="btn btn-primary" style={{ padding: '4px 8px', fontSize: '11px', marginInlineEnd: '4px' }} onClick={() => handleApprovePO(po.po_id)}>
+                                    <i className="fa-solid fa-check"></i> {t('btn_approve')}
+                                  </button>
+                                )}
+                                {(po.status_code === 'APPROVED' || po.status_code === 'RECEIVED') && (
+                                  <button className="btn" style={{ backgroundColor: 'var(--accent-blue)', padding: '4px 8px', fontSize: '11px', marginInlineEnd: '4px' }} onClick={() => handlePrintPO(po)}>
+                                    <i className="fa-solid fa-print"></i> {t('btn_print')}
+                                  </button>
+                                )}
+                                <button className="btn" style={{ backgroundColor: 'var(--accent-red)', color: '#fff', padding: '4px 8px', fontSize: '11px' }} onClick={() => handleDeletePO(po.po_id, po.po_number)}>
+                                  <i className="fa-solid fa-trash"></i> {t('btn_delete')}
+                                </button>
+                              </td>
                             )}
-                            {(po.status_code === 'APPROVED' || po.status_code === 'RECEIVED') && (
-                              <button className="btn" style={{ backgroundColor: 'var(--accent-blue)', padding: '4px 8px', fontSize: '11px', marginInlineEnd: '4px' }} onClick={() => handlePrintPO(po)}>
-                                <i className="fa-solid fa-print"></i> {t('btn_print')}
-                              </button>
-                            )}
-                            <button className="btn" style={{ backgroundColor: 'var(--accent-red)', color: '#fff', padding: '4px 8px', fontSize: '11px' }} onClick={() => handleDeletePO(po.po_id, po.po_number)}>
-                              <i className="fa-solid fa-trash"></i> {t('btn_delete')}
-                            </button>
-                          </td>
-                        )}
-                      </tr>
-                    ))
+                          </tr>
+
+                          {/* EXPANDED DETAILS ROW - Shows items */}
+                          {isExpanded && (
+                            <tr style={{ backgroundColor: 'rgba(59, 130, 246, 0.04)' }}>
+                              <td colSpan={canModify('purchase_orders') ? 8 : 7} style={{ padding: '16px 20px' }}>
+                                <div style={{ marginLeft: '20px' }}>
+                                  <h5 style={{ margin: '0 0 12px 0', fontSize: '13px', color: 'var(--accent-blue)', fontWeight: 'bold' }}>
+                                    {currentLang === 'en' ? 'Items:' : 'المنتجات:'}
+                                  </h5>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                                    {items.map((item: any, itemIdx: number) => {
+                                      const prod = products.find((p: any) => p.product_id === item.product_id);
+                                      const prodName = prod ? `${prod.metal_name} ${prod.denomination_label}` : (item.product_code || `Product #${item.product_id}`);
+                                      const itemQty = item.qty || item.ordered_qty || 1;
+                                      const itemWeight = prod && prod.weight_per_unit ? (prod.weight_per_unit * itemQty) : (po.weight / items.length);
+                                      const itemCost = po.cost / items.length;
+                                      const itemLandedCost = (po.landed_cost ?? po.cost) / items.length;
+
+                                      return (
+                                        <div key={itemIdx} style={{
+                                          padding: '12px 14px',
+                                          backgroundColor: 'rgba(255, 255, 255, 0.6)',
+                                          border: '1px solid rgba(59, 130, 246, 0.2)',
+                                          borderRadius: '4px',
+                                          fontSize: '13px',
+                                          display: 'grid',
+                                          gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr',
+                                          gap: '12px',
+                                          alignItems: 'center'
+                                        }}>
+                                          <div>
+                                            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>{currentLang === 'en' ? 'Product' : 'المنتج'}</div>
+                                            <strong style={{ color: 'var(--accent-blue)' }}>{prodName}</strong>
+                                            {prod && prod.purity_value && <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>Purity: {prod.purity_value}</div>}
+                                          </div>
+                                          <div>
+                                            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>{currentLang === 'en' ? 'Quantity' : 'الكمية'}</div>
+                                            <strong>{itemQty}</strong> {currentLang === 'en' ? 'units' : 'وحدات'}
+                                          </div>
+                                          <div>
+                                            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>{currentLang === 'en' ? 'Weight' : 'الوزن'}</div>
+                                            <strong>{itemWeight.toFixed(2)}g</strong>
+                                          </div>
+                                          <div>
+                                            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>{currentLang === 'en' ? 'Cost' : 'التكلفة'}</div>
+                                            <strong>${itemCost.toLocaleString(undefined, { maximumFractionDigits: 2 })}</strong>
+                                          </div>
+                                          <div>
+                                            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>{currentLang === 'en' ? 'Landed Cost' : 'التكلفة الفعلية'}</div>
+                                            <strong>${itemLandedCost.toLocaleString(undefined, { maximumFractionDigits: 2 })}</strong>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      );
+                    })
                   )}
                 </tbody>
               </table>
@@ -7790,6 +7867,148 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     <i className="fa-solid fa-plus"></i> {currentLang === 'ar' ? 'تسجيل الفرع' : 'Register Branch'}
                   </button>
                 </div>
+                )}
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* SCREEN VIEWPORT: SQL QUERY ADMIN TOOL */}
+        <section className={`screen-viewport ${activeTab === 'screen-sql-admin' ? 'active' : ''}`}>
+          <div className="glass-card">
+            <h3>{currentLang === 'en' ? 'SQL Query Tool' : 'أداة استعلام SQL'}</h3>
+            <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>
+              {currentLang === 'en'
+                ? 'Execute SQL queries directly against the database. Use with caution.'
+                : 'تنفيذ استعلامات SQL مباشرة ضد قاعدة البيانات. استخدم بحذر.'}
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', marginBottom: '20px' }}>
+              <div className="form-group">
+                <label style={{ fontSize: '12px', fontWeight: 'bold', marginBottom: '8px', display: 'block' }}>
+                  {currentLang === 'en' ? 'SQL Query' : 'استعلام SQL'}
+                </label>
+                <textarea
+                  value={sqlQuery}
+                  onChange={(e) => setSqlQuery(e.target.value)}
+                  placeholder="SELECT * FROM InventoryItems WHERE OwnershipType = 'KFH_OWNED';"
+                  style={{
+                    width: '100%',
+                    minHeight: '200px',
+                    padding: '12px',
+                    fontFamily: 'monospace',
+                    fontSize: '12px',
+                    backgroundColor: 'var(--bg-secondary)',
+                    border: '1px solid var(--surface-border)',
+                    borderRadius: '4px',
+                    color: '#000'
+                  }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button
+                  className="btn btn-primary"
+                  onClick={async () => {
+                    if (!sqlQuery.trim()) {
+                      alert(currentLang === 'en' ? 'Enter a SQL query' : 'أدخل استعلام SQL');
+                      return;
+                    }
+                    setSqlLoading(true);
+                    setSqlResult(null);
+                    try {
+                      const res = await fetch(`${API_BASE}/admin/sql-query`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ query: sqlQuery })
+                      });
+                      if (!res.ok) {
+                        setSqlResult({ success: false, error: `HTTP ${res.status}: ${res.statusText}` });
+                        return;
+                      }
+                      const text = await res.text();
+                      if (!text) {
+                        setSqlResult({ success: false, error: 'Empty response from server' });
+                        return;
+                      }
+                      try {
+                        const data = JSON.parse(text);
+                        setSqlResult(data);
+                      } catch (parseErr) {
+                        setSqlResult({ success: false, error: 'Invalid JSON response', details: text.substring(0, 500) });
+                      }
+                    } catch (e: any) {
+                      setSqlResult({ success: false, error: e.message || 'Network error' });
+                    } finally {
+                      setSqlLoading(false);
+                    }
+                  }}
+                  disabled={sqlLoading}
+                >
+                  <i className="fa-solid fa-play"></i> {currentLang === 'en' ? 'Execute' : 'تنفيذ'}
+                </button>
+                <button
+                  className="btn"
+                  onClick={() => setSqlQuery('')}
+                  style={{ backgroundColor: 'var(--accent-gray)' }}
+                >
+                  {currentLang === 'en' ? 'Clear' : 'مسح'}
+                </button>
+              </div>
+            </div>
+
+            {sqlLoading && (
+              <div style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>
+                <i className="fa-solid fa-spinner fa-spin"></i> {currentLang === 'en' ? 'Executing...' : 'جاري التنفيذ...'}
+              </div>
+            )}
+
+            {sqlResult && (
+              <div style={{ borderTop: '1px solid var(--surface-border)', paddingTop: '20px' }}>
+                {sqlResult.success ? (
+                  <>
+                    <p style={{ color: 'var(--accent-green)', fontSize: '12px', marginBottom: '15px' }}>
+                      ✓ {currentLang === 'en' ? `${sqlResult.rowCount} rows returned` : `تم إرجاع ${sqlResult.rowCount} صف`}
+                    </p>
+                    {sqlResult.data && sqlResult.data.length > 0 && (
+                      <div style={{ overflowX: 'auto' }}>
+                        <table style={{ width: '100%', fontSize: '12px', borderCollapse: 'collapse' }}>
+                          <thead>
+                            <tr style={{ borderBottom: '2px solid var(--surface-border)' }}>
+                              {Object.keys(sqlResult.data[0]).map((col) => (
+                                <th key={col} style={{ padding: '8px', textAlign: 'left', fontWeight: 'bold', color: 'var(--accent-blue)' }}>{col}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {sqlResult.data.slice(0, 100).map((row: any, idx: number) => (
+                              <tr key={idx} style={{ borderBottom: '1px solid var(--surface-border)', backgroundColor: idx % 2 ? 'rgba(59,130,246,0.02)' : 'transparent' }}>
+                                {Object.values(row).map((val: any, vIdx: number) => (
+                                  <td key={vIdx} style={{ padding: '8px', color: val === null ? 'var(--text-muted)' : 'inherit' }}>
+                                    {val === null ? '(null)' : String(val)}
+                                  </td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        {sqlResult.data.length > 100 && (
+                          <p style={{ marginTop: '10px', color: 'var(--text-muted)', fontSize: '11px' }}>
+                            {currentLang === 'en' ? `Showing first 100 of ${sqlResult.data.length} rows` : `عرض أول 100 من ${sqlResult.data.length} صفوف`}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div style={{ backgroundColor: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: '4px', padding: '12px', color: 'var(--accent-red)' }}>
+                    <p style={{ margin: '0 0 8px 0', fontWeight: 'bold' }}>{sqlResult.error}</p>
+                    {sqlResult.details && (
+                      <p style={{ margin: 0, fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                        {sqlResult.details}
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
             )}

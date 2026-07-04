@@ -1279,14 +1279,17 @@ public partial class PMIMSControllers : ControllerBase
         DateTime? rangeEndExclusive = ParseDateOrNull(endDate)?.Date.AddDays(1);
 
         var items = (await _repository.GetItemsAsync()).AsEnumerable();
+
+        // Filter by date range if provided; items without a Lot are included in the result
+        // even if outside the range (they represent undated/legacy inventory)
         if (rangeStart.HasValue)
-            items = items.Where(i => i.Lot != null && i.Lot.AcquisitionDate >= rangeStart.Value);
+            items = items.Where(i => i.Lot == null || i.Lot.AcquisitionDate >= rangeStart.Value);
         if (rangeEndExclusive.HasValue)
-            items = items.Where(i => i.Lot != null && i.Lot.AcquisitionDate < rangeEndExclusive.Value);
+            items = items.Where(i => i.Lot == null || i.Lot.AcquisitionDate < rangeEndExclusive.Value);
         var scopedItems = items.ToList();
 
         var goldWeightGrams = scopedItems
-            .Where(i => i.Product?.MetalType?.MetalName == "Gold")
+            .Where(i => i.Product?.MetalType?.MetalName == "Gold" && i.OwnershipType == "KFH_OWNED")
             .Sum(i => i.Product?.Denomination?.WeightGrams ?? 0m);
 
         // ============================================================
@@ -1332,16 +1335,31 @@ public partial class PMIMSControllers : ControllerBase
             purchaseOrders = purchaseOrders.Where(p => p.CreatedAt < rangeEndExclusive.Value);
         var scopedPOs = purchaseOrders.ToList();
 
+        // DEBUG: Log inventory items for diagnosis
+        var allItemsCount = scopedItems.Count;
+        var goldItemsCount = scopedItems.Count(i => i.Product?.MetalType?.MetalName == "Gold");
+        var kfhOwnedGoldCount = scopedItems.Count(i => i.Product?.MetalType?.MetalName == "Gold" && i.OwnershipType == "KFH_OWNED");
+
+        Console.WriteLine($"[Executive Board] Total items: {allItemsCount}, Gold items: {goldItemsCount}, KFH-owned Gold: {kfhOwnedGoldCount}, Gold weight grams: {goldWeightGrams}");
+
         return Ok(new
         {
-            total_gold_weight_kg = Math.Round(goldWeightGrams / 1000m, 2),
+            total_gold_weight_kg = Math.Round(goldWeightGrams / 1000m, 3),
+            _debug = new {
+                total_items = allItemsCount,
+                gold_items = goldItemsCount,
+                kfh_owned_gold_items = kfhOwnedGoldCount,
+                gold_weight_grams = goldWeightGrams
+            },
             // Dropped the old `ready_qty` field: it used to be `i.StatusCode == "READY"` with
             // no ownership check, which double-counted sold-but-still-custodied bars as
             // available stock. Fixing that filter to require OwnershipType == KFH_OWNED made
             // it numerically identical to `available_qty` below, so this was a duplicate
             // dashboard card rather than a distinct metric -- see availableItems above.
             reserved_qty = scopedItems.Count(i => i.StatusCode == "RESERVED"),
+            reserved_weight_kg = WeightKg(scopedItems.Where(i => i.StatusCode == "RESERVED").ToList()),
             custody_qty = holdings.Count(),
+            custody_weight_kg = WeightKg(holdings.Select(h => h.Item).ToList()),
             main_vault_qty = mainVaultItems.Count,
             main_vault_weight_kg = WeightKg(mainVaultItems),
             sold_qty = soldItems.Count,

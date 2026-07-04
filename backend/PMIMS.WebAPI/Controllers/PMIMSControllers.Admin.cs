@@ -389,4 +389,30 @@ public partial class PMIMSControllers
         var layout = await _repository.SaveSidebarMenuLayoutAsync(orderJson, updatedBy);
         return Ok(new { order = layout.OrderJson, updatedBy = layout.UpdatedBy, updatedAt = layout.UpdatedAt });
     }
+
+    // =========================================================================
+    // ADMIN SQL QUERY TOOL (Development/Debugging Only)
+    // Full SQL access (SELECT + UPDATE/DELETE/INSERT/DDL), so this is gated by
+    // user_admin.WRITE, not read — running arbitrary statements can mutate any
+    // table and must sit at the same tier as user/group/permission management.
+    // =========================================================================
+    [Authorize(Policy = "user_admin.write")]
+    [HttpPost("admin/sql-query")]
+    public async Task<IActionResult> ExecuteSqlQuery([FromBody] SqlQueryRequest req)
+    {
+        if (string.IsNullOrWhiteSpace(req.Query))
+            return Ok(new { success = false, error = "SQL query cannot be empty" });
+
+        try
+        {
+            var results = await _repository.ExecuteRawSqlQueryAsync(req.Query);
+            return Ok(new { success = true, rowCount = results.Count, data = results });
+        }
+        catch (Exception ex)
+        {
+            return Ok(new { success = false, error = ex.Message, details = ex.ToString() });
+        }
+    }
 }
+
+public class SqlQueryRequest { public string Query { get; set; } = null!; }

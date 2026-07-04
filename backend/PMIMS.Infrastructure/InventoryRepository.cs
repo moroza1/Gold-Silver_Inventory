@@ -3326,5 +3326,60 @@ public class InventoryRepository : IInventoryRepository
 
         return await query.OrderByDescending(l => l.CreatedAt).Take(limit).ToListAsync();
     }
+
+    /// <summary>
+    /// Execute raw SQL query for admin debugging (SQL Query Tool)
+    /// </summary>
+    public async Task<List<Dictionary<string, object?>>> ExecuteRawSqlQueryAsync(string sqlQuery)
+    {
+        var results = new List<Dictionary<string, object?>>();
+
+        // NOTE: do NOT dispose this connection — it belongs to the DbContext and
+        // disposing it here breaks any EF query issued later in the same request scope.
+        var connection = _dbContext.Database.GetDbConnection();
+        var wasOpen = connection.State == System.Data.ConnectionState.Open;
+        if (!wasOpen) await connection.OpenAsync();
+        try
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = sqlQuery;
+            command.CommandTimeout = 30;
+
+            var reader = await command.ExecuteReaderAsync();
+            int fieldCount;
+            try
+            {
+                fieldCount = reader.FieldCount;
+                while (await reader.ReadAsync())
+                {
+                    var row = new Dictionary<string, object?>();
+                    for (int i = 0; i < reader.FieldCount; i++)
+                    {
+                        var value = reader.GetValue(i);
+                        row[reader.GetName(i)] = value == DBNull.Value ? null : value;
+                    }
+                    results.Add(row);
+                }
+            }
+            finally
+            {
+                // RecordsAffected is only reliable after the reader is closed
+                // (Microsoft.Data.Sqlite computes it on close).
+                await reader.DisposeAsync();
+            }
+
+            if (fieldCount == 0)
+            {
+                // Non-query statement (UPDATE / DELETE / INSERT / DDL) — report affected rows.
+                results.Add(new Dictionary<string, object?> { ["rows_affected"] = reader.RecordsAffected });
+            }
+        }
+        finally
+        {
+            if (!wasOpen) await connection.CloseAsync();
+        }
+
+        return results;
+    }
 }
 
