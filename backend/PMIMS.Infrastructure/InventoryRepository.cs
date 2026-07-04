@@ -345,6 +345,13 @@ public class InventoryRepository : IInventoryRepository
                 AverageUnitCost = avgCost,
                 CreatedAt = DateTime.UtcNow
             };
+
+            // SAFEGUARD: Ensure AcquisitionDate is NEVER null -- required for dashboard filtering
+            if (lot.AcquisitionDate == null)
+            {
+                lot.AcquisitionDate = DateTime.UtcNow;
+            }
+
             _dbContext.InventoryLots.Add(lot);
             await _dbContext.SaveChangesAsync();
 
@@ -461,7 +468,40 @@ public class InventoryRepository : IInventoryRepository
 
             if (po != null)
             {
-                po.StatusCode = "RECEIVED";
+                // ============================================================
+                // P.O. PARTIAL RECEIPT TRACKING
+                // Count items received per product and update POItem.ReceivedQuantity.
+                // Only mark P.O. as RECEIVED when all items have been fully received.
+                // Otherwise mark as PARTIAL_RECEIPT to indicate awaiting remaining shipment.
+                // ============================================================
+                var itemsReceivedByProduct = newItems.GroupBy(i => i.ProductId)
+                    .ToDictionary(g => g.Key, g => g.Count());
+
+                bool allItemsReceived = true;
+                foreach (var poItem in po.Items)
+                {
+                    if (itemsReceivedByProduct.ContainsKey(poItem.ProductId))
+                    {
+                        poItem.ReceivedQuantity += itemsReceivedByProduct[poItem.ProductId];
+                    }
+
+                    // Check if this line item is fully received
+                    if (poItem.ReceivedQuantity < poItem.OrderedQuantity)
+                    {
+                        allItemsReceived = false;
+                    }
+                }
+
+                // Set P.O. status based on receipt completeness
+                if (allItemsReceived && po.Items.All(item => item.ReceivedQuantity == item.OrderedQuantity))
+                {
+                    po.StatusCode = "RECEIVED";
+                }
+                else
+                {
+                    po.StatusCode = "PARTIAL_RECEIPT";
+                }
+
                 await _dbContext.SaveChangesAsync();
 
                 // Cost Tracking & Valuation -- Core Banking (IMAL) GL Integration: a supplier
@@ -490,6 +530,14 @@ public class InventoryRepository : IInventoryRepository
                 : $"Received and spatialized {totalItems} bars in Lot: {lotNumber}";
             await SaveAuditLogAsync(receivedBy, "SYSTEM", "VAULT_OPS", auditMsg,
                 entityType: "INVENTORY_LOT", entityId: lot.LotId.ToString());
+
+            // Notify all branches of the newly received inventory
+            var firstItemProduct = newItems.FirstOrDefault()?.Product;
+            string metalType = firstItemProduct?.MetalType?.MetalName ?? "UNKNOWN";
+            await NotifyBranchesOfReceivedInventoryAsync(lot.LotId, lotNumber, totalItems, lot.TotalItems > 0 ?
+                (decimal)newItems.Sum(i => i.Product?.Denomination?.WeightGrams ?? 0) : 0,
+                metalType, lot.AcquisitionDate, receivedBy);
+
             return "SUCCESS";
         }
     }
@@ -1045,7 +1093,12 @@ public class InventoryRepository : IInventoryRepository
     // Lot.Vendor added for the Reporting Requirements Gap Analysis's Item 8 cost-analysis
     // rollup (cost by vendor) -- purely additive eager-load, no existing caller is affected.
     public async Task<IEnumerable<InventoryItem>> GetItemsAsync() => await _dbContext.InventoryItems.Include(i => i.Product).ThenInclude(p => p!.MetalType).Include(i => i.Product).ThenInclude(p => p!.Denomination).Include(i => i.Location).ThenInclude(l => l!.Vault).Include(i => i.Lot).ThenInclude(l => l!.Vendor).ToListAsync();
-    public async Task<IEnumerable<PurchaseOrder>> GetPurchaseOrdersAsync() => await _dbContext.PurchaseOrders.Include(p => p.Vendor).Include(p => p.Items).ThenInclude(i => i.Product).ToListAsync();
+    public async Task<IEnumerable<PurchaseOrder>> GetPurchaseOrdersAsync() =>
+        await _dbContext.PurchaseOrders
+            .Include(p => p.Items)
+                .ThenInclude(i => i.Product)
+            .Include(p => p.Vendor)
+            .ToListAsync();
 
     // Cost Tracking & Valuation -- Core Banking (IMAL) GL Integration: every posting PMIMS
     // has pushed (or attempted to push), newest first.
@@ -1113,8 +1166,11 @@ public class InventoryRepository : IInventoryRepository
         await _dbContext.SaveChangesAsync();
     }
 
-    public async Task<MetalProduct> CreateDenominationProductAsync(string label, string metalName, decimal weightGrams)
+    public async Task<MetalProduct> CreateDenominationProductAsync(string label, string metalName, decimal weightGrams, string? originCountry = null)
     {
+        // Normalize origin country (default to Switzerland if not provided)
+        originCountry = string.IsNullOrWhiteSpace(originCountry) ? "Switzerland" : originCountry.Trim();
+
         var metalType = await _dbContext.MetalTypes.FirstOrDefaultAsync(m => m.MetalName.ToLower() == metalName.ToLower());
         if (metalType == null)
         {
@@ -1140,12 +1196,16 @@ public class InventoryRepository : IInventoryRepository
             await _dbContext.SaveChangesAsync();
         }
 
-        string code = $"{(metalName.ToLower() == "gold" ? "AU" : "AG")}-{weightGrams}G-GEN";
+        // Build product code: AU-100G-TURK (metal-weight-origin)
+        string metalSymbol = metalName.ToLower() == "gold" ? "AU" : "AG";
+        string originAbbrev = GetOriginAbbreviation(originCountry);
+        string code = $"{metalSymbol}-{(int)weightGrams}G-{originAbbrev}";
+
         var product = await _dbContext.MetalProducts
             .Include(p => p.Denomination)
             .Include(p => p.Purity)
             .Include(p => p.MetalType)
-            .FirstOrDefaultAsync(p => p.ProductCode == code && p.MetalTypeId == metalType.MetalTypeId && p.DenominationId == denom.DenominationId);
+            .FirstOrDefaultAsync(p => p.ProductCode == code && p.MetalTypeId == metalType.MetalTypeId && p.DenominationId == denom.DenominationId && p.OriginCountry == originCountry);
         if (product == null)
         {
             product = new MetalProduct
@@ -1154,7 +1214,7 @@ public class InventoryRepository : IInventoryRepository
                 MetalTypeId = metalType.MetalTypeId,
                 DenominationId = denom.DenominationId,
                 PurityId = purity.PurityId,
-                OriginCountry = "Switzerland",
+                OriginCountry = originCountry,
                 IsActive = true
             };
             _dbContext.MetalProducts.Add(product);
@@ -1168,6 +1228,30 @@ public class InventoryRepository : IInventoryRepository
         }
 
         return product!;
+    }
+
+    // Helper to convert country name to 4-letter abbreviation for product codes
+    private static string GetOriginAbbreviation(string country)
+    {
+        return country?.ToLower() switch
+        {
+            "turkey" => "TURK",
+            "switzerland" => "SWIS",
+            "swiss" => "SWIS",
+            "usa" => "USA",
+            "united states" => "USA",
+            "germany" => "GERM",
+            "france" => "FRAN",
+            "uk" => "UK",
+            "united kingdom" => "UK",
+            "canada" => "CANA",
+            "australia" => "AUST",
+            "china" => "CHIN",
+            "india" => "INDI",
+            "russia" => "RUSS",
+            "unknown" => "UNK",
+            _ => (country?.Length >= 4 ? country.Substring(0, 4).ToUpper() : country?.ToUpper() ?? "UNK")
+        };
     }
 
     public async Task SaveAuditLogAsync(string username, string ipAddress, string moduleName, string actionDescription, string? sqlExecuted = null, string? entityType = null, string? entityId = null)
@@ -1206,6 +1290,13 @@ public class InventoryRepository : IInventoryRepository
     public async Task<IEnumerable<WorkflowTemplate>> GetWorkflowTemplatesAsync()
     {
         return await _dbContext.WorkflowTemplates.Include(t => t.Steps).ToListAsync();
+    }
+
+    public async Task<WorkflowTemplate?> GetWorkflowTemplateByTypeAsync(string workflowType)
+    {
+        return await _dbContext.WorkflowTemplates
+            .Include(t => t.Steps)
+            .FirstOrDefaultAsync(t => t.WorkflowType == workflowType && t.IsActive);
     }
 
     public async Task<WorkflowTemplate?> SaveWorkflowTemplateAsync(string workflowType, string name, string description, string stepsJson)
@@ -2184,6 +2275,46 @@ public class InventoryRepository : IInventoryRepository
         return pending;
     }
 
+    // Notify all active branches of newly received inventory
+    // Optionally creates transfer orders to distribute inventory across branches
+    public async Task<string> NotifyBranchesOfReceivedInventoryAsync(int lotId, string lotNumber, int totalItemsReceived, decimal totalWeightGrams, string metalType, DateTime acquisitionDate, string notifiedBy)
+    {
+        try
+        {
+            var branches = await _dbContext.Branches
+                .Where(b => b.IsActive && b.VaultId != null)
+                .ToListAsync();
+
+            if (!branches.Any())
+            {
+                // No branches to notify
+                return "SUCCESS_NO_BRANCHES";
+            }
+
+            var lot = await _dbContext.InventoryLots.FindAsync(lotId);
+            if (lot == null)
+                return "ERROR_LOT_NOT_FOUND";
+
+            // Create a notification record for each branch
+            // This is a simple audit trail; actual transfer would require branch manager approval
+            string notificationMessage = $"New inventory received: Lot {lotNumber}, {totalItemsReceived} items ({totalWeightGrams}g {metalType}) on {acquisitionDate:yyyy-MM-dd}. Available for branch transfer requests.";
+
+            foreach (var branch in branches)
+            {
+                // Log audit event for each branch notification
+                await SaveAuditLogAsync(notifiedBy, "BRANCHES", "INVENTORY",
+                    $"Branch {branch.BranchName} notified: {notificationMessage}");
+            }
+
+            await _dbContext.SaveChangesAsync();
+            return "SUCCESS";
+        }
+        catch (Exception ex)
+        {
+            return $"ERROR: {ex.Message}";
+        }
+    }
+
     public async Task<IEnumerable<PendingIntake>> GetPendingIntakesAsync()
     {
         return await _dbContext.PendingIntakes
@@ -2998,6 +3129,202 @@ public class InventoryRepository : IInventoryRepository
         _dbContext.CostBudgets.Remove(budget);
         await _dbContext.SaveChangesAsync();
         return true;
+    }
+
+    // =========================================================================
+    // KFHOnline Customer Portal - Real PMIMS Inventory Integration
+    // =========================================================================
+
+    /// <summary>
+    /// Mark bars as customer custody and create holding records
+    /// </summary>
+    public async Task<bool> PurchaseBarsAsync(string customerRim, string customerName, List<int> itemIds)
+    {
+        try
+        {
+            if (itemIds == null || itemIds.Count == 0)
+            {
+                Console.WriteLine("Error: No item IDs provided");
+                return false;
+            }
+
+            // Update inventory items to CUSTOMER_CUSTODY
+            var items = await _dbContext.InventoryItems.Where(i => itemIds.Contains(i.ItemId)).ToListAsync();
+
+            if (items.Count == 0)
+            {
+                Console.WriteLine($"Error: No inventory items found for IDs: {string.Join(",", itemIds)}");
+                return false;
+            }
+
+            foreach (var item in items)
+            {
+                item.StatusCode = "CUSTOMER_CUSTODY";
+            }
+
+            // Create customer holdings with external customer info (RIM from KFHOnline or other systems)
+            foreach (var itemId in itemIds)
+            {
+                var holding = new CustomerHolding
+                {
+                    CustomerId = null,  // External customer - does not exist in Customer table
+                    CustomerRim = customerRim,  // External customer ID/RIM
+                    CustomerName = customerName,  // External customer name
+                    AccountId = null,  // External customer - no internal account
+                    ItemId = itemId,
+                    AllocationDate = DateTime.UtcNow,
+                    StatusCode = "HELD_IN_CUSTODY"
+                };
+                _dbContext.CustomerHoldings.Add(holding);
+            }
+
+            var changeCount = await _dbContext.SaveChangesAsync();
+            Console.WriteLine($"✓ Purchase successful: {changeCount} changes saved for customer {customerRim} ({customerName}), {items.Count} bars");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error purchasing bars: {ex.Message}");
+            Console.WriteLine($"Stack trace: {ex.StackTrace}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Mark bars as READY and remove holding records (when customer sells)
+    /// </summary>
+    public async Task<bool> SellBarsAsync(string customerRim, List<int> itemIds)
+    {
+        try
+        {
+            // Update inventory items back to READY
+            var items = await _dbContext.InventoryItems.Where(i => itemIds.Contains(i.ItemId)).ToListAsync();
+            foreach (var item in items)
+            {
+                item.StatusCode = "READY";
+            }
+
+            // Remove customer holdings (query by external customer RIM)
+            var holdings = await _dbContext.CustomerHoldings
+                .Where(h => h.CustomerRim == customerRim && itemIds.Contains(h.ItemId))
+                .ToListAsync();
+            foreach (var holding in holdings)
+            {
+                _dbContext.CustomerHoldings.Remove(holding);
+            }
+
+            await _dbContext.SaveChangesAsync();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error selling bars: {ex.Message}");
+            return false;
+        }
+    }
+    /// <summary>
+    /// Get available inventory bars for customer purchases (READY status, not reserved/sold)
+    /// </summary>
+    public async Task<IEnumerable<InventoryItem>> GetAvailableInventoryForKfhAsync(string? metalName = null, string? purity = null, int limit = 50)
+    {
+        var query = _dbContext.InventoryItems
+            .Include(i => i.Product)
+            .ThenInclude(p => p!.MetalType)
+            .Include(i => i.Product)
+            .ThenInclude(p => p!.Denomination)
+            .Include(i => i.Product)
+            .ThenInclude(p => p!.Purity)
+            .Include(i => i.Location)
+            .ThenInclude(l => l!.Vault)
+            .Where(i => i.StatusCode == "READY" && i.OwnershipType == "KFH_OWNED")
+            .AsQueryable();
+
+        // Filter by metal type if specified
+        if (!string.IsNullOrWhiteSpace(metalName))
+        {
+            query = query.Where(i => i.Product != null && i.Product.MetalType != null &&
+                               i.Product.MetalType.MetalName.ToLower() == metalName.ToLower());
+        }
+
+        // Filter by purity if specified
+        if (!string.IsNullOrWhiteSpace(purity))
+        {
+            // Map purity string to decimal value (99.99% -> 99.99, etc)
+            var purityStr = purity.Replace("%", "").Trim();
+            if (decimal.TryParse(purityStr, out var purityValue))
+            {
+                query = query.Where(i => i.Product != null && i.Product.Purity != null &&
+                                   i.Product.Purity.PurityValue == purityValue);
+            }
+        }
+
+        return await query.OrderByDescending(i => i.ItemId).Take(limit).ToListAsync();
+    }
+
+    /// <summary>
+    /// Get customer's custody holdings (bars they've purchased and own)
+    /// </summary>
+    public async Task<IEnumerable<InventoryItem>> GetCustomerCustodyBarsAsync(int customerId)
+    {
+        // Get bars where customer is the owner (will be linked via CustomerHolding when implemented)
+        // For now, query items with customer ownership flag (future: join with CustomerHolding)
+        var customerHoldings = await _dbContext.CustomerHoldings
+            .Include(h => h.Item)
+            .ThenInclude(i => i!.Product)
+            .ThenInclude(p => p!.MetalType)
+            .Include(h => h.Item)
+            .ThenInclude(i => i!.Product)
+            .ThenInclude(p => p!.Denomination)
+            .Include(h => h.Item)
+            .ThenInclude(i => i!.Location)
+            .ThenInclude(l => l!.Vault)
+            .Where(h => h.CustomerId == customerId && h.StatusCode == "HELD_IN_CUSTODY")
+            .Select(h => h.Item)
+            .ToListAsync();
+
+        return customerHoldings!;
+    }
+
+    /// <summary>
+    /// Log KFHOnline transaction (buy, sell, delivery) for audit trail
+    /// Logs both successes and failures with full context
+    /// </summary>
+    public async Task LogKFHOnlineTransactionAsync(KFHOnlineTransactionLog logEntry)
+    {
+        try
+        {
+            _dbContext.KFHOnlineTransactionLogs.Add(logEntry);
+            await _dbContext.SaveChangesAsync();
+            Console.WriteLine($"✓ Transaction logged: {logEntry.TransactionType} for customer {logEntry.CustomerId}, status: {logEntry.StatusCode}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error logging KFHOnline transaction: {ex.Message}");
+            Console.WriteLine($"Stack trace: {ex.StackTrace}");
+            // Don't rethrow - logging failure shouldn't break the transaction itself
+        }
+    }
+
+    /// <summary>
+    /// Get KFHOnline transaction logs for monitoring and audit
+    /// </summary>
+    public async Task<IEnumerable<KFHOnlineTransactionLog>> GetKFHOnlineTransactionLogsAsync(int? customerId = null, string? status = null, DateTime? from = null, DateTime? to = null, int limit = 1000)
+    {
+        var query = _dbContext.KFHOnlineTransactionLogs.AsQueryable();
+
+        if (customerId.HasValue)
+            query = query.Where(l => l.CustomerId == customerId.Value);
+
+        if (!string.IsNullOrWhiteSpace(status))
+            query = query.Where(l => l.StatusCode == status);
+
+        if (from.HasValue)
+            query = query.Where(l => l.CreatedAt >= from.Value);
+
+        if (to.HasValue)
+            query = query.Where(l => l.CreatedAt <= to.Value);
+
+        return await query.OrderByDescending(l => l.CreatedAt).Take(limit).ToListAsync();
     }
 }
 

@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KFHOnline Transaction Logs - PMIMS</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+            padding: 30px;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 28px;
+        }
+
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+
+        .filters {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 6px;
+        }
+
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+        }
+
+        label {
+            font-weight: 600;
+            margin-bottom: 5px;
+            color: #333;
+            font-size: 12px;
+            text-transform: uppercase;
+        }
+
+        input, select {
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            font-family: inherit;
+        }
+
+        input:focus, select:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 5px rgba(102, 126, 234, 0.3);
+        }
+
+        .buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+
+        .btn-search {
+            background: #667eea;
+            color: white;
+            flex: 1;
+        }
+
+        .btn-search:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-reset {
+            background: #e0e0e0;
+            color: #333;
+        }
+
+        .btn-reset:hover {
+            background: #d0d0d0;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 6px;
+            text-align: center;
+        }
+
+        .stat-card.failed {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        }
+
+        .stat-card.confirmed {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+        }
+
+        .stat-card.pending {
+            background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+        }
+
+        .stat-number {
+            font-size: 32px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            text-transform: uppercase;
+            opacity: 0.9;
+        }
+
+        .table-container {
+            overflow-x: auto;
+            margin-bottom: 30px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        thead {
+            background: #f8f9fa;
+            border-bottom: 2px solid #ddd;
+        }
+
+        th {
+            padding: 15px;
+            text-align: left;
+            font-weight: 600;
+            color: #333;
+            font-size: 13px;
+            text-transform: uppercase;
+            white-space: nowrap;
+        }
+
+        td {
+            padding: 12px 15px;
+            border-bottom: 1px solid #eee;
+            font-size: 14px;
+            color: #555;
+        }
+
+        tr:hover {
+            background: #f8f9fa;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 12px;
+            text-transform: uppercase;
+        }
+
+        .status-confirmed {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status-failed {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .status-pending {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .type-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-weight: 600;
+            font-size: 11px;
+        }
+
+        .type-buy {
+            background: #cce5ff;
+            color: #004085;
+        }
+
+        .type-sell {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .type-delivery {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+
+        .error-message {
+            color: #721c24;
+            font-size: 12px;
+            max-width: 300px;
+            word-wrap: break-word;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .no-data {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+
+        .pagination {
+            text-align: center;
+            margin-top: 20px;
+            color: #666;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 KFHOnline Transaction Logs</h1>
+        <p class="subtitle">Real-time audit trail of all customer buy/sell/delivery transactions</p>
+
+        <div class="filters">
+            <div class="filter-group">
+                <label>Customer ID</label>
+                <input type="number" id="customerId" placeholder="e.g., 1">
+            </div>
+            <div class="filter-group">
+                <label>Status</label>
+                <select id="status">
+                    <option value="">-- All Statuses --</option>
+                    <option value="CONFIRMED">✓ Confirmed</option>
+                    <option value="FAILED">✗ Failed</option>
+                    <option value="PENDING">⏳ Pending</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>From Date</label>
+                <input type="date" id="fromDate">
+            </div>
+            <div class="filter-group">
+                <label>To Date</label>
+                <input type="date" id="toDate">
+            </div>
+            <div class="filter-group">
+                <label>Limit</label>
+                <input type="number" id="limit" value="100" min="1" max="1000">
+            </div>
+            <div class="filter-group">
+                <div class="buttons">
+                    <button class="btn-search" onclick="loadLogs()">🔍 Search</button>
+                    <button class="btn-reset" onclick="resetFilters()">Reset</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="stats" id="stats">
+            <div class="stat-card">
+                <div class="stat-number">-</div>
+                <div class="stat-label">Total Transactions</div>
+            </div>
+            <div class="stat-card confirmed">
+                <div class="stat-number">-</div>
+                <div class="stat-label">Confirmed</div>
+            </div>
+            <div class="stat-card failed">
+                <div class="stat-number">-</div>
+                <div class="stat-label">Failed</div>
+            </div>
+            <div class="stat-card pending">
+                <div class="stat-number">-</div>
+                <div class="stat-label">Pending</div>
+            </div>
+        </div>
+
+        <div class="table-container" id="tableContainer">
+            <div class="loading">
+                <div class="spinner"></div>
+                <p>Loading transaction logs...</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const BACKEND_URL = 'http://localhost:5000/api/kfhonline';
+
+        async function loadLogs() {
+            const customerId = document.getElementById('customerId').value;
+            const status = document.getElementById('status').value;
+            const fromDate = document.getElementById('fromDate').value;
+            const toDate = document.getElementById('toDate').value;
+            const limit = document.getElementById('limit').value;
+
+            let url = `${BACKEND_URL}/logs?limit=${limit}`;
+            if (customerId) url += `&customerId=${customerId}`;
+            if (status) url += `&status=${status}`;
+            if (fromDate) url += `&from=${fromDate}`;
+            if (toDate) url += `&to=${toDate}`;
+
+            const container = document.getElementById('tableContainer');
+            container.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading...</p></div>';
+
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+
+                if (!response.ok) {
+                    container.innerHTML = `<div class="no-data">❌ Error: ${data.error || 'Failed to load logs'}</div>`;
+                    return;
+                }
+
+                const logs = data.logs || [];
+
+                if (logs.length === 0) {
+                    container.innerHTML = '<div class="no-data">📭 No transaction logs found</div>';
+                    updateStats(logs);
+                    return;
+                }
+
+                updateStats(logs);
+                renderTable(logs);
+            } catch (error) {
+                container.innerHTML = `<div class="no-data">❌ Error: ${error.message}</div>`;
+                console.error('Error loading logs:', error);
+            }
+        }
+
+        function updateStats(logs) {
+            const total = logs.length;
+            const confirmed = logs.filter(l => l.statusCode === 'CONFIRMED').length;
+            const failed = logs.filter(l => l.statusCode === 'FAILED').length;
+            const pending = logs.filter(l => l.statusCode === 'PENDING').length;
+
+            const statsHtml = `
+                <div class="stat-card">
+                    <div class="stat-number">${total}</div>
+                    <div class="stat-label">Total Transactions</div>
+                </div>
+                <div class="stat-card confirmed">
+                    <div class="stat-number">${confirmed}</div>
+                    <div class="stat-label">Confirmed ✓</div>
+                </div>
+                <div class="stat-card failed">
+                    <div class="stat-number">${failed}</div>
+                    <div class="stat-label">Failed ✗</div>
+                </div>
+                <div class="stat-card pending">
+                    <div class="stat-number">${pending}</div>
+                    <div class="stat-label">Pending ⏳</div>
+                </div>
+            `;
+            document.getElementById('stats').innerHTML = statsHtml;
+        }
+
+        function renderTable(logs) {
+            let html = `
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Type</th>
+                            <th>Customer</th>
+                            <th>Weight (g)</th>
+                            <th>Price/g</th>
+                            <th>Status</th>
+                            <th>Error Message</th>
+                            <th>Created At</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            logs.forEach(log => {
+                const typeClass = `type-${log.transactionType.toLowerCase()}`;
+                const statusClass = `status-${log.statusCode.toLowerCase()}`;
+                const errorMsg = log.failureReason ? `<span class="error-message">${log.failureReason}</span>` : '-';
+                const date = new Date(log.createdAt).toLocaleString();
+
+                html += `
+                    <tr>
+                        <td><span class="type-badge ${typeClass}">${log.transactionType}</span></td>
+                        <td><strong>${log.customerName}</strong> (${log.customerId})</td>
+                        <td>${log.weightGrams}</td>
+                        <td>${log.pricePerGram ? '$' + log.pricePerGram.toFixed(2) : '-'}</td>
+                        <td><span class="status-badge ${statusClass}">${log.statusCode}</span></td>
+                        <td>${errorMsg}</td>
+                        <td style="font-size: 12px; color: #999;">${date}</td>
+                    </tr>
+                `;
+            });
+
+            html += `
+                    </tbody>
+                </table>
+                <div class="pagination">Showing ${logs.length} transaction(s)</div>
+            `;
+
+            document.getElementById('tableContainer').innerHTML = html;
+        }
+
+        function resetFilters() {
+            document.getElementById('customerId').value = '';
+            document.getElementById('status').value = '';
+            document.getElementById('fromDate').value = '';
+            document.getElementById('toDate').value = '';
+            document.getElementById('limit').value = '100';
+            loadLogs();
+        }
+
+        // Load logs on page load
+        window.addEventListener('DOMContentLoaded', loadLogs);
+    </script>
+</body>
+</html>

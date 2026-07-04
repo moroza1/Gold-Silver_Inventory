@@ -1,8 +1,10 @@
 {
   "version": 2,
-  "dgSpecHash": "XLmImsAwdLM=",
+  "dgSpecHash": "oECtGfdiP9U=",
   "success": true,
   "projectFilePath": "D:\\Projects\\Gold2\\backend\\PMIMS.Application\\PMIMS.Application.csproj",
-  "expectedPackageFiles": [],
+  "expectedPackageFiles": [
+    "C:\\Users\\Roshdy\\.nuget\\packages\\zxing.net\\0.16.11\\zxing.net.0.16.11.nupkg.sha512"
+  ],
   "logs": []
 }

@@ -154,6 +154,9 @@ public class AppDbContext : DbContext
     // Sidebar Menu Layout -- admin-arrangeable navigation order (single global row)
     public DbSet<SidebarMenuLayout> SidebarMenuLayouts { get; set; } = null!;
 
+    // KFHOnline Transaction Audit Log
+    public DbSet<KFHOnlineTransactionLog> KFHOnlineTransactionLogs { get; set; } = null!;
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -295,6 +298,8 @@ public class AppDbContext : DbContext
             entity.HasKey(e => e.PoItemId);
             entity.ToTable("po_items");
             entity.HasOne(e => e.Product).WithMany().HasForeignKey(e => e.ProductId);
+            // Configure the relationship between POItem and PurchaseOrder so Items are properly loaded
+            entity.HasOne<PurchaseOrder>().WithMany(p => p.Items).HasForeignKey(e => e.PoId);
         });
 
         // InventoryLot Configuration
@@ -334,9 +339,13 @@ public class AppDbContext : DbContext
         {
             entity.HasKey(e => e.HoldingId);
             entity.ToTable("customer_holdings");
-            entity.HasOne(e => e.Customer).WithMany().HasForeignKey(e => e.CustomerId);
-            entity.HasOne(e => e.Account).WithMany().HasForeignKey(e => e.AccountId);
+            // CustomerId is optional - external customers may not exist in the Customer table
+            entity.HasOne(e => e.Customer).WithMany().HasForeignKey(e => e.CustomerId).IsRequired(false);
+            // AccountId is optional - external customers may not have internal accounts
+            entity.HasOne(e => e.Account).WithMany().HasForeignKey(e => e.AccountId).IsRequired(false);
             entity.HasOne(e => e.Item).WithOne().HasForeignKey<CustomerHolding>(e => e.ItemId);
+            // Index for fast lookup by external customer RIM
+            entity.HasIndex(e => e.CustomerRim);
         });
 
         // CustomerAllocation Configuration
@@ -829,6 +838,19 @@ public class AppDbContext : DbContext
         {
             entity.HasKey(e => e.Id);
             entity.ToTable("sidebar_menu_layout");
+        });
+
+        // ============================================================
+        // KFHOnline Transaction Audit Log Configuration
+        // ============================================================
+        modelBuilder.Entity<KFHOnlineTransactionLog>(entity =>
+        {
+            entity.HasKey(e => e.LogId);
+            entity.ToTable("kfhonline_transaction_logs");
+            entity.HasIndex(e => e.TransactionType);
+            entity.HasIndex(e => e.CustomerId);
+            entity.HasIndex(e => e.StatusCode);
+            entity.HasIndex(e => e.CreatedAt);
         });
     }
 

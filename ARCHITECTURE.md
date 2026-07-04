@@ -96,7 +96,7 @@ The defining design decision is **separation of operational (view) modules from 
 | — | `user_admin` | users, groups, permissions, FIM provisioning |
 | — | `migration` | bulk Excel ingestion |
 
-The full 15-module catalog and the per-role grant matrix are in
+The full 21-module catalog and the per-role grant matrix are in
 [`docs/PERMISSIONS.md`](./docs/PERMISSIONS.md).
 
 ## 5. Controller organization

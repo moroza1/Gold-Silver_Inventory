@@ -373,8 +373,10 @@ public class InventoryBalance
 public class CustomerHolding
 {
     public int HoldingId { get; set; }
-    public int CustomerId { get; set; }
-    public int AccountId { get; set; }
+    public int? CustomerId { get; set; }  // Internal customer ID (nullable for external customers from KFHOnline)
+    public string? CustomerRim { get; set; }  // External customer RIM from KFHOnline or other systems
+    public string? CustomerName { get; set; }  // Customer name from external system
+    public int? AccountId { get; set; }  // Nullable - external customers may not have internal accounts
     public int ItemId { get; set; }
     public DateTime AllocationDate { get; set; } = DateTime.UtcNow;
     public string? CustodyAgreementNumber { get; set; }
@@ -1114,5 +1116,35 @@ public class SidebarMenuLayout
     public string OrderJson { get; set; } = null!;
     public string UpdatedBy { get; set; } = "SYSTEM";
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+// ============================================================
+// KFHOnline Transaction Audit Log
+// ============================================================
+// Comprehensive audit trail for all KFHOnline customer transactions
+// (buy/sell/delivery). Every operation -- success and failure -- is
+// logged here with full context: serial numbers, weights, prices,
+// status codes, and any error messages. This allows system monitoring
+// to track all transaction issues, failures, and their root causes.
+// ============================================================
+public class KFHOnlineTransactionLog
+{
+    public int LogId { get; set; }
+    public string TransactionType { get; set; } = null!; // BUY, SELL, DELIVERY_REQUEST
+    public int CustomerId { get; set; }
+    public string CustomerName { get; set; } = null!;
+    public decimal WeightGrams { get; set; }
+    public string? SerialsJson { get; set; } // JSON array of serial numbers
+    public string StatusCode { get; set; } = "PENDING"; // PENDING, CONFIRMED, FAILED, REJECTED
+    public string? FailureReason { get; set; } // Error message if StatusCode == FAILED
+    public decimal? PricePerGram { get; set; }
+    public decimal? TotalAmount { get; set; }
+    public string? Purity { get; set; } // 99.99%, etc
+    public string? Denomination { get; set; } // 1000g, 100g, 10g, etc
+    public string? Notes { get; set; }
+    public string? ResponseJson { get; set; } // Full API response (success or error)
+    public string? RequestJson { get; set; } // Full incoming request
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public string CreatedBy { get; set; } = "KFHOnline"; // Source: KFHOnline, API, WebUI, etc
 }
 

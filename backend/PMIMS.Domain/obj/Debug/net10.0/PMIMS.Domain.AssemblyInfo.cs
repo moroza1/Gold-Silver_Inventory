@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("PMIMS.Domain")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+c94afd7a9110175234776e9d1d4eb1ca7b2f27d3")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+e0cbd611cfba40a331d49b3a75115b90f308dffe")]
 [assembly: System.Reflection.AssemblyProductAttribute("PMIMS.Domain")]
 [assembly: System.Reflection.AssemblyTitleAttribute("PMIMS.Domain")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

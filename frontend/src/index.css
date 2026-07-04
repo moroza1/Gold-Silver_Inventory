@@ -237,7 +237,7 @@ a:hover {
   gap: 16px;
 }
 
-.rate-ticker-simulation {
+.rate-ticker-live {
   background-color: rgba(255,255,255,0.07);
   border: 1px solid rgba(255,255,255,0.12);
   padding: 6px 16px;
@@ -258,6 +258,8 @@ a:hover {
 .ticker-item .silver-lbl { color: rgba(255,255,255,0.6); font-weight: 700; }
 .ticker-item .val { font-family: monospace; }
 .ticker-item .green-arrow { color: #4ADE80; }
+.ticker-item .red-arrow { color: #F87171; }
+.ticker-item .flat-arrow { color: rgba(255,255,255,0.4); }
 
 /* ── Screen Viewports ── */
 .screen-viewport {
@@ -712,7 +714,7 @@ html[dir="rtl"] .header-controls {
   flex-direction: row-reverse;
 }
 
-html[dir="rtl"] .rate-ticker-simulation {
+html[dir="rtl"] .rate-ticker-live {
   flex-direction: row-reverse;
 }
 
@@ -808,6 +810,17 @@ html[dir="rtl"] .modal-header {
 
   .print-only-header {
     display: block !important;
+  }
+
+  /* Barcode/QR Labels screen -- hide the search/generate controls so only the
+     generated label(s) print. */
+  .no-print {
+    display: none !important;
+  }
+
+  .barcode-label-card {
+    break-inside: avoid;
+    page-break-inside: avoid;
   }
 
   .table-responsive {

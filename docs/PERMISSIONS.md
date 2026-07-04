@@ -27,7 +27,7 @@ without `vault_location` (create/delete shelves).
 
 Stored in `group_permissions(group_id, module_key, access_level)` (unique on `group_id+module_key`).
 
-## 3. Module catalog (20)
+## 3. Module catalog (21)
 
 ### Operational tier (day-to-day view / transactions)
 
@@ -43,6 +43,7 @@ Stored in `group_permissions(group_id, module_key, access_level)` (unique on `gr
 | `workflows` | Act on workflow instances (approve/reject) |
 | `intake` | Receive/verify incoming shipments (Maker-Checker) |
 | `dispensing` | Gold Dispensing Machine (GDM) — view/operate dispense transactions |
+| `barcode_qr_labeling` | Barcode/QR Code Tracking (RFP Section 3) — generate GS1-128 + ISO/IEC 18004 labels per item/lot |
 
 ### Administrative tier (manage / setup / governance)
 
@@ -123,6 +124,14 @@ frontend gate and the Maker role, which is the one described in `DbSeeder.cs` as
 | `GET /api/dispensing/transactions` | `dispensing.read` | view dispense activity |
 | `POST /api/dispensing/request`, `/{id}/complete`, `/{id}/fail` | `dispensing.write` | operate dispense transactions |
 
+### Barcode/QR Code Tracking (`PMIMSControllers.Barcode.cs`, RFP Section 3)
+
+| Endpoint(s) | Policy | Module / level |
+| :-- | :-- | :-- |
+| `GET /api/barcode/items/by-serial/{serialNumber}/label`, `/api/barcode/items/{itemId}/label` | `barcode_qr_labeling.read` | generate a single item's GS1-128 + QR label (computed on demand, nothing stored) |
+| `GET /api/barcode/lots/{lotNumber}/labels` | `barcode_qr_labeling.read` | generate a full label sheet for every item in a lot |
+| `POST /api/barcode/items/{itemId}/print-log` | `barcode_qr_labeling.write` | log a `ChainOfCustodyEvent` (`LABEL_PRINTED`) when a label is actually printed |
+
 ## 5. Seeded role → module matrix
 
 From `DbSeeder.cs`. `F`=FULL, `RW`=READ_WRITE, `RO`=READ_ONLY, `—`=HIDDEN.
@@ -141,6 +150,7 @@ Demo users (password `Password123`): `treasury-maker`, `treasury-checker`,
 | workflows (act) | RO | RO | RO | F |
 | intake | F | RO | RO | F |
 | dispensing | F | RO | RO | F |
+| barcode_qr_labeling | F | RO | RO | F |
 | **vault_location** (manage) | — | — | — | F |
 | **master_data** (manage) | — | — | — | F |
 | **workflow_design** (manage) | — | — | — | F |

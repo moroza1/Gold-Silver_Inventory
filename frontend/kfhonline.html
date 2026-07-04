@@ -1,0 +1,1440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KFH Online - Gold Trading Portal</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1e1e2e 0%, #16213e 100%);
+            color: #333;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            background: linear-gradient(135deg, #d4af37 0%, #f0e68c 100%);
+            padding: 30px 0;
+            margin-bottom: 40px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            border-radius: 10px;
+            text-align: center;
+        }
+
+        header h1 {
+            color: #1e1e2e;
+            font-size: 2.5em;
+            margin-bottom: 5px;
+        }
+
+        header p {
+            color: #555;
+            font-size: 1.1em;
+        }
+
+        .nav-tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .nav-tabs button {
+            padding: 12px 25px;
+            background: #d4af37;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1em;
+            font-weight: bold;
+            color: #1e1e2e;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+
+        .nav-tabs button:hover,
+        .nav-tabs button.active {
+            background: #f0e68c;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+        }
+
+        .section {
+            display: none;
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .section.active {
+            display: block;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        input, select, textarea {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            font-size: 1em;
+            font-family: inherit;
+            transition: border-color 0.3s ease;
+        }
+
+        input:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: #d4af37;
+            background: #fffef5;
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 100px;
+        }
+
+        button.submit-btn {
+            background: linear-gradient(135deg, #d4af37 0%, #f0e68c 100%);
+            color: #1e1e2e;
+            padding: 14px 30px;
+            border: none;
+            border-radius: 5px;
+            font-size: 1.1em;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+            width: 100%;
+        }
+
+        button.submit-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 10px rgba(0, 0, 0, 0.3);
+        }
+
+        button.submit-btn:active {
+            transform: translateY(0);
+        }
+
+        .info-box {
+            background: #f0f0f0;
+            border-left: 4px solid #d4af37;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 5px;
+        }
+
+        .price-display {
+            background: linear-gradient(135deg, #d4af37 0%, #f0e68c 100%);
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .price-display h3 {
+            color: #1e1e2e;
+            margin-bottom: 10px;
+        }
+
+        .price-display .price {
+            font-size: 2em;
+            color: #1e1e2e;
+            font-weight: bold;
+        }
+
+        .transaction-log {
+            margin-top: 20px;
+        }
+
+        .transaction-item {
+            background: #f9f9f9;
+            border: 1px solid #ddd;
+            padding: 15px;
+            margin-bottom: 10px;
+            border-radius: 5px;
+            border-left: 4px solid #d4af37;
+        }
+
+        .transaction-item h4 {
+            color: #d4af37;
+            margin-bottom: 5px;
+        }
+
+        .transaction-item p {
+            margin: 5px 0;
+            color: #666;
+            font-size: 0.95em;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            font-weight: bold;
+            margin-top: 5px;
+        }
+
+        .status-pending {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .status-completed {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status-failed {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .gold-detail {
+            background: #f0f0f0;
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 5px;
+            font-size: 0.9em;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        @media (max-width: 768px) {
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+
+            header h1 {
+                font-size: 1.8em;
+            }
+
+            .nav-tabs {
+                flex-direction: column;
+            }
+
+            .nav-tabs button {
+                width: 100%;
+            }
+        }
+
+        .response-message {
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 5px;
+            display: none;
+        }
+
+        .response-message.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+            display: block;
+        }
+
+        .response-message.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+            display: block;
+        }
+
+        .serial-input-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .serial-input-group input {
+            flex: 1;
+        }
+
+        .serial-input-group button {
+            padding: 12px 20px;
+            background: #d4af37;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            color: #1e1e2e;
+        }
+
+        .serial-list {
+            background: #f9f9f9;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+        }
+
+        .serial-item {
+            background: white;
+            padding: 8px;
+            margin: 5px 0;
+            border-radius: 3px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-left: 3px solid #d4af37;
+        }
+
+        .serial-item button {
+            background: #dc3545;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 0.8em;
+        }
+
+        .dashboard-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, #d4af37 0%, #f0e68c 100%);
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .stat-card h4 {
+            color: #1e1e2e;
+            margin-bottom: 10px;
+        }
+
+        .stat-card .value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #1e1e2e;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+
+        .empty-state p {
+            font-size: 1.1em;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header>
+            <h1>🏆 KFH Online</h1>
+            <p>Kuwait Finance House - Gold Trading Portal</p>
+            <div id="modeIndicator" style="margin-top: 15px; padding: 10px; background: rgba(0,0,0,0.1); border-radius: 5px; font-size: 0.9em;">
+                <strong id="modeText">⏳ Checking backend connection...</strong>
+            </div>
+        </header>
+
+        <!-- Navigation Tabs -->
+        <div class="nav-tabs">
+            <button class="tab-btn active" onclick="showSection('dashboard')">📊 Dashboard</button>
+            <button class="tab-btn" onclick="showSection('buy')">💳 Buy Gold</button>
+            <button class="tab-btn" onclick="showSection('sell')">🔄 Sell Gold</button>
+            <button class="tab-btn" onclick="showSection('delivery')">🚚 Delivery</button>
+            <button class="tab-btn" onclick="showSection('history')">📋 History</button>
+        </div>
+
+        <!-- DASHBOARD SECTION -->
+        <section id="dashboard" class="section active">
+            <h2>My Account Dashboard</h2>
+
+            <div class="form-group" style="max-width: 400px; margin-bottom: 30px;">
+                <label for="dashCustomerId">Enter Your Customer ID:</label>
+                <div style="display: flex; gap: 10px;">
+                    <input type="number" id="dashCustomerId" placeholder="e.g., 1" style="flex: 1;" min="1">
+                    <button type="button" class="submit-btn" style="flex: 0; padding: 12px 25px;" onclick="loadDashboard()">🔄 Load Dashboard</button>
+                </div>
+            </div>
+
+            <div id="dashboardContent" style="display: none;">
+                <div class="dashboard-stats">
+                    <div class="stat-card">
+                        <h4>Current Gold Price</h4>
+                        <div class="value" id="dashPrice">$65.00</div>
+                        <p>per gram (live)</p>
+                    </div>
+                    <div class="stat-card">
+                        <h4>Your Holdings</h4>
+                        <div class="value" id="dashHoldings">0g</div>
+                        <p>total weight</p>
+                    </div>
+                    <div class="stat-card">
+                        <h4>Number of Bars</h4>
+                        <div class="value" id="dashBarCount">0</div>
+                        <p>bars owned</p>
+                    </div>
+                    <div class="stat-card">
+                        <h4>Account Value</h4>
+                        <div class="value" id="dashAccountValue">$0.00</div>
+                        <p>current value</p>
+                    </div>
+                </div>
+
+                <div id="dashboardBars" style="margin-top: 30px;">
+                    <h3>Your Gold Bars</h3>
+                    <div id="dashBarsList" style="background: #f9f9f9; padding: 20px; border-radius: 5px; border-left: 4px solid #d4af37;"></div>
+                </div>
+
+                <div style="margin-top: 30px;">
+                    <h3>Quick Actions</h3>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                        <button type="button" class="submit-btn" onclick="showSection('buy')">💳 Buy More Gold</button>
+                        <button type="button" class="submit-btn" onclick="showSection('sell')">🔄 Sell Gold</button>
+                        <button type="button" class="submit-btn" onclick="showSection('delivery')">🚚 Request Delivery</button>
+                        <button type="button" class="submit-btn" onclick="loadDashboard()">🔄 Refresh Holdings</button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="dashboardEmpty" style="display: block;">
+                <div class="info-box">
+                    <strong>Welcome to KFH Online!</strong>
+                    <p>👆 Enter your Customer ID above to view your account dashboard.</p>
+                    <p>Trade gold easily with Kuwait Finance House. Buy, sell, or request delivery of physical gold bars with real-time pricing and secure transaction logging.</p>
+                </div>
+            </div>
+
+            <h3>Recent Transactions</h3>
+            <div id="recentTransactions"></div>
+        </section>
+
+        <!-- BUY GOLD SECTION -->
+        <section id="buy" class="section">
+            <h2>Buy Gold</h2>
+
+            <div class="price-display">
+                <h3>Live Gold Price</h3>
+                <div class="price" id="buyPrice">$65.00 <span style="font-size: 0.5em;">/gram</span></div>
+                <p style="color: #666; margin-top: 5px;">Last updated: <span id="priceTime">Just now</span></p>
+            </div>
+
+            <form id="buyForm">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="buyCustomerId">Customer ID:</label>
+                        <input type="number" id="buyCustomerId" name="customerId" required placeholder="e.g., 1" min="1">
+                    </div>
+                    <div class="form-group">
+                        <label for="buyCustomerName">Full Name:</label>
+                        <input type="text" id="buyCustomerName" name="customerName" required placeholder="Your full name">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Gold Type (Load from PMIMS):</label>
+                    <button type="button" class="submit-btn" onclick="loadAvailableDenominations()" style="width: 100%; margin-bottom: 15px;">📦 Load Available Stock from PMIMS</button>
+                </div>
+
+                <div id="noStockMessage" style="display: none; background: #fff3cd; border: 2px solid #ffc107; color: #856404; padding: 15px; border-radius: 5px; margin-bottom: 20px; font-weight: 600;">
+                    ⚠️ No available gold stock in PMIMS vault. All inventory is either reserved or sold.
+                </div>
+
+                <div id="stockAvailableContainer" style="display: none; margin-bottom: 20px;">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="buyDenomination">Select Gold Type:</label>
+                            <select id="buyDenomination" name="denomination" onchange="updateAvailableQuantity()">
+                                <option value="">-- Select Denomination --</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="buyQuantity">Select Quantity:</label>
+                            <select id="buyQuantity" name="quantity">
+                                <option value="">-- Select Quantity --</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Stock Info:</label>
+                        <div id="stockInfo" style="background: #f9f9f9; padding: 15px; border-radius: 5px; border-left: 4px solid #d4af37;">
+                            <p id="stockDetail">Select a denomination to see availability</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="buyNotes">Notes (Optional):</label>
+                    <textarea id="buyNotes" name="notes" placeholder="Any special instructions..."></textarea>
+                </div>
+
+                <button type="submit" class="submit-btn">✓ Confirm Buy Order</button>
+            </form>
+
+            <div id="buyResponse" class="response-message"></div>
+        </section>
+
+        <!-- SELL GOLD SECTION -->
+        <section id="sell" class="section">
+            <h2>Sell Gold - Your Holdings</h2>
+
+            <div class="info-box">
+                <strong>Sell Your Gold</strong>
+                <p>Select the gold you previously purchased to sell back to KFH at current market price.</p>
+            </div>
+
+            <div class="price-display">
+                <h3>We Pay You</h3>
+                <div class="price" id="sellPrice">$65.00 <span style="font-size: 0.5em;">/gram</span></div>
+                <p style="color: #666; margin-top: 5px;">Last updated: <span id="sellPriceTime">Just now</span></p>
+            </div>
+
+            <form id="sellForm">
+                <div class="form-group">
+                    <label for="sellCustomerId">Customer ID:</label>
+                    <input type="number" id="sellCustomerId" name="customerId" required placeholder="e.g., 1" min="1">
+                    <button type="button" class="submit-btn" style="margin-top: 10px;" onclick="loadCustomerHoldings()">🔍 Load My Gold Holdings</button>
+                </div>
+
+                <div id="holdingsContainer" style="display: none; margin-bottom: 20px;">
+                    <h3>Your Gold Holdings</h3>
+                    <div id="holdingsList" style="background: #f9f9f9; padding: 15px; border-radius: 5px; border-left: 4px solid #d4af37; max-height: 300px; overflow-y: auto;"></div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="sellCustomerName">Full Name:</label>
+                        <input type="text" id="sellCustomerName" name="customerName" required placeholder="Your full name">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Selected Gold Bars to Sell:</label>
+                    <div class="serial-list" id="serialList" style="min-height: 50px;"></div>
+                    <p style="color: #666; font-size: 0.9em; margin-top: 10px;">💡 Tip: Click on a gold bar from your holdings above to select it for selling</p>
+                </div>
+
+                <div class="form-group">
+                    <label for="sellNotes">Notes (Optional):</label>
+                    <textarea id="sellNotes" name="notes" placeholder="Any special instructions..."></textarea>
+                </div>
+
+                <div id="sellCalculation" style="background: #f0f0f0; padding: 15px; border-radius: 5px; margin-bottom: 20px;">
+                    <p>Weight: <strong id="sellCalcWeight">0</strong>g</p>
+                    <p>Price per gram: <strong id="sellCalcPricePerGram">$0.00</strong></p>
+                    <p style="font-size: 1.2em; color: #d4af37;"><strong>You Receive: $<span id="sellCalcTotal">0.00</span></strong></p>
+                </div>
+
+                <button type="submit" class="submit-btn">✓ Confirm Sell Order</button>
+            </form>
+
+            <div id="sellResponse" class="response-message"></div>
+        </section>
+
+        <!-- DELIVERY SECTION -->
+        <section id="delivery" class="section">
+            <h2>Request Gold Delivery</h2>
+
+            <div class="info-box">
+                <strong>Delivery Service</strong>
+                <p>Request physical delivery of your gold to your address. Secure, insured shipping available worldwide.</p>
+            </div>
+
+            <form id="deliveryForm">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="deliveryTransactionId">Transaction ID:</label>
+                        <input type="number" id="deliveryTransactionId" name="transactionId" required placeholder="e.g., 1001">
+                    </div>
+                    <div class="form-group">
+                        <label for="deliveryCustomerId">Customer ID:</label>
+                        <input type="text" id="deliveryCustomerId" name="customerId" required placeholder="e.g., CUST-001">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="deliveryAddress">Delivery Address:</label>
+                    <textarea id="deliveryAddress" name="deliveryAddress" required placeholder="Street address..."></textarea>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="deliveryCity">City:</label>
+                        <input type="text" id="deliveryCity" name="deliveryCity" required placeholder="e.g., Kuwait City">
+                    </div>
+                    <div class="form-group">
+                        <label for="deliveryCountry">Country:</label>
+                        <input type="text" id="deliveryCountry" name="deliveryCountry" required placeholder="e.g., Kuwait">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="deliveryPhone">Contact Phone:</label>
+                        <input type="tel" id="deliveryPhone" name="contactPhone" required placeholder="+965 XXXX XXXX">
+                    </div>
+                    <div class="form-group">
+                        <label for="deliveryFee">Shipping Fee:</label>
+                        <input type="number" id="deliveryFee" name="shippingFee" required min="0" placeholder="e.g., 50" step="0.01" value="50">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="deliveryNotes">Special Instructions (Optional):</label>
+                    <textarea id="deliveryNotes" name="notes" placeholder="Any special delivery instructions..."></textarea>
+                </div>
+
+                <button type="submit" class="submit-btn">✓ Request Delivery</button>
+            </form>
+
+            <div id="deliveryResponse" class="response-message"></div>
+        </section>
+
+        <!-- HISTORY SECTION -->
+        <section id="history" class="section">
+            <h2>Transaction History</h2>
+
+            <div class="form-group" style="max-width: 300px; margin-bottom: 20px;">
+                <label for="historyCustomerId">Enter Customer ID:</label>
+                <input type="text" id="historyCustomerId" placeholder="e.g., CUST-001">
+                <button type="button" class="submit-btn" style="margin-top: 10px;" onclick="loadTransactionHistory()">🔍 Load History</button>
+            </div>
+
+            <div id="historyContent"></div>
+        </section>
+    </div>
+
+    <!-- JavaScript -->
+    <script>
+        const API_BASE = 'http://localhost:5000/api/kfhonline';
+        let serialNumbers = [];
+        let currentPrice = 65.00;
+        let backendAvailable = true;  // Assume backend is running
+        let TEST_MODE = false;  // Start with real backend, use mock only if it fails
+        let buySelections = []; // Track buy selections: { denomination, weight, quantity, selectedBars }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            checkBackendAvailability();
+            loadGoldPrice();
+            setupEventListeners();
+            setInterval(loadGoldPrice, 30000); // Update price every 30 seconds
+        });
+
+        // ============================================================
+        // DASHBOARD - Customer Account Overview
+        // ============================================================
+        async function loadDashboard() {
+            const customerId = document.getElementById('dashCustomerId').value.trim();
+
+            if (!customerId) {
+                alert('Please enter your Customer ID');
+                return;
+            }
+
+            try {
+                let bars = [];
+
+                if (TEST_MODE || !backendAvailable) {
+                    // Mock customer holdings - indexed by numeric customer ID
+                    const mockCustomerHoldings = {
+                        1: [
+                            { serialNumber: 'KFHONLINE-1000G-001', weight: 1000, denomination: '1000g', purity: '99.99%', vaultLocation: 'ZONE-A/SHELF-1/SLOT-1' },
+                            { serialNumber: 'KFHONLINE-500G-001', weight: 500, denomination: '500g', purity: '99.99%', vaultLocation: 'ZONE-A/SHELF-1/SLOT-2' }
+                        ],
+                        2: [
+                            { serialNumber: 'KFHONLINE-100G-001', weight: 100, denomination: '100g', purity: '99.99%', vaultLocation: 'ZONE-B/SHELF-1/SLOT-1' },
+                            { serialNumber: 'KFHONLINE-50G-001', weight: 50, denomination: '50g', purity: '99.99%', vaultLocation: 'ZONE-B/SHELF-1/SLOT-2' }
+                        ],
+                        3: [
+                            { serialNumber: 'KFHONLINE-250G-001', weight: 250, denomination: '250g', purity: '99.99%', vaultLocation: 'ZONE-A/SHELF-2/SLOT-1' }
+                        ]
+                    };
+
+                    bars = mockCustomerHoldings[parseInt(customerId)] || [];
+                } else {
+                    // Fetch from real API
+                    const response = await fetch(`${API_BASE}/custody/${customerId}`, { mode: 'cors' });
+                    if (!response.ok) throw new Error('Customer not found or no holdings');
+                    const data = await response.json();
+                    bars = data.bars || [];
+                }
+
+                // Calculate totals
+                let totalWeight = 0;
+                let totalValue = 0;
+
+                if (bars.length === 0) {
+                    document.getElementById('dashboardContent').style.display = 'none';
+                    document.getElementById('dashboardEmpty').innerHTML = `
+                        <div class="info-box">
+                            <strong>👋 Welcome, ${customerId}!</strong>
+                            <p>You don't have any gold holdings yet.</p>
+                            <p>Start trading by visiting the <strong>Buy Gold</strong> tab to purchase your first gold bar.</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                // Build holdings display
+                let barsHTML = '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 15px;">';
+
+                bars.forEach(bar => {
+                    totalWeight += bar.weight;
+                    const currentValue = bar.weight * currentPrice;
+                    totalValue += currentValue;
+
+                    barsHTML += `
+                        <div style="background: white; padding: 15px; border-radius: 5px; border-left: 4px solid #d4af37; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                            <h4 style="font-family: monospace; color: #d4af37; margin-bottom: 10px;">📦 ${bar.serialNumber}</h4>
+                            <p><strong>Weight:</strong> ${bar.weight}g (${bar.denomination})</p>
+                            <p><strong>Purity:</strong> ${bar.purity}</p>
+                            <p><strong>Location:</strong> ${bar.vaultLocation}</p>
+                            <p style="margin-top: 10px; font-size: 1.1em; color: #d4af37;"><strong>Value: $${currentValue.toFixed(2)}</strong></p>
+                        </div>
+                    `;
+                });
+
+                barsHTML += '</div>';
+
+                // Update dashboard
+                document.getElementById('dashPrice').textContent = '$' + currentPrice.toFixed(2);
+                document.getElementById('dashHoldings').textContent = totalWeight + 'g';
+                document.getElementById('dashBarCount').textContent = bars.length;
+                document.getElementById('dashAccountValue').textContent = '$' + totalValue.toFixed(2);
+                document.getElementById('dashBarsList').innerHTML = barsHTML;
+
+                document.getElementById('dashboardContent').style.display = 'block';
+                document.getElementById('dashboardEmpty').style.display = 'none';
+
+            } catch (error) {
+                document.getElementById('dashboardContent').style.display = 'none';
+                document.getElementById('dashboardEmpty').innerHTML = `
+                    <div class="info-box" style="border-left: 4px solid #f44336;">
+                        <strong style="color: #f44336;">❌ Error</strong>
+                        <p>${error.message}</p>
+                        <p>Check your Customer ID and try again.</p>
+                    </div>
+                `;
+            }
+        }
+
+        // Store available bars data globally
+        let availableBarsByDenom = {};
+
+        // Load available denominations from PMIMS
+        async function loadAvailableDenominations() {
+            const noStockMsg = document.getElementById('noStockMessage');
+            const stockContainer = document.getElementById('stockAvailableContainer');
+            const denomSelect = document.getElementById('buyDenomination');
+
+            try {
+                const response = await fetch(`${API_BASE}/inventory/denominations`, { mode: 'cors' });
+                if (!response.ok) throw new Error('Failed to load inventory from PMIMS');
+
+                const data = await response.json();
+                const denominations = data.denominations || [];
+
+                if (denominations.length === 0) {
+                    noStockMsg.style.display = 'block';
+                    noStockMsg.innerHTML = '⚠️ No available gold stock in PMIMS vault. All inventory is either reserved or sold.';
+                    stockContainer.style.display = 'none';
+                    return;
+                }
+
+                // Store bars by denomination
+                availableBarsByDenom = {};
+                denominations.forEach(d => {
+                    availableBarsByDenom[d.denomination] = d;
+                });
+
+                // Populate denomination dropdown
+                denomSelect.innerHTML = '<option value="">-- Select Gold Type --</option>';
+                denominations.forEach(d => {
+                    const option = document.createElement('option');
+                    option.value = d.denomination;
+                    option.textContent = `${d.denomination} (${d.availableQuantity} available) - ${d.totalWeightAvailable}g total`;
+                    denomSelect.appendChild(option);
+                });
+
+                noStockMsg.style.display = 'none';
+                stockContainer.style.display = 'block';
+
+            } catch (error) {
+                console.error('Error loading denominations:', error);
+                noStockMsg.innerHTML = `⚠️ ${error.message}. Make sure backend is running and PMIMS has stock available.`;
+                noStockMsg.style.display = 'block';
+                stockContainer.style.display = 'none';
+            }
+        }
+
+        // Update available quantity dropdown when denomination changes
+        function updateAvailableQuantity() {
+            const denomination = document.getElementById('buyDenomination').value;
+            const quantitySelect = document.getElementById('buyQuantity');
+            const stockDetail = document.getElementById('stockDetail');
+
+            quantitySelect.innerHTML = '<option value="">-- Select Quantity --</option>';
+            stockDetail.innerHTML = 'Select a denomination to see availability';
+
+            if (!denomination || !availableBarsByDenom[denomination]) {
+                return;
+            }
+
+            const denomData = availableBarsByDenom[denomination];
+
+            // Populate quantity dropdown (0 to available quantity)
+            for (let qty = 1; qty <= denomData.availableQuantity; qty++) {
+                const option = document.createElement('option');
+                option.value = qty;
+                const totalWeight = denomData.weightGrams * qty;
+                const totalPrice = (totalWeight * currentPrice).toFixed(2);
+                option.textContent = `${qty} bar(s) = ${totalWeight}g @ $${totalPrice}`;
+                quantitySelect.appendChild(option);
+            }
+
+            // Show stock info
+            const availablePrice = (denomData.weightGrams * currentPrice).toFixed(2);
+            stockDetail.innerHTML = `
+                <strong>Available:</strong> ${denomData.availableQuantity} bar(s)<br>
+                <strong>Per Bar:</strong> ${denomData.weightGrams}g @ $${availablePrice}<br>
+                <strong>Total Stock:</strong> ${denomData.totalWeightAvailable}g<br>
+                <strong>Stock Value:</strong> $${(denomData.totalWeightAvailable * currentPrice).toFixed(2)}
+            `;
+        }
+
+        // Get selected bars for purchase
+        function getSelectedBarsForPurchase() {
+            const denomination = document.getElementById('buyDenomination').value;
+            const quantity = parseInt(document.getElementById('buyQuantity').value);
+
+            if (!denomination || !quantity) {
+                return [];
+            }
+
+            const denomData = availableBarsByDenom[denomination];
+            return denomData.bars.slice(0, quantity);
+        }
+
+        // Check if backend is available
+        async function checkBackendAvailability() {
+            const modeText = document.getElementById('modeText');
+            const modeIndicator = document.getElementById('modeIndicator');
+
+            try {
+                const response = await fetch(`${API_BASE}/prices/gold`, { mode: 'cors' });
+                if (response.ok) {
+                    backendAvailable = true;
+                    TEST_MODE = false;
+                    modeText.innerHTML = '✅ <strong>Live Mode</strong> - Connected to PMIMS backend at ' + API_BASE;
+                    modeIndicator.style.background = 'rgba(76, 175, 80, 0.2)'; // Green
+                    console.log('✓ Backend connected successfully');
+                } else {
+                    backendAvailable = false;
+                    TEST_MODE = true;
+                    modeText.innerHTML = '🧪 <strong>TEST MODE</strong> - Backend returned error. Using mock data for testing. (Start backend with: <code style="background: rgba(0,0,0,0.2); padding: 2px 6px; border-radius: 3px;">cd backend/PMIMS.WebAPI && dotnet run</code>)';
+                    modeIndicator.style.background = 'rgba(255, 152, 0, 0.2)'; // Orange
+                    console.log('⚠ Backend returned error, using TEST MODE');
+                }
+            } catch (error) {
+                backendAvailable = false;
+                TEST_MODE = true;
+                modeText.innerHTML = '🧪 <strong>TEST MODE</strong> - Backend not running. Using mock data for testing. (Start backend with: <code style="background: rgba(0,0,0,0.2); padding: 2px 6px; border-radius: 3px;">cd backend/PMIMS.WebAPI && dotnet run</code>)';
+                modeIndicator.style.background = 'rgba(255, 152, 0, 0.2)'; // Orange
+                console.log('⚠ Backend not available, using TEST MODE with mock data');
+            }
+        }
+
+        // Get current gold price
+        async function loadGoldPrice() {
+            try {
+                let data;
+
+                if (backendAvailable && !TEST_MODE) {
+                    const response = await fetch(`${API_BASE}/prices/gold`, { mode: 'cors' });
+                    if (!response.ok) throw new Error('Backend not responding');
+                    data = await response.json();
+                } else {
+                    // Use mock data (simulates real-time price changes)
+                    const variation = (Math.random() - 0.5) * 2; // -1 to +1
+                    data = {
+                        pricePerGram: 65.00 + variation,
+                        metal: "GOLD",
+                        lastUpdated: new Date().toISOString()
+                    };
+                }
+
+                currentPrice = data.pricePerGram || 65.00;
+
+                const buyPriceEl = document.getElementById('buyPrice');
+                const sellPriceEl = document.getElementById('sellPrice');
+                const priceTimeEl = document.getElementById('priceTime');
+
+                if (buyPriceEl) buyPriceEl.textContent = `$${currentPrice.toFixed(2)}`;
+                if (sellPriceEl) sellPriceEl.textContent = `$${currentPrice.toFixed(2)}`;
+                if (priceTimeEl) priceTimeEl.textContent = 'Just now';
+            } catch (error) {
+                console.warn('Price update error, using cached price:', error);
+                // Keep using last known price
+            }
+        }
+
+        // Setup form event listeners
+        function setupEventListeners() {
+            const buyForm = document.getElementById('buyForm');
+            const sellForm = document.getElementById('sellForm');
+            const deliveryForm = document.getElementById('deliveryForm');
+
+            if (buyForm) buyForm.addEventListener('submit', handleBuySubmit);
+            if (sellForm) sellForm.addEventListener('submit', handleSellSubmit);
+            if (deliveryForm) deliveryForm.addEventListener('submit', handleDeliverySubmit);
+        }
+
+        // Show/hide sections
+        function showSection(sectionId) {
+            const sections = document.querySelectorAll('.section');
+            sections.forEach(s => s.classList.remove('active'));
+            document.getElementById(sectionId).classList.add('active');
+
+            const tabs = document.querySelectorAll('.tab-btn');
+            tabs.forEach(t => t.classList.remove('active'));
+            event.target.classList.add('active');
+        }
+
+        // Calculate buy total
+        function calculateBuyTotal() {
+            const weight = parseFloat(document.getElementById('buyWeight').value) || 0;
+            const total = weight * currentPrice;
+            document.getElementById('calcWeight').textContent = weight.toFixed(2);
+            document.getElementById('calcPricePerGram').textContent = `$${currentPrice.toFixed(2)}`;
+            document.getElementById('calcTotal').textContent = total.toFixed(2);
+        }
+
+        // Calculate sell total
+        function calculateSellTotal() {
+            const weight = serialNumbers.reduce((sum, item) => sum + item.weight, 0);
+            const total = weight * currentPrice;
+            document.getElementById('sellCalcWeight').textContent = weight.toFixed(2);
+            document.getElementById('sellCalcPricePerGram').textContent = `$${currentPrice.toFixed(2)}`;
+            document.getElementById('sellCalcTotal').textContent = total.toFixed(2);
+        }
+
+        // Add serial number
+        function addSerialNumber() {
+            const input = document.getElementById('serialInput');
+            const serial = input.value.trim();
+
+            if (!serial) {
+                alert('Please enter a serial number');
+                return;
+            }
+
+            if (serialNumbers.includes(serial)) {
+                alert('This serial number already added');
+                return;
+            }
+
+            serialNumbers.push(serial);
+            displaySerialNumbers();
+            input.value = '';
+            input.focus();
+        }
+
+        // Display serial numbers
+        function displaySerialNumbers() {
+            const container = document.getElementById('serialList');
+            if (serialNumbers.length === 0) {
+                container.innerHTML = '<p style="color: #999; padding: 15px;">No gold bars selected yet. Load your holdings above.</p>';
+                return;
+            }
+            container.innerHTML = serialNumbers.map((serial, index) => `
+                <div class="serial-item">
+                    <span>${serial.serialNumber} - ${serial.weight}g @ ${serial.purity}</span>
+                    <button type="button" onclick="removeSerial(${index})">Remove</button>
+                </div>
+            `).join('');
+        }
+
+        // Remove serial number
+        function removeSerial(index) {
+            serialNumbers.splice(index, 1);
+            displaySerialNumbers();
+            calculateSellTotal();
+        }
+
+        // Load customer holdings
+        async function loadCustomerHoldings() {
+            const customerId = document.getElementById('sellCustomerId').value;
+
+            if (!customerId) {
+                alert('Please enter your Customer ID');
+                return;
+            }
+
+            const container = document.getElementById('holdingsContainer');
+            const listContainer = document.getElementById('holdingsList');
+
+            try {
+                let bars = [];
+
+                if (TEST_MODE || !backendAvailable) {
+                    // Mock holdings - different for each customer based on numeric ID
+                    const mockCustomerHoldings = {
+                        1: [
+                            { serialNumber: 'KFHONLINE-1000G-001', weight: 1000, denomination: '1000g', purity: '99.99%', vaultLocation: 'ZONE-A/SHELF-1/SLOT-1', purchasePrice: 65000 },
+                            { serialNumber: 'KFHONLINE-500G-001', weight: 500, denomination: '500g', purity: '99.99%', vaultLocation: 'ZONE-A/SHELF-1/SLOT-2', purchasePrice: 32500 }
+                        ],
+                        2: [
+                            { serialNumber: 'KFHONLINE-100G-001', weight: 100, denomination: '100g', purity: '99.99%', vaultLocation: 'ZONE-B/SHELF-1/SLOT-1', purchasePrice: 6500 },
+                            { serialNumber: 'KFHONLINE-50G-001', weight: 50, denomination: '50g', purity: '99.99%', vaultLocation: 'ZONE-B/SHELF-1/SLOT-2', purchasePrice: 3250 }
+                        ],
+                        3: [
+                            { serialNumber: 'KFHONLINE-250G-001', weight: 250, denomination: '250g', purity: '99.99%', vaultLocation: 'ZONE-A/SHELF-2/SLOT-1', purchasePrice: 16250 }
+                        ]
+                    };
+
+                    // Get holdings for this customer, or empty if no match
+                    bars = mockCustomerHoldings[parseInt(customerId)] || [];
+
+                    if (bars.length === 0) {
+                        // Default empty message
+                        listContainer.innerHTML = `<p style="color: #d4af37; font-weight: bold;">📭 Customer ${customerId} has no gold holdings.</p><p>To purchase gold, visit the <strong>Buy Gold</strong> tab.</p>`;
+                        container.style.display = 'block';
+                        return;
+                    }
+                } else {
+                    // Fetch from real backend
+                    const response = await fetch(`${API_BASE}/custody/${customerId}`, { mode: 'cors' });
+                    if (!response.ok) throw new Error('No holdings found for this customer ID');
+                    const data = await response.json();
+
+                    if (data.bars && data.bars.length > 0) {
+                        bars = data.bars.map(bar => ({
+                            serialNumber: bar.serialNumber,
+                            weight: bar.weight,
+                            denomination: bar.denomination,
+                            purity: bar.purity,
+                            vaultLocation: bar.vaultLocation,
+                            purchasePrice: bar.weight * 65 // Estimate based on typical price
+                        }));
+                    } else {
+                        throw new Error('You have no gold holdings');
+                    }
+                }
+
+                if (bars.length === 0) {
+                    listContainer.innerHTML = '<p style="color: #d4af37; font-weight: bold;">📭 You haven\'t purchased any gold yet.</p><p>Visit the <strong>Buy Gold</strong> tab to purchase gold bars.</p>';
+                    container.style.display = 'block';
+                    return;
+                }
+
+                let html = '<div>';
+                let totalWeight = 0;
+                let totalValue = 0;
+
+                bars.forEach((bar) => {
+                    totalWeight += bar.weight;
+                    const currentValue = bar.weight * currentPrice;
+                    totalValue += currentValue;
+                    const gainLoss = currentValue - bar.purchasePrice;
+                    const gainLossPercent = ((gainLoss / bar.purchasePrice) * 100).toFixed(2);
+                    const gainLossColor = gainLoss >= 0 ? '#4CAF50' : '#f44336';
+
+                    html += `
+                        <div class="transaction-item" style="cursor: pointer; transition: all 0.3s; background: white; padding: 12px; margin-bottom: 10px; border-radius: 5px; border-left: 3px solid #d4af37;"
+                             onmouseover="this.style.backgroundColor='#f9f9f9'"
+                             onmouseout="this.style.backgroundColor='white'"
+                             onclick="selectHoldingForSale('${bar.serialNumber}', ${bar.weight}, '${bar.purity}')">
+                            <h4 style="margin-bottom: 8px; font-family: monospace; color: #d4af37;">
+                                📦 ${bar.serialNumber}
+                                <span style="font-size: 0.8em; color: ${gainLossColor};">
+                                    ${gainLoss >= 0 ? '+' : ''}$${gainLoss.toFixed(2)} (${gainLossPercent}%)
+                                </span>
+                            </h4>
+                            <p><strong>Weight:</strong> ${bar.weight}g (${bar.denomination})</p>
+                            <p><strong>Purity:</strong> ${bar.purity}</p>
+                            <p><strong>Location:</strong> ${bar.vaultLocation}</p>
+                            <p><strong>Current Value:</strong> <span style="color: #d4af37; font-weight: bold;">$${currentValue.toFixed(2)}</span> @ $${currentPrice.toFixed(2)}/g</p>
+                            <button type="button" class="submit-btn" style="margin-top: 10px; padding: 8px; width: auto;">✓ Sell This Bar</button>
+                        </div>
+                    `;
+                });
+
+                html += '</div>';
+
+                listContainer.innerHTML = html;
+                container.style.display = 'block';
+            } catch (error) {
+                listContainer.innerHTML = `<p style="color: red;">Error loading holdings: ${error.message}</p>`;
+                container.style.display = 'block';
+            }
+        }
+
+        // Select holding for sale
+        function selectHoldingForSale(serialNumber, weight, purity) {
+            // Check if already selected
+            const alreadySelected = serialNumbers.some(s => s.serialNumber === serialNumber);
+            if (alreadySelected) {
+                alert('This bar is already selected for selling');
+                return;
+            }
+
+            serialNumbers.push({
+                serialNumber: serialNumber,
+                weight: weight,
+                purity: purity
+            });
+
+            displaySerialNumbers();
+            calculateSellTotal();
+
+            alert(`✓ Added ${holding.serialNumber} (${holding.weight}g) to your sale`);
+        }
+
+        // Handle buy submit
+        async function handleBuySubmit(e) {
+            e.preventDefault();
+            const responseDiv = document.getElementById('buyResponse');
+
+            const selectedBars = getSelectedBarsForPurchase();
+            if (selectedBars.length === 0) {
+                responseDiv.textContent = '✗ Error: Please select a gold type and quantity';
+                responseDiv.className = 'response-message error';
+                return;
+            }
+
+            const totalWeight = selectedBars.reduce((sum, bar) => sum + bar.weight, 0);
+            const serialNums = selectedBars.map(bar => bar.serialNumber);
+
+            const customerId = document.getElementById('buyCustomerId')?.value;
+            const customerName = document.getElementById('buyCustomerName')?.value;
+            const notes = document.getElementById('buyNotes')?.value;
+
+            console.log('Form values:', {
+                customerId: customerId,
+                customerName: customerName,
+                totalWeight: totalWeight,
+                serialNums: serialNums,
+                notes: notes
+            });
+
+            if (!customerId || !customerName) {
+                responseDiv.textContent = '✗ Error: Please fill in Customer ID and Full Name';
+                responseDiv.className = 'response-message error';
+                return;
+            }
+
+            const data = {
+                customerId: customerId,
+                customerName: customerName,
+                weightGrams: totalWeight,
+                purity: "99.99%",
+                serialNumbers: serialNums,
+                notes: notes || null
+            };
+
+            console.log('Sending data:', JSON.stringify(data));
+
+            try {
+                let result;
+
+                if (TEST_MODE || !backendAvailable) {
+                    // Mock response for testing
+                    result = {
+                        success: true,
+                        transactionId: Math.floor(Math.random() * 10000),
+                        customerId: data.customerId,
+                        amount: data.weightGrams * currentPrice,
+                        weight: data.weightGrams,
+                        pricePerGram: currentPrice,
+                        status: "PENDING",
+                        message: `Buy order created. ${data.weightGrams}g of gold at $${currentPrice}/g = $${(data.weightGrams * currentPrice).toFixed(2)}`
+                    };
+                    console.log('TEST MODE - Mock Buy:', result);
+                } else {
+                    // Real backend call
+                    const response = await fetch(`${API_BASE}/transactions/buy`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(data),
+                        mode: 'cors'
+                    });
+
+                    if (!response.ok) {
+                        const text = await response.text();
+                        throw new Error(`Backend error ${response.status}: ${text.substring(0, 100)}`);
+                    }
+
+                    result = await response.json();
+                }
+
+                if (result.success) {
+                    const selectedBars = getSelectedBarsForPurchase();
+                    responseDiv.textContent = `✓ Success!\n${result.message}\nTransaction ID: ${result.transactionId}\n\nYour ${selectedBars.length} bar(s) have been added to your account!`;
+                    responseDiv.className = 'response-message success';
+                    document.getElementById('buyForm').reset();
+                    document.getElementById('buyDenomination').value = '';
+                    document.getElementById('buyQuantity').innerHTML = '<option value="">-- Select Quantity --</option>';
+                    document.getElementById('stockInfo').innerHTML = 'Select a denomination to see availability';
+                    document.getElementById('stockAvailableContainer').style.display = 'none';
+
+                    // Refresh dashboard if customer ID was provided
+                    const customerId = document.getElementById('buyCustomerId').value;
+                    if (customerId) {
+                        document.getElementById('dashCustomerId').value = customerId;
+                        setTimeout(() => loadDashboard(), 1000); // Refresh after 1 second
+                    }
+                } else {
+                    responseDiv.textContent = `✗ Error: ${result.error || 'Unknown error'}`;
+                    responseDiv.className = 'response-message error';
+                }
+            } catch (error) {
+                const errorMsg = error.message || 'Connection error';
+                responseDiv.textContent = `✗ Error: ${errorMsg}\n\n💡 Tip: Is the backend running? Start it with:\n  cd backend/PMIMS.WebAPI && dotnet run\n\nFor now, TEST MODE is enabled - you can still test the portal!`;
+                responseDiv.className = 'response-message error';
+                console.error('Buy error:', error);
+            }
+        }
+
+        // Handle sell submit
+        async function handleSellSubmit(e) {
+            e.preventDefault();
+            const responseDiv = document.getElementById('sellResponse');
+
+            if (serialNumbers.length === 0) {
+                responseDiv.textContent = '✗ Error: Please add at least one serial number';
+                responseDiv.className = 'response-message error';
+                return;
+            }
+
+            // Calculate total weight from selected bars
+            const totalWeight = serialNumbers.reduce((sum, item) => sum + item.weight, 0);
+
+            const data = {
+                customerId: document.getElementById('sellCustomerId').value,
+                customerName: document.getElementById('sellCustomerName').value,
+                weightGrams: totalWeight,
+                serialNumbers: serialNumbers.map(s => s.serialNumber),
+                purity: serialNumbers.length > 0 ? serialNumbers[0].purity : '99.99%',
+                denomination: 'Mixed',
+                notes: document.getElementById('sellNotes').value || null
+            };
+
+            try {
+                let result;
+
+                if (TEST_MODE || !backendAvailable) {
+                    // Mock response for testing
+                    result = {
+                        success: true,
+                        transactionId: Math.floor(Math.random() * 10000),
+                        customerId: data.customerId,
+                        amount: data.weightGrams * currentPrice,
+                        weight: data.weightGrams,
+                        pricePerGram: currentPrice,
+                        serialNumbers: serialNumbers,
+                        status: "PENDING",
+                        message: `Sell order created. ${data.weightGrams}g of gold at $${currentPrice}/g = $${(data.weightGrams * currentPrice).toFixed(2)}`
+                    };
+                    console.log('TEST MODE - Mock Sell:', result);
+                } else {
+                    // Real backend call
+                    const response = await fetch(`${API_BASE}/transactions/sell`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(data),
+                        mode: 'cors'
+                    });
+
+                    if (!response.ok) {
+                        const text = await response.text();
+                        throw new Error(`Backend error ${response.status}: ${text.substring(0, 100)}`);
+                    }
+
+                    result = await response.json();
+                }
+
+                if (result.success) {
+                    responseDiv.textContent = `✓ Success! ${result.message}\nTransaction ID: ${result.transactionId}\nSerial Numbers: ${result.serialNumbers.join(', ')}`;
+                    responseDiv.className = 'response-message success';
+                    document.getElementById('sellForm').reset();
+                    serialNumbers = [];
+                    displaySerialNumbers();
+                    calculateSellTotal();
+
+                    // Refresh dashboard if customer ID was provided
+                    const customerId = document.getElementById('sellCustomerId').value;
+                    if (customerId) {
+                        document.getElementById('dashCustomerId').value = customerId;
+                        setTimeout(() => loadDashboard(), 1000); // Refresh after 1 second
+                    }
+                } else {
+                    responseDiv.textContent = `✗ Error: ${result.error || 'Unknown error'}`;
+                    responseDiv.className = 'response-message error';
+                }
+            } catch (error) {
+                const errorMsg = error.message || 'Connection error';
+                responseDiv.textContent = `✗ Error: ${errorMsg}\n\n💡 Tip: Is the backend running? Start it with:\n  cd backend/PMIMS.WebAPI && dotnet run\n\nFor now, TEST MODE is enabled - you can still test the portal!`;
+                responseDiv.className = 'response-message error';
+                console.error('Sell error:', error);
+            }
+        }
+
+        // Handle delivery submit
+        async function handleDeliverySubmit(e) {
+            e.preventDefault();
+            const responseDiv = document.getElementById('deliveryResponse');
+
+            const data = {
+                transactionId: parseInt(document.getElementById('deliveryTransactionId').value),
+                customerId: document.getElementById('deliveryCustomerId').value,
+                deliveryAddress: document.getElementById('deliveryAddress').value,
+                deliveryCity: document.getElementById('deliveryCity').value,
+                deliveryCountry: document.getElementById('deliveryCountry').value,
+                contactPhone: document.getElementById('deliveryPhone').value,
+                shippingFee: parseFloat(document.getElementById('deliveryFee').value),
+                notes: document.getElementById('deliveryNotes').value || null
+            };
+
+            try {
+                let result;
+
+                if (TEST_MODE || !backendAvailable) {
+                    // Mock response for testing
+                    result = {
+                        success: true,
+                        deliveryId: Math.floor(Math.random() * 10000),
+                        transactionId: data.transactionId,
+                        customerId: data.customerId,
+                        status: "PENDING",
+                        shippingFee: data.shippingFee,
+                        deliveryAddress: data.deliveryAddress,
+                        message: "Delivery request submitted. We will process your request within 24 hours."
+                    };
+                    console.log('TEST MODE - Mock Delivery:', result);
+                } else {
+                    // Real backend call
+                    const response = await fetch(`${API_BASE}/delivery/request`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(data),
+                        mode: 'cors'
+                    });
+
+                    if (!response.ok) {
+                        const text = await response.text();
+                        throw new Error(`Backend error ${response.status}: ${text.substring(0, 100)}`);
+                    }
+
+                    result = await response.json();
+                }
+
+                if (result.success) {
+                    responseDiv.textContent = `✓ Success! ${result.message}\n\nDelivery ID: ${result.deliveryId}\nShipping Fee: $${result.shippingFee.toFixed(2)}\nStatus: ${result.status}`;
+                    responseDiv.className = 'response-message success';
+                    document.getElementById('deliveryForm').reset();
+                } else {
+                    responseDiv.textContent = `✗ Error: ${result.error || 'Unknown error'}`;
+                    responseDiv.className = 'response-message error';
+                }
+            } catch (error) {
+                const errorMsg = error.message || 'Connection error';
+                responseDiv.textContent = `✗ Error: ${errorMsg}\n\n💡 Tip: Is the backend running? Start it with:\n  cd backend/PMIMS.WebAPI && dotnet run\n\nFor now, TEST MODE is enabled - you can still test the portal!`;
+                responseDiv.className = 'response-message error';
+                console.error('Delivery error:', error);
+            }
+        }
+
+        // Load transaction history
+        async function loadTransactionHistory() {
+            const customerId = document.getElementById('historyCustomerId').value;
+            const historyContent = document.getElementById('historyContent');
+
+            if (!customerId) {
+                historyContent.innerHTML = '<p style="color: red;">Please enter a Customer ID</p>';
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/transactions/${customerId}`);
+                const data = await response.json();
+
+                if (data.transactions && data.transactions.length > 0) {
+                    let html = '<div class="transaction-log">';
+                    data.transactions.forEach(tx => {
+                        html += `
+                            <div class="transaction-item">
+                                <h4>Transaction #${tx.transactionId} - ${tx.type}</h4>
+                                <p><strong>Date:</strong> ${new Date(tx.createdAt).toLocaleDateString()}</p>
+                                <p><strong>Amount:</strong> $${tx.amount.toFixed(2)}</p>
+                                <p><strong>Weight:</strong> ${tx.weight}g</p>
+                                <p><strong>Price/gram:</strong> $${tx.pricePerGram.toFixed(2)}</p>
+                                <p><strong>Purity:</strong> ${tx.purity}</p>
+                                <span class="status-badge status-${tx.status.toLowerCase()}">${tx.status}</span>
+                                ${tx.goldDetails && tx.goldDetails.length > 0 ? `
+                                    <div style="margin-top: 10px;">
+                                        <strong>Gold Details:</strong>
+                                        ${tx.goldDetails.map(gd => `
+                                            <div class="gold-detail">
+                                                Serial: ${gd.serialNumber} | Weight: ${gd.weight}g | Denom: ${gd.denomination}
+                                            </div>
+                                        `).join('')}
+                                    </div>
+                                ` : ''}
+                            </div>
+                        `;
+                    });
+                    html += '</div>';
+                    historyContent.innerHTML = html;
+                } else {
+                    historyContent.innerHTML = `
+                        <div class="empty-state">
+                            <p>No transactions found for customer ${customerId}</p>
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                historyContent.innerHTML = `<p style="color: red;">Error loading history: ${error.message}</p>`;
+            }
+        }
+
+        // Allow enter key in serial input
+        document.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter' && document.getElementById('serialInput') === document.activeElement) {
+                e.preventDefault();
+                addSerialNumber();
+            }
+        });
+    </script>
+</body>
+</html>

@@ -53,11 +53,12 @@ public interface IInventoryRepository
     Task AddVendorAsync(Vendor vendor);
     Task AddProductAsync(MetalProduct product);
     Task AddDenominationAsync(MetalDenomination denomination);
-    Task<MetalProduct> CreateDenominationProductAsync(string label, string metalName, decimal weightGrams);
+    Task<MetalProduct> CreateDenominationProductAsync(string label, string metalName, decimal weightGrams, string? originCountry = null);
     Task SaveAuditLogAsync(string username, string ipAddress, string moduleName, string actionDescription, string? sqlExecuted = null, string? entityType = null, string? entityId = null);
     
     // Workflow Engine
     Task<IEnumerable<WorkflowTemplate>> GetWorkflowTemplatesAsync();
+    Task<WorkflowTemplate?> GetWorkflowTemplateByTypeAsync(string workflowType);
     Task<WorkflowTemplate?> SaveWorkflowTemplateAsync(string workflowType, string name, string description, string stepsJson);
     Task<WorkflowInstance> StartWorkflowInstanceAsync(string workflowType, int entityId, string username);
     Task<string> ProcessWorkflowActionAsync(int instanceId, string username, string action, string? comments);
@@ -123,6 +124,7 @@ public interface IInventoryRepository
     Task<string> ReceiveBranchTransferAsync(int transferId, string receivedBy);
     Task<PendingIntake> InitiateWorkflowIntakeAsync(int? poId, string lotNumber, int locationId, string receivedBy, string serialsJsonList,
         string sourceType = "SUPPLIER", int? customerId = null, int? accountId = null, string? receiptReason = null);
+    Task<string> NotifyBranchesOfReceivedInventoryAsync(int lotId, string lotNumber, int totalItemsReceived, decimal totalWeightGrams, string metalType, DateTime acquisitionDate, string notifiedBy);
     Task<IEnumerable<PendingIntake>> GetPendingIntakesAsync();
 
     // =========================================================================
@@ -234,6 +236,22 @@ public interface IInventoryRepository
     // Every GL posting PMIMS has pushed (or attempted to push) to Core Banking,
     // newest first -- see CoreBankingLedgerPosting and ICoreBankingLedgerService.
     Task<IEnumerable<CoreBankingLedgerPosting>> GetCoreBankingPostingsAsync();
+
+    // =========================================================================
+    // KFHOnline Customer Portal - Inventory Integration
+    // =========================================================================
+    // Get available inventory for customer purchases (status = READY, not reserved/sold)
+    Task<IEnumerable<InventoryItem>> GetAvailableInventoryForKfhAsync(string? metalName = null, string? purity = null, int limit = 50);
+    // Get customer's custody holdings (bars they've purchased, status = CUSTOMER_CUSTODY)
+    Task<IEnumerable<InventoryItem>> GetCustomerCustodyBarsAsync(int customerId);
+    // Mark bars as customer custody when purchased
+    Task<bool> PurchaseBarsAsync(string customerRim, string customerName, List<int> itemIds);
+    // Mark bars as available again when customer sells
+    Task<bool> SellBarsAsync(string customerRim, List<int> itemIds);
+    // Log all KFHOnline transactions (buy, sell, delivery) - both successes and failures
+    Task LogKFHOnlineTransactionAsync(KFHOnlineTransactionLog logEntry);
+    // Get transaction logs for monitoring/audit
+    Task<IEnumerable<KFHOnlineTransactionLog>> GetKFHOnlineTransactionLogsAsync(int? customerId = null, string? status = null, DateTime? from = null, DateTime? to = null, int limit = 1000);
 
     // =========================================================================
     // Reporting Requirements Gap Analysis -- read-side aggregation support for

@@ -152,7 +152,7 @@ public partial class PMIMSControllers : ControllerBase
     [HttpPost("catalog/products")]
     public async Task<IActionResult> CreateProduct([FromBody] CreateProductRequestDto req)
     {
-        var product = await _repository.CreateDenominationProductAsync(req.Label, req.MetalName, req.WeightGrams);
+        var product = await _repository.CreateDenominationProductAsync(req.Label, req.MetalName, req.WeightGrams, req.OriginCountry);
         return Ok(new
         {
             product_id = product.ProductId,
@@ -360,6 +360,15 @@ public partial class PMIMSControllers : ControllerBase
     {
         try
         {
+            // VALIDATION: Ensure PURCHASE_ORDER workflow template exists before allowing PO creation
+            var poWorkflow = await _repository.GetWorkflowTemplateByTypeAsync("PURCHASE_ORDER");
+            if (poWorkflow == null || !poWorkflow.IsActive)
+            {
+                return BadRequest(new {
+                    error = "Cannot create Purchase Order: No active PURCHASE_ORDER workflow template is configured. Please contact an administrator to set up the workflow first."
+                });
+            }
+
             string itemsJson = JsonSerializer.Serialize(req.Items);
             var (poId, result) = await _repository.CreatePurchaseOrderAsync(req.PoNumber, req.VendorId, req.TotalWeightGrams, req.TotalCost, req.Currency, req.CreatedBy, itemsJson,
                 req.SupplierInvoiceNumber, req.SupplierInvoiceDate, req.FreightCost, req.InsuranceCost, req.CustomsDutyCost, req.OtherFeesCost, req.OtherFeesDescription);
@@ -498,6 +507,15 @@ public partial class PMIMSControllers : ControllerBase
     {
         try
         {
+            // VALIDATION: Ensure INTAKE_SHIPMENT workflow template exists before allowing shipment receipt
+            var intakeWorkflow = await _repository.GetWorkflowTemplateByTypeAsync("INTAKE_SHIPMENT");
+            if (intakeWorkflow == null || !intakeWorkflow.IsActive)
+            {
+                return BadRequest(new {
+                    error = "Cannot receive shipment: No active INTAKE_SHIPMENT workflow template is configured. Please contact an administrator to set up the workflow first."
+                });
+            }
+
             string itemsJson = JsonSerializer.Serialize(req.Items);
             var pending = await _repository.InitiateWorkflowIntakeAsync(req.PoId, req.LotNumber, req.LocationId, req.ReceivedBy, itemsJson);
             return Ok(new { pending_id = pending.PendingIntakeId, message = "Intake shipment verification request initiated and routed to the Maker-Checker workflow approval." });
@@ -517,6 +535,15 @@ public partial class PMIMSControllers : ControllerBase
     {
         try
         {
+            // VALIDATION: Ensure INTAKE_SHIPMENT workflow template exists before allowing customer receipt
+            var intakeWorkflow = await _repository.GetWorkflowTemplateByTypeAsync("INTAKE_SHIPMENT");
+            if (intakeWorkflow == null || !intakeWorkflow.IsActive)
+            {
+                return BadRequest(new {
+                    error = "Cannot receive from customer: No active INTAKE_SHIPMENT workflow template is configured. Please contact an administrator to set up the workflow first."
+                });
+            }
+
             string itemsJson = JsonSerializer.Serialize(req.Items);
             var pending = await _repository.InitiateWorkflowIntakeAsync(null, req.LotNumber, req.LocationId, req.ReceivedBy, itemsJson,
                 sourceType: "CUSTOMER", customerId: req.CustomerId, accountId: req.AccountId, receiptReason: req.ReceiptReason);
@@ -601,6 +628,15 @@ public partial class PMIMSControllers : ControllerBase
     [HttpPost("transfers/{id}/receive")]
     public async Task<IActionResult> ReceiveBranchTransfer([FromRoute] int id, [FromBody] ReceiveTransferRequest req)
     {
+        // VALIDATION: Ensure BRANCH_TRANSFER workflow template exists before allowing transfer receipt
+        var transferWorkflow = await _repository.GetWorkflowTemplateByTypeAsync("BRANCH_TRANSFER");
+        if (transferWorkflow == null || !transferWorkflow.IsActive)
+        {
+            return BadRequest(new {
+                error = "Cannot receive branch transfer: No active BRANCH_TRANSFER workflow template is configured. Please contact an administrator to set up the workflow first."
+            });
+        }
+
         var result = await _repository.ReceiveBranchTransferAsync(id, req.ReceivedBy);
         if (result != "SUCCESS") return BadRequest(new { error = result });
 
@@ -1253,6 +1289,24 @@ public partial class PMIMSControllers : ControllerBase
             .Where(i => i.Product?.MetalType?.MetalName == "Gold")
             .Sum(i => i.Product?.Denomination?.WeightGrams ?? 0m);
 
+        // ============================================================
+        // Main Vault / Sold / Available-for-Customers cards.
+        // "Available for customers" must additionally require OwnershipType ==
+        // KFH_OWNED: ConfirmPurchaseWithCustodyAsync flips a sold item's
+        // OwnershipType to CUSTOMER_OWNED but leaves StatusCode = "READY" (the
+        // bar physically stays put under custody), so a bare StatusCode ==
+        // "READY" filter -- what ready_qty below used to do -- silently counted
+        // already-sold bars as available stock. Sold is tracked by ownership,
+        // not by a "SOLD" StatusCode, since nothing in this codebase's sale
+        // path ever sets that status value.
+        // ============================================================
+        var mainVaultItems = scopedItems.Where(i => i.Location?.Vault?.VaultName == "Main Vault").ToList();
+        var soldItems = scopedItems.Where(i => i.OwnershipType == "CUSTOMER_OWNED").ToList();
+        var availableItems = scopedItems.Where(i => i.StatusCode == "READY" && i.OwnershipType == "KFH_OWNED").ToList();
+
+        static decimal WeightKg(IEnumerable<InventoryItem> list) =>
+            Math.Round(list.Sum(i => i.Product?.Denomination?.WeightGrams ?? 0m) / 1000m, 3);
+
         var holdings = (await _repository.GetAllCustomerHoldingsAsync())
             .Where(h => h.StatusCode == "HELD_IN_CUSTODY")
             .AsEnumerable();
@@ -1261,12 +1315,66 @@ public partial class PMIMSControllers : ControllerBase
         if (rangeEndExclusive.HasValue)
             holdings = holdings.Where(h => h.AllocationDate < rangeEndExclusive.Value);
 
+        // ============================================================
+        // PURCHASE ORDER RECEIPT TRACKING
+        // Include P.O. status metrics on the Executive Board:
+        // - Total P.O.s in the date range
+        // - Fully received (RECEIVED status)
+        // - Partially received (PARTIAL_RECEIPT status)
+        // - Pending approval (PENDING_APPROVAL)
+        // - Approved but not yet received (APPROVED)
+        // ============================================================
+        var purchaseOrders = (await _repository.GetPurchaseOrdersAsync())
+            .AsEnumerable();
+        if (rangeStart.HasValue)
+            purchaseOrders = purchaseOrders.Where(p => p.CreatedAt >= rangeStart.Value);
+        if (rangeEndExclusive.HasValue)
+            purchaseOrders = purchaseOrders.Where(p => p.CreatedAt < rangeEndExclusive.Value);
+        var scopedPOs = purchaseOrders.ToList();
+
         return Ok(new
         {
             total_gold_weight_kg = Math.Round(goldWeightGrams / 1000m, 2),
-            ready_qty = scopedItems.Count(i => i.StatusCode == "READY"),
+            // Dropped the old `ready_qty` field: it used to be `i.StatusCode == "READY"` with
+            // no ownership check, which double-counted sold-but-still-custodied bars as
+            // available stock. Fixing that filter to require OwnershipType == KFH_OWNED made
+            // it numerically identical to `available_qty` below, so this was a duplicate
+            // dashboard card rather than a distinct metric -- see availableItems above.
             reserved_qty = scopedItems.Count(i => i.StatusCode == "RESERVED"),
             custody_qty = holdings.Count(),
+            main_vault_qty = mainVaultItems.Count,
+            main_vault_weight_kg = WeightKg(mainVaultItems),
+            sold_qty = soldItems.Count,
+            sold_weight_kg = WeightKg(soldItems),
+            available_qty = availableItems.Count,
+            available_weight_kg = WeightKg(availableItems),
+            purchase_orders = new
+            {
+                total = scopedPOs.Count,
+                pending_approval = scopedPOs.Count(p => p.StatusCode == "PENDING_APPROVAL"),
+                approved = scopedPOs.Count(p => p.StatusCode == "APPROVED"),
+                partial_receipt = scopedPOs.Count(p => p.StatusCode == "PARTIAL_RECEIPT"),
+                fully_received = scopedPOs.Count(p => p.StatusCode == "RECEIVED")
+            },
+            purchase_order_list = scopedPOs.Select(p => new
+            {
+                po_id = p.PoId,
+                po_number = p.PoNumber,
+                vendor_name = p.Vendor?.VendorName ?? "Unknown",
+                status = p.StatusCode,
+                total_cost = p.TotalCost,
+                currency = p.Currency,
+                created_at = p.CreatedAt,
+                order_date = p.OrderDate,
+                expected_delivery = p.ExpectedDeliveryDate,
+                items = p.Items.Select(i => new
+                {
+                    product_id = i.ProductId,
+                    ordered_qty = i.OrderedQuantity,
+                    received_qty = i.ReceivedQuantity,
+                    product_name = i.Product?.ProductCode ?? "Unknown"
+                })
+            }),
             items = scopedItems.Select(i => new
             {
                 item_id = i.ItemId,
@@ -1437,7 +1545,13 @@ public class WithdrawalConfirmRequest { public int HoldingId { get; set; } publi
 public class StartStocktakeRequest { public string SessionCode { get; set; } = null!; public int VaultId { get; set; } public string InitiatedBy { get; set; } = null!; public List<int> FreezeLocationIds { get; set; } = new(); }
 public class LogScanRequest { public int SessionId { get; set; } public string ScannedSerial { get; set; } = null!; public int LocationId { get; set; } public string ScannedBy { get; set; } = null!; }
 public class CommitMigrationRequest { public int MigrationId { get; set; } public string ApprovedBy { get; set; } = null!; }
-public class CreateProductRequestDto { public string Label { get; set; } = null!; public string MetalName { get; set; } = null!; public decimal WeightGrams { get; set; } }
+public class CreateProductRequestDto
+{
+    public string Label { get; set; } = null!;
+    public string MetalName { get; set; } = null!;
+    public decimal WeightGrams { get; set; }
+    public string OriginCountry { get; set; } = "Unknown";  // Origin country (e.g., Turkey, Switzerland)
+}
 // FimAddUserRequest / FimAddProfileRequest retired -- see FimAttributesRequest
 // and the rest of the /api/fim/* DTOs in PMIMSControllers.Fim.cs.
 

@@ -23,6 +23,7 @@ public static class DbSeeder
             new StatusCodes { StatusCode = "INACTIVE", Description = "Withdrawn / Redeemed physically", Category = "INVENTORY" },
             new StatusCodes { StatusCode = "PENDING_APPROVAL", Description = "Awaiting checker approval signature", Category = "WORKFLOW" },
             new StatusCodes { StatusCode = "APPROVED", Description = "Approved by Checker", Category = "WORKFLOW" },
+            new StatusCodes { StatusCode = "PARTIAL_RECEIPT", Description = "Partial shipment received, awaiting remaining items", Category = "WORKFLOW" },
             new StatusCodes { StatusCode = "RECEIVED", Description = "Intake matched and closed", Category = "WORKFLOW" },
             new StatusCodes { StatusCode = "ACTIVE", Description = "Active checkout session", Category = "RESERVATION" },
             new StatusCodes { StatusCode = "COMPLETED", Description = "Reservation completed successfully", Category = "RESERVATION" },
@@ -169,20 +170,49 @@ public static class DbSeeder
         await context.SaveChangesAsync();
 
         // 12. Demo Customers & Accounts
+        // Create test customers for KFHOnline with specific IDs (1, 2, 3)
+        var testCust1 = new Customer
+        {
+            CustomerId = 1,
+            CivilId = "123456789001",
+            CustomerName = "Ahmed Al-Sabah",
+            MobileNumber = "+96590001001",
+            Email = "ahmed@example.com"
+        };
+        var testCust2 = new Customer
+        {
+            CustomerId = 2,
+            CivilId = "123456789002",
+            CustomerName = "Fatima Al-Dosari",
+            MobileNumber = "+96590001002",
+            Email = "fatima@example.com"
+        };
+        var testCust3 = new Customer
+        {
+            CustomerId = 3,
+            CivilId = "123456789003",
+            CustomerName = "Mohammed Al-Ajmi",
+            MobileNumber = "+96590001003",
+            Email = "mohammed@example.com"
+        };
+        context.Customers.AddRange(testCust1, testCust2, testCust3);
+        await context.SaveChangesAsync();
+
+        // Add main demo customer
         var customer = new Customer { CivilId = "289101201928", CustomerName = "Khalid Al-Mutairi", MobileNumber = "+96590001010", Email = "khalid@mutairi.com" };
         context.Customers.Add(customer);
+        await context.SaveChangesAsync();
+
+        // Create accounts for test customers
+        var account1 = new CustomerAccount { CustomerId = testCust1.CustomerId, AccountNumber = "KWD-000001-001", Currency = "KWD" };
+        var account2 = new CustomerAccount { CustomerId = testCust2.CustomerId, AccountNumber = "KWD-000002-001", Currency = "KWD" };
+        var account3 = new CustomerAccount { CustomerId = testCust3.CustomerId, AccountNumber = "KWD-000003-001", Currency = "KWD" };
+        context.CustomerAccounts.AddRange(account1, account2, account3);
         await context.SaveChangesAsync();
 
         var account = new CustomerAccount { CustomerId = customer.CustomerId, AccountNumber = "KWD-902910-101", Currency = "KWD" };
         context.CustomerAccounts.Add(account);
         await context.SaveChangesAsync();
-
-        // 13-16. START FROM ZERO: no physical gold/silver stock is seeded.
-        // The lot, inventory items (bars), custody holding and allocation are intentionally
-        // NOT created, so the system starts with an empty inventory. Add real stock through
-        // the app (Purchase Order -> Receive Shipment). All structure above remains: metal
-        // catalog, denominations, products, vendors, vaults, branches, shelf locations,
-        // channels, the demo customer/account, users, groups and permissions.
 
         // 16. Mapped Roles and Permissions Matrix
         var role1 = new UserRole { RoleName = "Operations Maker", Description = "Initiates POs and branch transfers" };
@@ -214,25 +244,26 @@ public static class DbSeeder
         await context.SaveChangesAsync();
 
         // RequiredRole must be the literal PrivilegeGroup.GroupName of the group that should
-        // be able to act on this step (see grpChecker/grpRecon/grpAdmin below) -- Maker-
+        // be able to act on this step (see grpMaker/grpChecker/grpRecon/grpAdmin below) -- Maker-
         // Checker step gating (InventoryRepository.GetUserRoles/ProcessWorkflowActionAsync)
         // resolves a user's roles purely from their real group membership, so these strings
         // have to match exactly or every approval attempt fails with UNAUTHORIZED_ROLE.
+        // Using Treasury Operations (Maker) first, then Treasury Operations (Checker) as per requirement.
         var step1 = new WorkflowStep
         {
             TemplateId = poWorkflow.TemplateId,
             StepOrder = 1,
-            StepName = "Risk & Treasury Review",
-            RequiredRole = "Treasury Operations (Checker)",
-            Description = "Initial review of cost and provider accreditation."
+            StepName = "Treasury Maker Initiation",
+            RequiredRole = "Treasury Operations (Maker)",
+            Description = "Maker initiates and submits purchase order for approval."
         };
         var step2 = new WorkflowStep
         {
             TemplateId = poWorkflow.TemplateId,
             StepOrder = 2,
-            StepName = "Reconciliation Double Check",
-            RequiredRole = "Reconciliation Officers",
-            Description = "Validation against system ledger balances."
+            StepName = "Treasury Checker Approval",
+            RequiredRole = "Treasury Operations (Checker)",
+            Description = "Checker reviews and approves the purchase order."
         };
         context.WorkflowSteps.AddRange(step1, step2);
         await context.SaveChangesAsync();
@@ -248,15 +279,23 @@ public static class DbSeeder
         context.WorkflowTemplates.Add(intakeWorkflow);
         await context.SaveChangesAsync();
 
-        var intakeStep = new WorkflowStep
+        var intakeStep1 = new WorkflowStep
         {
             TemplateId = intakeWorkflow.TemplateId,
             StepOrder = 1,
-            StepName = "Treasury Verification",
-            RequiredRole = "Treasury Operations (Checker)",
-            Description = "Verify weight, serials and coordinate shelf placement."
+            StepName = "Intake Maker Submission",
+            RequiredRole = "Treasury Operations (Maker)",
+            Description = "Maker receives shipment and submits for verification."
         };
-        context.WorkflowSteps.Add(intakeStep);
+        var intakeStep2 = new WorkflowStep
+        {
+            TemplateId = intakeWorkflow.TemplateId,
+            StepOrder = 2,
+            StepName = "Intake Checker Verification",
+            RequiredRole = "Treasury Operations (Checker)",
+            Description = "Checker verifies weight, serials and approves shelf placement."
+        };
+        context.WorkflowSteps.AddRange(intakeStep1, intakeStep2);
         await context.SaveChangesAsync();
 
 

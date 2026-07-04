@@ -5,8 +5,8 @@ D:\Projects\Gold2\backend\PMIMS.Domain\obj\Debug\net10.0\PMIMS.Domain.GeneratedM
 D:\Projects\Gold2\backend\PMIMS.Domain\obj\Debug\net10.0\PMIMS.Domain.AssemblyInfoInputs.cache
 D:\Projects\Gold2\backend\PMIMS.Domain\obj\Debug\net10.0\PMIMS.Domain.AssemblyInfo.cs
 D:\Projects\Gold2\backend\PMIMS.Domain\obj\Debug\net10.0\PMIMS.Domain.csproj.CoreCompileInputs.cache
+D:\Projects\Gold2\backend\PMIMS.Domain\obj\Debug\net10.0\PMIMS.Domain.sourcelink.json
 D:\Projects\Gold2\backend\PMIMS.Domain\obj\Debug\net10.0\PMIMS.Domain.dll
 D:\Projects\Gold2\backend\PMIMS.Domain\obj\Debug\net10.0\refint\PMIMS.Domain.dll
 D:\Projects\Gold2\backend\PMIMS.Domain\obj\Debug\net10.0\PMIMS.Domain.pdb
 D:\Projects\Gold2\backend\PMIMS.Domain\obj\Debug\net10.0\ref\PMIMS.Domain.dll
-D:\Projects\Gold2\backend\PMIMS.Domain\obj\Debug\net10.0\PMIMS.Domain.sourcelink.json

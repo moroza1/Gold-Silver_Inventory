@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PMIMS - KFH Online Integration Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1e1e2e 0%, #16213e 100%);
+            color: #333;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        header {
+            background: linear-gradient(135deg, #d4af37 0%, #f0e68c 100%);
+            padding: 30px;
+            margin-bottom: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+
+        header h1 {
+            color: #1e1e2e;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        header p {
+            color: #555;
+            font-size: 1.1em;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+            background: white;
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .tab-btn {
+            padding: 12px 25px;
+            background: #f0f0f0;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1em;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+
+        .tab-btn:hover {
+            background: #d4af37;
+            border-color: #d4af37;
+            color: #1e1e2e;
+        }
+
+        .tab-btn.active {
+            background: #d4af37;
+            border-color: #d4af37;
+            color: #1e1e2e;
+            box-shadow: 0 4px 8px rgba(212, 175, 55, 0.3);
+        }
+
+        .content {
+            display: none;
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .content.active {
+            display: block;
+        }
+
+        .content h2 {
+            color: #1e1e2e;
+            margin-bottom: 20px;
+            border-bottom: 3px solid #d4af37;
+            padding-bottom: 10px;
+        }
+
+        .info-box {
+            background: #f9f9f9;
+            border-left: 4px solid #d4af37;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 5px;
+        }
+
+        .info-box strong {
+            color: #d4af37;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        th {
+            background: #1e1e2e;
+            color: #d4af37;
+            padding: 15px;
+            text-align: left;
+            font-weight: 600;
+        }
+
+        td {
+            padding: 12px 15px;
+            border-bottom: 1px solid #ddd;
+        }
+
+        tr:hover {
+            background: #f9f9f9;
+        }
+
+        tr:nth-child(even) {
+            background: #fafafa;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            font-weight: 600;
+        }
+
+        .status-ready {
+            background: #4CAF50;
+            color: white;
+        }
+
+        .status-custody {
+            background: #2196F3;
+            color: white;
+        }
+
+        .status-sold {
+            background: #f44336;
+            color: white;
+        }
+
+        .filters {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .filter-group label {
+            font-weight: 600;
+            color: #1e1e2e;
+            font-size: 0.9em;
+        }
+
+        .filter-group select,
+        .filter-group input {
+            padding: 8px 12px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            font-size: 1em;
+        }
+
+        .filter-group select:focus,
+        .filter-group input:focus {
+            outline: none;
+            border-color: #d4af37;
+            background: #fffef5;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, #d4af37 0%, #f0e68c 100%);
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            color: #1e1e2e;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(212, 175, 55, 0.2);
+        }
+
+        .stat-card h3 {
+            font-size: 1.1em;
+            margin-bottom: 10px;
+        }
+
+        .stat-card .value {
+            font-size: 2em;
+            font-weight: bold;
+        }
+
+        .stat-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #999;
+        }
+
+        .empty-state p {
+            font-size: 1.1em;
+            margin: 10px 0;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #d4af37;
+            font-size: 1.2em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🏆 PMIMS - KFH Online Integration</h1>
+            <p>Monitor customer gold purchases, custody holdings, and inventory status</p>
+        </header>
+
+        <div class="tabs">
+            <button class="tab-btn active" onclick="showTab('holdings')">👥 Customer Holdings</button>
+            <button class="tab-btn" onclick="showTab('transactions')">📋 Custody Transactions</button>
+            <button class="tab-btn" onclick="showTab('inventory')">📦 Custody Inventory</button>
+        </div>
+
+        <!-- CUSTOMER HOLDINGS TAB -->
+        <div id="holdings" class="content active">
+            <h2>👥 Customer Gold Holdings</h2>
+            <div class="info-box">
+                <strong>Overview:</strong> All gold bars currently held by customers in custody. Bars are locked to each customer until sold back.
+            </div>
+
+            <div class="filters">
+                <div class="filter-group">
+                    <label>Filter by Customer ID:</label>
+                    <input type="text" id="filterCustomer" placeholder="e.g., CUST-001" onchange="filterHoldings()">
+                </div>
+            </div>
+
+            <div class="stat-cards">
+                <div class="stat-card">
+                    <h3>Total Customers</h3>
+                    <div class="value" id="totalCustomers">0</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Total Bars Held</h3>
+                    <div class="value" id="totalBarsHeld">0</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Total Weight (g)</h3>
+                    <div class="value" id="totalWeightHeld">0g</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Estimated Value</h3>
+                    <div class="value" id="totalValueHeld">$0</div>
+                </div>
+            </div>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>Customer ID</th>
+                        <th>Serial Number</th>
+                        <th>Weight (g)</th>
+                        <th>Denomination</th>
+                        <th>Vault Location</th>
+                        <th>Since</th>
+                        <th>Current Value</th>
+                    </tr>
+                </thead>
+                <tbody id="holdingsTable">
+                    <tr><td colspan="7" class="empty-state">Loading customer holdings...</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- CUSTODY TRANSACTIONS TAB -->
+        <div id="transactions" class="content">
+            <h2>📋 Custody Transaction History</h2>
+            <div class="info-box">
+                <strong>Transaction Log:</strong> All KFHOnline buy/sell transactions that update PMIMS inventory and customer custody status.
+            </div>
+
+            <div class="filters">
+                <div class="filter-group">
+                    <label>Filter by Type:</label>
+                    <select id="filterType" onchange="filterTransactions()">
+                        <option value="">All Types</option>
+                        <option value="BUY">Buy</option>
+                        <option value="SELL">Sell</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>Filter by Customer:</label>
+                    <input type="text" id="filterTxCustomer" placeholder="e.g., CUST-001" onchange="filterTransactions()">
+                </div>
+            </div>
+
+            <div class="stat-cards">
+                <div class="stat-card">
+                    <h3>Total Transactions</h3>
+                    <div class="value" id="totalTransactions">0</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Buy Orders</h3>
+                    <div class="value" id="buyCount">0</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Sell Orders</h3>
+                    <div class="value" id="sellCount">0</div>
+                </div>
+            </div>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>Transaction ID</th>
+                        <th>Type</th>
+                        <th>Customer ID</th>
+                        <th>Bars</th>
+                        <th>Weight (g)</th>
+                        <th>Price/g</th>
+                        <th>Amount</th>
+                        <th>Status</th>
+                        <th>Timestamp</th>
+                    </tr>
+                </thead>
+                <tbody id="transactionsTable">
+                    <tr><td colspan="9" class="empty-state">Loading transaction history...</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- CUSTODY INVENTORY TAB -->
+        <div id="inventory" class="content">
+            <h2>📦 Bars in Customer Custody</h2>
+            <div class="info-box">
+                <strong>Inventory Status:</strong> All inventory items currently marked as CUSTOMER_CUSTODY. These bars are locked to specific customers and not available for general sale.
+            </div>
+
+            <div class="filters">
+                <div class="filter-group">
+                    <label>Filter by Customer:</label>
+                    <input type="text" id="filterInvCustomer" placeholder="e.g., CUST-001" onchange="filterInventory()">
+                </div>
+                <div class="filter-group">
+                    <label>Filter by Denomination:</label>
+                    <select id="filterDenom" onchange="filterInventory()">
+                        <option value="">All Denominations</option>
+                        <option value="1000g">1000g</option>
+                        <option value="500g">500g</option>
+                        <option value="250g">250g</option>
+                        <option value="100g">100g</option>
+                        <option value="50g">50g</option>
+                        <option value="10g">10g</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="stat-cards">
+                <div class="stat-card">
+                    <h3>Bars in Custody</h3>
+                    <div class="value" id="custodyBarCount">0</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Total Weight (g)</h3>
+                    <div class="value" id="custodyTotalWeight">0g</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Unique Customers</h3>
+                    <div class="value" id="custodyCustomerCount">0</div>
+                </div>
+            </div>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>Serial Number</th>
+                        <th>Customer ID</th>
+                        <th>Weight (g)</th>
+                        <th>Denomination</th>
+                        <th>Purity</th>
+                        <th>Vault Location</th>
+                        <th>Custody Since</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody id="inventoryTable">
+                    <tr><td colspan="8" class="empty-state">Loading custody inventory...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:5000/api';
+        let allHoldings = [];
+        let allTransactions = [];
+        let allInventory = [];
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            loadCustomerHoldings();
+            loadTransactions();
+            loadCustodyInventory();
+        });
+
+        // TAB SWITCHING
+        function showTab(tabName) {
+            document.querySelectorAll('.content').forEach(c => c.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById(tabName).classList.add('active');
+            event.target.classList.add('active');
+        }
+
+        // ===== CUSTOMER HOLDINGS =====
+        async function loadCustomerHoldings() {
+            try {
+                const response = await fetch(`${API_BASE}/kfhonline/inventory/by-status?status=CUSTOMER_CUSTODY`, { mode: 'cors' });
+                if (!response.ok) throw new Error('Failed to load holdings');
+                const data = await response.json();
+
+                allHoldings = (data.items || []).map(item => ({
+                    customerId: item.customerId,
+                    serialNumber: item.serialNumber,
+                    weight: item.weight,
+                    denomination: item.denomination,
+                    location: item.vaultLocation,
+                    since: new Date(item.allocationDate).toLocaleDateString(),
+                    price: item.currentValue
+                }));
+
+                displayHoldings(allHoldings);
+                updateHoldingsStats();
+            } catch (error) {
+                document.getElementById('holdingsTable').innerHTML = `<tr><td colspan="7" class="empty-state">Error loading holdings: ${error.message}</td></tr>`;
+            }
+        }
+
+        function displayHoldings(holdings) {
+            const tbody = document.getElementById('holdingsTable');
+            if (holdings.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No customer holdings</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = holdings.map(h => `
+                <tr>
+                    <td><strong>${h.customerId}</strong></td>
+                    <td style="font-family: monospace; color: #d4af37;">${h.serialNumber}</td>
+                    <td>${h.weight}g</td>
+                    <td>${h.denomination}</td>
+                    <td>${h.location}</td>
+                    <td>${h.since}</td>
+                    <td style="color: #d4af37; font-weight: bold;">$${h.price.toFixed(2)}</td>
+                </tr>
+            `).join('');
+        }
+
+        function updateHoldingsStats() {
+            const uniqueCustomers = new Set(allHoldings.map(h => h.customerId)).size;
+            const totalBars = allHoldings.length;
+            const totalWeight = allHoldings.reduce((sum, h) => sum + h.weight, 0);
+            const totalValue = allHoldings.reduce((sum, h) => sum + h.price, 0);
+
+            document.getElementById('totalCustomers').textContent = uniqueCustomers;
+            document.getElementById('totalBarsHeld').textContent = totalBars;
+            document.getElementById('totalWeightHeld').textContent = totalWeight + 'g';
+            document.getElementById('totalValueHeld').textContent = '$' + totalValue.toFixed(2);
+        }
+
+        function filterHoldings() {
+            const customerId = document.getElementById('filterCustomer').value.toUpperCase();
+            const filtered = customerId ? allHoldings.filter(h => h.customerId.includes(customerId)) : allHoldings;
+            displayHoldings(filtered);
+        }
+
+        // ===== CUSTODY TRANSACTIONS =====
+        async function loadTransactions() {
+            try {
+                const response = await fetch(`${API_BASE}/kfhonline/transactions`, { mode: 'cors' });
+                if (!response.ok) throw new Error('Failed to load transactions');
+                const data = await response.json();
+
+                allTransactions = (data.transactions || []).map(tx => ({
+                    id: tx.transactionId,
+                    type: tx.type,
+                    customerId: tx.customerId,
+                    bars: tx.barCount,
+                    weight: tx.weightGrams,
+                    pricePerGram: tx.pricePerGram,
+                    amount: tx.totalAmount,
+                    status: tx.status,
+                    timestamp: new Date(tx.timestamp).toLocaleString()
+                }));
+
+                displayTransactions(allTransactions);
+                updateTransactionStats();
+            } catch (error) {
+                document.getElementById('transactionsTable').innerHTML = `<tr><td colspan="9">Error: ${error.message}</td></tr>`;
+            }
+        }
+
+        function displayTransactions(transactions) {
+            const tbody = document.getElementById('transactionsTable');
+            if (transactions.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="9" class="empty-state">No transactions</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = transactions.map(t => `
+                <tr>
+                    <td><strong>${t.id}</strong></td>
+                    <td><span class="status-badge ${t.type === 'BUY' ? 'status-ready' : 'status-sold'}">${t.type}</span></td>
+                    <td>${t.customerId}</td>
+                    <td>${t.bars}</td>
+                    <td>${t.weight}g</td>
+                    <td>$${t.pricePerGram}</td>
+                    <td style="font-weight: bold;">$${t.amount.toFixed(2)}</td>
+                    <td><span class="status-badge status-ready">${t.status}</span></td>
+                    <td>${t.timestamp}</td>
+                </tr>
+            `).join('');
+        }
+
+        function updateTransactionStats() {
+            const buyTx = allTransactions.filter(t => t.type === 'BUY').length;
+            const sellTx = allTransactions.filter(t => t.type === 'SELL').length;
+
+            document.getElementById('totalTransactions').textContent = allTransactions.length;
+            document.getElementById('buyCount').textContent = buyTx;
+            document.getElementById('sellCount').textContent = sellTx;
+        }
+
+        function filterTransactions() {
+            const type = document.getElementById('filterType').value;
+            const customer = document.getElementById('filterTxCustomer').value.toUpperCase();
+
+            const filtered = allTransactions.filter(t => {
+                const typeMatch = !type || t.type === type;
+                const customerMatch = !customer || t.customerId.includes(customer);
+                return typeMatch && customerMatch;
+            });
+
+            displayTransactions(filtered);
+        }
+
+        // ===== CUSTODY INVENTORY =====
+        async function loadCustodyInventory() {
+            try {
+                const response = await fetch(`${API_BASE}/kfhonline/inventory/by-status?status=CUSTOMER_CUSTODY`, { mode: 'cors' });
+                if (!response.ok) throw new Error('Failed to load inventory');
+                const data = await response.json();
+
+                allInventory = (data.items || []).map(item => ({
+                    serial: item.serialNumber,
+                    customerId: item.customerId,
+                    weight: item.weight,
+                    denomination: item.denomination,
+                    purity: item.purity,
+                    location: item.vaultLocation,
+                    since: new Date(item.allocationDate).toLocaleDateString(),
+                    status: item.statusCode
+                }));
+
+                displayInventory(allInventory);
+                updateInventoryStats();
+            } catch (error) {
+                document.getElementById('inventoryTable').innerHTML = `<tr><td colspan="8">Error: ${error.message}</td></tr>`;
+            }
+        }
+
+        function displayInventory(inventory) {
+            const tbody = document.getElementById('inventoryTable');
+            if (inventory.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" class="empty-state">No bars in customer custody</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = inventory.map(i => `
+                <tr>
+                    <td style="font-family: monospace; color: #d4af37;">${i.serial}</td>
+                    <td><strong>${i.customerId}</strong></td>
+                    <td>${i.weight}g</td>
+                    <td>${i.denomination}</td>
+                    <td>${i.purity}</td>
+                    <td>${i.location}</td>
+                    <td>${i.since}</td>
+                    <td><span class="status-badge status-custody">${i.status}</span></td>
+                </tr>
+            `).join('');
+        }
+
+        function updateInventoryStats() {
+            const uniqueCustomers = new Set(allInventory.map(i => i.customerId)).size;
+            const totalBars = allInventory.length;
+            const totalWeight = allInventory.reduce((sum, i) => sum + i.weight, 0);
+
+            document.getElementById('custodyBarCount').textContent = totalBars;
+            document.getElementById('custodyTotalWeight').textContent = totalWeight + 'g';
+            document.getElementById('custodyCustomerCount').textContent = uniqueCustomers;
+        }
+
+        function filterInventory() {
+            const customer = document.getElementById('filterInvCustomer').value.toUpperCase();
+            const denom = document.getElementById('filterDenom').value;
+
+            const filtered = allInventory.filter(i => {
+                const customerMatch = !customer || i.customerId.includes(customer);
+                const denomMatch = !denom || i.denomination === denom;
+                return customerMatch && denomMatch;
+            });
+
+            displayInventory(filtered);
+        }
+    </script>
+</body>
+</html>

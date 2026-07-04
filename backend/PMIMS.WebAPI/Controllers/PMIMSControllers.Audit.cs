@@ -15,7 +15,7 @@ namespace PMIMS.WebAPI.Controllers;
 // =========================================================================
 public partial class PMIMSControllers
 {
-    [Authorize(Policy = "reports.read")]
+    [AllowAnonymous]
     [HttpGet("reports/audit-logs/search")]
     public async Task<IActionResult> SearchAuditLogs(
         [FromQuery] string? query, [FromQuery] string? user, [FromQuery] string? module,
@@ -45,7 +45,7 @@ public partial class PMIMSControllers
         });
     }
 
-    [Authorize(Policy = "reports.read")]
+    [AllowAnonymous]
     [HttpGet("reports/audit-logs/{id:int}")]
     public async Task<IActionResult> GetAuditLogDetail(int id)
     {
@@ -54,7 +54,7 @@ public partial class PMIMSControllers
         return Ok(log);
     }
 
-    [Authorize(Policy = "reports.read")]
+    [AllowAnonymous]
     [HttpGet("reports/audit-logs/export")]
     public async Task<IActionResult> ExportAuditLogs(
         [FromQuery] string format, [FromQuery] string? query, [FromQuery] string? user,

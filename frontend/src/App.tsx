@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 
-const API_BASE = 'http://localhost:8080/api';
+const API_BASE = 'http://localhost:5000/api';
 
 // --- "Between dates" range filter helpers ---------------------------------
 // Shared by the My Activity and Executive Board screens, both of which default
@@ -128,6 +128,8 @@ const Translations: Record<string, Record<string, string>> = {
     menu_custody: "Customer Custody",
     menu_controls: "Controls & Audits",
     menu_stocktake: "Stocktake (الجرد)",
+    menu_audit_trail: "System Audit Trail",
+    menu_kfhonline_logs: "KFHOnline Transaction Logs",
     menu_migration: "Bulk Ingestion",
     menu_settings: "System Settings",
     menu_my_activity: "My Activity",
@@ -438,6 +440,8 @@ const Translations: Record<string, Record<string, string>> = {
     menu_custody: "أمانات العملاء",
     menu_controls: "الرقابة والجرد",
     menu_stocktake: "عمليات الجرد",
+    menu_audit_trail: "سجل التدقيق الشامل",
+    menu_kfhonline_logs: "سجلات معاملات KFHOnline",
     menu_migration: "الاستيراد الجماعي",
     menu_settings: "إعدادات النظام",
     menu_my_activity: "نشاطي",
@@ -876,6 +880,8 @@ export default function App() {
   const [scannedSerials, setScannedSerials] = useState<{ serial: string; product_id: number; product_code: string }[]>([]);
   const [currentScanSerial, setCurrentScanSerial] = useState('');
   const [intakeSelectedProductId, setIntakeSelectedProductId] = useState<number>(1);
+  // Track which P.O. is expanded to show its line items in Receive Shipments
+  const [expandedPOId, setExpandedPOId] = useState<number | null>(null);
   // Receipt of precious metals FROM a customer (buyback / custody deposit / return) --
   // the mirror of the supplier intake flow above, no Purchase Order involved. Rendered as
   // its own top-level screen (screen-customer-receipt), not a modal.
@@ -1017,33 +1023,65 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   const [newDenomLabel, setNewDenomLabel] = useState('');
   const [newDenomMetal, setNewDenomMetal] = useState('Gold');
   const [newDenomWeight, setNewDenomWeight] = useState('');
+  const [newDenomOrigin, setNewDenomOrigin] = useState('Switzerland');
+  const [denomFilterText, setDenomFilterText] = useState('');
+  const [denomFilterOrigin, setDenomFilterOrigin] = useState('');
+  const [denomSortBy, setDenomSortBy] = useState<'label' | 'metal' | 'weight' | 'origin'>('label');
+  const [branchFilterText, setBranchFilterText] = useState('');
+  const [branchSortBy, setBranchSortBy] = useState<'name' | 'code'>('name');
+  const [poFilterStatus, setPoFilterStatus] = useState('');
+  const [poFilterSupplier, setPoFilterSupplier] = useState('');
+  const [poSortBy, setPoSortBy] = useState<'po_number' | 'supplier' | 'cost'>('po_number');
   const [editingDenomIdx, setEditingDenomIdx] = useState<number | null>(null);
   const [editDenomLabel, setEditDenomLabel] = useState('');
   const [editDenomMetal, setEditDenomMetal] = useState('Gold');
   const [editDenomWeight, setEditDenomWeight] = useState('');
+  const [editDenomOrigin, setEditDenomOrigin] = useState('Switzerland');
 
   const handleAddDenom = async () => {
-    if (!newDenomLabel.trim() || !newDenomWeight) return;
+    console.log('Register clicked:', { newDenomLabel, newDenomMetal, newDenomWeight, newDenomOrigin });
+    if (!newDenomLabel.trim() || !newDenomWeight) {
+      console.log('Validation failed - missing label or weight');
+      alert(currentLang === 'en' ? 'Please fill in all required fields' : 'يرجى ملء جميع الحقول المطلوبة');
+      return;
+    }
     try {
+      const payload = {
+        label: newDenomLabel.trim(),
+        metalName: newDenomMetal,
+        weightGrams: parseFloat(newDenomWeight),
+        originCountry: newDenomOrigin
+      };
+      console.log('Sending payload:', payload);
       const res = await fetch(`${API_BASE}/catalog/products`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          label: newDenomLabel.trim(),
-          metalName: newDenomMetal,
-          weightGrams: parseFloat(newDenomWeight)
-        })
+        body: JSON.stringify(payload)
       });
+      console.log('Response status:', res.status);
       if (res.ok) {
         await fetchProducts();
+        const metalSymbol = newDenomMetal === 'Gold' ? 'AU' : 'SV';
+        const originAbbrev = newDenomOrigin === 'Switzerland' ? 'SWIS' : 'TURK';
+        const generatedCode = `${metalSymbol}-${(parseInt(newDenomWeight))}G-${originAbbrev}`;
+        const successMsg = currentLang === 'en'
+          ? `✓ Product created successfully!\n\nProduct Code: ${generatedCode}\n${newDenomLabel} (${newDenomOrigin})`
+          : `✓ تم إنشاء المنتج بنجاح!\n\nرمز المنتج: ${generatedCode}\n${newDenomLabel} (${newDenomOrigin})`;
+        alert(successMsg);
         setNewDenomLabel('');
         setNewDenomMetal('Gold');
         setNewDenomWeight('');
-        alert(currentLang === 'en' ? 'Denomination added successfully.' : 'تم إضافة فئة الوزن بنجاح.');
+        setNewDenomOrigin('Switzerland');
       } else {
-        alert(currentLang === 'en' ? 'Failed to add denomination.' : 'فشل إضافة فئة الوزن.');
+        const error = await res.text();
+        console.log('Error response:', error);
+        const errorMsg = currentLang === 'en'
+          ? `Failed to add denomination.\n\nError: ${error}`
+          : `فشل إضافة فئة الوزن.\n\nالخطأ: ${error}`;
+        alert(errorMsg);
       }
     } catch (e) {
+      console.error('Exception:', e);
       alert(currentLang === 'en' ? 'Error connecting to server.' : 'خطأ في الاتصال بالخادم.');
     }
   };
@@ -1213,14 +1251,14 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     // --- Administration / Setup ---
     { key: 'vault_location', label: 'Vault Location Setup (manage shelves)', tier: 'Administration' },
     { key: 'master_data', label: 'Master Data (branches, vendors, thresholds)', tier: 'Administration' },
-    { key: 'workflow_design', label: 'Workflow Designer (templates)', tier: 'Administration' },
     { key: 'migration', label: 'Bulk Ingestion', tier: 'Administration' },
     { key: 'rules_engine', label: 'Business Rules Engine (author/version rules)', tier: 'Administration' },
     { key: 'notifications', label: 'Notifications (distribution lists & alerts)', tier: 'Administration' },
     { key: 'monitoring', label: 'Monitoring (SLA metrics & alert routing)', tier: 'Administration' },
-    { key: 'settings', label: 'System Settings', tier: 'Administration' },
+    { key: 'device_integration', label: 'GDM Device Registration (manage machines)', tier: 'Administration' },
+    { key: 'workflow_design', label: 'Workflow Designer (templates)', tier: 'Administration' },
     { key: 'user_admin', label: 'User & Group Admin', tier: 'Administration' },
-    { key: 'device_integration', label: 'GDM Device Registration (manage machines)', tier: 'Administration' }
+    { key: 'settings', label: 'System Settings', tier: 'Administration' }
   ];
 
   const canAccess = (moduleKey: string) => {
@@ -1396,7 +1434,10 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     lines.reduce((c, l) => c + (l.unit_cost || 0) * (l.qty || 0), 0);
 
   // Item-combo helpers for the PO entry row (searchable product picker).
-  const poActiveProducts = products.filter((p: any) => p.is_active !== false);
+  // Filter by: (1) active status, and (2) matching origin country from the P.O. form
+  const poActiveProducts = products.filter((p: any) =>
+    p.is_active !== false && p.origin_country === poOrigin
+  );
   const poProductLabel = (p: any) =>
     `${p.metal_name} ${p.denomination_label}${p.purity_value ? ` — ${p.purity_value}` : ''}${p.weight_grams ? ` (${p.weight_grams}g)` : ''}`;
   const poComboSelected = poActiveProducts.find((p: any) => String(p.product_id) === String(poEntryProduct));
@@ -1738,7 +1779,9 @@ const [migrationApproved, setMigrationApproved] = useState(false);
           label: p.denomination_label,
           metal: p.metal_name,
           weight: p.weight_grams,
-          product_id: p.product_id
+          product_id: p.product_id,
+          product_code: p.product_code,
+          origin: p.origin_country
         })));
       }
     } catch (_) {}
@@ -3631,6 +3674,8 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     { type: 'section', key: 'section-controls', label: t('menu_controls') },
     { type: 'item', key: 'screen-stocktake', label: t('menu_stocktake'), icon: 'fa-solid fa-clipboard-check', permission: 'stocktake', onClick: () => setActiveTab('screen-stocktake') },
     { type: 'item', key: 'screen-reports', label: t('menu_reports'), icon: 'fa-solid fa-chart-pie', permission: 'reports', onClick: () => { setActiveTab('screen-reports'); loadReport(reportType); } },
+    { type: 'item', key: 'screen-audit-trail', label: t('menu_audit_trail'), icon: 'fa-solid fa-magnifying-glass-chart', permission: 'reports', onClick: () => window.open('/pmims-audit-trail.html', '_blank') },
+    { type: 'item', key: 'screen-kfhonline-logs', label: t('menu_kfhonline_logs'), icon: 'fa-solid fa-receipt', permission: 'reports', onClick: () => window.open('/kfhonline-transaction-logs.html', '_blank') },
     { type: 'item', key: 'screen-realtime', label: currentLang === 'en' ? 'Real-Time Monitoring' : 'المراقبة اللحظية', icon: 'fa-solid fa-tower-broadcast', permission: 'reports', onClick: () => { setActiveTab('screen-realtime'); fetchLiveBalances(); }, showLiveDot: true },
     { type: 'item', key: 'screen-workflows', label: canAccess('workflow_design') ? t('menu_workflows') : t('menu_workflows_queue'), icon: 'fa-solid fa-diagram-project', permission: 'workflows', onClick: () => { setActiveTab('screen-workflows'); fetchWorkflows(); } },
 
@@ -4698,6 +4743,60 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                 <i className="fa-solid fa-circle-exclamation"></i> {currentLang === 'en' ? 'Read-Only Mode: You cannot initiate shipment intakes.' : 'وضع القراءة فقط: لا يمكنك بدء عمليات استلام الشحنات.'}
               </div>
             )}
+
+            {/* Filter & Sort for P.O.s */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '12px', marginBottom: '15px' }}>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label style={{ fontSize: '12px' }}>Search Supplier</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="e.g., Valcambi"
+                  value={poFilterSupplier}
+                  onChange={e => setPoFilterSupplier(e.target.value)}
+                  style={{ padding: '6px 8px', fontSize: '12px' }}
+                />
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label style={{ fontSize: '12px' }}>Filter by Status</label>
+                <select
+                  value={poFilterStatus}
+                  onChange={e => setPoFilterStatus(e.target.value)}
+                  style={{ padding: '6px 8px', fontSize: '12px' }}
+                >
+                  <option value="">All Status</option>
+                  <option value="APPROVED">Approved</option>
+                  <option value="PARTIAL_RECEIPT">Partial Receipt</option>
+                  <option value="RECEIVED">Received</option>
+                </select>
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label style={{ fontSize: '12px' }}>Sort by</label>
+                <select
+                  value={poSortBy}
+                  onChange={e => setPoSortBy(e.target.value as any)}
+                  style={{ padding: '6px 8px', fontSize: '12px' }}
+                >
+                  <option value="po_number">P.O. Number</option>
+                  <option value="supplier">Supplier</option>
+                  <option value="cost">Cost</option>
+                </select>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+                <button
+                  className="btn"
+                  style={{ width: '100%', padding: '6px 8px', fontSize: '12px', backgroundColor: 'var(--accent-red)', color: '#fff' }}
+                  onClick={() => {
+                    setPoFilterSupplier('');
+                    setPoFilterStatus('');
+                    setPoSortBy('po_number');
+                  }}
+                >
+                  <i className="fa-solid fa-redo"></i> Reset Filters
+                </button>
+              </div>
+            </div>
+
             <div className="table-responsive">
               <table>
                 <thead>
@@ -4712,38 +4811,109 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                   </tr>
                 </thead>
                 <tbody>
-                  {poList.filter((po: any) => po.status_code === 'APPROVED').length === 0 ? (
+                  {(() => {
+                    let filtered = poList.filter((po: any) => {
+                      const matchesSupplier = po.supplier.toLowerCase().includes(poFilterSupplier.toLowerCase());
+                      const matchesStatus = !poFilterStatus || po.status_code === poFilterStatus;
+                      return matchesSupplier && matchesStatus;
+                    });
+
+                    filtered.sort((a: any, b: any) => {
+                      switch (poSortBy) {
+                        case 'supplier':
+                          return a.supplier.localeCompare(b.supplier);
+                        case 'cost':
+                          return b.cost - a.cost;
+                        default: // po_number
+                          return a.po_number.localeCompare(b.po_number);
+                      }
+                    });
+
+                    return filtered.length === 0 ? (
                     <tr>
                       <td colSpan={canModify('intake') ? 7 : 6} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '20px' }}>
-                        {currentLang === 'en' ? 'No approved purchase orders pending receipt.' : 'لا توجد طلبات شراء معتمدة بانتظار الاستلام.'}
+                        {currentLang === 'en' ? 'No purchase orders found.' : 'لا توجد طلبات شراء.'}
                       </td>
                     </tr>
                   ) : (
-                    poList.filter((po: any) => po.status_code === 'APPROVED').map((po: any, idx: number) => (
-                      <tr key={idx}>
-                        <td><strong>{po.po_number}</strong></td>
-                        <td>{po.supplier}</td>
-                        <td>{po.weight}g</td>
-                        <td>${po.cost.toLocaleString()}</td>
-                        <td>
-                          <div>{po.qty || 1}</div>
-                          <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{poItemsSummary(po)}</div>
-                        </td>
-                        <td>
-                          <span className="badge badge-ready">
-                            {translateDb(po.status_code)}
-                          </span>
-                        </td>
-                        {canModify('intake') && (
+                    filtered.map((po: any, idx: number) => (
+                      <React.Fragment key={idx}>
+                        <tr onClick={() => setExpandedPOId(expandedPOId === po.po_id ? null : po.po_id)} style={{ cursor: 'pointer' }}>
                           <td>
-                            <button className="btn" style={{ backgroundColor: 'var(--accent-blue)', padding: '4px 8px', fontSize: '11px' }} onClick={() => handleIntakePO(po.po_id)}>
-                              {currentLang === 'en' ? 'Receive Shipment' : 'استلام الشحنة'}
-                            </button>
+                            <span style={{ marginInlineEnd: '8px' }}>
+                              <i className={`fa-solid fa-chevron-${expandedPOId === po.po_id ? 'down' : 'right'}`} style={{ color: 'var(--accent-blue)' }}></i>
+                            </span>
+                            <strong>{po.po_number}</strong>
                           </td>
+                          <td>{po.supplier}</td>
+                          <td>{po.weight}g</td>
+                          <td>${po.cost.toLocaleString()}</td>
+                          <td>
+                            <div>{po.qty || 1}</div>
+                            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{poItemsSummary(po)}</div>
+                          </td>
+                          <td>
+                            <span className="badge badge-ready">
+                              {translateDb(po.status_code)}
+                            </span>
+                          </td>
+                          {canModify('intake') && (
+                            <td onClick={e => e.stopPropagation()}>
+                              <button className="btn" style={{ backgroundColor: 'var(--accent-blue)', padding: '4px 8px', fontSize: '11px' }} onClick={() => handleIntakePO(po.po_id)}>
+                                {currentLang === 'en' ? 'Receive Shipment' : 'استلام الشحنة'}
+                              </button>
+                            </td>
+                          )}
+                        </tr>
+                        {/* Expanded Items List */}
+                        {expandedPOId === po.po_id && (
+                          <tr style={{ backgroundColor: 'rgba(59, 130, 246, 0.04)' }}>
+                            <td colSpan={canModify('intake') ? 7 : 6} style={{ padding: '12px' }}>
+                              <div style={{ marginLeft: '20px' }}>
+                                <h5 style={{ margin: '0 0 10px 0', fontSize: '12px', color: 'var(--accent-blue)', fontWeight: 'bold' }}>
+                                  {currentLang === 'en' ? 'Items to Receive:' : 'السلع المطلوب استقبالها:'}
+                                </h5>
+                                {po.items && po.items.length > 0 ? (
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                    {po.items.map((item: any, itemIdx: number) => {
+                                      const prod = products.find((p: any) => p.product_id === item.product_id);
+                                      const prodName = prod ? `${prod.metal_name} ${prod.denomination_label}` : (item.product_code || `Product #${item.product_id}`);
+                                      const orderedQty = item.qty || item.ordered_qty || 0;
+                                      return (
+                                        <div key={itemIdx} style={{
+                                          padding: '8px 10px',
+                                          backgroundColor: 'rgba(255, 255, 255, 0.5)',
+                                          border: '1px solid rgba(59, 130, 246, 0.2)',
+                                          borderRadius: '4px',
+                                          fontSize: '12px',
+                                          display: 'flex',
+                                          justifyContent: 'space-between',
+                                          alignItems: 'center'
+                                        }}>
+                                          <span>
+                                            <strong style={{ color: 'var(--accent-blue)' }}>{prodName}</strong>
+                                            {prod && prod.purity_value && <span style={{ color: 'var(--text-muted)', marginLeft: '8px' }}>({prod.purity_value} {currentLang === 'ar' ? 'نقاوة' : 'Purity'})</span>}
+                                          </span>
+                                          <span style={{ color: 'var(--text-muted)' }}>
+                                            <strong style={{ color: 'var(--kfh-green)' }}>{orderedQty}</strong> {currentLang === 'en' ? 'units' : 'وحدات'}
+                                          </span>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                ) : (
+                                  <div style={{ padding: '8px 10px', color: 'var(--text-muted)', fontSize: '12px', fontStyle: 'italic' }}>
+                                    {currentLang === 'en' ? 'No items associated with this purchase order.' : 'لا توجد سلع مرتبطة بهذا طلب الشراء.'}
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
                         )}
-                      </tr>
+                      </React.Fragment>
                     ))
-                  )}
+                  );
+                  })()}
                 </tbody>
               </table>
             </div>
@@ -7087,6 +7257,60 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     <i className="fa-solid fa-circle-exclamation"></i> {currentLang === 'en' ? 'Read-Only Mode: You cannot manage denominations (requires the Master Data module).' : 'وضع القراءة فقط: لا يمكنك إدارة الفئات (تتطلب وحدة البيانات الرئيسية).'}
                   </div>
                 )}
+
+                {/* Filter & Sort Controls */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '12px', marginTop: '15px', marginBottom: '15px' }}>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label style={{ fontSize: '12px' }}>Search by Name</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder="e.g., Gold 100g"
+                      value={denomFilterText}
+                      onChange={e => setDenomFilterText(e.target.value)}
+                      style={{ padding: '6px 8px', fontSize: '12px' }}
+                    />
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label style={{ fontSize: '12px' }}>Filter by Origin</label>
+                    <select
+                      value={denomFilterOrigin}
+                      onChange={e => setDenomFilterOrigin(e.target.value)}
+                      style={{ padding: '6px 8px', fontSize: '12px' }}
+                    >
+                      <option value="">All Origins</option>
+                      <option value="Switzerland">Switzerland</option>
+                      <option value="Turkey">Turkey</option>
+                    </select>
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label style={{ fontSize: '12px' }}>Sort by</label>
+                    <select
+                      value={denomSortBy}
+                      onChange={e => setDenomSortBy(e.target.value as any)}
+                      style={{ padding: '6px 8px', fontSize: '12px' }}
+                    >
+                      <option value="label">Name</option>
+                      <option value="metal">Metal Type</option>
+                      <option value="weight">Weight</option>
+                      <option value="origin">Origin</option>
+                    </select>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+                    <button
+                      className="btn"
+                      style={{ width: '100%', padding: '6px 8px', fontSize: '12px', backgroundColor: 'var(--accent-red)', color: '#fff' }}
+                      onClick={() => {
+                        setDenomFilterText('');
+                        setDenomFilterOrigin('');
+                        setDenomSortBy('label');
+                      }}
+                    >
+                      <i className="fa-solid fa-redo"></i> Reset Filters
+                    </button>
+                  </div>
+                </div>
+
                 <div className="table-responsive" style={{ marginTop: '15px' }}>
                   <table>
                     <thead>
@@ -7094,11 +7318,35 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                         <th>{t('th_label_name')}</th>
                         <th>{t('th_metal_type')}</th>
                         <th>{t('th_weight_grams')}</th>
+                        <th>Product Code</th>
+                        <th>Origin Country</th>
                         {canModify('master_data') && <th style={{ width: '110px', textAlign: 'center' }}>{t('th_action')}</th>}
                       </tr>
                     </thead>
                     <tbody>
-                      {denomsList.map((d, idx) => (
+                      {(() => {
+                        let filtered = denomsList.filter((d: any) => {
+                          const matchesText = d.label.toLowerCase().includes(denomFilterText.toLowerCase());
+                          const matchesOrigin = !denomFilterOrigin || d.origin === denomFilterOrigin;
+                          return matchesText && matchesOrigin;
+                        });
+
+                        filtered.sort((a: any, b: any) => {
+                          switch (denomSortBy) {
+                            case 'metal':
+                              return a.metal.localeCompare(b.metal);
+                            case 'weight':
+                              return a.weight - b.weight;
+                            case 'origin':
+                              return (a.origin || '').localeCompare(b.origin || '');
+                            default: // label
+                              return a.label.localeCompare(b.label);
+                          }
+                        });
+
+                        return filtered.map((d: any) => {
+                          const idx = denomsList.indexOf(d);
+                          return (
                         <tr key={idx}>
                           {editingDenomIdx === idx ? (
                             <>
@@ -7130,6 +7378,16 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                                   style={{ padding: '6px 8px', fontSize: '13px', width: '100px' }}
                                 />
                               </td>
+                              <td>
+                                <select
+                                  value={editDenomOrigin}
+                                  onChange={e => setEditDenomOrigin(e.target.value)}
+                                  style={{ padding: '6px 8px', fontSize: '13px' }}
+                                >
+                                  <option value="Switzerland">Switzerland</option>
+                                  <option value="Turkey">Turkey</option>
+                                </select>
+                              </td>
                               <td style={{ textAlign: 'center' }}>
                                 <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
                                   <button
@@ -7158,6 +7416,8 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                                 </span>
                               </td>
                               <td>{d.weight}g</td>
+                              <td><code style={{ color: 'var(--accent-blue)', fontSize: '12px' }}>{d.product_code || 'N/A'}</code></td>
+                              <td><span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{d.origin || 'N/A'}</span></td>
                               {canModify('master_data') && (
                                 <td style={{ textAlign: 'center' }}>
                                   <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
@@ -7183,7 +7443,9 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                             </>
                           )}
                         </tr>
-                      ))}
+                          );
+                        });
+                      })()}
                     </tbody>
                   </table>
                 </div>
@@ -7219,6 +7481,13 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                         value={newDenomWeight}
                         onChange={e => setNewDenomWeight(e.target.value)}
                       />
+                    </div>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label>Product Origin</label>
+                      <select value={newDenomOrigin} onChange={e => setNewDenomOrigin(e.target.value)}>
+                        <option value="Switzerland">Switzerland</option>
+                        <option value="Turkey">Turkey</option>
+                      </select>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'flex-end' }}>
                       <button
@@ -7347,6 +7616,44 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                   </div>
                 )}
 
+                {/* Filter & Sort for Branches */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginBottom: '15px' }}>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label style={{ fontSize: '12px' }}>Search Branch</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder="Name or Code"
+                      value={branchFilterText}
+                      onChange={e => setBranchFilterText(e.target.value)}
+                      style={{ padding: '6px 8px', fontSize: '12px' }}
+                    />
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label style={{ fontSize: '12px' }}>Sort by</label>
+                    <select
+                      value={branchSortBy}
+                      onChange={e => setBranchSortBy(e.target.value as any)}
+                      style={{ padding: '6px 8px', fontSize: '12px' }}
+                    >
+                      <option value="name">Name</option>
+                      <option value="code">Code</option>
+                    </select>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+                    <button
+                      className="btn"
+                      style={{ width: '100%', padding: '6px 8px', fontSize: '12px', backgroundColor: 'var(--accent-red)', color: '#fff' }}
+                      onClick={() => {
+                        setBranchFilterText('');
+                        setBranchSortBy('name');
+                      }}
+                    >
+                      <i className="fa-solid fa-redo"></i> Reset
+                    </button>
+                  </div>
+                </div>
+
                 <div className="table-responsive" style={{ marginBottom: '30px' }}>
                   <table>
                     <thead>
@@ -7359,7 +7666,25 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       </tr>
                     </thead>
                     <tbody>
-                      {branchesList.map((b, idx) => (
+                      {(() => {
+                        let filtered = branchesList.filter((b: any) => {
+                          const matchesText = (b.branch_name?.toLowerCase() || '').includes(branchFilterText.toLowerCase()) ||
+                                            (b.branch_code?.toLowerCase() || '').includes(branchFilterText.toLowerCase());
+                          return matchesText;
+                        });
+
+                        filtered.sort((a: any, b: any) => {
+                          switch (branchSortBy) {
+                            case 'code':
+                              return (a.branch_code || '').localeCompare(b.branch_code || '');
+                            default: // name
+                              return (a.branch_name || '').localeCompare(b.branch_name || '');
+                          }
+                        });
+
+                        return filtered.map((b: any) => {
+                          const idx = branchesList.indexOf(b);
+                          return (
                         <tr key={idx}>
                           {editingBranchIdx === idx ? (
                             <>
@@ -7427,7 +7752,9 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                             </>
                           )}
                         </tr>
-                      ))}
+                          );
+                        });
+                      })()}
                     </tbody>
                   </table>
                 </div>
@@ -8562,117 +8889,102 @@ const [migrationApproved, setMigrationApproved] = useState(false);
             </div>
           </div>
         )}
-        {/* INTAKE SHIPMENT MODAL */}
+        {/* INTAKE SHIPMENT MODAL - FULL SCREEN WITH DATA GRID */}
         {showIntakeModal && intakePOId && (
           <div className="modal-overlay active" onClick={() => setShowIntakeModal(false)}>
-            <div className="glass-card modal-content-box" onClick={e => e.stopPropagation()} style={{ maxWidth: '550px', width: '90%' }}>
+            <div className="glass-card modal-content-box" onClick={e => e.stopPropagation()} style={{ maxWidth: '95vw', width: '95vw', maxHeight: '95vh', height: '95vh', display: 'flex', flexDirection: 'column' }}>
+              {/* HEADER */}
               <div className="modal-header">
-                <h3>{currentLang === 'ar' ? 'التحقق واستلام الشحنة (مسح باركود)' : 'Verify & Receive Shipment (Scan)'}</h3>
-                <span className="modal-close-btn" onClick={() => setShowIntakeModal(false)}>&times;</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', gap: '20px' }}>
+                  <div>
+                    <h3>{currentLang === 'ar' ? 'التحقق واستلام الشحنة (مسح باركود)' : 'Verify & Receive Shipment (Scan)'}</h3>
+                    <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '4px 0 0 0' }}>
+                      {currentLang === 'ar' ? `طلب الشراء: ${intakePONumber}` : `PO: ${intakePONumber}`} •
+                      {currentLang === 'ar' ? ' رقم التشغيلة: ' : ' Lot #: '}{intakeLotNum}
+                    </p>
+                  </div>
+                  <span className="modal-close-btn" onClick={() => setShowIntakeModal(false)}>&times;</span>
+                </div>
               </div>
-              <div style={{ padding: '10px 0' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '15px' }}>
-                  <div className="form-group">
-                    <label>{currentLang === 'ar' ? 'رقم طلب الشراء' : 'PO Number'}</label>
-                    <input type="text" className="form-control" value={intakePONumber} disabled style={{ opacity: 0.8 }} />
-                  </div>
-                  <div className="form-group">
-                    <label>{currentLang === 'ar' ? 'رقم تشغيلة المورد (Lot #)' : 'Vendor Lot Number'}</label>
-                    <input type="text" className="form-control" value={intakeLotNum} onChange={e => setIntakeLotNum(e.target.value)} />
-                  </div>
-                </div>
 
-                <div className="form-group">
-                  <label>{currentLang === 'ar' ? 'موقع التخزين بالخزينة الرئيسية' : 'Main Vault Storage Slot Location'}</label>
-                  <select value={intakeSelectedLocation} onChange={e => setIntakeSelectedLocation(parseInt(e.target.value))} style={{ color: '#000' }}>
-                    {locations.flatMap(loc => 
-                      loc.slots.map((s: any) => ({
-                        id: s.location_id,
-                        label: `${loc.vault_name} - ${loc.zone_room} - Row ${s.shelf_row} - Slot ${s.slot_bin} ${s.occupied ? '(Occupied)' : ''}`
-                      }))
-                    ).map(item => (
-                      <option key={item.id} value={item.id}>{item.label}</option>
-                    ))}
-                  </select>
-                </div>
+              {/* MAIN CONTENT - SCROLLABLE */}
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: '0' }}>
 
-                {/* Scan Simulator Section */}
-                <div className="glass-card" style={{ padding: '12px', background: 'rgba(0, 155, 78, 0.05)', border: '1px solid rgba(0, 155, 78, 0.2)', marginBottom: '15px' }}>
-                  <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--kfh-green)' }}>
-                    <i className="fa-solid fa-barcode"></i> {currentLang === 'ar' ? 'محاكي جهاز مسح الباركود / الرقم التسلسلي' : 'Barcode / Serial Scanner Input'}
-                  </h4>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <input 
-                      type="text" 
-                      className="form-control" 
-                      placeholder={currentLang === 'ar' ? 'امسح الباركود للقطعة أو أدخل الرقم التسلسلي واضغط Enter...' : 'Scan piece barcode or enter serial number & hit Enter...'}
-                      value={currentScanSerial}
-                      onChange={e => setCurrentScanSerial(e.target.value)}
-                      onKeyDown={e => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          if (currentScanSerial.trim()) {
-                            // Add scanned item
-                            const parsed = parseGs1Barcode(currentScanSerial.trim());
-                            const isDup = scannedSerials.some(s => s.serial === parsed.serial);
-                            if (isDup) {
-                              alert(currentLang === 'en' ? 'This barcode/serial has already been scanned.' : 'هذا الباركود/الرقم التسلسلي تم مسحه مسبقاً.');
-                              return;
+                {/* TOP SECTION - PO DETAILS & SCANNER */}
+                <div style={{ padding: '15px', borderBottom: '1px solid var(--border-color)', background: 'var(--bg-secondary)', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {/* PO Details Row */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', fontSize: '12px' }}>
+                    <div>
+                      <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>{currentLang === 'ar' ? 'رقم طلب الشراء' : 'PO Number'}</label>
+                      <div style={{ fontWeight: 600, color: '#000' }}>{intakePONumber}</div>
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>{currentLang === 'ar' ? 'موقع التخزين' : 'Storage Location'}</label>
+                      <select value={intakeSelectedLocation} onChange={e => setIntakeSelectedLocation(parseInt(e.target.value))} style={{ color: '#000', fontSize: '11px', padding: '4px', height: '28px', width: '100%' }}>
+                        {locations.flatMap(loc =>
+                          loc.slots.map((s: any) => ({
+                            id: s.location_id,
+                            label: `${loc.vault_name} - ${loc.zone_room} - Row ${s.shelf_row} - Slot ${s.slot_bin}`
+                          }))
+                        ).map(item => (
+                          <option key={item.id} value={item.id}>{item.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>{currentLang === 'ar' ? 'رقم التشغيلة' : 'Vendor Lot #'}</label>
+                      <input type="text" className="form-control" value={intakeLotNum} onChange={e => setIntakeLotNum(e.target.value)} style={{ fontSize: '11px', padding: '4px', height: '28px' }} />
+                    </div>
+                  </div>
+
+                  {/* Scanner Section - Prominent */}
+                  <div className="glass-card" style={{ padding: '12px', background: 'rgba(0, 155, 78, 0.08)', border: '2px solid rgba(0, 155, 78, 0.3)', borderRadius: '6px' }}>
+                    <h4 style={{ margin: '0 0 10px 0', fontSize: '12px', fontWeight: 600, color: 'var(--kfh-green)' }}>
+                      <i className="fa-solid fa-barcode"></i> {currentLang === 'ar' ? 'مسح الباركود / الرقم التسلسلي' : 'Scan Barcode / Serial Number'}
+                    </h4>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder={currentLang === 'ar' ? 'امسح الباركود أو أدخل الرقم التسلسلي...' : 'Scan barcode or enter serial...'}
+                        value={currentScanSerial}
+                        onChange={e => setCurrentScanSerial(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            if (currentScanSerial.trim()) {
+                              const parsed = parseGs1Barcode(currentScanSerial.trim());
+                              const isDup = scannedSerials.some(s => s.serial === parsed.serial);
+                              if (isDup) {
+                                alert(currentLang === 'en' ? 'This barcode/serial has already been scanned.' : 'هذا الباركود/الرقم التسلسلي تم مسحه مسبقاً.');
+                                return;
+                              }
+                              setScannedSerials([
+                                ...scannedSerials,
+                                { serial: parsed.serial, product_id: intakeSelectedProductId, product_code: (products.find((p: any) => p.product_id === intakeSelectedProductId)?.denomination_label) || 'Bar' }
+                              ]);
+                              setCurrentScanSerial('');
                             }
-                            setScannedSerials([
-                              ...scannedSerials,
-                              { serial: parsed.serial, product_id: intakeSelectedProductId, product_code: (products.find((p: any) => p.product_id === intakeSelectedProductId)?.denomination_label) || (products.find((p: any) => p.product_id === intakeSelectedProductId)?.product_code) || 'Bar' }
-                            ]);
-                            setCurrentScanSerial('');
                           }
-                        }
-                      }}
-                    />
-                    <button 
-                      className="btn btn-primary"
-                      type="button"
-                      onClick={() => {
-                        if (currentScanSerial.trim()) {
-                          const parsed = parseGs1Barcode(currentScanSerial.trim());
-                          const isDup = scannedSerials.some(s => s.serial === parsed.serial);
-                          if (isDup) {
-                            alert(currentLang === 'en' ? 'This barcode/serial has already been scanned.' : 'هذا الباركود/الرقم التسلسلي تم مسحه مسبقاً.');
-                            return;
-                          }
-                          setScannedSerials([
-                            ...scannedSerials,
-                            { serial: parsed.serial, product_id: intakeSelectedProductId, product_code: intakeSelectedProductId === 1 ? '1 Kilogram Bar' : 'Other Bar' }
-                          ]);
-                          setCurrentScanSerial('');
-                        }
-                      }}
-                    >
-                      {currentLang === 'ar' ? 'إضافة' : 'Add'}
-                    </button>
-                  </div>
-                  
-                  {/* Select which line item on THIS PO the scanned bar belongs to. Only the
-                      denominations actually ordered on the PO are selectable, and each shows
-                      how many pieces have been scanned vs. ordered. */}
-                  {(() => {
-                    const intakePO = poList.find((p: any) => p.po_id === intakePOId);
-                    const poItems = intakePO?.items && intakePO.items.length ? intakePO.items : null;
-                    const scannedCountFor = (pid: number) => scannedSerials.filter(s => s.product_id === pid).length;
-                    return (
-                      <div className="form-group" style={{ marginTop: '10px', marginBottom: 0 }}>
-                        <label style={{ fontSize: '11px' }}>{currentLang === 'ar' ? 'بند الطلب للسبيكة الممسوحة' : 'Scanned Bar — PO Line Item'}</label>
-                        <select
-                          value={intakeSelectedProductId}
-                          onChange={e => setIntakeSelectedProductId(parseInt(e.target.value))}
-                          style={{ padding: '4px', fontSize: '12px', height: '30px', color: '#000' }}
-                        >
-                          {poItems ? (
+                        }}
+                        style={{ flex: 1, fontSize: '12px', padding: '8px' }}
+                      />
+                      <select
+                        value={intakeSelectedProductId}
+                        onChange={e => setIntakeSelectedProductId(parseInt(e.target.value))}
+                        style={{ fontSize: '12px', padding: '8px', height: '36px', color: '#000', minWidth: '180px' }}
+                      >
+                        {(() => {
+                          const intakePO = poList.find((p: any) => p.po_id === intakePOId);
+                          const poItems = intakePO?.items && intakePO.items.length ? intakePO.items : null;
+                          return poItems ? (
                             poItems.map((it: any) => {
                               const p = products.find((pp: any) => String(pp.product_id) === String(it.product_id));
-                              const denom = p ? `${p.metal_name} ${p.denomination_label}` : (it.product_code || `#${it.product_id}`);
+                              const denom = p ? `${p.metal_name} ${p.denomination_label}` : `#${it.product_id}`;
+                              const scanned = scannedSerials.filter(s => s.product_id === it.product_id).length;
                               return (
                                 <option key={it.product_id} value={it.product_id}>
-                                  {`${denom} — ${scannedCountFor(it.product_id)}/${it.qty} ${currentLang === 'ar' ? 'ممسوح' : 'scanned'}`}
+                                  {denom} ({scanned}/{it.qty})
                                 </option>
                               );
                             })
@@ -8681,40 +8993,209 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                               .filter((p: any) => p.is_active !== false)
                               .map((p: any) => (
                                 <option key={p.product_id} value={p.product_id}>
-                                  {`${p.metal_name} ${p.denomination_label}` + (p.purity_value ? ` (${p.purity_value} ${currentLang === 'ar' ? 'نقاوة' : 'Purity'})` : '')}
+                                  {p.metal_name} {p.denomination_label}
                                 </option>
                               ))
-                          )}
-                        </select>
-                        {poItems && (
-                          <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
-                            {poItems.map((it: any) => {
-                              const p = products.find((pp: any) => String(pp.product_id) === String(it.product_id));
-                              const denom = p ? `${p.metal_name} ${p.denomination_label}` : (it.product_code || `#${it.product_id}`);
-                              const done = scannedCountFor(it.product_id);
-                              const complete = done === it.qty;
-                              return (
-                                <div key={it.product_id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: complete ? 'var(--accent-green)' : 'var(--text-muted)' }}>
-                                  <span>{denom}</span>
-                                  <span>{done}/{it.qty} {complete ? '✓' : ''}</span>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()}
+                          );
+                        })()}
+                      </select>
+                      <button
+                        className="btn btn-primary"
+                        type="button"
+                        onClick={() => {
+                          if (currentScanSerial.trim()) {
+                            const parsed = parseGs1Barcode(currentScanSerial.trim());
+                            const isDup = scannedSerials.some(s => s.serial === parsed.serial);
+                            if (isDup) {
+                              alert(currentLang === 'en' ? 'This barcode/serial has already been scanned.' : 'هذا الباركود/الرقم التسلصلي تم مسحه مسبقاً.');
+                              return;
+                            }
+                            setScannedSerials([
+                              ...scannedSerials,
+                              { serial: parsed.serial, product_id: intakeSelectedProductId, product_code: (products.find((p: any) => p.product_id === intakeSelectedProductId)?.denomination_label) || 'Bar' }
+                            ]);
+                            setCurrentScanSerial('');
+                          }
+                        }}
+                        style={{ whiteSpace: 'nowrap' }}
+                      >
+                        <i className="fa-solid fa-plus"></i> {currentLang === 'ar' ? 'إضافة' : 'Add'}
+                      </button>
+                    </div>
+                  </div>
                 </div>
 
-                <button
-                  className="btn btn-primary"
-                  style={{ width: '100%', marginTop: '15px' }}
-                  onClick={handleSubmitIntake}
-                >
-                  <i className="fa-solid fa-check"></i> {currentLang === 'ar' ? 'تأكيد استلام الشحنة' : 'Confirm Shipment Receipt'}
-                </button>
+                {/* SCANNED ITEMS DATA GRID */}
+                <div style={{ flex: 1, overflow: 'auto', padding: '15px', display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                    <h4 style={{ margin: 0, fontSize: '13px', fontWeight: 600 }}>
+                      {currentLang === 'ar' ? 'العناصر الممسوحة' : 'Scanned Items'}
+                      <span style={{ color: 'var(--kfh-green)', marginLeft: '8px' }}>({scannedSerials.length})</span>
+                    </h4>
+                    {scannedSerials.length > 0 && (
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button
+                          className="btn btn-sm"
+                          onClick={() => {
+                            const selectedItems = document.querySelectorAll('input[name="scan-checkbox"]:checked');
+                            if (selectedItems.length > 0) {
+                              setScannedSerials(scannedSerials.filter((_, idx) => {
+                                const checkbox = document.querySelector(`input[name="scan-checkbox"][data-index="${idx}"]`) as HTMLInputElement;
+                                return !checkbox?.checked;
+                              }));
+                            }
+                          }}
+                          style={{ fontSize: '11px', padding: '4px 8px', background: '#dc3545', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                        >
+                          <i className="fa-solid fa-trash"></i> {currentLang === 'ar' ? 'حذف المحدد' : 'Remove Selected'}
+                        </button>
+                        <button
+                          className="btn btn-sm"
+                          onClick={() => setScannedSerials([])}
+                          style={{ fontSize: '11px', padding: '4px 8px', background: '#6c757d', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                        >
+                          <i className="fa-solid fa-xmark"></i> {currentLang === 'ar' ? 'مسح الكل' : 'Clear All'}
+                        </button>
+                        <button
+                          className="btn btn-sm"
+                          onClick={() => {
+                            const exportData = scannedSerials.map((item, idx) => {
+                              return `${idx + 1}\t${item.serial}\t${item.product_code}\tReceived`;
+                            }).join('\n');
+                            const csvContent = 'Serial\tProduct\tStatus\n' + exportData;
+                            const blob = new Blob([csvContent], { type: 'text/plain' });
+                            const url = window.URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = `${intakePONumber}-scanned-items.csv`;
+                            a.click();
+                            window.URL.revokeObjectURL(url);
+                          }}
+                          style={{ fontSize: '11px', padding: '4px 8px', background: '#17a2b8', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                        >
+                          <i className="fa-solid fa-download"></i> {currentLang === 'ar' ? 'تصدير' : 'Export'}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {scannedSerials.length === 0 ? (
+                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
+                      <div style={{ textAlign: 'center' }}>
+                        <i className="fa-solid fa-inbox" style={{ fontSize: '32px', marginBottom: '8px', opacity: 0.5 }}></i>
+                        <p>{currentLang === 'ar' ? 'لا توجد عناصر ممسوحة حتى الآن' : 'No scanned items yet'}</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ overflowX: 'auto', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                        <thead>
+                          <tr style={{ background: 'var(--bg-secondary)', borderBottom: '2px solid var(--border-color)' }}>
+                            <th style={{ padding: '10px', textAlign: 'center', width: '40px' }}>
+                              <input
+                                type="checkbox"
+                                onChange={(e) => {
+                                  document.querySelectorAll('input[name="scan-checkbox"]').forEach((cb: any) => {
+                                    cb.checked = e.target.checked;
+                                  });
+                                }}
+                                style={{ cursor: 'pointer' }}
+                              />
+                            </th>
+                            <th style={{ padding: '10px', textAlign: 'left', fontWeight: 600 }}>{currentLang === 'ar' ? 'الرقم التسلسلي' : 'Serial Number'}</th>
+                            <th style={{ padding: '10px', textAlign: 'left', fontWeight: 600 }}>{currentLang === 'ar' ? 'المنتج' : 'Product'}</th>
+                            <th style={{ padding: '10px', textAlign: 'center', fontWeight: 600 }}>{currentLang === 'ar' ? 'الحالة' : 'Status'}</th>
+                            <th style={{ padding: '10px', textAlign: 'center', width: '100px', fontWeight: 600 }}>{currentLang === 'ar' ? 'إجراءات' : 'Actions'}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {scannedSerials.map((item, idx) => {
+                            const product = products.find((p: any) => p.product_id === item.product_id);
+                            const rowColor = idx % 2 === 0 ? 'transparent' : 'rgba(0, 155, 78, 0.02)';
+                            return (
+                              <tr key={idx} style={{ background: rowColor, borderBottom: '1px solid var(--border-color)', height: '40px' }}>
+                                <td style={{ padding: '8px 10px', textAlign: 'center' }}>
+                                  <input
+                                    type="checkbox"
+                                    name="scan-checkbox"
+                                    data-index={idx}
+                                    style={{ cursor: 'pointer' }}
+                                  />
+                                </td>
+                                <td style={{ padding: '8px 10px', color: 'var(--kfh-green)', fontWeight: 600, fontFamily: 'monospace' }}>
+                                  {item.serial}
+                                </td>
+                                <td style={{ padding: '8px 10px', color: '#000' }}>
+                                  {product ? `${product.metal_name} ${product.denomination_label}` : item.product_code}
+                                </td>
+                                <td style={{ padding: '8px 10px', textAlign: 'center' }}>
+                                  <span style={{ background: 'rgba(0, 155, 78, 0.15)', color: 'var(--kfh-green)', padding: '3px 8px', borderRadius: '3px', fontSize: '11px', fontWeight: 600 }}>
+                                    {currentLang === 'ar' ? '✓ مستلم' : '✓ Received'}
+                                  </span>
+                                </td>
+                                <td style={{ padding: '8px 10px', textAlign: 'center' }}>
+                                  <button
+                                    onClick={() => {
+                                      setScannedSerials(scannedSerials.filter((_, i) => i !== idx));
+                                    }}
+                                    style={{ background: '#dc3545', color: '#fff', border: 'none', borderRadius: '3px', padding: '4px 8px', cursor: 'pointer', fontSize: '11px' }}
+                                  >
+                                    <i className="fa-solid fa-trash-alt"></i>
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
               </div>
+
+              {/* FOOTER WITH SUMMARY & ACTION BUTTONS */}
+              <div style={{ borderTop: '1px solid var(--border-color)', background: 'var(--bg-secondary)', padding: '12px 15px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', gap: '20px', fontSize: '12px' }}>
+                  <div>
+                    <span style={{ color: 'var(--text-muted)' }}>{currentLang === 'ar' ? 'إجمالي الممسوح:' : 'Total Scanned:'}</span>
+                    <span style={{ fontWeight: 600, marginLeft: '6px', color: 'var(--kfh-green)', fontSize: '14px' }}>{scannedSerials.length}</span>
+                  </div>
+                  <div>
+                    <span style={{ color: 'var(--text-muted)' }}>{currentLang === 'ar' ? 'طلب الشراء:' : 'PO Items:'}</span>
+                    <span style={{ fontWeight: 600, marginLeft: '6px', color: '#000', fontSize: '14px' }}>
+                      {(() => {
+                        const intakePO = poList.find((p: any) => p.po_id === intakePOId);
+                        return intakePO?.items ? intakePO.items.reduce((sum: number, it: any) => sum + it.qty, 0) : 0;
+                      })()}
+                    </span>
+                  </div>
+                  <div style={{ paddingLeft: '10px', borderLeft: '1px solid var(--border-color)' }}>
+                    <span style={{ color: 'var(--text-muted)' }}>{currentLang === 'ar' ? 'نسبة الاكتمال:' : 'Completion:'}</span>
+                    <span style={{ fontWeight: 600, marginLeft: '6px', fontSize: '14px', color: scannedSerials.length === (poList.find((p: any) => p.po_id === intakePOId)?.items?.reduce((sum: number, it: any) => sum + it.qty, 0) || 0) ? 'var(--accent-green)' : '#ffc107' }}>
+                      {Math.round((scannedSerials.length / (poList.find((p: any) => p.po_id === intakePOId)?.items?.reduce((sum: number, it: any) => sum + it.qty, 0) || 1)) * 100)}%
+                    </span>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    className="btn btn-secondary"
+                    onClick={() => setShowIntakeModal(false)}
+                    style={{ padding: '8px 16px' }}
+                  >
+                    {currentLang === 'ar' ? 'إلغاء' : 'Cancel'}
+                  </button>
+                  <button
+                    className="btn btn-primary"
+                    onClick={handleSubmitIntake}
+                    disabled={scannedSerials.length === 0}
+                    style={{ padding: '8px 20px', display: 'flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    <i className="fa-solid fa-check"></i> {currentLang === 'ar' ? 'تأكيد استلام الشحنة' : 'Confirm Shipment Receipt'}
+                  </button>
+                </div>
+              </div>
+
             </div>
           </div>
         )}

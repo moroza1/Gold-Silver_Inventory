@@ -6,7 +6,7 @@
 
   <ItemGroup>
     <!-- Barcode/QR Code Tracking (RFP Section 3): GS1-128 + ISO/IEC 18004 (QR) symbol
-         generation. Pure managed library, no native image dependency -- we render
+         generation. Pure managed library, no native image dependency; we render
          BitMatrix output to SVG ourselves (see BarcodeLabelService.cs), which keeps
          this cross-platform (no SkiaSharp/System.Drawing native asset packages needed). -->
     <PackageReference Include="ZXing.Net" Version="0.16.11" />
