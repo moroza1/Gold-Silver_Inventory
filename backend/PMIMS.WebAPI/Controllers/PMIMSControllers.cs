@@ -35,6 +35,7 @@ public partial class PMIMSControllers : ControllerBase
     private readonly IEmailSenderService _emailSender;
     private readonly IMonitoringAdapter _monitoringAdapter;
     private readonly INotificationDispatchService _notificationDispatch;
+    private readonly IBarcodeLabelService _barcodeLabelService;
 
     public PMIMSControllers(
         IInventoryRepository repository,
@@ -48,7 +49,8 @@ public partial class PMIMSControllers : ControllerBase
         IAuditExportService auditExport,
         IEmailSenderService emailSender,
         IMonitoringAdapter monitoringAdapter,
-        INotificationDispatchService notificationDispatch)
+        INotificationDispatchService notificationDispatch,
+        IBarcodeLabelService barcodeLabelService)
     {
         _repository = repository;
         _adService = adService;
@@ -62,6 +64,7 @@ public partial class PMIMSControllers : ControllerBase
         _emailSender = emailSender;
         _monitoringAdapter = monitoringAdapter;
         _notificationDispatch = notificationDispatch;
+        _barcodeLabelService = barcodeLabelService;
     }
 
     // =========================================================================
@@ -1347,7 +1350,8 @@ public partial class PMIMSControllers : ControllerBase
         "dashboard", "pending_actions", "purchase_orders", "spatial_map", "custody",
         "stocktake", "migration", "reports", "workflows", "settings", "user_admin",
         "vault_location", "master_data", "workflow_design", "intake",
-        "rules_engine", "notifications", "monitoring", "dispensing", "device_integration"
+        "rules_engine", "notifications", "monitoring", "dispensing", "device_integration",
+        "barcode_qr_labeling"
     };
 
     // Reconstructs the caller's effective module permissions from the JWT "perm:*" claims.
