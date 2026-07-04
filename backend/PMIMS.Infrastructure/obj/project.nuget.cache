@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "/D8CMjORKQE=",
+  "dgSpecHash": "HP7RRu7TVhw=",
   "success": true,
-  "projectFilePath": "D:\\Projects\\Gold2\\backend\\PMIMS.Infrastructure\\PMIMS.Infrastructure.csproj",
+  "projectFilePath": "d:\\Projects\\Gold2\\backend\\PMIMS.Infrastructure\\PMIMS.Infrastructure.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\Roshdy\\.nuget\\packages\\bcrypt.net-next\\4.0.3\\bcrypt.net-next.4.0.3.nupkg.sha512",
     "C:\\Users\\Roshdy\\.nuget\\packages\\bouncycastle.cryptography\\2.6.2\\bouncycastle.cryptography.2.6.2.nupkg.sha512",
@@ -85,9 +85,9 @@
       "code": "NU1903",
       "level": "Warning",
       "message": "Package 'SQLitePCLRaw.lib.e_sqlite3' 2.1.11 has a known high severity vulnerability, https://github.com/advisories/GHSA-2m69-gcr7-jv3q",
-      "projectPath": "D:\\Projects\\Gold2\\backend\\PMIMS.Infrastructure\\PMIMS.Infrastructure.csproj",
+      "projectPath": "d:\\Projects\\Gold2\\backend\\PMIMS.Infrastructure\\PMIMS.Infrastructure.csproj",
       "warningLevel": 1,
-      "filePath": "D:\\Projects\\Gold2\\backend\\PMIMS.Infrastructure\\PMIMS.Infrastructure.csproj",
+      "filePath": "d:\\Projects\\Gold2\\backend\\PMIMS.Infrastructure\\PMIMS.Infrastructure.csproj",
       "libraryId": "SQLitePCLRaw.lib.e_sqlite3",
       "targetGraphs": [
         "net10.0"

@@ -5475,3 +5475,27 @@ System.ArgumentException: The supplied DateTime must have the Kind property set 
    at Cronos.CronExpression.GetNextOccurrence(DateTime fromUtc, TimeZoneInfo zone, Boolean inclusive) in C:\projects\cronos\src\Cronos\CronExpression.cs:line 215
    at PMIMS.Infrastructure.NotificationSchedulerService.IsDue(NotificationSubscription sub) in D:\Projects\Gold2\backend\PMIMS.Infrastructure\NotificationSchedulerService.cs:line 136
    at PMIMS.Infrastructure.NotificationSchedulerService.ExecuteAsync(CancellationToken stoppingToken) in D:\Projects\Gold2\backend\PMIMS.Infrastructure\NotificationSchedulerService.cs:line 62
+[2026-07-04 19:45:53.074 +03:00] [INF] Executed DbCommand (0ms) [Parameters=[@now='?' (DbType = DateTime)], CommandType='"Text"', CommandTimeout='30']
+SELECT "r"."reservation_id", "r"."channel_id", "r"."customer_id", "r"."expires_at", "r"."idempotency_key", "r"."item_id", "r"."reservation_token", "r"."reserved_at", "r"."status_code"
+FROM "reservation_requests" AS "r"
+WHERE "r"."status_code" = 'ACTIVE' AND "r"."expires_at" < @now
+[2026-07-04 19:46:03.081 +03:00] [INF] Executed DbCommand (0ms) [Parameters=[@now='?' (DbType = DateTime)], CommandType='"Text"', CommandTimeout='30']
+SELECT "r"."reservation_id", "r"."channel_id", "r"."customer_id", "r"."expires_at", "r"."idempotency_key", "r"."item_id", "r"."reservation_token", "r"."reserved_at", "r"."status_code"
+FROM "reservation_requests" AS "r"
+WHERE "r"."status_code" = 'ACTIVE' AND "r"."expires_at" < @now
+[2026-07-04 19:46:13.083 +03:00] [INF] Executed DbCommand (0ms) [Parameters=[@now='?' (DbType = DateTime)], CommandType='"Text"', CommandTimeout='30']
+SELECT "r"."reservation_id", "r"."channel_id", "r"."customer_id", "r"."expires_at", "r"."idempotency_key", "r"."item_id", "r"."reservation_token", "r"."reserved_at", "r"."status_code"
+FROM "reservation_requests" AS "r"
+WHERE "r"."status_code" = 'ACTIVE' AND "r"."expires_at" < @now
+[2026-07-04 19:46:23.099 +03:00] [INF] Executed DbCommand (0ms) [Parameters=[@now='?' (DbType = DateTime)], CommandType='"Text"', CommandTimeout='30']
+SELECT "r"."reservation_id", "r"."channel_id", "r"."customer_id", "r"."expires_at", "r"."idempotency_key", "r"."item_id", "r"."reservation_token", "r"."reserved_at", "r"."status_code"
+FROM "reservation_requests" AS "r"
+WHERE "r"."status_code" = 'ACTIVE' AND "r"."expires_at" < @now
+[2026-07-04 19:46:33.119 +03:00] [INF] Executed DbCommand (0ms) [Parameters=[@now='?' (DbType = DateTime)], CommandType='"Text"', CommandTimeout='30']
+SELECT "r"."reservation_id", "r"."channel_id", "r"."customer_id", "r"."expires_at", "r"."idempotency_key", "r"."item_id", "r"."reservation_token", "r"."reserved_at", "r"."status_code"
+FROM "reservation_requests" AS "r"
+WHERE "r"."status_code" = 'ACTIVE' AND "r"."expires_at" < @now
+[2026-07-04 19:46:43.133 +03:00] [INF] Executed DbCommand (0ms) [Parameters=[@now='?' (DbType = DateTime)], CommandType='"Text"', CommandTimeout='30']
+SELECT "r"."reservation_id", "r"."channel_id", "r"."customer_id", "r"."expires_at", "r"."idempotency_key", "r"."item_id", "r"."reservation_token", "r"."reserved_at", "r"."status_code"
+FROM "reservation_requests" AS "r"
+WHERE "r"."status_code" = 'ACTIVE' AND "r"."expires_at" < @now

@@ -4510,11 +4510,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "D:\\Projects\\Gold2\\backend\\PMIMS.WebAPI\\PMIMS.WebAPI.csproj",
+      "projectUniqueName": "d:\\Projects\\Gold2\\backend\\PMIMS.WebAPI\\PMIMS.WebAPI.csproj",
       "projectName": "PMIMS.WebAPI",
-      "projectPath": "D:\\Projects\\Gold2\\backend\\PMIMS.WebAPI\\PMIMS.WebAPI.csproj",
+      "projectPath": "d:\\Projects\\Gold2\\backend\\PMIMS.WebAPI\\PMIMS.WebAPI.csproj",
       "packagesPath": "C:\\Users\\Roshdy\\.nuget\\packages\\",
-      "outputPath": "D:\\Projects\\Gold2\\backend\\PMIMS.WebAPI\\obj\\",
+      "outputPath": "d:\\Projects\\Gold2\\backend\\PMIMS.WebAPI\\obj\\",
       "projectStyle": "PackageReference",
       "configFilePaths": [
         "C:\\Users\\Roshdy\\AppData\\Roaming\\NuGet\\NuGet.Config"
@@ -4530,11 +4530,11 @@
           "framework": "net10.0",
           "targetAlias": "net10.0",
           "projectReferences": {
-            "D:\\Projects\\Gold2\\backend\\PMIMS.Application\\PMIMS.Application.csproj": {
-              "projectPath": "D:\\Projects\\Gold2\\backend\\PMIMS.Application\\PMIMS.Application.csproj"
+            "d:\\Projects\\Gold2\\backend\\PMIMS.Application\\PMIMS.Application.csproj": {
+              "projectPath": "d:\\Projects\\Gold2\\backend\\PMIMS.Application\\PMIMS.Application.csproj"
             },
-            "D:\\Projects\\Gold2\\backend\\PMIMS.Infrastructure\\PMIMS.Infrastructure.csproj": {
-              "projectPath": "D:\\Projects\\Gold2\\backend\\PMIMS.Infrastructure\\PMIMS.Infrastructure.csproj"
+            "d:\\Projects\\Gold2\\backend\\PMIMS.Infrastructure\\PMIMS.Infrastructure.csproj": {
+              "projectPath": "d:\\Projects\\Gold2\\backend\\PMIMS.Infrastructure\\PMIMS.Infrastructure.csproj"
             }
           }
         }
