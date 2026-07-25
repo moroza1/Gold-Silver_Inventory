@@ -1599,6 +1599,31 @@
           }
         }
       },
+      "Ledger.Gl/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v10.0",
+        "compile": {
+          "bin/placeholder/Ledger.Gl.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Ledger.Gl.dll": {}
+        }
+      },
+      "Ledger.Gl.EfCore/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v10.0",
+        "dependencies": {
+          "Ledger.Gl": "1.0.0",
+          "Microsoft.EntityFrameworkCore": "10.0.9",
+          "Microsoft.EntityFrameworkCore.Relational": "10.0.9"
+        },
+        "compile": {
+          "bin/placeholder/Ledger.Gl.EfCore.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Ledger.Gl.EfCore.dll": {}
+        }
+      },
       "PMIMS.Application/1.0.0": {
         "type": "project",
         "framework": ".NETCoreApp,Version=v10.0",
@@ -1631,6 +1656,7 @@
           "ClosedXML": "0.104.2",
           "Cronos": "0.9.0",
           "Dapper": "2.1.79",
+          "Ledger.Gl": "1.0.0",
           "MailKit": "4.16.0",
           "Microsoft.Data.SqlClient": "7.0.2",
           "Microsoft.EntityFrameworkCore": "10.0.9",
@@ -4476,6 +4502,16 @@
         "zxing.net.nuspec"
       ]
     },
+    "Ledger.Gl/1.0.0": {
+      "type": "project",
+      "path": "../Ledger.Gl/Ledger.Gl.csproj",
+      "msbuildProject": "../Ledger.Gl/Ledger.Gl.csproj"
+    },
+    "Ledger.Gl.EfCore/1.0.0": {
+      "type": "project",
+      "path": "../Ledger.Gl.EfCore/Ledger.Gl.EfCore.csproj",
+      "msbuildProject": "../Ledger.Gl.EfCore/Ledger.Gl.EfCore.csproj"
+    },
     "PMIMS.Application/1.0.0": {
       "type": "project",
       "path": "../PMIMS.Application/PMIMS.Application.csproj",
@@ -4494,6 +4530,7 @@
   },
   "projectFileDependencyGroups": {
     "net10.0": [
+      "Ledger.Gl.EfCore >= 1.0.0",
       "Microsoft.AspNetCore.Authentication.JwtBearer >= 10.0.8",
       "Microsoft.AspNetCore.OpenApi >= 10.0.8",
       "Microsoft.EntityFrameworkCore.Design >= 10.0.9",
@@ -4510,11 +4547,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "d:\\Projects\\Gold2\\backend\\PMIMS.WebAPI\\PMIMS.WebAPI.csproj",
+      "projectUniqueName": "D:\\Projects\\Gold2\\backend\\PMIMS.WebAPI\\PMIMS.WebAPI.csproj",
       "projectName": "PMIMS.WebAPI",
-      "projectPath": "d:\\Projects\\Gold2\\backend\\PMIMS.WebAPI\\PMIMS.WebAPI.csproj",
+      "projectPath": "D:\\Projects\\Gold2\\backend\\PMIMS.WebAPI\\PMIMS.WebAPI.csproj",
       "packagesPath": "C:\\Users\\Roshdy\\.nuget\\packages\\",
-      "outputPath": "d:\\Projects\\Gold2\\backend\\PMIMS.WebAPI\\obj\\",
+      "outputPath": "D:\\Projects\\Gold2\\backend\\PMIMS.WebAPI\\obj\\",
       "projectStyle": "PackageReference",
       "configFilePaths": [
         "C:\\Users\\Roshdy\\AppData\\Roaming\\NuGet\\NuGet.Config"
@@ -4530,11 +4567,14 @@
           "framework": "net10.0",
           "targetAlias": "net10.0",
           "projectReferences": {
-            "d:\\Projects\\Gold2\\backend\\PMIMS.Application\\PMIMS.Application.csproj": {
-              "projectPath": "d:\\Projects\\Gold2\\backend\\PMIMS.Application\\PMIMS.Application.csproj"
+            "D:\\Projects\\Gold2\\backend\\Ledger.Gl.EfCore\\Ledger.Gl.EfCore.csproj": {
+              "projectPath": "D:\\Projects\\Gold2\\backend\\Ledger.Gl.EfCore\\Ledger.Gl.EfCore.csproj"
             },
-            "d:\\Projects\\Gold2\\backend\\PMIMS.Infrastructure\\PMIMS.Infrastructure.csproj": {
-              "projectPath": "d:\\Projects\\Gold2\\backend\\PMIMS.Infrastructure\\PMIMS.Infrastructure.csproj"
+            "D:\\Projects\\Gold2\\backend\\PMIMS.Application\\PMIMS.Application.csproj": {
+              "projectPath": "D:\\Projects\\Gold2\\backend\\PMIMS.Application\\PMIMS.Application.csproj"
+            },
+            "D:\\Projects\\Gold2\\backend\\PMIMS.Infrastructure\\PMIMS.Infrastructure.csproj": {
+              "projectPath": "D:\\Projects\\Gold2\\backend\\PMIMS.Infrastructure\\PMIMS.Infrastructure.csproj"
             }
           }
         }

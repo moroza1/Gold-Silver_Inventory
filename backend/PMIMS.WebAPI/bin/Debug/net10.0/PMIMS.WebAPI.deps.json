@@ -8,6 +8,7 @@
     ".NETCoreApp,Version=v10.0": {
       "PMIMS.WebAPI/1.0.0": {
         "dependencies": {
+          "Ledger.Gl.EfCore": "1.0.0",
           "Microsoft.AspNetCore.Authentication.JwtBearer": "10.0.8",
           "Microsoft.AspNetCore.OpenApi": "10.0.8",
           "Microsoft.EntityFrameworkCore.Design": "10.0.9",
@@ -1197,6 +1198,27 @@
           }
         }
       },
+      "Ledger.Gl/1.0.0": {
+        "runtime": {
+          "Ledger.Gl.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
+      },
+      "Ledger.Gl.EfCore/1.0.0": {
+        "dependencies": {
+          "Ledger.Gl": "1.0.0",
+          "Microsoft.EntityFrameworkCore": "10.0.9",
+          "Microsoft.EntityFrameworkCore.Relational": "10.0.9"
+        },
+        "runtime": {
+          "Ledger.Gl.EfCore.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
+      },
       "PMIMS.Application/1.0.0": {
         "dependencies": {
           "PMIMS.Domain": "1.0.0",
@@ -1223,6 +1245,7 @@
           "ClosedXML": "0.104.2",
           "Cronos": "0.9.0",
           "Dapper": "2.1.79",
+          "Ledger.Gl": "1.0.0",
           "MailKit": "4.16.0",
           "Microsoft.Data.SqlClient": "7.0.2",
           "Microsoft.EntityFrameworkCore": "10.0.9",
@@ -1756,6 +1779,16 @@
       "sha512": "sha512-OZfAVu88hl87BffQ+rlWCj/vLvAhhCK4QnFaoveeF/MY8SjHNSYBQ3qyUEWlPKNgBQGh1syXhCDg10vUnCsqkg==",
       "path": "zxing.net/0.16.11",
       "hashPath": "zxing.net.0.16.11.nupkg.sha512"
+    },
+    "Ledger.Gl/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Ledger.Gl.EfCore/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
     },
     "PMIMS.Application/1.0.0": {
       "type": "project",

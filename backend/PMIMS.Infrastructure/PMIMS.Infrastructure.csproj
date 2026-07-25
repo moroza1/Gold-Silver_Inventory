@@ -2,6 +2,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\PMIMS.Application\PMIMS.Application.csproj" />
+    <!-- Dependency-free General Ledger core (Integration adapter + listener types). -->
+    <ProjectReference Include="..\Ledger.Gl\Ledger.Gl.csproj" />
   </ItemGroup>
 
   <ItemGroup>

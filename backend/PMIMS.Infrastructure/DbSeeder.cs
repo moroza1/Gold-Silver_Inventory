@@ -7,6 +7,81 @@ namespace PMIMS.Infrastructure;
 
 public static class DbSeeder
 {
+    // Single source of truth for system-group module permissions, shared by the fresh
+    // seed (SeedAsync) and the top-up (EnsureModulePermissionsAsync). Keyed by group
+    // NAME so both paths can resolve the right PrivilegeGroup. When you add a new module,
+    // add its grant to each group here once -- existing databases get it on next startup.
+    private static Dictionary<string, Dictionary<string, string>> BuildPermissionMatrix() => new()
+    {
+        ["Treasury Operations (Maker)"] = new()
+        {
+            {"dashboard","READ_ONLY"}, {"pending_actions","READ_ONLY"}, {"purchase_orders","FULL"}, {"spatial_map","READ_ONLY"},
+            {"custody","READ_ONLY"}, {"stocktake","READ_ONLY"}, {"migration","READ_WRITE"}, {"reports","READ_ONLY"},
+            {"workflows","READ_ONLY"}, {"settings","HIDDEN"}, {"user_admin","HIDDEN"}, {"vault_location","HIDDEN"},
+            {"master_data","HIDDEN"}, {"workflow_design","HIDDEN"}, {"intake","FULL"}, {"rules_engine","HIDDEN"},
+            {"notifications","HIDDEN"}, {"monitoring","HIDDEN"}, {"dispensing","FULL"}, {"device_integration","HIDDEN"},
+            {"barcode_qr_labeling","FULL"}, {"gl_config","HIDDEN"},
+        },
+        ["Treasury Operations (Checker)"] = new()
+        {
+            {"dashboard","READ_ONLY"}, {"pending_actions","FULL"}, {"purchase_orders","READ_ONLY"}, {"spatial_map","READ_ONLY"},
+            {"custody","READ_ONLY"}, {"stocktake","READ_WRITE"}, {"migration","READ_ONLY"}, {"reports","READ_ONLY"},
+            {"workflows","READ_ONLY"}, {"settings","HIDDEN"}, {"user_admin","HIDDEN"}, {"vault_location","HIDDEN"},
+            {"master_data","HIDDEN"}, {"workflow_design","HIDDEN"}, {"intake","READ_ONLY"}, {"rules_engine","HIDDEN"},
+            {"notifications","HIDDEN"}, {"monitoring","HIDDEN"}, {"dispensing","READ_ONLY"}, {"device_integration","HIDDEN"},
+            {"barcode_qr_labeling","READ_ONLY"}, {"gl_config","READ_ONLY"},
+        },
+        ["Reconciliation Officers"] = new()
+        {
+            {"dashboard","READ_ONLY"}, {"pending_actions","FULL"}, {"purchase_orders","READ_ONLY"}, {"spatial_map","READ_ONLY"},
+            {"custody","READ_ONLY"}, {"stocktake","FULL"}, {"migration","READ_ONLY"}, {"reports","FULL"},
+            {"workflows","READ_ONLY"}, {"settings","HIDDEN"}, {"user_admin","HIDDEN"}, {"vault_location","HIDDEN"},
+            {"master_data","HIDDEN"}, {"workflow_design","HIDDEN"}, {"intake","READ_ONLY"}, {"rules_engine","READ_ONLY"},
+            {"notifications","HIDDEN"}, {"monitoring","READ_ONLY"}, {"dispensing","READ_ONLY"}, {"device_integration","HIDDEN"},
+            {"barcode_qr_labeling","READ_ONLY"}, {"gl_config","READ_WRITE"},
+        },
+        ["IT Administrators"] = new()
+        {
+            {"dashboard","FULL"}, {"pending_actions","FULL"}, {"purchase_orders","FULL"}, {"spatial_map","FULL"},
+            {"custody","FULL"}, {"stocktake","FULL"}, {"migration","FULL"}, {"reports","FULL"},
+            {"workflows","FULL"}, {"settings","FULL"}, {"user_admin","FULL"}, {"vault_location","FULL"},
+            {"master_data","FULL"}, {"workflow_design","FULL"}, {"intake","FULL"}, {"rules_engine","FULL"},
+            {"notifications","FULL"}, {"monitoring","FULL"}, {"dispensing","FULL"}, {"device_integration","FULL"},
+            {"barcode_qr_labeling","FULL"}, {"gl_config","FULL"},
+        },
+    };
+
+    /// <summary>
+    /// Idempotently ensures every built-in system group has a GroupPermission row for every
+    /// module in the shared matrix. Runs on EVERY startup -- including already-seeded
+    /// databases, which SeedAsync skips -- so grants for a newly-added module appear after a
+    /// restart without a full reseed. Only the four system groups are touched; admin-created
+    /// custom groups are left alone. Users must re-login to pick up new permission claims.
+    /// </summary>
+    public static async Task EnsureModulePermissionsAsync(AppDbContext context)
+    {
+        var groups = context.PrivilegeGroups.ToList();
+        if (groups.Count == 0) return; // brand-new DB: SeedAsync will populate everything
+        var matrix = BuildPermissionMatrix();
+        var have = new HashSet<string>(
+            context.GroupPermissions.Select(p => new { p.GroupId, p.ModuleKey }).ToList()
+                .Select(e => e.GroupId + "|" + e.ModuleKey));
+        bool added = false;
+        foreach (var grp in groups)
+        {
+            if (!matrix.TryGetValue(grp.GroupName, out var perms)) continue;
+            foreach (var kv in perms)
+            {
+                if (have.Add(grp.GroupId + "|" + kv.Key)) // Add == true means it was missing
+                {
+                    context.GroupPermissions.Add(new GroupPermission { GroupId = grp.GroupId, ModuleKey = kv.Key, AccessLevel = kv.Value });
+                    added = true;
+                }
+            }
+        }
+        if (added) await context.SaveChangesAsync();
+    }
+
     public static async Task SeedAsync(AppDbContext context)
     {
         // Check if database is already seeded
@@ -306,7 +381,7 @@ public static class DbSeeder
         // while being denied the authority to create/delete physical shelf locations.
         // RFP items 5-8 (rules_engine, notifications, monitoring) are new admin-tier
         // modules, same governance tier as vault_location/master_data/workflow_design.
-        var allModules = new[] { "dashboard", "pending_actions", "purchase_orders", "spatial_map", "custody", "stocktake", "migration", "reports", "workflows", "settings", "user_admin", "vault_location", "master_data", "workflow_design", "intake", "rules_engine", "notifications", "monitoring", "dispensing", "device_integration", "barcode_qr_labeling" };
+        var allModules = new[] { "dashboard", "pending_actions", "purchase_orders", "spatial_map", "custody", "stocktake", "migration", "reports", "workflows", "settings", "user_admin", "vault_location", "master_data", "workflow_design", "intake", "rules_engine", "notifications", "monitoring", "dispensing", "device_integration", "barcode_qr_labeling", "gl_config" };
 
         var grpMaker = new PrivilegeGroup { GroupName = "Treasury Operations (Maker)", Description = "Initiates purchase orders, transfers, and branch operations.", IsSystem = true };
         var grpChecker = new PrivilegeGroup { GroupName = "Treasury Operations (Checker)", Description = "Reviews and approves purchase orders and intake verifications.", IsSystem = true };
@@ -315,63 +390,20 @@ public static class DbSeeder
         context.PrivilegeGroups.AddRange(grpMaker, grpChecker, grpRecon, grpAdmin);
         await context.SaveChangesAsync();
 
-        // Permission matrices: module_key -> access_level per group
-        var makerPerms = new Dictionary<string, string> {
-            {"dashboard","READ_ONLY"}, {"pending_actions","READ_ONLY"}, {"purchase_orders","FULL"}, {"spatial_map","READ_ONLY"},
-            {"custody","READ_ONLY"}, {"stocktake","READ_ONLY"}, {"migration","READ_WRITE"},
-            {"reports","READ_ONLY"}, {"workflows","READ_ONLY"}, {"settings","HIDDEN"}, {"user_admin","HIDDEN"},
-            // Operators may VIEW but never MANAGE structural/master data:
-            {"vault_location","HIDDEN"}, {"master_data","HIDDEN"}, {"workflow_design","HIDDEN"},
-            {"intake","FULL"}, // Vault team maker has full access to receive shipments
-            {"rules_engine","HIDDEN"}, {"notifications","HIDDEN"}, {"monitoring","HIDDEN"},
-            // Treasury Ops monitor/operate GDM dispense activity (view + manual fail/retry),
-            // but device registration/decommissioning is admin-only infrastructure work.
-            {"dispensing","FULL"}, {"device_integration","HIDDEN"},
-            // Vault team maker generates/prints GS1-128 + QR labels at intake/transfer,
-            // same tier as intake/dispensing.
-            {"barcode_qr_labeling","FULL"}
+        // Apply the shared permission matrix (single source of truth -- see
+        // BuildPermissionMatrix / EnsureModulePermissionsAsync above).
+        var permMatrix = BuildPermissionMatrix();
+        var groupsByName = new Dictionary<string, PrivilegeGroup>
+        {
+            [grpMaker.GroupName] = grpMaker,
+            [grpChecker.GroupName] = grpChecker,
+            [grpRecon.GroupName] = grpRecon,
+            [grpAdmin.GroupName] = grpAdmin,
         };
-        var checkerPerms = new Dictionary<string, string> {
-            {"dashboard","READ_ONLY"}, {"pending_actions","FULL"}, {"purchase_orders","READ_ONLY"}, {"spatial_map","READ_ONLY"},
-            {"custody","READ_ONLY"}, {"stocktake","READ_WRITE"}, {"migration","READ_ONLY"},
-            {"reports","READ_ONLY"}, {"workflows","READ_ONLY"}, {"settings","HIDDEN"}, {"user_admin","HIDDEN"},
-            {"vault_location","HIDDEN"}, {"master_data","HIDDEN"}, {"workflow_design","HIDDEN"},
-            {"intake","READ_ONLY"}, // Vault team checker has read-only access (they approve via workflows)
-            {"rules_engine","HIDDEN"}, {"notifications","HIDDEN"}, {"monitoring","HIDDEN"},
-            {"dispensing","READ_ONLY"}, {"device_integration","HIDDEN"},
-            {"barcode_qr_labeling","READ_ONLY"}
-        };
-        var reconPerms = new Dictionary<string, string> {
-            {"dashboard","READ_ONLY"}, {"pending_actions","FULL"}, {"purchase_orders","READ_ONLY"}, {"spatial_map","READ_ONLY"},
-            {"custody","READ_ONLY"}, {"stocktake","FULL"}, {"migration","READ_ONLY"},
-            {"reports","FULL"}, {"workflows","READ_ONLY"}, {"settings","HIDDEN"}, {"user_admin","HIDDEN"},
-            {"vault_location","HIDDEN"}, {"master_data","HIDDEN"}, {"workflow_design","HIDDEN"},
-            {"intake","READ_ONLY"},
-            // Reconciliation officers may VIEW rule evaluations and SLA/monitoring
-            // metrics (relevant to break investigation) but not author rules or
-            // configure email distribution lists.
-            {"rules_engine","READ_ONLY"}, {"notifications","HIDDEN"}, {"monitoring","READ_ONLY"},
-            {"dispensing","READ_ONLY"}, {"device_integration","HIDDEN"},
-            {"barcode_qr_labeling","READ_ONLY"}
-        };
-        var adminPerms = new Dictionary<string, string> {
-            {"dashboard","FULL"}, {"pending_actions","FULL"}, {"purchase_orders","FULL"}, {"spatial_map","FULL"},
-            {"custody","FULL"}, {"stocktake","FULL"}, {"migration","FULL"},
-            {"reports","FULL"}, {"workflows","FULL"}, {"settings","FULL"}, {"user_admin","FULL"},
-            {"vault_location","FULL"}, {"master_data","FULL"}, {"workflow_design","FULL"},
-            {"intake","FULL"},
-            {"rules_engine","FULL"}, {"notifications","FULL"}, {"monitoring","FULL"},
-            {"dispensing","FULL"}, {"device_integration","FULL"}, {"barcode_qr_labeling","FULL"}
-        };
-
-        foreach (var kv in makerPerms)
-            context.GroupPermissions.Add(new GroupPermission { GroupId = grpMaker.GroupId, ModuleKey = kv.Key, AccessLevel = kv.Value });
-        foreach (var kv in checkerPerms)
-            context.GroupPermissions.Add(new GroupPermission { GroupId = grpChecker.GroupId, ModuleKey = kv.Key, AccessLevel = kv.Value });
-        foreach (var kv in reconPerms)
-            context.GroupPermissions.Add(new GroupPermission { GroupId = grpRecon.GroupId, ModuleKey = kv.Key, AccessLevel = kv.Value });
-        foreach (var kv in adminPerms)
-            context.GroupPermissions.Add(new GroupPermission { GroupId = grpAdmin.GroupId, ModuleKey = kv.Key, AccessLevel = kv.Value });
+        foreach (var (groupName, perms) in permMatrix)
+            if (groupsByName.TryGetValue(groupName, out var grp))
+                foreach (var kv in perms)
+                    context.GroupPermissions.Add(new GroupPermission { GroupId = grp.GroupId, ModuleKey = kv.Key, AccessLevel = kv.Value });
         await context.SaveChangesAsync();
 
         // 20. Default Application Users

@@ -6,6 +6,7 @@ using Microsoft.IdentityModel.Tokens;
 using PMIMS.Application;
 using PMIMS.Infrastructure;
 using PMIMS.WebAPI.Realtime;
+using Ledger.Gl.EfCore;   // plug-and-play General Ledger module DI extensions
 using Serilog;
 
 // Configure Serilog for file logging
@@ -73,6 +74,23 @@ try
     // Cost Tracking & Valuation -- Core Banking (IMAL) GL Integration (pushes purchase-order
     // receipt landed-cost journal entries; see InventoryRepository.IntakeInventoryItemsAsync).
     builder.Services.AddScoped<ICoreBankingLedgerService, CoreBankingGlAdapter>();
+
+    // Plug-and-play double-entry General Ledger module (Ledger.Gl + Ledger.Gl.EfCore).
+    // Registers the config (chart of accounts + posting rules), an EF-backed GeneralLedger,
+    // and an InventoryEventListener -- all injectable. The GL uses its own bounded-context
+    // GlDbContext against the SAME database as AppDbContext, so it never touches PMIMS'
+    // mappings. Post inventory transactions to it via the listener (see WIRING.md).
+    {
+        var glConfigPath = Path.Combine(AppContext.BaseDirectory, "Config", "gl-accounts.gold-silver.json");
+        builder.Services.AddLedgerGl(glConfigPath, opt =>
+        {
+            if (useSqlServer)
+                opt.UseSqlServer(dbConfig.GetValue<string>("SqlServerConnection") ?? "");
+            else
+                opt.UseSqlite(dbConfig.GetValue<string>("SqliteConnection") ?? "Data Source=pmims.db");
+        });
+    }
+
     // Item 7 extension -- immediate event-triggered notifications (transfer completed,
     // inventory discrepancy found), shared by ReconciliationService and PMIMSControllers.
     builder.Services.AddScoped<INotificationDispatchService, NotificationDispatchService>();
@@ -278,6 +296,15 @@ try
         // current order to render their own sidebar), not gated by settings.read.
         Read("settings.read", "settings");
         Write("settings.write", "settings");
+
+        // GL Configuration (administrative/governance module). Governs the chart of
+        // accounts + posting-rule mappings that decide how inventory movements are
+        // booked -- the most sensitive config in the system, so it is admin-tier and
+        // its changes go through maker-checker (enforced in GlConfigService, not here).
+        // .read = view config/versions + run the posting simulator; .write = create/edit/
+        // submit a draft AND approve/reject (segregation-of-duties is enforced server-side).
+        Read("gl_config.read", "gl_config");
+        Write("gl_config.write", "gl_config");
     });
 
     var app = builder.Build();
@@ -295,6 +322,21 @@ try
             Console.WriteLine("🔄 Seeding data...");
             await DbSeeder.SeedAsync(context);
             Console.WriteLine("✅ Database seeded successfully");
+
+            // Top up module permissions on already-seeded databases so a newly-added
+            // admin module (e.g. gl_config) becomes visible after a restart without a
+            // full reseed. Idempotent; no-op on a fresh DB just seeded above.
+            Console.WriteLine("🔄 Ensuring module permissions are up to date...");
+            await DbSeeder.EnsureModulePermissionsAsync(context);
+            Console.WriteLine("✅ Module permissions verified");
+
+            // Create the General Ledger tables (gl_journal_*, gl_config_versions) in the
+            // same database, seed the initial ACTIVE config version from the JSON file, and
+            // load it into the hot config provider. Dev/SQLite convenience; production SQL
+            // Server should use EF migrations for GlDbContext.
+            Console.WriteLine("🔄 Initializing General Ledger (schema + active config)...");
+            await app.Services.InitializeLedgerGlAsync("SYSTEM");
+            Console.WriteLine("✅ General Ledger initialized");
         }
         catch (Exception ex)
         {

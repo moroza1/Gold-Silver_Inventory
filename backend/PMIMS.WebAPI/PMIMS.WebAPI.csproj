@@ -21,6 +21,14 @@
   <ItemGroup>
     <ProjectReference Include="..\PMIMS.Application\PMIMS.Application.csproj" />
     <ProjectReference Include="..\PMIMS.Infrastructure\PMIMS.Infrastructure.csproj" />
+    <!-- Plug-and-play General Ledger module + its EF Core persistence adapter. -->
+    <ProjectReference Include="..\Ledger.Gl.EfCore\Ledger.Gl.EfCore.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Ship the GL configuration (chart of accounts + posting rules) with the app. -->
+    <None Include="..\Ledger.Gl\Config\gl-accounts.gold-silver.json"
+          Link="Config\gl-accounts.gold-silver.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

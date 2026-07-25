@@ -8,6 +8,7 @@ using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using PMIMS.Application;
 using PMIMS.Domain;
+using Ledger.Gl.Integration; // plug-and-play General Ledger listener + PMIMS adapter
 
 namespace PMIMS.Infrastructure;
 
@@ -24,12 +25,18 @@ public class InventoryRepository : IInventoryRepository
     // `new InventoryRepository(context)` call site -- test fixtures included -- keeps
     // compiling; a supplier receipt just doesn't push a GL posting if none is supplied.
     private readonly ICoreBankingLedgerService? _coreBanking;
+    // Plug-and-play General Ledger listener. Nullable/optional (default null), same pattern
+    // as _coreBanking, so every existing `new InventoryRepository(context)` call site -- test
+    // fixtures included -- keeps compiling; intake just doesn't post a GL journal entry if none
+    // is supplied. Registered by AddLedgerGl in Program.cs.
+    private readonly InventoryEventListener? _glListener;
 
-    public InventoryRepository(AppDbContext dbContext, IRateFeedService? rateFeed = null, ICoreBankingLedgerService? coreBanking = null)
+    public InventoryRepository(AppDbContext dbContext, IRateFeedService? rateFeed = null, ICoreBankingLedgerService? coreBanking = null, InventoryEventListener? glListener = null)
     {
         _dbContext = dbContext;
         _rateFeed = rateFeed;
         _coreBanking = coreBanking;
+        _glListener = glListener;
     }
 
     private bool IsSqlServer => _dbContext.Database.ProviderName?.Contains("SqlServer") ?? false;
@@ -459,6 +466,58 @@ public class InventoryRepository : IInventoryRepository
                     });
                 }
                 await _dbContext.SaveChangesAsync();
+
+                // Plug-and-play General Ledger: a customer custody deposit is NOT a KFH
+                // purchase -- the metal stays the customer's property. The config's
+                // ownership-conditioned rule (Purchase + ownership=CUSTOMER_OWNED) books it to
+                // the custody obligation/contra accounts (Dr 1900 / Cr 2900), keeping it off
+                // KFH's inventory and revenue. Valued mark-to-market at bid (net-realizable),
+                // using the SAME per-gram convention as GenerateIfrsValuationDisclosureAsync.
+                // Optional (_glListener/_rateFeed may be null) and fully guarded -- never breaks intake.
+                if (_glListener != null && _rateFeed != null)
+                {
+                    try
+                    {
+                        var productIds = newItems.Select(i => i.ProductId).Distinct().ToList();
+                        // metal name for the commodity + the deposited weight, from the products.
+                        string metalName = await _dbContext.MetalProducts
+                            .Where(p => productIds.Contains(p.ProductId))
+                            .Join(_dbContext.MetalTypes, p => p.MetalTypeId, mt => mt.MetalTypeId, (p, mt) => mt.MetalName)
+                            .FirstOrDefaultAsync() ?? "UNKNOWN";
+                        var weightByProduct = await _dbContext.MetalProducts
+                            .Where(p => productIds.Contains(p.ProductId))
+                            .Join(_dbContext.MetalDenominations, p => p.DenominationId, d => d.DenominationId,
+                                  (p, d) => new { p.ProductId, d.WeightGrams })
+                            .ToDictionaryAsync(x => x.ProductId, x => x.WeightGrams);
+                        decimal totalWeight = newItems.Sum(i => weightByProduct.TryGetValue(i.ProductId, out var w) ? w : 0m);
+
+                        var (bidRate, _, _) = await _rateFeed.GetLiveRatesAsync(metalName);
+                        decimal custodyValue = Math.Round(totalWeight * (bidRate / 31.1034768m), 2); // per-gram bid
+
+                        if (custodyValue > 0)
+                        {
+                            await _glListener.HandleAsync(new InventoryTransactionSnapshot
+                            {
+                                TransactionNumber = lotNumber,           // unique per receipt -> idempotent
+                                TransactionType   = "PURCHASE",           // adapter -> Purchase; ownership routes to custody
+                                Commodity         = metalName,
+                                Amount            = custodyValue,
+                                Currency          = "KWD",
+                                InitiatedBy       = receivedBy,
+                                Ownership         = "CUSTOMER_OWNED",     // -> custody rule (Dr 1900 / Cr 2900)
+                                ReceiptReason     = "CUSTODY_DEPOSIT",
+                                Note              = $"Custody deposit of {totalWeight:0.###}g {metalName} from customer {customer!.CustomerName}. Lot {lotNumber}.",
+                                OccurredAtUtc     = DateTime.UtcNow
+                            }, new PmimsInventoryAdapter());
+                        }
+                    }
+                    catch (Exception glEx)
+                    {
+                        await SaveAuditLogAsync(receivedBy, "SYSTEM", "GL_INTEGRATION",
+                            $"GL custody-deposit posting skipped for Lot {lotNumber}: {glEx.Message}",
+                            entityType: "INVENTORY_LOT", entityId: lot.LotId.ToString());
+                    }
+                }
             }
 
             foreach (var prodId in affectedProducts)
@@ -518,6 +577,48 @@ public class InventoryRepository : IInventoryRepository
                         "INVENTORY_PRECIOUS_METALS", "ACCOUNTS_PAYABLE_VENDOR",
                         po.LandedCost, po.Currency, receivedBy,
                         $"Receipt of Lot {lotNumber} ({totalItems} bar(s)) against PO {po.PoNumber} -- {vendorForMemo?.VendorName ?? "Vendor #" + po.VendorId}");
+                }
+
+                // Plug-and-play General Ledger: post the local double-entry record for this
+                // supplier receipt (Dr Inventory-<metal> / Cr Accounts Payable, per the GL
+                // config's Purchase rule for the metal). This is the durable double-entry
+                // behind the Core Banking push above. Optional (_glListener may be null) and
+                // fully guarded -- a GL failure (e.g. an unmapped commodity) is logged and
+                // must NEVER break the physical intake, exactly like the _coreBanking path.
+                if (_glListener != null && po.LandedCost > 0 && newItems.Count > 0)
+                {
+                    try
+                    {
+                        // Derive the commodity (e.g. "GOLD"/"SILVER") from the received metal type.
+                        string glCommodity = await _dbContext.MetalProducts
+                            .Where(p => p.ProductId == newItems[0].ProductId)
+                            .Join(_dbContext.MetalTypes, p => p.MetalTypeId, mt => mt.MetalTypeId, (p, mt) => mt.MetalName)
+                            .FirstOrDefaultAsync() ?? "UNKNOWN";
+
+                        await _glListener.HandleAsync(new InventoryTransactionSnapshot
+                        {
+                            // Origin id = the receipt's lot number: unique PER receipt, so
+                            // idempotency dedupes retries of the SAME receipt without collapsing
+                            // legitimate partial receipts of one PO. The PO number rides along in
+                            // the note for context/search.
+                            TransactionNumber = lotNumber,
+                            TransactionType   = "PURCHASE",
+                            Commodity         = glCommodity,
+                            Amount            = po.LandedCost,
+                            Currency          = po.Currency,
+                            InitiatedBy       = receivedBy,
+                            Ownership         = ownershipType,       // KFH_OWNED for a supplier PO receipt
+                            ReceiptReason     = receiptReason,
+                            Note              = $"Receipt of Lot {lotNumber} ({totalItems} bar(s)) against PO {po.PoNumber}",
+                            OccurredAtUtc     = DateTime.UtcNow
+                        }, new PmimsInventoryAdapter());
+                    }
+                    catch (Exception glEx)
+                    {
+                        await SaveAuditLogAsync(receivedBy, "SYSTEM", "GL_INTEGRATION",
+                            $"GL posting skipped for PO {po.PoNumber} receipt (Lot {lotNumber}): {glEx.Message}",
+                            entityType: "PURCHASE_ORDER", entityId: po.PoId.ToString());
+                    }
                 }
             }
 
@@ -902,6 +1003,50 @@ public class InventoryRepository : IInventoryRepository
             await SaveAuditLogAsync(withdrawnBy, "SYSTEM", "CUSTODY",
                 $"Physical withdrawal completed for serial {item.SerialNumber} at branch #{branchId} (holding {holdingId}).",
                 entityType: "INVENTORY_TRANSACTION", entityId: tx.TransactionId.ToString());
+
+            // Plug-and-play General Ledger: the customer is taking their own metal back, so
+            // REVERSE the custody obligation booked at deposit. The config's ownership rule
+            // (Sale + ownership=CUSTOMER_OWNED) posts Dr 2900 / Cr 1900. Valued mark-to-market
+            // at bid, same convention as the deposit. Optional + guarded -- never breaks the
+            // physical withdrawal.
+            if (_glListener != null && _rateFeed != null)
+            {
+                try
+                {
+                    var prod = await _dbContext.MetalProducts
+                        .Where(p => p.ProductId == item.ProductId)
+                        .Join(_dbContext.MetalTypes, p => p.MetalTypeId, mt => mt.MetalTypeId, (p, mt) => new { mt.MetalName, p.DenominationId })
+                        .FirstOrDefaultAsync();
+                    decimal weight = prod == null ? 0m : await _dbContext.MetalDenominations
+                        .Where(d => d.DenominationId == prod.DenominationId)
+                        .Select(d => d.WeightGrams).FirstOrDefaultAsync();
+                    string metalName = prod?.MetalName ?? "UNKNOWN";
+                    var (bidRate, _, _) = await _rateFeed.GetLiveRatesAsync(metalName);
+                    decimal custodyValue = Math.Round(weight * (bidRate / 31.1034768m), 2);
+
+                    if (custodyValue > 0)
+                    {
+                        await _glListener.HandleAsync(new InventoryTransactionSnapshot
+                        {
+                            TransactionNumber = tx.TransactionNumber,   // unique per withdrawal -> idempotent
+                            TransactionType   = "REDEMPTION",            // adapter -> Sale; ownership routes to custody reversal
+                            Commodity         = metalName,
+                            Amount            = custodyValue,
+                            Currency          = "KWD",
+                            InitiatedBy       = withdrawnBy,
+                            Ownership         = "CUSTOMER_OWNED",        // -> custody withdrawal rule (Dr 2900 / Cr 1900)
+                            Note              = $"Custody withdrawal of {weight:0.###}g {metalName} (holding {holdingId}) to branch {branchId}.",
+                            OccurredAtUtc     = DateTime.UtcNow
+                        }, new PmimsInventoryAdapter());
+                    }
+                }
+                catch (Exception glEx)
+                {
+                    await SaveAuditLogAsync(withdrawnBy, "SYSTEM", "GL_INTEGRATION",
+                        $"GL custody-withdrawal posting skipped for holding {holdingId}: {glEx.Message}",
+                        entityType: "INVENTORY_TRANSACTION", entityId: tx.TransactionId.ToString());
+                }
+            }
 
             return "SUCCESS";
         }

@@ -4,55 +4,59 @@
    Primary: #009B4E (KFH Green) | Accent: #D4AF37 (Gold) | BG: #FFFFFF
    ============================================================================ */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Tajawal:wght@400;500;700;800&display=swap');
 
 :root {
   /* ── KFH Official Color Palette ── */
-  --kfh-green:        #009B4E;   /* Primary brand green */
-  --kfh-green-dark:   #007A3D;   /* Hover / pressed */
-  --kfh-green-light:  #E8F7F0;   /* Subtle bg tint */
-  --kfh-green-muted:  rgba(0, 155, 78, 0.12);
-  --kfh-gold:         #C9963D;   /* KFH warm gold accent */
-  --kfh-gold-light:   #FBF4E8;
+  --kfh-green:        #00934C;   /* Primary Brand Color */
+  --kfh-green-dark:   #007D40;   /* Darker hover green */
+  --kfh-green-light:  #EBF4EE;   /* Table Header Fill / subtle bg green tint */
+  --kfh-green-muted:  rgba(0, 147, 76, 0.12);
+  --kfh-gold:         #D97706;   /* Warning / Pending gold accent */
+  --kfh-gold-light:   #FEF3C7;
 
   /* ── Backgrounds ── */
-  --bg-primary:       #F5F6F8;   /* App canvas (off-white) */
-  --bg-secondary:     #FFFFFF;   /* Cards, panels */
-  --bg-topbar:        #1A1F2E;   /* Dark top bar (as per KFH site) */
-  --bg-sidebar:       #FFFFFF;   /* White sidebar */
+  --bg-primary:       #F4F6F5;   /* Main Dashboard Surface */
+  --bg-secondary:     #FFFFFF;   /* Data Grid / Card Background */
+  --bg-topbar:        #FFFFFF;   /* Sticky Header Fill */
+  --bg-sidebar:       #FFFFFF;   /* Left-side Navigation Rail Fill */
 
   /* ── Surfaces ── */
   --surface-glass:    rgba(255, 255, 255, 0.95);
-  --surface-border:   #E2E8F0;
+  --surface-border:   #E5E7EB;   /* Borders & Dividers */
 
-  /* ── Semantic Colors ── */
-  --accent-gold:      #C9963D;
-  --accent-gold-hover:#A77A2A;
-  --accent-green:     #009B4E;
-  --accent-green-muted: rgba(0, 155, 78, 0.12);
-  --accent-red:       #DC2626;
+  /* ── Semantic Colors (Status Colors) ── */
+  --accent-gold:      #D97706;   /* Low-Stock / Warning / Pending (Warm amber) */
+  --accent-gold-hover:#B45309;
+  --accent-green:     #00934C;   /* In-Stock / Success / Approved (KFH Green) */
+  --accent-green-muted: rgba(0, 147, 76, 0.12);
+  --accent-red:       #DC2626;   /* Out-of-Stock / Danger / Rejected (Clean crimson) */
   --accent-red-muted: rgba(220, 38, 38, 0.10);
   --accent-blue:      #0284C7;
-  --accent-orange:    #EA580C;
+  --accent-orange:    #D97706;
   --accent-purple:    #7C3AED;
 
   /* ── Text ── */
-  --text-primary:     #1A202C;   /* Dark charcoal */
-  --text-secondary:   #4A5568;   /* Medium gray */
-  --text-muted:       #718096;   /* Muted gray */
+  --text-primary:     #1A2A22;   /* KFH Slate/Charcoal for structural text/headings */
+  --text-secondary:   #374151;   /* Medium gray for body/labels */
+  --text-muted:       #6B7280;   /* Muted gray */
   --text-on-green:    #FFFFFF;   /* White on green bg */
-  --text-dark:        #1A202C;
+  --text-dark:        #1A2A22;
 
   /* ── Typography ── */
-  --font-headers: 'Outfit', sans-serif;
-  --font-body:    'Inter', sans-serif;
+  --font-headers: 'Tajawal', 'Inter', sans-serif;
+  --font-body:    'Inter', 'Tajawal', sans-serif;
 
-  /* ── Layout ── */
+  /* ── Layout & Radii (Enterprise Standard) ── */
   --sidebar-width: 270px;
-  --transition-smooth: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  --shadow-card:   0 1px 3px rgba(0,0,0,0.07), 0 4px 12px rgba(0,0,0,0.06);
-  --shadow-premium:0 4px 24px rgba(0,0,0,0.10);
-  --shadow-green:  0 4px 14px rgba(0, 155, 78, 0.25);
+  --transition-smooth: all 0.2s ease-in-out;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  
+  --shadow-card:   0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-premium:0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  --shadow-green:  0 4px 12px rgba(0, 147, 76, 0.15);
 }
 
 /* ============================================================================
@@ -125,8 +129,8 @@ a:hover {
 .logo-icon {
   width: 40px;
   height: 40px;
-  background: linear-gradient(135deg, var(--kfh-green), var(--kfh-gold));
-  border-radius: 10px;
+  background: linear-gradient(135deg, var(--kfh-green), #C9963D);
+  border-radius: var(--radius-lg);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -140,13 +144,13 @@ a:hover {
 
 .logo-text h2 {
   font-size: 16px;
-  color: #FFFFFF;
+  color: var(--text-primary);
   font-weight: 700;
 }
 
 .logo-text span {
   font-size: 9px;
-  color: rgba(255,255,255,0.55);
+  color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.15em;
   font-weight: 600;
@@ -177,7 +181,7 @@ a:hover {
   align-items: center;
   gap: 10px;
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   cursor: pointer;
   color: var(--text-secondary);
   font-weight: 500;
@@ -227,7 +231,7 @@ a:hover {
 
 .header-title-box h1 {
   font-size: 20px;
-  color: #FFFFFF;
+  color: var(--text-primary);
   font-weight: 600;
 }
 
@@ -238,10 +242,10 @@ a:hover {
 }
 
 .rate-ticker-live {
-  background-color: rgba(255,255,255,0.07);
-  border: 1px solid rgba(255,255,255,0.12);
+  background-color: var(--bg-primary);
+  border: 1px solid var(--surface-border);
   padding: 6px 16px;
-  border-radius: 30px;
+  border-radius: 20px;
   display: flex;
   gap: 16px;
   font-size: 12px;
@@ -251,15 +255,15 @@ a:hover {
   display: flex;
   align-items: center;
   gap: 6px;
-  color: rgba(255,255,255,0.85);
+  color: var(--text-secondary);
 }
 
-.ticker-item .gold-lbl { color: #F5C542; font-weight: 700; }
-.ticker-item .silver-lbl { color: rgba(255,255,255,0.6); font-weight: 700; }
-.ticker-item .val { font-family: monospace; }
-.ticker-item .green-arrow { color: #4ADE80; }
-.ticker-item .red-arrow { color: #F87171; }
-.ticker-item .flat-arrow { color: rgba(255,255,255,0.4); }
+.ticker-item .gold-lbl { color: var(--accent-gold); font-weight: 700; }
+.ticker-item .silver-lbl { color: var(--text-muted); font-weight: 700; }
+.ticker-item .val { font-family: monospace; font-weight: 600; }
+.ticker-item .green-arrow { color: var(--accent-green); }
+.ticker-item .red-arrow { color: var(--accent-red); }
+.ticker-item .flat-arrow { color: var(--text-muted); }
 
 /* ── Screen Viewports ── */
 .screen-viewport {
@@ -285,7 +289,7 @@ a:hover {
 .glass-card {
   background: var(--bg-secondary);
   border: 1px solid var(--surface-border);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   padding: 24px;
   box-shadow: var(--shadow-card);
   margin-bottom: 20px;
@@ -362,7 +366,7 @@ a:hover {
   border: 1px solid var(--surface-border);
   color: var(--text-secondary);
   padding: 9px 18px;
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   cursor: pointer;
   font-weight: 600;
   font-size: 13px;
@@ -404,7 +408,7 @@ a:hover {
 .table-responsive {
   width: 100%;
   overflow-x: auto;
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   border: 1px solid var(--surface-border);
 }
 
@@ -415,18 +419,18 @@ table {
 }
 
 th {
-  background-color: #F8FAFC;
-  color: var(--text-muted);
-  font-size: 10px;
+  background-color: var(--kfh-green-light); /* #EBF4EE light green tint */
+  color: var(--text-primary); /* KFH Slate/Charcoal */
+  font-size: 11px;
   text-transform: uppercase;
-  letter-spacing: 0.1em;
-  padding: 14px 18px;
+  letter-spacing: 0.05em;
+  padding: 8px 12px;
   font-weight: 700;
   border-bottom: 1px solid var(--surface-border);
 }
 
 td {
-  padding: 14px 18px;
+  padding: 8px 12px;
   font-size: 13px;
   border-bottom: 1px solid var(--surface-border);
   color: var(--text-primary);
@@ -437,21 +441,21 @@ tr:last-child td {
 }
 
 tr:hover td {
-  background-color: var(--kfh-green-light);
+  background-color: #F0F6F2; /* Soft row hover background shift */
 }
 
 /* ── Badges ── */
 .badge {
   padding: 3px 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
 }
 
-.badge-ready       { background-color: #DCFCE7; color: #16A34A; }
-.badge-reserved    { background-color: #FEF9C3; color: #CA8A04; }
-.badge-quarantined { background-color: #FEE2E2; color: #DC2626; }
+.badge-ready       { background-color: var(--kfh-green-light); color: var(--kfh-green); }
+.badge-reserved    { background-color: var(--kfh-gold-light); color: var(--accent-gold); }
+.badge-quarantined { background-color: var(--accent-red-muted); color: var(--accent-red); }
 .badge-transfer    { background-color: #E0F2FE; color: #0284C7; }
 
 /* ── Forms ── */
@@ -472,8 +476,8 @@ tr:hover td {
 
 .form-control, select, textarea {
   background-color: #FFFFFF;
-  border: 1px solid #CBD5E0;
-  border-radius: 7px;
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md);
   padding: 10px 12px;
   color: var(--text-primary);
   font-family: var(--font-body);

@@ -2,6 +2,7 @@ D:\Projects\Gold2\backend\PMIMS.WebAPI\bin\Debug\net10.0\appsettings.Development
 D:\Projects\Gold2\backend\PMIMS.WebAPI\bin\Debug\net10.0\appsettings.json
 D:\Projects\Gold2\backend\PMIMS.WebAPI\bin\Debug\net10.0\package-lock.json
 D:\Projects\Gold2\backend\PMIMS.WebAPI\bin\Debug\net10.0\PMIMS.WebAPI.staticwebassets.endpoints.json
+D:\Projects\Gold2\backend\PMIMS.WebAPI\bin\Debug\net10.0\Config\gl-accounts.gold-silver.json
 D:\Projects\Gold2\backend\PMIMS.WebAPI\bin\Debug\net10.0\LatoFont\Lato-Black.ttf
 D:\Projects\Gold2\backend\PMIMS.WebAPI\bin\Debug\net10.0\LatoFont\Lato-BlackItalic.ttf
 D:\Projects\Gold2\backend\PMIMS.WebAPI\bin\Debug\net10.0\LatoFont\Lato-Bold.ttf
@@ -209,11 +210,15 @@ D:\Projects\Gold2\backend\PMIMS.WebAPI\bin\Debug\net10.0\runtimes\win-arm\native
 D:\Projects\Gold2\backend\PMIMS.WebAPI\bin\Debug\net10.0\runtimes\win-arm64\native\e_sqlite3.dll
 D:\Projects\Gold2\backend\PMIMS.WebAPI\bin\Debug\net10.0\runtimes\win-x64\native\e_sqlite3.dll
 D:\Projects\Gold2\backend\PMIMS.WebAPI\bin\Debug\net10.0\runtimes\win-x86\native\e_sqlite3.dll
+D:\Projects\Gold2\backend\PMIMS.WebAPI\bin\Debug\net10.0\Ledger.Gl.dll
+D:\Projects\Gold2\backend\PMIMS.WebAPI\bin\Debug\net10.0\Ledger.Gl.EfCore.dll
 D:\Projects\Gold2\backend\PMIMS.WebAPI\bin\Debug\net10.0\PMIMS.Application.dll
 D:\Projects\Gold2\backend\PMIMS.WebAPI\bin\Debug\net10.0\PMIMS.Domain.dll
 D:\Projects\Gold2\backend\PMIMS.WebAPI\bin\Debug\net10.0\PMIMS.Infrastructure.dll
 D:\Projects\Gold2\backend\PMIMS.WebAPI\bin\Debug\net10.0\PMIMS.Application.pdb
 D:\Projects\Gold2\backend\PMIMS.WebAPI\bin\Debug\net10.0\PMIMS.Infrastructure.pdb
+D:\Projects\Gold2\backend\PMIMS.WebAPI\bin\Debug\net10.0\Ledger.Gl.EfCore.pdb
+D:\Projects\Gold2\backend\PMIMS.WebAPI\bin\Debug\net10.0\Ledger.Gl.pdb
 D:\Projects\Gold2\backend\PMIMS.WebAPI\bin\Debug\net10.0\PMIMS.Domain.pdb
 D:\Projects\Gold2\backend\PMIMS.WebAPI\obj\Debug\net10.0\PMIMS.WebAPI.csproj.AssemblyReference.cache
 D:\Projects\Gold2\backend\PMIMS.WebAPI\obj\Debug\net10.0\rpswa.dswa.cache.json

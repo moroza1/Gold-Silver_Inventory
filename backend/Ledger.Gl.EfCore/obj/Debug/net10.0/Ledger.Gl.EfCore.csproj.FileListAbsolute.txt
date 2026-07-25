@@ -1,0 +1,17 @@
+D:\Projects\Gold2\backend\Ledger.Gl.EfCore\bin\Debug\net10.0\Config\gl-accounts.gold-silver.json
+D:\Projects\Gold2\backend\Ledger.Gl.EfCore\bin\Debug\net10.0\Ledger.Gl.EfCore.deps.json
+D:\Projects\Gold2\backend\Ledger.Gl.EfCore\bin\Debug\net10.0\Ledger.Gl.EfCore.dll
+D:\Projects\Gold2\backend\Ledger.Gl.EfCore\bin\Debug\net10.0\Ledger.Gl.EfCore.pdb
+D:\Projects\Gold2\backend\Ledger.Gl.EfCore\bin\Debug\net10.0\Ledger.Gl.dll
+D:\Projects\Gold2\backend\Ledger.Gl.EfCore\bin\Debug\net10.0\Ledger.Gl.pdb
+D:\Projects\Gold2\backend\Ledger.Gl.EfCore\obj\Debug\net10.0\Ledger.Gl.EfCore.csproj.AssemblyReference.cache
+D:\Projects\Gold2\backend\Ledger.Gl.EfCore\obj\Debug\net10.0\Ledger.Gl.EfCore.GeneratedMSBuildEditorConfig.editorconfig
+D:\Projects\Gold2\backend\Ledger.Gl.EfCore\obj\Debug\net10.0\Ledger.Gl.EfCore.AssemblyInfoInputs.cache
+D:\Projects\Gold2\backend\Ledger.Gl.EfCore\obj\Debug\net10.0\Ledger.Gl.EfCore.AssemblyInfo.cs
+D:\Projects\Gold2\backend\Ledger.Gl.EfCore\obj\Debug\net10.0\Ledger.Gl.EfCore.csproj.CoreCompileInputs.cache
+D:\Projects\Gold2\backend\Ledger.Gl.EfCore\obj\Debug\net10.0\Ledger.Gl.EfCore.sourcelink.json
+D:\Projects\Gold2\backend\Ledger.Gl.EfCore\obj\Debug\net10.0\Ledger.G.4AE2216D.Up2Date
+D:\Projects\Gold2\backend\Ledger.Gl.EfCore\obj\Debug\net10.0\Ledger.Gl.EfCore.dll
+D:\Projects\Gold2\backend\Ledger.Gl.EfCore\obj\Debug\net10.0\refint\Ledger.Gl.EfCore.dll
+D:\Projects\Gold2\backend\Ledger.Gl.EfCore\obj\Debug\net10.0\Ledger.Gl.EfCore.pdb
+D:\Projects\Gold2\backend\Ledger.Gl.EfCore\obj\Debug\net10.0\ref\Ledger.Gl.EfCore.dll

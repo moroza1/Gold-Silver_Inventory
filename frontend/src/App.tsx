@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import GlConfigScreen from './GlConfigScreen';
 
 const API_BASE = 'http://localhost:5000/api';
 
@@ -815,6 +816,9 @@ export default function App() {
   const [execEndDate, setExecEndDate] = useState(() => getCurrentMonthRange().end);
   const [execBoard, setExecBoard] = useState<{
     total_gold_weight_kg: number;
+    available_weight_kg: number;
+    reserved_weight_kg: number;
+    custody_weight_kg: number;
     ready_qty: number;
     reserved_qty: number;
     custody_qty: number;
@@ -1260,16 +1264,19 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     { key: 'monitoring', label: 'Monitoring (SLA metrics & alert routing)', tier: 'Administration' },
     { key: 'device_integration', label: 'GDM Device Registration (manage machines)', tier: 'Administration' },
     { key: 'workflow_design', label: 'Workflow Designer (templates)', tier: 'Administration' },
+    { key: 'gl_config', label: 'GL Configuration (accounts & posting rules)', tier: 'Administration' },
     { key: 'user_admin', label: 'User & Group Admin', tier: 'Administration' },
     { key: 'settings', label: 'System Settings', tier: 'Administration' }
   ];
 
   const canAccess = (moduleKey: string) => {
-    if (Object.keys(userPermissions).length === 0) return true; // No permissions loaded yet = allow (backward compat)
+    if (!isLoggedIn) return false;
+    if (Object.keys(userPermissions).length === 0) return false; // No permissions loaded yet = deny
     return userPermissions[moduleKey] !== 'HIDDEN' && userPermissions[moduleKey] !== undefined;
   };
   const getAccess = (moduleKey: string): string => {
-    return userPermissions[moduleKey] || 'FULL';
+    if (!isLoggedIn) return 'HIDDEN';
+    return userPermissions[moduleKey] || 'HIDDEN';
   };
   const canModify = (moduleKey: string) => {
     const level = getAccess(moduleKey);
@@ -3613,12 +3620,12 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     return (
       <div style={{
         display: 'flex', justifyContent: 'center', alignItems: 'center', width: '100vw', height: '100vh',
-        background: 'linear-gradient(145deg, #F0FBF5 0%, #FFFFFF 40%, #E8F7F0 100%)'
+        background: 'linear-gradient(135deg, var(--bg-primary) 0%, #FFFFFF 50%, var(--kfh-green-light) 100%)'
       }}>
-        <form onSubmit={handleLogin} className="glass-card" style={{ width: '420px', padding: '44px', borderTop: '4px solid #009B4E' }}>
+        <form onSubmit={handleLogin} className="glass-card" style={{ width: '420px', padding: '44px', borderTop: '4px solid var(--kfh-green)', borderRadius: 'var(--radius-lg)' }}>
           <div style={{ textAlign: 'center', marginBottom: '32px' }}>
-            <div className="logo-icon" style={{ margin: '0 auto 18px', width: '56px', height: '56px', fontSize: '26px' }}>K</div>
-            <h2 style={{ color: '#009B4E', fontSize: '22px' }}>Kuwait Finance House</h2>
+            <div className="logo-icon" style={{ margin: '0 auto 18px', width: '56px', height: '56px', fontSize: '26px', borderRadius: 'var(--radius-lg)' }}>K</div>
+            <h2 style={{ color: 'var(--kfh-green)', fontSize: '22px' }}>Kuwait Finance House</h2>
             <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Treasury Inventory Portal (PMIMS)</span>
           </div>
 
@@ -3663,7 +3670,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   const menuNodesCanonical: MenuNode[] = [
     { type: 'section', key: 'section-dashboards', label: t('menu_dashboards') },
     { type: 'item', key: 'screen-exec', label: t('menu_exec'), icon: 'fa-solid fa-chart-line', permission: 'dashboard', onClick: () => setActiveTab('screen-exec') },
-    { type: 'item', key: 'screen-my-activity', label: t('menu_my_activity'), icon: 'fa-solid fa-user-clock', onClick: () => { setActiveTab('screen-my-activity'); fetchMyActivity(); } },
+    { type: 'item', key: 'screen-my-activity', label: t('menu_my_activity'), icon: 'fa-solid fa-user-clock', permission: 'dashboard', onClick: () => { setActiveTab('screen-my-activity'); fetchMyActivity(); } },
     { type: 'item', key: 'screen-pending-req', label: t('menu_pending_requests'), icon: 'fa-solid fa-circle-exclamation', permission: 'pending_actions', onClick: () => { setActiveTab('screen-pending-req'); fetchWorkflows(); fetchPOs(); } },
 
     { type: 'section', key: 'section-operations', label: t('menu_operations') },
@@ -3693,6 +3700,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     { type: 'item', key: 'screen-devices', label: currentLang === 'en' ? 'GDM Device Registration' : 'تسجيل أجهزة الصرف الذاتي', icon: 'fa-solid fa-microchip', permission: 'device_integration', onClick: () => { setActiveTab('screen-devices'); fetchGdmDevices(); fetchBranches(); } },
     { type: 'item', key: 'screen-rules', label: currentLang === 'en' ? 'Business Rules Engine' : 'محرك قواعد الأعمال', icon: 'fa-solid fa-scale-balanced', permission: 'rules_engine', onClick: () => { setActiveTab('screen-rules'); fetchBusinessRules(); } },
     { type: 'item', key: 'screen-monitoring', label: currentLang === 'en' ? 'Monitoring' : 'المراقبة والتنبيهات', icon: 'fa-solid fa-heart-pulse', permission: 'monitoring', onClick: () => { setActiveTab('screen-monitoring'); fetchSlaMetrics(); fetchMonitoringEvents(); fetchAlertRoutes(); } },
+    { type: 'item', key: 'screen-gl-config', label: currentLang === 'en' ? 'GL Configuration' : 'إعدادات دفتر الأستاذ', icon: 'fa-solid fa-book', permission: 'gl_config', onClick: () => setActiveTab('screen-gl-config') },
     { type: 'item', key: 'screen-admin', label: t('menu_settings'), icon: 'fa-solid fa-gears', permission: 'settings', onClick: () => setActiveTab('screen-admin') },
   ];
 
@@ -3853,10 +3861,10 @@ const [migrationApproved, setMigrationApproved] = useState(false);
         </nav>
 
         {/* User Info Footer */}
-        <div style={{ padding: '16px 18px', borderTop: '1px solid var(--surface-border)', fontSize: '12px', color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', gap: '6px', background: '#FAFAFA' }}>
+        <div style={{ padding: '16px 18px', borderTop: '1px solid var(--surface-border)', fontSize: '12px', color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', gap: '6px', background: 'var(--bg-secondary)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><i className="fa-solid fa-user" style={{ color: 'var(--kfh-green)' }}></i> <strong>{displayName}</strong></div>
-          <div style={{ fontSize: '10px', color: '#009B4E', fontWeight: 600 }}>{userRole}</div>
-          <button className="btn" style={{ padding: '5px 10px', fontSize: '11px', marginTop: '4px', borderColor: '#FCA5A5', color: '#DC2626', alignSelf: 'flex-start', background: '#FFF5F5' }} onClick={() => {
+          <div style={{ fontSize: '10px', color: 'var(--kfh-green)', fontWeight: 600 }}>{userRole}</div>
+          <button className="btn" style={{ padding: '5px 10px', fontSize: '11px', marginTop: '4px', borderColor: 'var(--accent-red-muted)', color: 'var(--accent-red)', alignSelf: 'flex-start', background: 'var(--accent-red-muted)', borderRadius: 'var(--radius-sm)' }} onClick={() => {
             disconnectMonitoringHub();
             setIsLoggedIn(false);
             setUsername('');
@@ -3881,7 +3889,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
           </div>
 
           <div className="header-controls">
-            <div className="rate-ticker-simulation">
+            <div className="rate-ticker-live">
               <div className="ticker-item">
                 <span className="gold-lbl">{t('ticker_gold')}</span>
                 <span className="val">${goldRate.toFixed(2)}</span>
@@ -4060,6 +4068,15 @@ const [migrationApproved, setMigrationApproved] = useState(false);
               </div>
             )}
           </div>
+        </section>
+
+        {/* SCREEN VIEWPORT: GL CONFIGURATION (chart of accounts + posting rules, maker-checker).
+            Self-contained component (see GlConfigScreen.tsx); talks to /api/gl-config. Gated by
+            the gl_config module; edit/approve controls appear only when canModify('gl_config'). */}
+        <section className={`screen-viewport ${activeTab === 'screen-gl-config' ? 'active' : ''}`}>
+          {activeTab === 'screen-gl-config' && (
+            <GlConfigScreen apiBase={API_BASE} canModify={canModify('gl_config')} lang={currentLang} />
+          )}
         </section>
 
         {/* SCREEN VIEWPORT: COMPLIANCE DASHBOARD (Reporting Requirements Gap Analysis, Item 6) --
