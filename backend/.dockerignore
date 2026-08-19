@@ -1,0 +1,11 @@
+**/bin/
+**/obj/
+**/.vs/
+**/.git/
+*.user
+*.suo
+pmims.db
+pmims.db-shm
+pmims.db-wal
+logs/
+ErrorLogs/

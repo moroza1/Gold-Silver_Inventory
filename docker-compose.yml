@@ -1,0 +1,53 @@
+services:
+  # 1. Backend ASP.NET Core API (.NET 10)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: pmims-backend
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:8080
+      # Set to 'true' to connect to SQL Server container below, or 'false' for self-seeding SQLite
+      - DatabaseConfig__UseSqlServer=false
+      - DatabaseConfig__SqlServerConnection=Server=sqlserver,1433;Database=KFH_PMIMS;User Id=sa;Password=StrongPassword123!;TrustServerCertificate=True;
+      - DatabaseConfig__SqliteConnection=Data Source=/app/data/pmims.db
+    volumes:
+      - backend-data:/app/data
+      - backend-logs:/app/logs
+
+  # 2. Frontend React Single Page App (Nginx)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: pmims-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "5173:80"
+    depends_on:
+      - backend
+
+  # 3. Optional SQL Server Database
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: pmims-sqlserver
+    restart: unless-stopped
+    environment:
+      - ACCEPT_EULA=Y
+      - MSSQL_SA_PASSWORD=StrongPassword123!
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqlserver-data:/var/opt/mssql
+    profiles:
+      - with-sqlserver
+
+volumes:
+  backend-data:
+  backend-logs:
+  sqlserver-data:
