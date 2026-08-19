@@ -634,9 +634,10 @@
         </section>
     </div>
 
-    <!-- JavaScript -->
     <script>
-        const API_BASE = 'http://localhost:5000/api/kfhonline';
+        const API_BASE = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+            ? 'http://localhost:8080/api/kfhonline'
+            : `http://${window.location.hostname}:8080/api/kfhonline`;
         let serialNumbers = [];
         let currentPrice = 65.00;
         let backendAvailable = true;  // Assume backend is running

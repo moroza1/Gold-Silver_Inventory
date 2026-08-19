@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 
-const API_BASE = 'http://localhost:5000/api';
+const API_BASE = (import.meta as any).env?.VITE_API_URL || 'http://69.62.116.52:8080/api';
 
 interface Customer {
   customerId: number;

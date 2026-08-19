@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import GfsApp from './GfsApp';
-
-const API_BASE = 'http://localhost:5000/api';
+const API_BASE = (import.meta as any).env?.VITE_API_URL || 'http://69.62.116.52:8080/api';
 
 // --- "Between dates" range filter helpers ---------------------------------
 // Shared by the My Activity and Executive Board screens, both of which default
