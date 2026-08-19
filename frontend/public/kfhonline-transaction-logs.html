@@ -345,8 +345,8 @@
 
     <script>
         const BACKEND_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-            ? 'http://localhost:8080/api/kfhonline'
-            : `http://${window.location.hostname}:8080/api/kfhonline`;
+            ? (window.location.port === '80' || window.location.port === '8080' ? 'http://localhost:8080/api/kfhonline' : 'http://localhost:5000/api/kfhonline')
+            : `http://${window.location.hostname || '69.62.116.52'}:8080/api/kfhonline`;
 
         async function loadLogs() {
             const customerId = document.getElementById('customerId').value;

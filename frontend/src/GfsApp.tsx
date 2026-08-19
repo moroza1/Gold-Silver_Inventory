@@ -1,6 +1,10 @@
 import { useState, useEffect } from 'react';
 
-const API_BASE = (import.meta as any).env?.VITE_API_URL || 'http://69.62.116.52:8080/api';
+const API_BASE = (import.meta as any).env?.VITE_API_URL || (
+  typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+    ? (window.location.port === '80' || window.location.port === '8080' ? `http://${window.location.hostname}:8080/api` : 'http://localhost:5000/api')
+    : 'http://69.62.116.52:8080/api'
+);
 
 interface Customer {
   customerId: number;
