@@ -1,0 +1,382 @@
+KFH Precious Metals Inventory Management System (PMIMS)
+RFP Compliance Gap-Closure Design Document
+Items 2–15 of the FIM/RFP Gap Analysis — Architecture, Database, API, Code, Configuration, Testing & Documentation
+Item 1 (FIM Integration Module) delivered as working code in an earlier pass; Items 5–8 (Rules Engine, Enhanced Audit Trail UI, Email Notifications, Monitoring Integration) delivered as working code in a subsequent pass — see §0.
+Prepared for: KFH Treasury Operations
+Prepared by: PMIMS Engineering (AI-assisted architecture pass)
+Date: 3 July 2026
+0. Executive Summary & How to Read This Document
+This document responds to the RFP gap analysis for PMIMS. Item 1 (FIM Integration Module) was flagged “Critical / Must Add” and was fully implemented in code in an earlier engineering pass — not just designed. Items 5, 6, 7 and 8 (Dynamic Business Validation Rules Engine, Enhanced Audit Trail UI, Automatic Management Email Notifications, and KFH Existing Monitoring Tool Integration) have since also been fully implemented in code, in a subsequent pass — see §0.1b. The remaining items (2, 3, 4, 9–15) are delivered here as build-ready designs: architecture and data flow, database changes, API changes, code implementation approach (Controller → Service → Repository, matching PMIMS's existing Clean Architecture split across PMIMS.Domain / PMIMS.Application / PMIMS.Infrastructure / PMIMS.WebAPI), configuration, testing strategy, and documentation deliverables — scoped for phased implementation without disrupting the live system.
+0.1 What shipped as working code in this pass (Item 1)
+Layer
+Artifact
+Location
+Domain
+FimUserAttribute, FimRight, FimUserRight, FimSyncLog entities; AppUser.PasswordAlgorithm
+backend/PMIMS.Domain/Entities.cs
+Application
+IFimService (29 RFP functions) + FIM DTOs
+backend/PMIMS.Application/Interfaces.cs, FimModels.cs
+Infrastructure
+FimService (real implementation, replaces the old mock) + PasswordHasher (BCrypt/AES-256/SHA-256)
+backend/PMIMS.Infrastructure/FimService.cs, PasswordHasher.cs
+WebAPI
+30 REST endpoints under /api/fim/*, gated by the existing user_admin policy
+backend/PMIMS.WebAPI/Controllers/PMIMSControllers.Fim.cs
+Database
+app_users / privilege_groups / group_permissions / user_group_memberships brought into schema.sql (were EF-only), plus fim_user_attributes, fim_rights, fim_user_rights, fim_sync_logs
+database/schema.sql
+Database
+31 sp_FIM_* stored procedures (one per function + sp_FIM_LogSyncChange helper)
+database/procedures.sql
+Tests
+xUnit coverage: provisioning, rights, both password algorithms, delta-sync
+backend/PMIMS.Tests/FimServiceTests.cs
+Docs
+Function → endpoint → stored-procedure map, connectivity support, error handling
+docs/FIM_INTEGRATION.md
+FIM provisioning deliberately reuses the existing user_admin permission module (docs/PERMISSIONS.md) rather than introducing a new module key — that catalog already lists “FIM provisioning” under user_admin, and every other admin/governance surface (users, groups, permissions) follows the same policy. No Program.cs authorization changes were required.
+0.1b What shipped as working code in a subsequent pass (Items 5–8)
+Items 5, 6, 7 and 8 — flagged Medium/High priority, Phase 1–2 in the roadmap below — were subsequently taken from design to fully working code in the same Clean Architecture split as Item 1, without disrupting any existing endpoint or repository method (all new IInventoryRepository members are additive; the one existing call site that was modified, TransferStockWorkflow, gained an additive pre-check that fails closed only when a BLOCK-severity rule explicitly matches). The §16 roadmap and §16.1 acceptance criteria below have been updated accordingly.
+Item
+Key Code Artifacts
+Primary Location(s)
+5 — Rules Engine
+BusinessRule / BusinessRuleEvaluation entities; IRuleEngineService + RuleEngineService (JSON predicate-tree evaluator, append-only versioning); rules_engine module (.read/.write); GET/POST/PUT /api/rules*; additive pre-check wired into TransferStockWorkflow.
+RuleEngineService.cs, PMIMSControllers.Rules.cs
+6 — Audit Trail UI
+AuditLog.EntityType/EntityId/RowHash (SHA-256 tamper fingerprint, backward-compatible/nullable); SearchAuditLogsAsync / GetAuditLogByIdAsync (Verified/Tampered/Unverified); IAuditExportService + AuditExportService (CSV/XLSX via ClosedXML, PDF via QuestPDF); GET /api/reports/audit-logs/search|{id}|export.
+AuditExportService.cs, PMIMSControllers.Audit.cs
+7 — Email Notifications
+NotificationSubscription / NotificationDelivery entities; IEmailSenderService + EmailSenderService (MailKit SMTP); NotificationSchedulerService (hosted BackgroundService, Cronos cron matching, reuses AuditExportService table renderer for attachments); notifications module (.read/.write); subscriptions CRUD + test-send + anonymous unsubscribe link.
+EmailSenderService.cs, NotificationSchedulerService.cs, PMIMSControllers.Notifications.cs
+8 — Monitoring Integration
+MonitoringEvent / MonitoringAlertRoute entities; IMonitoringAdapter + GenericWebhookMonitoringAdapter (generic webhook push with local monitoring_events audit buffer regardless of push outcome, SLA metrics snapshot, detailed health); wired into ReconciliationService (alert push on breaks > 0); monitoring module (.read/.write); anonymous GET /api/health/detailed.
+MonitoringAdapter.cs, PMIMSControllers.Monitoring.cs
+Database (shared)
+business_rules, business_rule_evaluations, notification_subscriptions, notification_deliveries, monitoring_events, monitoring_alert_routes tables + indexes; audit_logs gained entity_type/entity_id/row_hash (nullable ALTER, backward-compatible); sp_SearchAuditLogs, sp_EvaluateBusinessRule, sp_GetDueNotificationSubscriptions, sp_GetSlaMetricsSnapshot.
+database/schema.sql, database/procedures.sql
+Wiring & Tests (shared)
+4 new DI registrations + QuestPDF Community license line + NotificationSchedulerService hosted service in Program.cs; 6 new rules_engine/notifications/monitoring .read/.write policies; DbSeeder.cs module keys (default HIDDEN for Maker/Checker, READ_ONLY for Reconciliation on rules_engine/monitoring, FULL for IT Admin) + one demo row per new table; AllModuleKeys array; docs/PERMISSIONS.md catalog, endpoint→policy map and role matrix updated; ~30 xUnit tests covering rule evaluation semantics, tamper detection, notification CRUD, and the monitoring adapter.
+Program.cs, DbSeeder.cs, docs/PERMISSIONS.md, PMIMS.Tests/RfpItems5to8Tests.cs
+Licensing note: PDF generation (Item 6 export, reused by Item 7) uses QuestPDF, whose free Community tier is capped at $1M USD annual gross revenue. As a bank, KFH will need a QuestPDF Commercial license before production use.
+0.2 Conventions used throughout this document
+Database objects: snake_case table/column names, sp_ prefix for stored procedures (sp_FIM_ for this pass, matching sp_CreatePurchaseOrder / sp_RecalculateInventoryBalance precedent).
+API authorization: [Authorize(Policy = "<module>.read"/"<module>.write")] on every mutating/sensitive endpoint — the AGENTS.md “missing [Authorize] = anonymous access” lesson applies to every new endpoint below.
+New permission modules (where introduced) follow the existing operational-vs-administrative segregation documented in docs/PERMISSIONS.md and docs/MODULE_SEGREGATION_REVIEW.md.
+Dual database provider: every new table/procedure targets SQL Server T-SQL (production) with the existing SQLite EnsureCreated() dev fallback in mind — avoid SQL Server-only syntax in paths the EF Core model also needs to satisfy.
+IMAL (core banking rate feed) and GL (general ledger reconciliation) already exist as concepts in PMIMS (README.md, ExternalServices.cs); GFS, Phoenix and SAP do not appear anywhere in the current codebase — those integrations are greenfield and scoped conservatively (adapter interfaces, not vendor-specific SDKs baked into the core).
+16. Consolidated Implementation Roadmap
+Phasing balances RFP-stated priority against technical dependency. Item 1 (FIM) is complete. Phase 1 items are foundational (security/audit/documentation) and largely independent of each other. Phase 2 depends on Phase-1 tooling (export/adapter patterns). Phase 3 depends on Phase-2 integrations (auth extensions, adapter patterns) being proven in production first.
+Item
+Priority
+Phase
+Depends on
+1 — FIM Integration Module
+Critical
+Delivered this pass
+—
+11 — Remove Inline Queries
+High
+Phase 1
+—
+6 — Enhanced Audit Trail UI [DELIVERED]
+High
+Delivered (subsequent pass)
+11 (query pattern), FIM audit conventions
+12 — Vulnerability Coverage Documentation
+High
+Phase 1
+11
+9 — Data Dictionary (Excel)
+Medium (doc)
+Phase 1, parallel
+—
+10 — Data Model (Erwin 9.x)
+Medium (doc)
+Phase 1, parallel
+9
+14 — Deployment & Environment Docs
+Medium (doc)
+Phase 1, parallel
+—
+15 — Solution Lifecycle Documentation
+Medium (doc)
+Phase 1, parallel; quarterly refresh
+—
+5 — Dynamic Business Rules Engine [DELIVERED]
+Medium
+Delivered (subsequent pass)
+—
+3 — KFH Integration Middleware
+Medium
+Phase 2
+—
+8 — KFH Monitoring Integration [DELIVERED]
+Medium
+Delivered (subsequent pass)
+3 (shares adapter pattern)
+7 — Automatic Email Notifications [DELIVERED]
+Medium
+Delivered (subsequent pass)
+6 (export tooling reuse)
+4 — SAP EBI Integration
+Medium
+Phase 3
+7 (export tooling reuse)
+2 — Mobile App (Android/NFC)
+Medium
+Phase 3
+1 (auth), 6 (sync pattern)
+13 — Vendor Deliverables
+Ongoing
+All phases
+All items
+16.1 Acceptance criteria for this document
+Item 1: code compiles against the existing PMIMS.sln, xUnit suite passes, docs/FIM_INTEGRATION.md accurately reflects the shipped endpoint/procedure map (verified in an earlier pass).
+Items 5, 6, 7, 8: code compiles against the existing PMIMS.sln; the ~30-test xUnit suite in PMIMS.Tests/RfpItems5to8Tests.cs traces through RuleEngineService's actual pass/fail/BLOCK-vs-WARN semantics, the audit-log tamper-hash comparison, notification subscription CRUD, and the monitoring adapter's DISABLED/FAILED/DEGRADED status logic rather than asserting against assumed behavior; docs/PERMISSIONS.md accurately reflects the three new rules_engine/notifications/monitoring modules end to end (module catalog, endpoint→policy map, and DbSeeder.cs role matrix); an independent Read/Grep-only review pass found zero compile- or logic-breaking issues across all 20 changed/new files (verified in this pass).
+Items 2, 3, 4, 9–15: each section above is sufficient for a development team to produce a sprint-level task breakdown without further requirements discovery — architecture, schema, endpoints, and UAT scenarios are all stated concretely against the real PMIMS codebase, not generic RFP boilerplate.
+2. Mobile App Module (Android with NFC)
+New Android client + a thin mobile-facing REST surface reusing existing inventory/transfer/intake services.
+Architecture / Design
+Component flow: Android app (Kotlin, MVVM) → OAuth2 login → PMIMS.WebAPI mobile endpoints → existing IInventoryRepository / branch-transfer / intake services (no duplicate business logic). Local Room (SQLite) cache mirrors server state for offline lookup; WorkManager drives sync-on-connect.
+NFC/scan flow: CameraX + ML Kit Barcode Scanning (QR/1D barcodes) and Android NfcAdapter (NDEF reads for NFC-tagged bins/packages) resolve a scanned code to inventory_items.serial_number (already unique-indexed) before calling the relevant confirm/verify endpoint.
+Auth: extend the existing JWT login with a mobile-appropriate OAuth2 flow (longer-lived refresh token, device-bound) rather than replacing PMIMSControllers.GenerateJwt — same claims shape (roles + perm:* claims), so server-side authorization is unchanged.
+Database Changes
+device_registrations (device_id PK, user_id FK app_users, platform, app_version, push_token, last_sync_at, is_active).
+mobile_sync_cursors (user_id, entity_type, last_synced_at) — per-user incremental sync watermark, same pattern as fim_sync_logs' delta model.
+No changes to inventory_items / branch_transfers / pending_intakes — the mobile module is a client, not a new source of truth.
+API Changes
+POST /api/auth/mobile/token — OAuth2 password/refresh grant, longer refresh-token TTL, device_id bound.
+GET /api/mobile/inventory/lookup?serial= — resolves a scanned serial to item/location/status.
+POST /api/mobile/transfers/{transferId}/confirm, POST /api/mobile/intake/{poId}/verify — thin wrappers over existing repository methods (ReceiveBranchTransferAsync / IntakeInventoryItemsAsync).
+GET /api/mobile/notifications — pending actions relevant to the device's user (reuses GetPendingWorkflowInstancesForUserAsync).
+GET /api/mobile/sync/delta?since= — mirrors the FIM delta-sync pattern for offline cache refresh.
+New module key mobile (operational tier): mobile.read / mobile.write policies, same [Authorize(Policy=...)] convention as every other module.
+Code Implementation
+PMIMSControllers.Mobile.cs — new partial class, thin delegation only, no new business rules.
+Android: Kotlin, minSdk 21 (Android 5.0 Lollipop) for backward compatibility with AppCompat/Room; Retrofit + OkHttp for REST; Room for the offline cache; WorkManager for background sync; CameraX/ML Kit for scanning.
+Screens (Fragment + ViewModel each): Inventory Lookup, Transfer Confirmation, Receipt Verification, Barcode/QR Scan, Notifications.
+Configuration
+Mobile:RefreshTokenExpiryDays, Mobile:MinSupportedAppVersion (server-enforced minimum, rejects stale clients).
+Android build variants carry the API base URL per environment (Dev/UAT/Stage/Prod).
+Testing Strategy
+Android: JUnit + Espresso (UI flows), Robolectric for ViewModel logic.
+Backend: xUnit for PMIMSControllers.Mobile.cs against mocked IInventoryRepository.
+UAT: warehouse operator scans an NFC-tagged sealed package at the receiving dock while offline; app queues the intake verification locally; on reconnect, sync-on-connect pushes it and PMIMS reflects RECEIVED status within one sync cycle.
+Documentation
+Mobile app end-user guide (per screen), API reference addendum for /api/mobile/*, offline-conflict-resolution note (last-write-wins with server-side revalidation against RowVersion where applicable).
+3. KFH Integration Middleware (Web Services Based)
+SOAP/WCF adapter layer routing outbound integrations (IMAL, GL, and the RFP-named GFS/Phoenix once scoped) through KFH's middleware instead of calling core systems directly.
+Architecture / Design
+PMIMS.Infrastructure → IIntegrationMiddlewareClient (new Application-layer interface) → KfhMiddlewareSoapClient (WCF BasicHttpBinding, mTLS client certificate) → KFH Integration Middleware → IMAL / GL / GFS / Phoenix.
+Existing direct call sites (RateFeedService's IMAL fallback, ReconciliationService's GL mapping) are redirected through this client instead of calling the target system directly — the middleware becomes the single egress point, matching the RFP's “route all integration touch points through KFH Integration Middleware” requirement.
+A local outbound queue + dead-letter table absorbs middleware unavailability so PMIMS operations (e.g., a reconciliation run) don't hard-fail on a transient integration outage.
+Database Changes
+integration_outbound_messages (message_id, target_system, message_type, payload_xml, status_code [PENDING/SENT/FAILED/DEAD_LETTER], attempt_count, last_attempt_at, created_at).
+integration_dead_letters (dead_letter_id, message_id FK, failure_reason, moved_at).
+Index on (status_code, target_system) for the retry sweeper's polling query.
+API Changes
+No new public integration endpoints — the change is internal (service call sites redirected).
+GET /api/integration/outbound-messages, POST /api/integration/outbound-messages/{id}/retry — ops visibility/manual-replay, new integration_ops module (admin tier).
+Code Implementation
+IIntegrationMiddlewareClient.SendAsync(targetSystem, messageType, payloadXml) (PMIMS.Application).
+KfhMiddlewareSoapClient (PMIMS.Infrastructure) — WCF ChannelFactory<IKfhMiddlewarePortType> against the middleware's WSDL; Polly-driven exponential-backoff retry; on exhaustion, writes to integration_dead_letters instead of throwing to the caller.
+RateFeedService and ReconciliationService updated to depend on IIntegrationMiddlewareClient instead of the current direct HTTP/simulated call — behind a feature flag so dev/UAT can keep the existing simulated feed.
+Configuration
+IntegrationMiddleware:Endpoint, :ClientCertificateThumbprint, :RetryMaxAttempts, :RetryBackoffSeconds, :Enabled (falls back to today's simulated feed when false).
+Testing Strategy
+Unit tests mocking IIntegrationMiddlewareClient for both RateFeedService and ReconciliationService call sites.
+Integration test against a WireMock/soapUI-hosted SOAP stub simulating the middleware's WSDL contract.
+UAT: simulate a middleware outage, confirm the message lands in the dead-letter table and is successfully replayable via the retry endpoint.
+Documentation
+Middleware message catalog (message_type → target_system → XSD schema), retry/dead-letter-queue operational runbook.
+4. SAP Enterprise Business Intelligence (EBI) Integration
+Scheduled ETL export from PMIMS reporting views into a SAP BusinessObjects/BW-compatible landing format — batch, not live SAP calls.
+Architecture / Design
+PMIMS SQL Server (star-schema reporting views) → scheduled export job (hosted BackgroundService, same pattern as ReservationCleanupService) → flat-file drop (pipe-delimited, BODS-import-ready) → SAP Business Objects Data Services (BODS) / BW load.
+OLAP cube exports are produced from the same fact views in a SAP-compatible dimensional shape (date, metal type, branch, ownership type as dimensions; quantity and KWD value as measures).
+Database Changes
+Views: vw_sap_inventory_fact, vw_sap_transaction_fact, vw_sap_valuation_fact — star-schema shaped over inventory_balances, inventory_transactions, valuation_snapshots.
+sap_export_runs (run_id, export_type, row_count, started_at, completed_at, status_code, file_path) — run history/audit.
+API Changes
+POST /api/sap/exports/{exportType}/run — manual trigger (sap_integration module, .write).
+GET /api/sap/exports — run history.
+Code Implementation
+ISapExportService / SapExportService generating the documented pipe-delimited extract per exportType, hosted as a BackgroundService on a configurable cron (default nightly 02:00 Kuwait time).
+Configuration
+SapIntegration:ExportScheduleCron, :ExportDropFolder, :Enabled.
+Testing Strategy
+Unit tests validating extract row counts and column mapping against seeded data.
+UAT: run an export, load the sample file into a SAP BODS staging table (or an equivalent mock loader) and confirm zero truncation/type-mismatch errors.
+Documentation
+ETL pipeline document (source view → transform → target field mapping), OLAP cube dimension/measure reference.
+5. Dynamic Business Validation Rules Engine [DELIVERED — see §0.1b]
+In-database rule catalog + in-memory evaluation engine, invoked as a pre-check inside existing transfer/receipt/reservation/PO flows — additive to, not a replacement for, current hard-coded guards (e.g., the vendor Sharia-compliance check in sp_CreatePurchaseOrder).
+Architecture / Design
+Mirrors the existing Maker-Checker workflow engine's “pluggable step” philosophy, but for validation rather than approval routing.
+Extension points: transfer initiation, receipt/intake validation, customer eligibility, rate thresholds, inventory availability checks — called from the corresponding IInventoryRepository methods before the existing stored-procedure-level checks run.
+Rules are stored as a structured predicate tree (field/operator/value/and-or), not executable code — this closes off a code-injection surface entirely, at the cost of expressiveness (acceptable given the RFP's stated rule categories are all simple comparisons/thresholds).
+Database Changes
+business_rules (rule_id, rule_code, rule_name, rule_type [TRANSFER_LIMIT/RECEIPT_VALIDATION/CUSTOMER_ELIGIBILITY/RATE_THRESHOLD/INVENTORY_CHECK], expression_json, severity [BLOCK/WARN], version, is_active, effective_from, effective_to, created_by, created_at).
+business_rule_evaluations (evaluation_id, rule_id, entity_type, entity_id, result [PASS/FAIL/WARN], evaluated_at, context_json) — evaluation audit trail.
+API Changes
+GET/POST/PUT /api/rules, POST /api/rules/{id}/activate, POST /api/rules/{id}/deactivate, GET /api/rules/{id}/versions, POST /api/rules/evaluate (ad-hoc test-evaluate).
+New rules_engine module, admin tier (.read/.write), same segregation pattern as workflow_design vs. workflows.
+Code Implementation
+IRuleEngineService.EvaluateAsync(ruleType, context) (PMIMS.Application) — walks active rules of that type by version, evaluates the predicate tree in-memory, returns pass/fail/warnings.
+Called from InitiateBranchTransferAsync, IntakeInventoryItemsAsync, ReserveStockAsync, and PO creation as an additive pre-check.
+Optional sp_EvaluateBusinessRule T-SQL mirror for direct-DB batch validation scenarios.
+In-memory rule cache with save-triggered invalidation (RulesEngine:CacheTtlSeconds).
+Configuration
+RulesEngine:CacheTtlSeconds, per-rule_type feature flags (RulesEngine:Enabled:<RuleType>).
+Testing Strategy
+Unit tests per predicate operator (>=, <=, in, between) and per rule_type.
+Regression test confirming existing hard-coded validations (e.g., Sharia vendor check) still fire even when the rules engine is disabled.
+UAT: a business user adds “no single transfer over 5kg gold without dual approval” with zero code deploy; confirm it blocks a 6kg transfer attempt and the admin UI shows the rule as active with correct version history.
+Documentation
+Rule-authoring guide, predicate-tree JSON schema reference, admin UI screen (screen-rules) walkthrough.
+6. Enhanced Audit Trail UI [DELIVERED — see §0.1b]
+Built directly on the existing audit_logs table and GET /api/reports/audit-logs endpoint — adds search, filtering, export and tamper-detection without changing the write path (every module already writes here).
+Architecture / Design
+Read-side enhancement only: every module already calls SaveAuditLogAsync on mutating actions, so no new instrumentation is needed at the write path — this item is entirely about making the existing audit_logs data explorable.
+Tamper-detection: a row_hash column (SHA-256 over the row's other columns, computed at insert time) lets the UI recompute-and-compare on read; a mismatch surfaces as a tamper indicator per row.
+Database Changes
+ALTER audit_logs ADD entity_type, entity_id, row_hash (all nullable — backward compatible with existing rows, which show “Unverified (pre-dates hashing)” rather than a false tamper flag).
+CREATE FULLTEXT INDEX on audit_logs(action_description) for full-text search across action descriptions.
+sp_SearchAuditLogs — dynamic filter (user/timestamp/action type/module/entity/status) built from sanitized parameters, never string-concatenated (ties directly into Item 11's inline-query policy).
+API Changes
+GET /api/reports/audit-logs/search?query=&user=&module=&entityType=&status=&from=&to=&page= — paginated, filtered, full-text.
+GET /api/reports/audit-logs/{id} — single-entry drill-down with recomputed tamper-check status.
+GET /api/reports/audit-logs/export?format=pdf|xlsx|csv — under the existing reports.read policy.
+Code Implementation
+Extend IInventoryRepository.GetAuditLogsAsync with a filtered/paged overload backed by sp_SearchAuditLogs.
+New AuditExportService for PDF/Excel/CSV/print-friendly rendering (reused by Item 4's SAP export and Item 7's scheduled reports).
+Configuration
+Audit:FullTextSearchEnabled, Audit:ExportMaxRows (guard against unbounded exports).
+Testing Strategy
+Unit tests for hash computation/verification and for the dynamic filter builder, including SQL-injection negative test cases.
+UAT: search “purchase order” across 90 days of logs, filter by user + module, export to Excel, confirm the exported row count matches the on-screen filtered count.
+Documentation
+Audit trail explorer user guide; tamper-detection methodology note (row_hash detects in-place row edits, not deletions — pair with DB-level access controls for deletion protection).
+7. Automatic Management Email Notifications [DELIVERED — see §0.1b]
+Scheduled report generation + email dispatch, layered on the existing reorder_thresholds / CheckLowStockAlertsAsync (today exposed as an API but not proactively emailed) and inventory_balances.
+Architecture / Design
+INotificationSchedulerService (hosted BackgroundService, same pattern as ReservationCleanupService) evaluates due subscriptions each tick, generates the report via Item 6's AuditExportService-style builder, and dispatches through IEmailSenderService (MailKit SMTP client).
+Database Changes
+notification_subscriptions (subscription_id, distribution_list_email, report_type [INVENTORY_BALANCE/LOW_STOCK/HIGH_VALUE_MOVEMENT], schedule_cron, format [PDF/XLSX/BOTH], is_active, unsubscribed_at).
+notification_deliveries (delivery_id, subscription_id, sent_at, status_code [SENT/FAILED/BOUNCED], message_id) — delivery tracking.
+API Changes
+GET/POST/PUT/DELETE /api/notifications/subscriptions, POST /api/notifications/subscriptions/{id}/test-send, GET /api/notifications/deliveries.
+GET /api/notifications/unsubscribe?token= — anonymous, signed single-use token (standard email-compliance pattern, no login required).
+Code Implementation
+IEmailSenderService (MailKit) with tracked message_id; INotificationSchedulerService evaluates schedule_cron due-ness and configurable thresholds (low-stock, high-value movement) each tick.
+Configuration
+Email:SmtpHost/Port/Username/Password (secret-store in prod, dev-only placeholder mirroring the Jwt:Key pattern).
+Notifications:LowStockThresholdCheckIntervalMinutes, Notifications:HighValueMovementThresholdKwd.
+Testing Strategy
+Unit tests for cron-due evaluation and threshold-breach detection.
+Integration test against a local SMTP catcher (smtp4dev/MailHog).
+UAT: configure a low-stock alert threshold, drop stock below it via a test transfer, confirm the email arrives within one scheduler tick with the correct PDF/Excel attachment.
+Documentation
+Notification configuration guide; unsubscribe/compliance footer requirement note.
+8. KFH Existing Monitoring Tool Integration [DELIVERED — see §0.1b]
+A generic monitoring adapter interface — same “adapter, not vendor lock-in” approach as Item 3 — so PMIMS can push to whichever tool KFH already runs without a hard vendor SDK dependency baked into the core.
+Architecture / Design
+IMonitoringAdapter (PMIMS.Application) with a default GenericWebhookMonitoringAdapter (PMIMS.Infrastructure) implementation — HTTP POST to a configured webhook URL; payload mapping is adjusted once KFH's specific tool is named, without touching call sites.
+Existing GET /api/health is extended, not replaced.
+Database Changes
+monitoring_events (event_id, event_type [HEALTH_CHECK/SLA_METRIC/ALERT], service_name, metric_name, metric_value, severity, occurred_at, pushed_at, push_status) — local buffer/audit of everything pushed.
+monitoring_alert_routes (event_type, severity, destination) — routing table for fan-out to different receivers/on-call groups.
+API Changes
+GET /api/health/detailed — per-dependency status (DB, integration middleware, email relay), extending the existing GET /api/health.
+GET /api/monitoring/sla-metrics — rolling error rate, latency proxy, workflow-SLA-breach count, for the monitoring tool to pull.
+Code Implementation
+IMonitoringAdapter.PushAsync(MonitoringEvent) called from key event points (reconciliation break detected, DLQ item aged out from Item 3) in addition to a periodic health/SLA push.
+Configuration
+Monitoring:WebhookUrl, :PushIntervalSeconds, :Enabled; per-severity routing in monitoring_alert_routes.
+Testing Strategy
+Unit tests for payload mapping.
+UAT: force a reconciliation mismatch, confirm an alert event appears in monitoring_events with push_status=SENT and is received correctly by a stubbed receiver.
+Documentation
+Monitoring configuration guide, alert routing matrix, standardized per-service health endpoint contract (for if the monolith is later decomposed).
+9. Data Dictionary (Excel Format)
+A generated, not hand-maintained, Excel workbook — PMIMS already carries full schema metadata (EF Core model + database/schema.sql), so the dictionary should be produced from that source of truth to avoid drift.
+Approach
+A small offline generator (tools/generate-data-dictionary/) reads INFORMATION_SCHEMA (or the EF Core model) and cross-references a curated business_glossary.json (business entity/attribute names and definitions the schema alone can't infer), emitting one row per column with exactly the RFP-required fields: Table Name, Associated Business Entity Name, Definition of Entity, Column Name, Associated Business Attribute Name, Business Attribute Definition, Data Type/Scale/Precision, Nullability, Format Pattern, Domain Range, Primary Key, Foreign Keys, Alternate Key, Subject Area.
+ISO/IEC 11179-4 compliance: each Business Attribute Definition follows the standard's precise / concise / non-circular / unit-of-measure-stated rules; a short authoring checklist ships in the tool's README.
+Deliverable
+PMIMS_Data_Dictionary.xlsx — one worksheet per Subject Area (Inventory Ledger, Customer Holdings, Transactions, Workflows & Security, FIM Integration, Reconciliation & Valuation, ...) plus an index sheet.
+Testing / Acceptance
+Generated row count matches INFORMATION_SCHEMA.COLUMNS count for the target database.
+DBA sign-off spot-check.
+Regenerate-and-diff wired into CI so drift between the dictionary and the live schema is caught automatically (shared mechanism with Item 15's lifecycle tracking).
+10. Data Model (CA Erwin 9.x Format)
+database/schema.sql is the authoritative DDL; the conversion path is DDL → Erwin reverse-engineer import, not a hand-built model file that risks drifting from the real schema.
+Approach
+1) Stand up a disposable SQL Server instance from database/schema.sql + database/procedures.sql.
+2) Erwin Data Modeler 9.x “Reverse Engineer” (ODBC) against that instance produces the physical model.
+3) Hand-author the logical-level overlay in Erwin — business names, relationship cardinality, bi-directional relationship phrases (e.g., “InventoryItem is stored in InventoryLocation” / “InventoryLocation stores InventoryItem”) — since phrasing/cardinality is a modeling decision Erwin can't infer from DDL alone.
+4) Export Physical and Logical model views plus a subject-area diagram per module, using the same Subject Area grouping as Item 9's data dictionary so both deliverables stay consistent with each other.
+Deliverable
+PMIMS_DataModel.erwin (or .ERX interchange format, so the round-trip can be validated without requiring a licensed Erwin seat).
+Validation
+Round-trip test: export .ERX, re-import into a clean Erwin session, diff entity/attribute/relationship counts against the source to confirm zero data loss before hand-off.
+Maintenance note
+One-time-per-schema-version artifact — re-run steps 1–4 whenever schema.sql changes materially; tie to the same CI schema-drift check as Item 9.
+11. Remove Inline Queries
+Audit + enforce. PMIMS already leans on stored procedures for its critical write paths (sp_CreatePurchaseOrder, sp_RecalculateInventoryBalance, etc.) — this item closes the remaining gaps and makes the pattern unbreakable going forward.
+Audit findings (this pass)
+The pre-existing FIM mock in ExternalServices.cs called ExecuteSqlRawAsync with parameterized placeholders (not string-concatenated, but still raw SQL in application code). It has been removed as part of the Item 1 rebuild — the new FimService uses EF Core LINQ plus the sp_FIM_* procedures exclusively, closing that instance.
+Recommended next step: run a repo-wide grep for ExecuteSqlRaw, FromSqlRaw, and any string-built SQL across backend/ and catalog every remaining hit with file:line before remediation.
+Remediation plan
+For each hit: convert to a parameterized stored procedure call (preferred — consistent with the sp_ convention) or a pure EF Core LINQ query. Never string-concatenated SQL, regardless of parameterization.
+Add a Roslyn analyzer rule to the existing PMIMS.Analyzers / PMIMS.Analyzers.Test project scaffold that flags ExecuteSqlRaw / FromSqlRaw / ad-hoc SqlCommand construction built from a non-constant, non-parameterized string — build-breaking severity.
+CI/CD
+Wire the analyzer as an error-severity rule (Directory.Build.props / .editorconfig) so dotnet build fails on a violation.
+Document the rule as a required pre-merge check in the code-review policy.
+Documentation
+docs/NO_INLINE_QUERIES.md — policy statement, analyzer rule ID, and a remediation log (what was found, what it was converted to, date, PR reference).
+12. Vulnerability Coverage Documentation
+Documents controls already in place and the specific gaps already visible in the codebase today, rather than a generic checklist.
+Structure
+OWASP Top 10 (2021) coverage matrix — one row per category with status (Covered / Partial / Gap) and an evidence pointer. Examples already evident in the repo: A01 Broken Access Control → server-side [Authorize(Policy=...)] enforcement per docs/PERMISSIONS.md (Covered); A02 Cryptographic Failures → PasswordHasher's BCrypt/AES-256/SHA-256 handling, but the dev-only JWT signing key and AES key placeholders in appsettings.json are a flagged Gap until moved to a secret store; A03 Injection → addressed by Item 11's inline-query removal; A05 Security Misconfiguration → CORS is currently AllowAll (Program.cs), flagged as a Gap requiring an explicit origin allowlist before production.
+SANS/CWE Top 25 mapping in the same Covered/Partial/Gap format.
+Database-specific checks: least-privilege SQL login for the app service account, TDE-at-rest recommendation, xp_cmdshell disabled, stored-procedure-only data access surface (ties to Item 11).
+Remediation plan: owner + target date per Gap row.
+Penetration test scope/results section — this document defines scope and acceptance criteria; results are appended once an external pen-test engagement completes.
+Security hardening checklist: TLS configuration, missing response headers (HSTS/CSP/X-Frame-Options not currently set on WebAPI responses — flagged Gap), CORS lockdown from AllowAll to an explicit allowlist.
+Deliverable
+docs/SECURITY_ASSESSMENT.md + docs/OWASP_CWE_COVERAGE_MATRIX.xlsx.
+13. Vendor Deliverables (Documentation)
+A documentation set, indexed and cross-referenced against existing PMIMS artifacts so nothing is authored from scratch where a source already exists.
+Deliverable list
+Business Requirements Document (BRD) — structured per KFH Treasury Operations requirements; builds on README.md's feature narrative and this gap-analysis response as the requirements-traceability source.
+Business Cases — KFH template format, each tied to one or more BRD requirements (e.g., one for the Mobile App module, one for the Rules Engine), cost/benefit framed against the phasing table in §16.
+Quality Assurance (QA) Document — test coverage summary (unit test counts per project, e.g., PMIMS.Tests), environment testing matrix, compliance verification checklist referencing Item 12.
+UAT Support Package — test case catalog (precondition/steps/expected result, seeded from every item's “Testing Strategy — UAT” scenario above), defect tracking workflow (severity levels), resolution SLA table.
+Training Materials — end-user guide per screen, administrator guide (user/group/permission/FIM administration), video tutorial script outline.
+Go-Live Support Document — cutover/transition plan, rollback procedure per deployed component, first-72-hours operational stability checklist.
+Compliance and Security Documentation — regulatory compliance matrix (Sharia-board-relevant controls already present: vendor Sharia-compliance check in sp_CreatePurchaseOrder, Maker-Checker workflow), internal audit readiness evidence pack referencing Item 6's audit trail.
+Deliverable
+One Word/PDF document per bullet above, indexed from docs/VENDOR_DELIVERABLES_INDEX.md.
+14. Deployment & Environment Documentation
+Grounded in the app's existing dual-provider design — appsettings.json's DatabaseConfig:UseSqlServer toggle already means Cloud/Hybrid/On-prem is a supported runtime configuration today, just undocumented as a deployment topology.
+Deployment options
+Cloud — Azure App Service/AKS + Azure SQL, API Management or Kong-on-Azure as the gateway.
+Hybrid — app tier in cloud, SQL Server + IMAL/GL connectivity kept on-prem via ExpressRoute/VPN (core banking integration realistically stays on-prem).
+On-premises — IIS-hosted Kestrel (ANCM) + on-prem SQL Server, matching the IIS 7 compatibility requirement referenced in Item 1's connectivity support.
+Per-environment detail
+Production, Disaster Recovery, Stage, UAT, Development — each documented with a hardware/software requirements table (CPU/RAM/storage tiers), the relevant appsettings.{Environment}.json override set, and a network/security zoning diagram (DMZ for the gateway, app tier in a private subnet, DB tier further isolated, KFH middleware/IMAL reachable only from the app tier).
+Failover & recovery
+DB: SQL Server Always On / Azure SQL geo-replication; app tier: multi-instance behind the gateway.
+RTO/RPO targets stated per environment, with a scheduled DR-drill validation cadence (e.g., quarterly).
+Deliverable
+docs/DEPLOYMENT_ENVIRONMENTS.md + docs/diagrams/ (architecture diagrams per option).
+15. Solution Components Lifecycle Documentation
+An inventory + roadmap document seeded directly from the package references already in the repo, not a generic vendor list.
+Structure
+Components table (Component, Current Version, EOL/Support-End Date, Risk if Unaddressed, Planned Upgrade, Target Quarter) covering: .NET 10 runtime (LTS), SQL Server edition in use, EF Core 10.0.9, Dapper 2.1.79, Microsoft.Data.SqlClient 7.0.2, BCrypt.Net-Next 4.0.3 (added in this pass), React/Vite/Node LTS line on the frontend, and new third-party additions introduced by items above (MailKit, a PDF/Excel export library, Polly, WCF client libraries for Item 3, a scheduler for Items 4/7).
+3-year roadmap in six half-year windows, each listing planned upgrades (e.g., “adopt the next .NET LTS release once GA + one point release stable”, “SQL Server CU/feature-pack review”) and feature-roadmap milestones tied back to the phasing table in §16.
+Deliverable
+docs/COMPONENT_LIFECYCLE_AND_ROADMAP.xlsx (components table) + docs/PRODUCT_ROADMAP.md (narrative 3-year plan).

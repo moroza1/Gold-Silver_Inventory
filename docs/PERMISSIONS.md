@@ -149,24 +149,21 @@ Demo users (password `Password123`): `treasury-maker`, `treasury-checker`,
 | reports | RO | RO | F | F |
 | workflows (act) | RO | RO | RO | F |
 | intake | F | RO | RO | F |
-| dispensing | F | RO | RO | F |
 | barcode_qr_labeling | F | RO | RO | F |
 | **vault_location** (manage) | — | — | — | F |
 | **master_data** (manage) | — | — | — | F |
 | **workflow_design** (manage) | — | — | — | F |
-| migration | RW | RO | RO | F |
 | settings | — | — | — | F |
 | user_admin | — | — | — | F |
-| **rules_engine** (manage) | — | — | RO | F |
-| **notifications** (manage) | — | — | — | F |
-| **monitoring** (manage) | — | — | RO | F |
-| **device_integration** (manage) | — | — | — | F |
+| *dispensing* (non-BRD) | — | — | — | F |
+| *migration* (non-BRD) | — | — | — | F |
+| *rules_engine* (non-BRD) | — | — | — | F |
+| *notifications* (non-BRD) | — | — | — | F |
+| *monitoring* (non-BRD) | — | — | — | F |
+| *device_integration* (non-BRD) | — | — | — | F |
+| *gl_config* (non-BRD) | — | — | — | F |
 
-The manage-tier modules are `HIDDEN` for Maker/Checker and `FULL` only for IT Administrators —
-the concrete realization of the view-vs-manage segregation. Reconciliation Officers are the one
-exception: they get `READ_ONLY` on `rules_engine` and `monitoring` (relevant to break
-investigation — seeing which rule fired, checking SLA/monitoring metrics) but stay `HIDDEN` on
-`notifications` (email distribution-list configuration is not part of their job).
+Non-BRD features (dispensing, bulk migration, dynamic rules engine, notification alert lists, monitoring SLAs, device integration, GL config) are preserved in the codebase and accessible to IT Administrators, but are `HIDDEN` by default in standard operational user group profiles (Maker, Checker, Reconciliation).
 
 `dashboard` now has a registered `dashboard.read` policy (`GET /api/dashboard/executive-board`)
 — previously the module's seeded permission level was never enforced anywhere (the endpoint had

@@ -446,6 +446,91 @@ public partial class KFHOnlineControllers : ControllerBase
     }
 
     // =========================================================================
+    // 8. GET ALL CUSTOMERS WITH ACCOUNTS & HOLDINGS (FOR GFS PORTAL)
+    // =========================================================================
+    [AllowAnonymous]
+    [HttpGet("customers")]
+    public async Task<IActionResult> GetCustomers()
+    {
+        try
+        {
+            var customers = await _repository.GetCustomersWithDetailsAsync();
+            return Ok(customers);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
+    // =========================================================================
+    // 9. TRANSFER GOLD BARS AS GIFT TO ANOTHER CUSTOMER
+    // =========================================================================
+    [AllowAnonymous]
+    [HttpPost("transactions/transfer-gift")]
+    public async Task<IActionResult> TransferGift([FromBody] CustomerGiftTransferRequest req)
+    {
+        try
+        {
+            if (req.ItemIds == null || req.ItemIds.Count == 0)
+            {
+                return BadRequest(new { error = "No gold bars selected for transfer." });
+            }
+
+            if (string.IsNullOrWhiteSpace(req.RecipientCustomerId))
+            {
+                return BadRequest(new { error = "Recipient customer ID or Civil ID is required." });
+            }
+
+            var success = await _repository.TransferGiftBarsAsync(
+                req.SenderCustomerId,
+                req.SenderCustomerName ?? "Sender Customer",
+                req.RecipientCustomerId,
+                req.RecipientCustomerName ?? "Recipient Customer",
+                req.ItemIds,
+                req.Occasion ?? "Gift",
+                req.GiftMessage ?? ""
+            );
+
+            if (!success)
+            {
+                return StatusCode(500, new { error = "Failed to process gift transfer. Selected bars may not exist in sender custody." });
+            }
+
+            var logEntry = new KFHOnlineTransactionLog
+            {
+                TransactionType = "GIFT_TRANSFER",
+                CustomerId = int.TryParse(req.SenderCustomerId, out var scid) ? scid : 0,
+                CustomerName = req.SenderCustomerName ?? "Sender Customer",
+                Notes = $"Gift to {req.RecipientCustomerName} ({req.RecipientCustomerId}) - {req.Occasion}: {req.GiftMessage}",
+                SerialsJson = JsonSerializer.Serialize(req.ItemIds),
+                StatusCode = "CONFIRMED",
+                CreatedAt = DateTime.UtcNow
+            };
+            await _repository.LogKFHOnlineTransactionAsync(logEntry);
+
+            return Ok(new
+            {
+                success = true,
+                message = $"Successfully transferred {req.ItemIds.Count} gold bar(s) as a gift to {req.RecipientCustomerName}.",
+                transferDetails = new
+                {
+                    sender = req.SenderCustomerName,
+                    recipient = req.RecipientCustomerName,
+                    occasion = req.Occasion,
+                    message = req.GiftMessage,
+                    transferredBarsCount = req.ItemIds.Count,
+                    timestamp = DateTime.UtcNow
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
+    // =========================================================================
     // HELPER METHODS (Mock data - kept for reference/fallback)
     // =========================================================================
 

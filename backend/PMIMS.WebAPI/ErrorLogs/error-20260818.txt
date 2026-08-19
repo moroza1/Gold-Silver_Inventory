@@ -1,0 +1,111 @@
+===============================================================================
+TIMESTAMP: [2026-08-18 12:51:05.732 +03:00]
+LEVEL:     [ERR]
+MESSAGE:   Failed executing DbCommand (6ms) [Parameters=[], CommandType='"Text"', CommandTimeout='30']
+CREATE TABLE "gl_config_versions" (
+    "VersionId" INTEGER NOT NULL CONSTRAINT "PK_gl_config_versions" PRIMARY KEY AUTOINCREMENT,
+    "VersionNumber" INTEGER NOT NULL,
+    "ConfigJson" TEXT NOT NULL,
+    "Status" TEXT NOT NULL,
+    "ChangeSummary" TEXT NULL,
+    "CreatedBy" TEXT NOT NULL,
+    "CreatedAt" TEXT NOT NULL,
+    "SubmittedBy" TEXT NULL,
+    "SubmittedAt" TEXT NULL,
+    "ReviewedBy" TEXT NULL,
+    "ReviewedAt" TEXT NULL,
+    "ReviewComments" TEXT NULL,
+    "ActivatedAt" TEXT NULL
+)
+===============================================================================
+===============================================================================
+TIMESTAMP: [2026-08-18 12:51:05.750 +03:00]
+LEVEL:     [ERR]
+MESSAGE:   Failed executing DbCommand (0ms) [Parameters=[], CommandType='"Text"', CommandTimeout='30']
+CREATE TABLE "gl_journal_entries" (
+    "Id" INTEGER NOT NULL CONSTRAINT "PK_gl_journal_entries" PRIMARY KEY AUTOINCREMENT,
+    "EntryId" TEXT NOT NULL,
+    "SequenceNumber" INTEGER NOT NULL,
+    "PostedAtUtc" TEXT NOT NULL,
+    "OccurredAtUtc" TEXT NOT NULL,
+    "SourceType" TEXT NOT NULL,
+    "SourceId" TEXT NOT NULL,
+    "SourceEventType" TEXT NOT NULL,
+    "Commodity" TEXT NOT NULL,
+    "Currency" TEXT NOT NULL,
+    "InitiatedBy" TEXT NOT NULL,
+    "Description" TEXT NULL,
+    "ExternalKey" TEXT NULL,
+    "PreviousHash" TEXT NULL,
+    "EntryHash" TEXT NOT NULL
+)
+===============================================================================
+===============================================================================
+TIMESTAMP: [2026-08-18 12:51:05.756 +03:00]
+LEVEL:     [ERR]
+MESSAGE:   Failed executing DbCommand (0ms) [Parameters=[], CommandType='"Text"', CommandTimeout='30']
+CREATE TABLE "gl_journal_lines" (
+    "Id" INTEGER NOT NULL CONSTRAINT "PK_gl_journal_lines" PRIMARY KEY AUTOINCREMENT,
+    "EntryId" INTEGER NOT NULL,
+    "LineNumber" INTEGER NOT NULL,
+    "AccountCode" TEXT NOT NULL,
+    "Side" TEXT NOT NULL,
+    "Amount" TEXT NOT NULL,
+    "Memo" TEXT NULL,
+    CONSTRAINT "FK_gl_journal_lines_gl_journal_entries_EntryId" FOREIGN KEY ("EntryId") REFERENCES "gl_journal_entries" ("Id") ON DELETE CASCADE
+)
+===============================================================================
+===============================================================================
+TIMESTAMP: [2026-08-18 12:51:05.763 +03:00]
+LEVEL:     [ERR]
+MESSAGE:   Failed executing DbCommand (0ms) [Parameters=[], CommandType='"Text"', CommandTimeout='30']
+CREATE INDEX "IX_gl_config_versions_Status" ON "gl_config_versions" ("Status")
+===============================================================================
+===============================================================================
+TIMESTAMP: [2026-08-18 12:51:05.767 +03:00]
+LEVEL:     [ERR]
+MESSAGE:   Failed executing DbCommand (0ms) [Parameters=[], CommandType='"Text"', CommandTimeout='30']
+CREATE UNIQUE INDEX "IX_gl_config_versions_VersionNumber" ON "gl_config_versions" ("VersionNumber")
+===============================================================================
+===============================================================================
+TIMESTAMP: [2026-08-18 12:51:05.771 +03:00]
+LEVEL:     [ERR]
+MESSAGE:   Failed executing DbCommand (0ms) [Parameters=[], CommandType='"Text"', CommandTimeout='30']
+CREATE UNIQUE INDEX "IX_gl_journal_entries_EntryId" ON "gl_journal_entries" ("EntryId")
+===============================================================================
+===============================================================================
+TIMESTAMP: [2026-08-18 12:51:05.776 +03:00]
+LEVEL:     [ERR]
+MESSAGE:   Failed executing DbCommand (0ms) [Parameters=[], CommandType='"Text"', CommandTimeout='30']
+CREATE UNIQUE INDEX "IX_gl_journal_entries_ExternalKey" ON "gl_journal_entries" ("ExternalKey") WHERE [ExternalKey] IS NOT NULL
+===============================================================================
+===============================================================================
+TIMESTAMP: [2026-08-18 12:51:05.782 +03:00]
+LEVEL:     [ERR]
+MESSAGE:   Failed executing DbCommand (0ms) [Parameters=[], CommandType='"Text"', CommandTimeout='30']
+CREATE INDEX "IX_gl_journal_entries_OccurredAtUtc" ON "gl_journal_entries" ("OccurredAtUtc")
+===============================================================================
+===============================================================================
+TIMESTAMP: [2026-08-18 12:51:05.786 +03:00]
+LEVEL:     [ERR]
+MESSAGE:   Failed executing DbCommand (0ms) [Parameters=[], CommandType='"Text"', CommandTimeout='30']
+CREATE UNIQUE INDEX "IX_gl_journal_entries_SequenceNumber" ON "gl_journal_entries" ("SequenceNumber")
+===============================================================================
+===============================================================================
+TIMESTAMP: [2026-08-18 12:51:05.790 +03:00]
+LEVEL:     [ERR]
+MESSAGE:   Failed executing DbCommand (0ms) [Parameters=[], CommandType='"Text"', CommandTimeout='30']
+CREATE INDEX "IX_gl_journal_entries_SourceType_SourceId" ON "gl_journal_entries" ("SourceType", "SourceId")
+===============================================================================
+===============================================================================
+TIMESTAMP: [2026-08-18 12:51:05.797 +03:00]
+LEVEL:     [ERR]
+MESSAGE:   Failed executing DbCommand (0ms) [Parameters=[], CommandType='"Text"', CommandTimeout='30']
+CREATE INDEX "IX_gl_journal_lines_AccountCode" ON "gl_journal_lines" ("AccountCode")
+===============================================================================
+===============================================================================
+TIMESTAMP: [2026-08-18 12:51:05.800 +03:00]
+LEVEL:     [ERR]
+MESSAGE:   Failed executing DbCommand (0ms) [Parameters=[], CommandType='"Text"', CommandTimeout='30']
+CREATE INDEX "IX_gl_journal_lines_EntryId" ON "gl_journal_lines" ("EntryId")
+===============================================================================

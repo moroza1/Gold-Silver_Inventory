@@ -15,39 +15,39 @@ public static class DbSeeder
     {
         ["Treasury Operations (Maker)"] = new()
         {
-            {"dashboard","READ_ONLY"}, {"pending_actions","READ_ONLY"}, {"purchase_orders","FULL"}, {"spatial_map","READ_ONLY"},
-            {"custody","READ_ONLY"}, {"stocktake","READ_ONLY"}, {"migration","READ_WRITE"}, {"reports","READ_ONLY"},
+            {"dashboard","READ_ONLY"}, {"pending_actions","READ_WRITE"}, {"spatial_map","READ_ONLY"},
+            {"custody","READ_ONLY"}, {"stocktake","READ_ONLY"}, {"migration","HIDDEN"}, {"reports","READ_ONLY"},
             {"workflows","READ_ONLY"}, {"settings","HIDDEN"}, {"user_admin","HIDDEN"}, {"vault_location","HIDDEN"},
             {"master_data","HIDDEN"}, {"workflow_design","HIDDEN"}, {"intake","FULL"}, {"rules_engine","HIDDEN"},
-            {"notifications","HIDDEN"}, {"monitoring","HIDDEN"}, {"dispensing","FULL"}, {"device_integration","HIDDEN"},
-            {"barcode_qr_labeling","FULL"}, {"gl_config","HIDDEN"},
+            {"monitoring","HIDDEN"}, {"barcode_qr_labeling","FULL"}, {"purchase_orders","FULL"},
+            {"dispensing","FULL"}, {"device_integration","HIDDEN"}, {"notifications","READ_ONLY"},
         },
         ["Treasury Operations (Checker)"] = new()
         {
-            {"dashboard","READ_ONLY"}, {"pending_actions","FULL"}, {"purchase_orders","READ_ONLY"}, {"spatial_map","READ_ONLY"},
-            {"custody","READ_ONLY"}, {"stocktake","READ_WRITE"}, {"migration","READ_ONLY"}, {"reports","READ_ONLY"},
+            {"dashboard","READ_ONLY"}, {"pending_actions","FULL"}, {"spatial_map","READ_ONLY"},
+            {"custody","READ_ONLY"}, {"stocktake","READ_WRITE"}, {"migration","HIDDEN"}, {"reports","READ_ONLY"},
             {"workflows","READ_ONLY"}, {"settings","HIDDEN"}, {"user_admin","HIDDEN"}, {"vault_location","HIDDEN"},
             {"master_data","HIDDEN"}, {"workflow_design","HIDDEN"}, {"intake","READ_ONLY"}, {"rules_engine","HIDDEN"},
-            {"notifications","HIDDEN"}, {"monitoring","HIDDEN"}, {"dispensing","READ_ONLY"}, {"device_integration","HIDDEN"},
-            {"barcode_qr_labeling","READ_ONLY"}, {"gl_config","READ_ONLY"},
+            {"monitoring","HIDDEN"}, {"barcode_qr_labeling","READ_ONLY"}, {"purchase_orders","READ_ONLY"},
+            {"dispensing","READ_ONLY"}, {"device_integration","HIDDEN"}, {"notifications","READ_ONLY"},
         },
         ["Reconciliation Officers"] = new()
         {
-            {"dashboard","READ_ONLY"}, {"pending_actions","FULL"}, {"purchase_orders","READ_ONLY"}, {"spatial_map","READ_ONLY"},
-            {"custody","READ_ONLY"}, {"stocktake","FULL"}, {"migration","READ_ONLY"}, {"reports","FULL"},
+            {"dashboard","READ_ONLY"}, {"pending_actions","FULL"}, {"spatial_map","READ_ONLY"},
+            {"custody","READ_ONLY"}, {"stocktake","FULL"}, {"migration","HIDDEN"}, {"reports","FULL"},
             {"workflows","READ_ONLY"}, {"settings","HIDDEN"}, {"user_admin","HIDDEN"}, {"vault_location","HIDDEN"},
-            {"master_data","HIDDEN"}, {"workflow_design","HIDDEN"}, {"intake","READ_ONLY"}, {"rules_engine","READ_ONLY"},
-            {"notifications","HIDDEN"}, {"monitoring","READ_ONLY"}, {"dispensing","READ_ONLY"}, {"device_integration","HIDDEN"},
-            {"barcode_qr_labeling","READ_ONLY"}, {"gl_config","READ_WRITE"},
+            {"master_data","HIDDEN"}, {"workflow_design","HIDDEN"}, {"intake","READ_ONLY"}, {"rules_engine","HIDDEN"},
+            {"monitoring","HIDDEN"}, {"barcode_qr_labeling","READ_ONLY"}, {"purchase_orders","READ_ONLY"},
+            {"dispensing","READ_ONLY"}, {"device_integration","HIDDEN"}, {"notifications","READ_ONLY"},
         },
         ["IT Administrators"] = new()
         {
-            {"dashboard","FULL"}, {"pending_actions","FULL"}, {"purchase_orders","FULL"}, {"spatial_map","FULL"},
+            {"dashboard","FULL"}, {"pending_actions","FULL"}, {"spatial_map","FULL"},
             {"custody","FULL"}, {"stocktake","FULL"}, {"migration","FULL"}, {"reports","FULL"},
             {"workflows","FULL"}, {"settings","FULL"}, {"user_admin","FULL"}, {"vault_location","FULL"},
             {"master_data","FULL"}, {"workflow_design","FULL"}, {"intake","FULL"}, {"rules_engine","FULL"},
-            {"notifications","FULL"}, {"monitoring","FULL"}, {"dispensing","FULL"}, {"device_integration","FULL"},
-            {"barcode_qr_labeling","FULL"}, {"gl_config","FULL"},
+            {"monitoring","FULL"}, {"barcode_qr_labeling","FULL"}, {"purchase_orders","FULL"},
+            {"dispensing","FULL"}, {"device_integration","FULL"}, {"notifications","FULL"},
         },
     };
 
@@ -63,18 +63,21 @@ public static class DbSeeder
         var groups = context.PrivilegeGroups.ToList();
         if (groups.Count == 0) return; // brand-new DB: SeedAsync will populate everything
         var matrix = BuildPermissionMatrix();
-        var have = new HashSet<string>(
-            context.GroupPermissions.Select(p => new { p.GroupId, p.ModuleKey }).ToList()
-                .Select(e => e.GroupId + "|" + e.ModuleKey));
         bool added = false;
         foreach (var grp in groups)
         {
             if (!matrix.TryGetValue(grp.GroupName, out var perms)) continue;
             foreach (var kv in perms)
             {
-                if (have.Add(grp.GroupId + "|" + kv.Key)) // Add == true means it was missing
+                var existing = context.GroupPermissions.FirstOrDefault(p => p.GroupId == grp.GroupId && p.ModuleKey == kv.Key);
+                if (existing == null)
                 {
                     context.GroupPermissions.Add(new GroupPermission { GroupId = grp.GroupId, ModuleKey = kv.Key, AccessLevel = kv.Value });
+                    added = true;
+                }
+                else if (existing.AccessLevel != kv.Value && grp.IsSystem)
+                {
+                    existing.AccessLevel = kv.Value;
                     added = true;
                 }
             }
@@ -144,15 +147,27 @@ public static class DbSeeder
         context.MetalDenominations.AddRange(d1g, d5g, d10g, d25g, d50g, d100g, d1kg, d1oz);
         await context.SaveChangesAsync();
 
+        // 5b. Refiner / Mint Brands (Master Data Lookup)
+        var bValcambi = new MetalBrand { BrandCode = "VALCAMBI", BrandName = "Valcambi Suisse", CountryOfOrigin = "Switzerland", LbmaRefinerId = "VALC-CH", IsLbmaCertified = true, Description = "LBMA Good Delivery Refiner - Balerna, Switzerland" };
+        var bPamp = new MetalBrand { BrandCode = "PAMP", BrandName = "PAMP Suisse", CountryOfOrigin = "Switzerland", LbmaRefinerId = "PAMP-CH", IsLbmaCertified = true, Description = "LBMA Good Delivery Refiner - Castel San Pietro, Switzerland" };
+        var bArgor = new MetalBrand { BrandCode = "ARGOR", BrandName = "Argor-Heraeus", CountryOfOrigin = "Switzerland", LbmaRefinerId = "ARGH-CH", IsLbmaCertified = true, Description = "LBMA Good Delivery Refiner - Mendrisio, Switzerland" };
+        var bNadir = new MetalBrand { BrandCode = "NADIR", BrandName = "Nadir Gold Refinery", CountryOfOrigin = "Turkey", LbmaRefinerId = "NADR-TR", IsLbmaCertified = true, Description = "LBMA Good Delivery Refiner - Istanbul, Turkey" };
+        var bIgr = new MetalBrand { BrandCode = "IGR", BrandName = "Istanbul Gold Refinery (IGR)", CountryOfOrigin = "Turkey", LbmaRefinerId = "IGRE-TR", IsLbmaCertified = true, Description = "LBMA Good Delivery Refiner - Istanbul, Turkey" };
+        var bEmirates = new MetalBrand { BrandCode = "EMIRATES", BrandName = "Emirates Gold", CountryOfOrigin = "United Arab Emirates", LbmaRefinerId = "EMIR-AE", IsLbmaCertified = true, Description = "DMCC / UAE Good Delivery - Dubai, UAE" };
+        var bPerth = new MetalBrand { BrandCode = "PERTH", BrandName = "Perth Mint Australia", CountryOfOrigin = "Australia", LbmaRefinerId = "PERTH-AU", IsLbmaCertified = true, Description = "LBMA Good Delivery - Perth, Australia" };
+        var bKfh = new MetalBrand { BrandCode = "KFH_MINT", BrandName = "KFH Custom Mint Gold", CountryOfOrigin = "Kuwait", LbmaRefinerId = "KFH-KW", IsLbmaCertified = true, Description = "Kuwait Finance House Investment Bullion Mint" };
+        context.Brands.AddRange(bValcambi, bPamp, bArgor, bNadir, bIgr, bEmirates, bPerth, bKfh);
+        await context.SaveChangesAsync();
+
         // 6. Products
-        var p1 = new MetalProduct { ProductCode = "AU-1KG-SWISS", MetalTypeId = gold.MetalTypeId, DenominationId = d1kg.DenominationId, PurityId = p9999.PurityId, OriginCountry = "Switzerland" };
-        var p2 = new MetalProduct { ProductCode = "AU-100G-TURK", MetalTypeId = gold.MetalTypeId, DenominationId = d100g.DenominationId, PurityId = p9999.PurityId, OriginCountry = "Turkey" };
-        var p3 = new MetalProduct { ProductCode = "AU-10G-SWISS", MetalTypeId = gold.MetalTypeId, DenominationId = d10g.DenominationId, PurityId = p9999.PurityId, OriginCountry = "Switzerland" };
-        var p4 = new MetalProduct { ProductCode = "AG-1OZ-TURK", MetalTypeId = silver.MetalTypeId, DenominationId = d1oz.DenominationId, PurityId = p9990.PurityId, OriginCountry = "Turkey" };
-        var p5 = new MetalProduct { ProductCode = "AU-50G-SWISS", MetalTypeId = gold.MetalTypeId, DenominationId = d50g.DenominationId, PurityId = p9999.PurityId, OriginCountry = "Switzerland" };
-        var p6 = new MetalProduct { ProductCode = "AU-25G-SWISS", MetalTypeId = gold.MetalTypeId, DenominationId = d25g.DenominationId, PurityId = p9999.PurityId, OriginCountry = "Switzerland" };
-        var p7 = new MetalProduct { ProductCode = "AU-5G-SWISS", MetalTypeId = gold.MetalTypeId, DenominationId = d5g.DenominationId, PurityId = p9999.PurityId, OriginCountry = "Switzerland" };
-        var p8 = new MetalProduct { ProductCode = "AU-1G-SWISS", MetalTypeId = gold.MetalTypeId, DenominationId = d1g.DenominationId, PurityId = p9999.PurityId, OriginCountry = "Switzerland" };
+        var p1 = new MetalProduct { ProductCode = "AU-1KG-SWISS", MetalTypeId = gold.MetalTypeId, DenominationId = d1kg.DenominationId, PurityId = p9999.PurityId, OriginCountry = "Switzerland", BrandId = bValcambi.BrandId, BrandName = bValcambi.BrandName };
+        var p2 = new MetalProduct { ProductCode = "AU-100G-TURK", MetalTypeId = gold.MetalTypeId, DenominationId = d100g.DenominationId, PurityId = p9999.PurityId, OriginCountry = "Turkey", BrandId = bNadir.BrandId, BrandName = bNadir.BrandName };
+        var p3 = new MetalProduct { ProductCode = "AU-10G-SWISS", MetalTypeId = gold.MetalTypeId, DenominationId = d10g.DenominationId, PurityId = p9999.PurityId, OriginCountry = "Switzerland", BrandId = bValcambi.BrandId, BrandName = bValcambi.BrandName };
+        var p4 = new MetalProduct { ProductCode = "AG-1OZ-TURK", MetalTypeId = silver.MetalTypeId, DenominationId = d1oz.DenominationId, PurityId = p9990.PurityId, OriginCountry = "Turkey", BrandId = bNadir.BrandId, BrandName = bNadir.BrandName };
+        var p5 = new MetalProduct { ProductCode = "AU-50G-SWISS", MetalTypeId = gold.MetalTypeId, DenominationId = d50g.DenominationId, PurityId = p9999.PurityId, OriginCountry = "Switzerland", BrandId = bPamp.BrandId, BrandName = bPamp.BrandName };
+        var p6 = new MetalProduct { ProductCode = "AU-25G-SWISS", MetalTypeId = gold.MetalTypeId, DenominationId = d25g.DenominationId, PurityId = p9999.PurityId, OriginCountry = "Switzerland", BrandId = bValcambi.BrandId, BrandName = bValcambi.BrandName };
+        var p7 = new MetalProduct { ProductCode = "AU-5G-SWISS", MetalTypeId = gold.MetalTypeId, DenominationId = d5g.DenominationId, PurityId = p9999.PurityId, OriginCountry = "Switzerland", BrandId = bValcambi.BrandId, BrandName = bValcambi.BrandName };
+        var p8 = new MetalProduct { ProductCode = "AU-1G-SWISS", MetalTypeId = gold.MetalTypeId, DenominationId = d1g.DenominationId, PurityId = p9999.PurityId, OriginCountry = "Switzerland", BrandId = bKfh.BrandId, BrandName = bKfh.BrandName };
         context.MetalProducts.AddRange(p1, p2, p3, p4, p5, p6, p7, p8);
 
         // 7. Vendors
@@ -185,8 +200,7 @@ public static class DbSeeder
         var chOnline = new Channel { ChannelName = "Online" };
         var chXtm = new Channel { ChannelName = "XTM" };
         var chApi = new Channel { ChannelName = "API" };
-        var chGdm = new Channel { ChannelName = "GDM" }; // Gold Dispensing Machine self-service channel
-        context.Channels.AddRange(chBranch, chMobile, chOnline, chXtm, chApi, chGdm);
+        context.Channels.AddRange(chBranch, chMobile, chOnline, chXtm, chApi);
 
         // 11. Spatial Coordinates Layout setup
         // Vault Main, Shelves 1-3
@@ -228,21 +242,7 @@ public static class DbSeeder
                 SlotBin = $"Slot {slot}"
             });
         }
-        // Gold Dispensing Machine cassette location (Fahaheel Branch, lobby unit #1) --
-        // scalability hook demo data so the `dispensing`/`device_integration` modules are
-        // exercisable immediately after a fresh seed. Modeled as a normal InventoryLocation
-        // (same coordinate-grid pattern as every other shelf/slot) so all existing
-        // balance/transaction/reporting code works against it unchanged.
-        var gdmLocation = new InventoryLocation
-        {
-            VaultId = vaultBranch.VaultId,
-            BranchId = bFahaheel.BranchId,
-            ZoneRoom = "Lobby",
-            ShelfRow = "GDM Unit",
-            SlotBin = "Cassette 1"
-        };
-        context.InventoryLocations.Add(gdmLocation);
-        await context.SaveChangesAsync();
+
 
         // 12. Demo Customers & Accounts
         // Create test customers for KFHOnline with specific IDs (1, 2, 3)
@@ -312,35 +312,21 @@ public static class DbSeeder
         {
             WorkflowType = "PURCHASE_ORDER",
             Name = "Default PO Approval Workflow",
-            Description = "Standard 2-step verification process for purchase orders.",
+            Description = "Standard Maker-Checker verification for purchase orders.",
             IsActive = true
         };
         context.WorkflowTemplates.Add(poWorkflow);
         await context.SaveChangesAsync();
 
-        // RequiredRole must be the literal PrivilegeGroup.GroupName of the group that should
-        // be able to act on this step (see grpMaker/grpChecker/grpRecon/grpAdmin below) -- Maker-
-        // Checker step gating (InventoryRepository.GetUserRoles/ProcessWorkflowActionAsync)
-        // resolves a user's roles purely from their real group membership, so these strings
-        // have to match exactly or every approval attempt fails with UNAUTHORIZED_ROLE.
-        // Using Treasury Operations (Maker) first, then Treasury Operations (Checker) as per requirement.
-        var step1 = new WorkflowStep
+        var poStep1 = new WorkflowStep
         {
             TemplateId = poWorkflow.TemplateId,
             StepOrder = 1,
-            StepName = "Treasury Maker Initiation",
-            RequiredRole = "Treasury Operations (Maker)",
-            Description = "Maker initiates and submits purchase order for approval."
-        };
-        var step2 = new WorkflowStep
-        {
-            TemplateId = poWorkflow.TemplateId,
-            StepOrder = 2,
             StepName = "Treasury Checker Approval",
             RequiredRole = "Treasury Operations (Checker)",
             Description = "Checker reviews and approves the purchase order."
         };
-        context.WorkflowSteps.AddRange(step1, step2);
+        context.WorkflowSteps.Add(poStep1);
         await context.SaveChangesAsync();
 
         // Seed INTAKE_SHIPMENT workflow template
@@ -358,19 +344,55 @@ public static class DbSeeder
         {
             TemplateId = intakeWorkflow.TemplateId,
             StepOrder = 1,
-            StepName = "Intake Maker Submission",
-            RequiredRole = "Treasury Operations (Maker)",
-            Description = "Maker receives shipment and submits for verification."
-        };
-        var intakeStep2 = new WorkflowStep
-        {
-            TemplateId = intakeWorkflow.TemplateId,
-            StepOrder = 2,
             StepName = "Intake Checker Verification",
             RequiredRole = "Treasury Operations (Checker)",
             Description = "Checker verifies weight, serials and approves shelf placement."
         };
-        context.WorkflowSteps.AddRange(intakeStep1, intakeStep2);
+        context.WorkflowSteps.Add(intakeStep1);
+        await context.SaveChangesAsync();
+
+        // Seed BRANCH_TRANSFER workflow template
+        var transferWorkflow = new WorkflowTemplate
+        {
+            WorkflowType = "BRANCH_TRANSFER",
+            Name = "Default Branch Transfer Workflow",
+            Description = "Standard Maker-Checker verification for branch transfers.",
+            IsActive = true
+        };
+        context.WorkflowTemplates.Add(transferWorkflow);
+        await context.SaveChangesAsync();
+
+        var transferStep1 = new WorkflowStep
+        {
+            TemplateId = transferWorkflow.TemplateId,
+            StepOrder = 1,
+            StepName = "Branch Transfer Checker Approval",
+            RequiredRole = "Treasury Operations (Checker)",
+            Description = "Checker reviews and approves the branch transfer."
+        };
+        context.WorkflowSteps.Add(transferStep1);
+        await context.SaveChangesAsync();
+
+        // Seed DAMAGE_BAR workflow template
+        var damageWorkflow = new WorkflowTemplate
+        {
+            WorkflowType = "DAMAGE_BAR",
+            Name = "Default Damage Bar Workflow",
+            Description = "Standard Maker-Checker verification for marking gold bars as damaged.",
+            IsActive = true
+        };
+        context.WorkflowTemplates.Add(damageWorkflow);
+        await context.SaveChangesAsync();
+
+        var damageStep1 = new WorkflowStep
+        {
+            TemplateId = damageWorkflow.TemplateId,
+            StepOrder = 1,
+            StepName = "Damage Bar Checker Approval",
+            RequiredRole = "Treasury Operations (Checker)",
+            Description = "Checker reviews damage evidence and approves status change."
+        };
+        context.WorkflowSteps.Add(damageStep1);
         await context.SaveChangesAsync();
 
 
@@ -381,7 +403,7 @@ public static class DbSeeder
         // while being denied the authority to create/delete physical shelf locations.
         // RFP items 5-8 (rules_engine, notifications, monitoring) are new admin-tier
         // modules, same governance tier as vault_location/master_data/workflow_design.
-        var allModules = new[] { "dashboard", "pending_actions", "purchase_orders", "spatial_map", "custody", "stocktake", "migration", "reports", "workflows", "settings", "user_admin", "vault_location", "master_data", "workflow_design", "intake", "rules_engine", "notifications", "monitoring", "dispensing", "device_integration", "barcode_qr_labeling", "gl_config" };
+        var allModules = new[] { "dashboard", "pending_actions", "spatial_map", "custody", "stocktake", "migration", "reports", "workflows", "settings", "user_admin", "vault_location", "master_data", "workflow_design", "intake", "rules_engine", "monitoring", "barcode_qr_labeling", "purchase_orders", "dispensing", "device_integration", "notifications" };
 
         var grpMaker = new PrivilegeGroup { GroupName = "Treasury Operations (Maker)", Description = "Initiates purchase orders, transfers, and branch operations.", IsSystem = true };
         var grpChecker = new PrivilegeGroup { GroupName = "Treasury Operations (Checker)", Description = "Reviews and approves purchase orders and intake verifications.", IsSystem = true };
@@ -461,32 +483,75 @@ public static class DbSeeder
         // 23. RFP items 5-8 demo data -- one example row per module so the
         // feature is exercisable/demonstrable immediately after a fresh seed,
         // without shipping fictitious "real" business thresholds.
-        var demoRule = new BusinessRule
+        // 23. Business Rules Engine Demo Rules - Examples for every supported rule type
+        var ruleTransferLimit = new BusinessRule
         {
-            RuleCode = "TRANSFER_LIMIT_DEFAULT",
-            RuleName = "Default Branch Transfer Weight Limit",
+            RuleCode = "RULE_TRANSFER_MAX_WEIGHT",
+            RuleName = "Max Branch Transfer Weight Limit (5kg)",
             RuleType = "TRANSFER_LIMIT",
-            // A rule's predicate tree describes the CONDITION THAT FLAGS A PROBLEM (see
-            // RuleEngineService.EvaluateAsync) -- "gt 5000" fires (blocks) when the transfer
-            // exceeds the 5000g limit; it does not fire for transfers at or below it.
             ExpressionJson = "{\"all\":[{\"field\":\"weightGrams\",\"op\":\"gt\",\"value\":5000}]}",
             Severity = "BLOCK",
             Version = 1,
             IsActive = true,
             CreatedBy = "SYSTEM"
         };
-        context.BusinessRules.Add(demoRule);
 
-        var demoSubscription = new NotificationSubscription
+        var ruleReceiptValidation = new BusinessRule
         {
-            DistributionListEmail = "treasury-management@kfh.com.kw",
-            ReportType = "LOW_STOCK",
-            ScheduleCron = "0 7 * * *", // daily 07:00
-            Format = "PDF",
+            RuleCode = "RULE_INTAKE_BATCH_QTY_WARN",
+            RuleName = "Large Shipment Intake Quantity Alert (>100 Items)",
+            RuleType = "RECEIPT_VALIDATION",
+            ExpressionJson = "{\"all\":[{\"field\":\"quantity\",\"op\":\"gt\",\"value\":100}]}",
+            Severity = "WARN",
+            Version = 1,
             IsActive = true,
             CreatedBy = "SYSTEM"
         };
-        context.NotificationSubscriptions.Add(demoSubscription);
+
+        var ruleCustomerEligibility = new BusinessRule
+        {
+            RuleCode = "RULE_CUST_RESIDENCY_CHECK",
+            RuleName = "Customer Non-Resident Verification Block",
+            RuleType = "CUSTOMER_ELIGIBILITY",
+            ExpressionJson = "{\"all\":[{\"field\":\"isResident\",\"op\":\"eq\",\"value\":false}]}",
+            Severity = "BLOCK",
+            Version = 1,
+            IsActive = true,
+            CreatedBy = "SYSTEM"
+        };
+
+        var ruleRateThreshold = new BusinessRule
+        {
+            RuleCode = "RULE_GOLD_RATE_SPIKE_WARN",
+            RuleName = "Gold Market Rate Ceiling Alert (>30 KWD/g)",
+            RuleType = "RATE_THRESHOLD",
+            ExpressionJson = "{\"all\":[{\"field\":\"rate\",\"op\":\"gt\",\"value\":30}]}",
+            Severity = "WARN",
+            Version = 1,
+            IsActive = true,
+            CreatedBy = "SYSTEM"
+        };
+
+        var ruleInventoryCheck = new BusinessRule
+        {
+            RuleCode = "RULE_VAULT_MIN_STOCK_ALERT",
+            RuleName = "Minimum Vault Stock Level Warning (<10 Items)",
+            RuleType = "INVENTORY_CHECK",
+            ExpressionJson = "{\"all\":[{\"field\":\"availableQty\",\"op\":\"lt\",\"value\":10}]}",
+            Severity = "WARN",
+            Version = 1,
+            IsActive = true,
+            CreatedBy = "SYSTEM"
+        };
+
+        context.BusinessRules.AddRange(
+            ruleTransferLimit,
+            ruleReceiptValidation,
+            ruleCustomerEligibility,
+            ruleRateThreshold,
+            ruleInventoryCheck
+        );
+
 
         var demoAlertRoute = new MonitoringAlertRoute
         {
@@ -497,22 +562,7 @@ public static class DbSeeder
         };
         context.MonitoringAlertRoutes.Add(demoAlertRoute);
 
-        // 24. Gold Dispensing Machine (GDM) demo device -- OFFLINE by default (no stock has
-        // been allocated to its cassette yet; an admin brings it ACTIVE via
-        // PUT /api/admin/devices/{id}/heartbeat once bars are intake'd to gdmLocation).
-        var demoDevice = new DispensingDevice
-        {
-            DeviceCode = "GDM-FAHAHEEL-01",
-            DeviceName = "Fahaheel Branch Lobby Dispensing Unit",
-            LocationId = gdmLocation.LocationId,
-            BranchId = bFahaheel.BranchId,
-            Manufacturer = "TBD (vendor not yet selected)",
-            Model = "TBD",
-            StatusCode = "OFFLINE",
-            IsActive = true,
-            RegisteredBy = "SYSTEM"
-        };
-        context.DispensingDevices.Add(demoDevice);
+
 
         // 25. Reporting Requirements Gap Analysis -- Cost Analysis & Variance (Item 8) demo
         // budget baseline, current calendar month, so the cost-variance report has a

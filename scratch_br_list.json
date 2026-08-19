@@ -1,0 +1,178 @@
+[
+  {
+    "id": "BR-001",
+    "desc": "Every gold bar/package must have a unique QR/barcode and a unique bar serial number before movement is allowed."
+  },
+  {
+    "id": "BR-002",
+    "desc": "All inventory movement transactions must follow Maker-Checker approval where configured by KFH."
+  },
+  {
+    "id": "BR-003",
+    "desc": "Physical movement validation must be performed using QR/barcode scanning at each mandatory control point."
+  },
+  {
+    "id": "BR-004",
+    "desc": "Buying, selling, ownership, average purchase cost and last selling price are not mastered in the Inventory System."
+  },
+  {
+    "id": "BR-005",
+    "desc": "During QR scan, the Inventory System must retrieve live owner/account and valuation attributes from the external source system when required by the workflow."
+  },
+  {
+    "id": "BR-006",
+    "desc": "At EOD, the Inventory System must update stored bar reference fields for owner, customer account number, average purchase cost and last selling price from the external source system."
+  },
+  {
+    "id": "BR-007",
+    "desc": "Inventory location must change only after all mandatory validations and approvals are successful."
+  },
+  {
+    "id": "BR-008",
+    "desc": "Customer-owned bars must be associated with the customer account number received from the source system."
+  },
+  {
+    "id": "BR-009",
+    "desc": "Every action, scan, validation result, approval, cancellation and integration response must be audit logged with user, timestamp and details."
+  },
+  {
+    "id": "BR-010",
+    "desc": "Low-stock alerts must be generated based on configurable thresholds by location, owner/customer segment, product type and denomination."
+  },
+  {
+    "id": "BR-011",
+    "desc": "For Main Vault dispatch to courier, the scanned bar must match the exact bar required in the GFS branch delivery request."
+  },
+  {
+    "id": "BR-012",
+    "desc": "For Main Vault dispatch and branch receipt, the live owner/customer account must match the customer account associated with the GFS request."
+  },
+  {
+    "id": "BR-013",
+    "desc": "If bar identity validation fails during Main Vault dispatch, the transfer request must be cancelled and bar location must not change."
+  },
+  {
+    "id": "BR-014",
+    "desc": "If owner/customer account validation fails during Main Vault dispatch, the transfer request must be cancelled and bar location must not change."
+  },
+  {
+    "id": "BR-015",
+    "desc": "If Main Vault dispatch validations pass and Checker approves, bar location must change to In-Transit and the courier delivery leg must be recorded."
+  },
+  {
+    "id": "BR-016",
+    "desc": "At branch receipt, the scanned bar must match the bar requested by the customer and the bar required in GFS."
+  },
+  {
+    "id": "BR-017",
+    "desc": "At branch receipt, the receiving branch must match the destination branch associated with the GFS request."
+  },
+  {
+    "id": "BR-018",
+    "desc": "If any branch receipt validation fails, the request must be cancelled and the bar must be handed back to courier for return to Main Vault."
+  },
+  {
+    "id": "BR-019",
+    "desc": "Manual barcode entry, if allowed, must require reason capture, Checker approval and enhanced audit logging."
+  },
+  {
+    "id": "BR-020",
+    "desc": "If live external lookup is unavailable, location must not be changed unless KFH approves a controlled pending-verification process."
+  },
+  {
+    "id": "BR-021",
+    "desc": "Low stock monitoring shall support the precious metal product types Turkish Gold and Swiss Gold, and any future configured product types."
+  },
+  {
+    "id": "BR-022",
+    "desc": "System default low-stock cut-off thresholds shall be configurable by product type and denomination, and shall support N/A where no threshold is applicable."
+  },
+  {
+    "id": "BR-023",
+    "desc": "All creation, amendment, activation, deactivation, or deletion of cut-off threshold configurations must follow Maker-Checker workflow before becoming effective."
+  },
+  {
+    "id": "BR-024",
+    "desc": "Low-stock alerts must be raised when available stock balance is less than or equal to the configured cut-off threshold for the relevant product type and denomination."
+  },
+  {
+    "id": "BR-025",
+    "desc": "Stock threshold calculation shall aggregate stock in KG equivalent while preserving denomination-level detail for reporting and alert routing."
+  },
+  {
+    "id": "BR-026",
+    "desc": "Low-stock alert calculation must include only bars where Owner equals KFH-Kuwait."
+  },
+  {
+    "id": "BR-027",
+    "desc": "Bars owned by Customer accounts, KFH-Turkey, or any owner other than KFH-Kuwait must be excluded from low-stock threshold calculation and alert validation."
+  },
+  {
+    "id": "BR-028",
+    "desc": "Owner filtering for low-stock calculation must use the latest available owner value from live lookup or the latest successful EOD synchronization snapshot, according to the monitoring execution mode."
+  },
+  {
+    "id": "BR-029",
+    "desc": "High-stock alert calculation must include only bars where Owner equals KFH-Kuwait."
+  },
+  {
+    "id": "BR-030",
+    "desc": "Bars owned by Customer accounts, KFH-Turkey, or any owner other than KFH-Kuwait must be excluded from high-stock threshold calculation and alert validation."
+  },
+  {
+    "id": "BR-031",
+    "desc": "High-stock alerts must be raised when available KFH-Kuwait owned stock balance is greater than or equal to the configured high-stock cut-off threshold for the relevant product type and denomination."
+  },
+  {
+    "id": "BR-032",
+    "desc": "High-stock cut-off thresholds shall be configurable by product type and denomination, support N/A where not applicable, and require Maker-Checker approval before becoming effective."
+  },
+  {
+    "id": "BR-033",
+    "desc": "Low-stock and high-stock thresholds shall be maintained as separate configuration types so that each denomination can have independent minimum and maximum alert levels."
+  },
+  {
+    "id": "BR-034",
+    "desc": "Low-stock and high-stock alert thresholds shall be evaluated at Enterprise Level across all KFH-Kuwait inventory locations combined, unless a future approved change introduces location-level thresholds."
+  },
+  {
+    "id": "BR-035",
+    "desc": "Enterprise-level stock alert calculation shall aggregate eligible KFH-Kuwait owned bars across Main Vault, branches and approved internal stock locations, while excluding customer-owned, KFH-Turkey-owned and non-KFH-Kuwait-owned bars."
+  },
+  {
+    "id": "BR-036",
+    "desc": "GFS is the authoritative source for actual bar owner/customer account information and average purchase cost."
+  },
+  {
+    "id": "BR-037",
+    "desc": "When a bar QR/barcode is scanned at any location, the Inventory System must fetch live owner and average purchase cost data from GFS and update the Inventory System bar record with the returned values."
+  },
+  {
+    "id": "BR-038",
+    "desc": "At EOD, the Inventory System must synchronize owner/customer account information and average purchase cost from GFS for all applicable bars and store the latest GFS values as the inventory reference snapshot."
+  },
+  {
+    "id": "BR-039",
+    "desc": "If live GFS data cannot be retrieved during a scan, workflows requiring owner or average purchase cost validation must not perform location-changing updates until GFS data is successfully retrieved or an approved exception process is executed."
+  },
+  {
+    "id": "BR-040",
+    "desc": "Damaged bar updates must follow Maker-Checker workflow before the Is Damaged flag becomes effective."
+  },
+  {
+    "id": "BR-041",
+    "desc": "A bar marked as damaged must not be dispatched, transferred, delivered, or moved from Main Vault to any other location."
+  },
+  {
+    "id": "BR-042",
+    "desc": "All Main Vault outbound movement workflows must validate Is Damaged before location update. If Is Damaged = Yes, the workflow must be rejected/cancelled and the bar location must remain unchanged."
+  },
+  {
+    "id": "BR-043",
+    "desc": "Marking a bar as damaged must not change bar ownership, average purchase cost, denomination, product type, or physical location."
+  },
+  {
+    "id": "BR-044",
+    "desc": "Damaged status must be visible during QR scan, movement validation, reporting and audit review."
+  }
+]

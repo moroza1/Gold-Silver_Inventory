@@ -10,15 +10,20 @@ using Ledger.Gl.EfCore;   // plug-and-play General Ledger module DI extensions
 using Serilog;
 
 // Configure Serilog for file logging
-var logsDir = @"D:\Projects\Gold2\backend\PMIMS.WebAPI\logs";
+var baseDir = AppContext.BaseDirectory;
+var logsDir = Path.Combine(Directory.GetCurrentDirectory(), "logs");
+var errorLogsDir = Path.Combine(Directory.GetCurrentDirectory(), "ErrorLogs");
+
 try
 {
     Directory.CreateDirectory(logsDir);
-    Console.WriteLine($"📝 Logs will be written to: {logsDir}");
+    Directory.CreateDirectory(errorLogsDir);
+    Console.WriteLine($"📝 Standard Logs will be written to: {logsDir}");
+    Console.WriteLine($"🚨 Daily Support Error Logs will be written to: {errorLogsDir}");
 }
 catch (Exception ex)
 {
-    Console.WriteLine($"❌ Failed to create logs directory: {ex.Message}");
+    Console.WriteLine($"❌ Failed to create log directories: {ex.Message}");
 }
 
 Log.Logger = new LoggerConfiguration()
@@ -27,7 +32,14 @@ Log.Logger = new LoggerConfiguration()
     .WriteTo.File(
         path: Path.Combine(logsDir, "pmims-.txt"),
         rollingInterval: RollingInterval.Day,
+        shared: true,
         outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz}] [{Level:u3}] {Message:lj}{NewLine}{Exception}")
+    .WriteTo.File(
+        path: Path.Combine(errorLogsDir, "error-.txt"),
+        restrictedToMinimumLevel: Serilog.Events.LogEventLevel.Error,
+        rollingInterval: RollingInterval.Day,
+        shared: true,
+        outputTemplate: "==============================================================================={NewLine}TIMESTAMP: [{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz}]{NewLine}LEVEL:     [{Level:u3}]{NewLine}MESSAGE:   {Message:lj}{NewLine}{Exception}==============================================================================={NewLine}")
     .CreateLogger();
 
 try
@@ -62,6 +74,7 @@ try
     builder.Services.AddScoped<IActiveDirectoryService, ActiveDirectoryService>();
     builder.Services.AddScoped<IFimService, FimService>();
     builder.Services.AddScoped<IRateFeedService, RateFeedService>();
+    builder.Services.AddScoped<IGfsService, GfsService>();
     builder.Services.AddScoped<IReconciliationService, ReconciliationService>();
     builder.Services.AddScoped<IBulkMigrationService, BulkMigrationService>();
 
@@ -112,7 +125,6 @@ try
 
     // 3. Register Background Task Cleanup Hosted Services
     builder.Services.AddHostedService<ReservationCleanupService>();
-    builder.Services.AddHostedService<NotificationSchedulerService>();
 
     // 4. Add MVC Controllers and Session middleware
     builder.Services.AddControllers();
@@ -210,17 +222,11 @@ try
         // any-authenticated-user read (see comment at that endpoint), not a module-level one.
         Read("dashboard.read", "dashboard");
 
-        // Purchase orders (operational module) -- was missing, which left the
-        // create/update PO endpoints unprotected regardless of the caller's
-        // GroupPermission level (e.g. Treasury Operations (Checker) = READ_ONLY).
+        // Purchase Orders
         Read("purchase_orders.read", "purchase_orders");
         Write("purchase_orders.write", "purchase_orders");
 
-        // Custody, stocktake, workflows and reports (operational modules) -- also
-        // had no policy registered at all, leaving their write endpoints (stock
-        // transfers, reservations, purchases, withdrawals, stocktake sessions,
-        // workflow approve/reject) and read endpoints (reports, holdings, active
-        // workflow instances) fully open to anonymous callers.
+        // Custody, stocktake, workflows and reports (operational modules)
         Read("custody.read", "custody");
         Write("custody.write", "custody");
         Read("stocktake.read", "stocktake");
@@ -228,10 +234,12 @@ try
         Read("workflows.read", "workflows");
         Read("reports.read", "reports");
 
+        // Spatial map
+        Read("spatial_map.read", "spatial_map");
+        Write("spatial_map.write", "spatial_map");
+
         // "pending_actions" is the module that actually governs approving/rejecting
-        // a workflow instance assigned to the caller (Treasury Operations (Checker)
-        // and Reconciliation Officers are FULL here; "workflows" itself is READ_ONLY
-        // for everyone but IT/Admin -- it's just the browse/list view).
+        // a workflow instance assigned to the caller
         Read("pending_actions.read", "pending_actions");
         Write("pending_actions.write", "pending_actions");
 
@@ -241,8 +249,7 @@ try
         Read("master_data.read", "master_data");
         Read("workflow_design.read", "workflow_design");
 
-        // Phase 2/3 -- administrative MANAGE/SETUP modules, distinct from the
-        // operational VIEW modules of the same data.
+        // Administrative MANAGE/SETUP modules
         Write("vault_location.write", "vault_location");
         Write("master_data.write", "master_data");
         Write("workflow_design.write", "workflow_design");
@@ -251,60 +258,30 @@ try
         Read("intake.read", "intake");
         Write("intake.write", "intake");
 
-        // RFP items 5-8. Rules Engine and Notifications are administrative/governance
-        // modules (rule authoring, distribution-list configuration are sensitive --
-        // same tier as workflow_design/master_data). Monitoring alert-route config is
-        // likewise admin-tier; GET /api/health/detailed and the existing GET /api/health
-        // stay anonymous since external monitoring tools poll them without a user JWT.
+        // Rules Engine and Monitoring
         Read("rules_engine.read", "rules_engine");
         Write("rules_engine.write", "rules_engine");
-        Read("notifications.read", "notifications");
-        Write("notifications.write", "notifications");
         Read("monitoring.read", "monitoring");
         Write("monitoring.write", "monitoring");
 
-        // "reports" previously only had a .read policy (the report views themselves are
-        // read-only). Generating a persisted IFRS valuation disclosure snapshot is a write
-        // action layered on the same module -- gate it so only roles with FULL on `reports`
-        // (Reconciliation Officers, IT/Admin) can produce a disclosure of record, while
-        // everyone with reports.read can still list/view previously generated ones.
-        Write("reports.write", "reports");
-
-        // Gold Dispensing Machine (GDM) integration -- scalability hook (RFP-adjacent
-        // enhancement). `dispensing` is the operational module (view/operate dispense
-        // transactions, mirrors intake/custody); `device_integration` is the administrative
-        // module that governs registering/decommissioning physical machines, same tier as
-        // vault_location/master_data.
+        // Notifications, Dispensing and Device Integration
+        Read("notifications.read", "notifications");
+        Write("notifications.write", "notifications");
         Read("dispensing.read", "dispensing");
         Write("dispensing.write", "dispensing");
         Read("device_integration.read", "device_integration");
         Write("device_integration.write", "device_integration");
 
-        // Barcode/QR Code Tracking (RFP Section 3) -- generating/printing GS1-128 + QR
-        // labels is an operational task (same tier as intake/dispensing); the write side
-        // is only used to log a "label printed" chain-of-custody event, not to mutate
-        // the label content itself (labels are derived/computed, never stored).
+        // Reports write
+        Write("reports.write", "reports");
+
+        // Barcode/QR Code Tracking
         Read("barcode_qr_labeling.read", "barcode_qr_labeling");
         Write("barcode_qr_labeling.write", "barcode_qr_labeling");
 
-        // "settings" module key existed in the seed data (DbSeeder) and the frontend's
-        // MODULE_KEYS catalog, but had no registered policy anywhere -- decorative like
-        // "dashboard" used to be. Backs the sidebar menu-layout write endpoint (arranging
-        // the nav order is a system-wide administrative change, same tier as
-        // vault_location/master_data/rules_engine). The read side of the menu layout is
-        // intentionally a plain any-authenticated-user [Authorize] (every user needs the
-        // current order to render their own sidebar), not gated by settings.read.
+        // Settings module
         Read("settings.read", "settings");
         Write("settings.write", "settings");
-
-        // GL Configuration (administrative/governance module). Governs the chart of
-        // accounts + posting-rule mappings that decide how inventory movements are
-        // booked -- the most sensitive config in the system, so it is admin-tier and
-        // its changes go through maker-checker (enforced in GlConfigService, not here).
-        // .read = view config/versions + run the posting simulator; .write = create/edit/
-        // submit a draft AND approve/reject (segregation-of-duties is enforced server-side).
-        Read("gl_config.read", "gl_config");
-        Write("gl_config.write", "gl_config");
     });
 
     var app = builder.Build();
@@ -348,6 +325,49 @@ try
 
     // 7. Request Pipeline Setup
     app.UseCors("AllowAll");
+
+    // Global Error & Exception Logging Middleware for Support Team
+    app.Use(async (context, next) =>
+    {
+        try
+        {
+            await next();
+            if (context.Response.StatusCode >= 500)
+            {
+                Log.Error("🚨 HTTP {StatusCode} SERVER ERROR: {Method} {Path}{Query} [User: {User}] [Client IP: {RemoteIp}]",
+                    context.Response.StatusCode,
+                    context.Request.Method,
+                    context.Request.Path,
+                    context.Request.QueryString,
+                    context.User.Identity?.Name ?? "Anonymous",
+                    context.Connection.RemoteIpAddress?.ToString() ?? "Unknown");
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "🚨 UNHANDLED SERVER EXCEPTION: {Method} {Path}{Query} [User: {User}] [Client IP: {RemoteIp}]",
+                context.Request.Method,
+                context.Request.Path,
+                context.Request.QueryString,
+                context.User.Identity?.Name ?? "Anonymous",
+                context.Connection.RemoteIpAddress?.ToString() ?? "Unknown");
+
+            if (!context.Response.HasStarted)
+            {
+                context.Response.StatusCode = 500;
+                context.Response.ContentType = "application/json";
+                var errorPayload = new
+                {
+                    error = ex.InnerException?.Message ?? ex.Message,
+                    type = ex.GetType().Name,
+                    path = context.Request.Path.Value,
+                    timestamp = DateTime.UtcNow
+                };
+                await context.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(errorPayload));
+            }
+        }
+    });
+
     app.UseSession();
     app.UseHttpsRedirection();
     app.UseAuthentication();

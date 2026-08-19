@@ -1,0 +1,583 @@
+[1] Kuwait Finance House
+[2] Technology Business Analysis
+[3] Precious Metal Inventory System
+[4] Business Requirements Document
+[5] System
+[6] New System
+[7] Sector
+[8] Department
+[9] Operations
+[10] Author
+[11] Ahmed M. ElBaz
+[12] Date
+[13] 09/08/2026
+[14] Version
+[15] 1.0
+[16] Revision History
+[17] Date
+[18] Version
+[19] Description
+[20] Author
+[21] 09/08/2026
+[22] 1.0
+[23] Initial Document
+[24] Ahmed M. ElBaz
+[25] Acceptance
+[26] Date
+[27] Name
+[28] Title
+[29] Dept.
+[30] Signature
+[31] Abbreviations
+[32] Acronym
+[33] Definition
+[34] AD
+[35] Active Directory
+[36] API
+[37] Application Programming Interface
+[38] EOD
+[39] End of Day
+[40] GFS
+[41] Gold Fulfillment / Movement System
+[42] GL
+[43] General Ledger
+[44] IMAL
+[45] Treasury System for Posting Financial Buy/Sell Transactions to Supplier
+[46] KFH
+[47] Kuwait Finance House
+[48] LBMA
+[49] London Bullion Market Association
+[50] QR
+[51] Code related to a single precious metal serial number
+[52] RBAC
+[53] Role-Based Access Control
+[54] UOM
+[55] Unit of Measure
+[56] Contents
+[57] Use Case Purpose:1
+[58] Stakeholders:1
+[59] Business Rules:1
+[60] Business Flow Diagram:1
+[61] UC01:1
+[62] UC02:1
+[63] BRD Purpose:
+[64] This BRD defines the functional business requirements for implementing an enterprise-grade Precious Metals Inventory Management System focused on physical gold bar tracking, movement control, QR/barcode validation, auditability, and operational visibility across Main Vault, branches, courier transit, and future distribution channels.
+[65] The target solution shall apply a hybrid information model. The Inventory System shall be the system of record for physical bar identity, static bar attributes, current location, physical status, movement workflow, QR scans and audit trail. Ownership, customer account number, average purchase cost and last selling price shall remain mastered in external systems and shall be retrieved either in real time during QR scanning or synchronized to the inventory platform at EOD for reporting, reconciliation and operational continuity.
+[66] The required outcome is to reduce manual tracking, prevent wrong-bar dispatch or receipt, enforce maker-checker validation, prevent invalid location changes, and ensure that failed validations automatically trigger cancellation or return controls instead of silent inventory updates
+[67] Stakeholders:
+[68] Treasury
+[69] Vault Operations
+[70] Trigger:
+[71] The end-to-end process is triggered when a business event requires physical inventory handling or verification. Examples include supplier receipt, customer gold receipt, QR/barcode creation, GFS branch delivery request, courier handover, branch delivery receipt, EOD synchronization, reconciliation activity, or low-stock threshold breach.
+[72] For branch delivery use cases, the initiating trigger is the presence of an approved GFS branch delivery request that identifies the required bar, customer account/owner, destination branch and physical delivery route.
+[73] Business Flow Diagram:
+[74] NA
+[75] Business Rules:
+[76] Business Rule ID
+[77] Description
+[78] BR-001
+[79] Every gold bar/package must have a unique QR/barcode and a unique bar serial number before movement is allowed.
+[80] BR-002
+[81] All inventory movement transactions must follow Maker-Checker approval where configured by KFH.
+[82] BR-003
+[83] Physical movement validation must be performed using QR/barcode scanning at each mandatory control point.
+[84] BR-004
+[85] Buying, selling, ownership, average purchase cost and last selling price are not mastered in the Inventory System.
+[86] BR-005
+[87] During QR scan, the Inventory System must retrieve live owner/account and valuation attributes from the external source system when required by the workflow.
+[88] BR-006
+[89] At EOD, the Inventory System must update stored bar reference fields for owner, customer account number, average purchase cost and last selling price from the external source system.
+[90] BR-007
+[91] Inventory location must change only after all mandatory validations and approvals are successful.
+[92] BR-008
+[93] Customer-owned bars must be associated with the customer account number received from the source system.
+[94] BR-009
+[95] Every action, scan, validation result, approval, cancellation and integration response must be audit logged with user, timestamp and details.
+[96] BR-010
+[97] Low-stock alerts must be generated based on configurable thresholds by location, owner/customer segment, product type and denomination.
+[98] BR-011
+[99] For Main Vault dispatch to courier, the scanned bar must match the exact bar required in the GFS branch delivery request.
+[100] BR-012
+[101] For Main Vault dispatch and branch receipt, the live owner/customer account must match the customer account associated with the GFS request.
+[102] BR-013
+[103] If bar identity validation fails during Main Vault dispatch, the transfer request must be cancelled and bar location must not change.
+[104] BR-014
+[105] If owner/customer account validation fails during Main Vault dispatch, the transfer request must be cancelled and bar location must not change.
+[106] BR-015
+[107] If Main Vault dispatch validations pass and Checker approves, bar location must change to In-Transit and the courier delivery leg must be recorded.
+[108] BR-016
+[109] At branch receipt, the scanned bar must match the bar requested by the customer and the bar required in GFS.
+[110] BR-017
+[111] At branch receipt, the receiving branch must match the destination branch associated with the GFS request.
+[112] BR-018
+[113] If any branch receipt validation fails, the request must be cancelled and the bar must be handed back to courier for return to Main Vault.
+[114] BR-019
+[115] Manual barcode entry, if allowed, must require reason capture, Checker approval and enhanced audit logging.
+[116] BR-020
+[117] If live external lookup is unavailable, location must not be changed unless KFH approves a controlled pending-verification process.
+[118] BR-021
+[119] Low stock monitoring shall support the precious metal product types Turkish Gold and Swiss Gold, and any future configured product types.
+[120] BR-022
+[121] System default low-stock cut-off thresholds shall be configurable by product type and denomination, and shall support N/A where no threshold is applicable.
+[122] BR-023
+[123] All creation, amendment, activation, deactivation, or deletion of cut-off threshold configurations must follow Maker-Checker workflow before becoming effective.
+[124] BR-024
+[125] Low-stock alerts must be raised when available stock balance is less than or equal to the configured cut-off threshold for the relevant product type and denomination.
+[126] BR-025
+[127] Stock threshold calculation shall aggregate stock in KG equivalent while preserving denomination-level detail for reporting and alert routing.
+[128] BR-026
+[129] Low-stock alert calculation must include only bars where Owner equals KFH-Kuwait.
+[130] BR-027
+[131] Bars owned by Customer accounts, KFH-Turkey, or any owner other than KFH-Kuwait must be excluded from low-stock threshold calculation and alert validation.
+[132] BR-028
+[133] Owner filtering for low-stock calculation must use the latest available owner value from live lookup or the latest successful EOD synchronization snapshot, according to the monitoring execution mode.
+[134] BR-029
+[135] High-stock alert calculation must include only bars where Owner equals KFH-Kuwait.
+[136] BR-030
+[137] Bars owned by Customer accounts, KFH-Turkey, or any owner other than KFH-Kuwait must be excluded from high-stock threshold calculation and alert validation.
+[138] BR-031
+[139] High-stock alerts must be raised when available KFH-Kuwait owned stock balance is greater than or equal to the configured high-stock cut-off threshold for the relevant product type and denomination.
+[140] BR-032
+[141] High-stock cut-off thresholds shall be configurable by product type and denomination, support N/A where not applicable, and require Maker-Checker approval before becoming effective.
+[142] BR-033
+[143] Low-stock and high-stock thresholds shall be maintained as separate configuration types so that each denomination can have independent minimum and maximum alert levels.
+[144] BR-034
+[145] Low-stock and high-stock alert thresholds shall be evaluated at Enterprise Level across all KFH-Kuwait inventory locations combined, unless a future approved change introduces location-level thresholds.
+[146] BR-035
+[147] Enterprise-level stock alert calculation shall aggregate eligible KFH-Kuwait owned bars across Main Vault, branches and approved internal stock locations, while excluding customer-owned, KFH-Turkey-owned and non-KFH-Kuwait-owned bars.
+[148] BR-036
+[149] GFS is the authoritative source for actual bar owner/customer account information and average purchase cost.
+[150] BR-037
+[151] When a bar QR/barcode is scanned at any location, the Inventory System must fetch live owner and average purchase cost data from GFS and update the Inventory System bar record with the returned values.
+[152] BR-038
+[153] At EOD, the Inventory System must synchronize owner/customer account information and average purchase cost from GFS for all applicable bars and store the latest GFS values as the inventory reference snapshot.
+[154] BR-039
+[155] If live GFS data cannot be retrieved during a scan, workflows requiring owner or average purchase cost validation must not perform location-changing updates until GFS data is successfully retrieved or an approved exception process is executed.
+[156] BR-040
+[157] Damaged bar updates must follow Maker-Checker workflow before the Is Damaged flag becomes effective.
+[158] BR-041
+[159] A bar marked as damaged must not be dispatched, transferred, delivered, or moved from Main Vault to any other location.
+[160] BR-042
+[161] All Main Vault outbound movement workflows must validate Is Damaged before location update. If Is Damaged = Yes, the workflow must be rejected/cancelled and the bar location must remain unchanged.
+[162] BR-043
+[163] Marking a bar as damaged must not change bar ownership, average purchase cost, denomination, product type, or physical location.
+[164] BR-044
+[165] Damaged status must be visible during QR scan, movement validation, reporting and audit review.
+[166] UC01 - Add QR/Barcode to Gold Bar
+[167] Use Case ID:
+[168] UC01
+[169] Use Case Name:
+[170] Add QR/Barcode to Gold Bar
+[171] Created By:
+[172] Ahmed M. ElBaz
+[173] Last Updated By:
+[174] Ahmed M. ElBaz
+[175] Date Created:
+[176] 09/08/2026
+[177] Date Last Updated:
+[178] 09/08/2026
+[179] Actors:
+[180] Vault Operations User, Branch Operations User, Inventory System, QR/Barcode Printer/Generator
+[181] Description:
+[182] Create and assign a unique QR/barcode to a gold bar/package so it can be tracked across all future operations.
+[183] Trigger:
+[184] A new bar/package is received or an existing bar requires controlled QR/barcode registration.
+[185] Pre-Conditions:
+[186] Bar serial number, product type, weight and purity are available and user is authorized.
+[187] Post Conditions:
+[188] QR/barcode is generated, linked to the bar record and available for scanning.
+[189] Main Flow:
+[190] 1. User selects or creates bar record.2. System validates mandatory attributes.3. System generates unique QR/barcode.4. User prints/attaches label.5. Checker approves if required.6. System logs QR creation and activation.
+[191] Alternative Flow:
+[192] A1. Reprint label after damage subject to reason capture.A2. Bulk QR generation for supplier shipment if enabled.
+[193] Exceptions:
+[194] E1. Duplicate barcode detected: reject.E2. Missing mandatory bar attributes: hold until corrected.
+[195] Includes:
+[196] Authentication; Audit Logging; Maker-Checker Workflow
+[197] Reporting:
+[198] Business Rules:
+[199] BR-001, BR-002, BR-009, BR-019
+[200] Assumptions:
+[201] Barcode format shall comply with bank-approved physical labeling standards.
+[202] Notes and Issues:
+[203] Confirm whether barcode label generation will be integrated with KFH printers.
+[204] UC02 - Scan QR and Retrieve Live Bar Details from GFS
+[205] Use Case ID:
+[206] UC02
+[207] Use Case Name:
+[208] Scan QR and Retrieve Live Bar Details from GFS
+[209] Created By:
+[210] Ahmed M. ElBaz
+[211] Last Updated By:
+[212] Ahmed M. ElBaz
+[213] Date Created:
+[214] 09/08/2026
+[215] Date Last Updated:
+[216] 09/08/2026
+[217] Actors:
+[218] Operations User, Inventory System, GFS Branch Automation System
+[219] Description:
+[220] Scan a bar QR/barcode and display locally stored physical inventory attributes together with live owner information and average purchase cost fetched from GFS. The Inventory System shall update the bar record with the latest GFS-returned owner/customer account and average purchase cost values after a successful scan lookup.
+[221] Trigger:
+[222] User scans a QR/barcode as part of receipt, dispatch, verification, reconciliation or inquiry.
+[223] Pre-Conditions:
+[224] QR/barcode exists. GFS integration service is available or an approved exception process is configured. User is authorized to scan and view the required bar information.
+[225] Post Conditions:
+[226] Bar details are displayed. The Inventory System bar record is updated with the latest owner/customer account and average purchase cost returned from GFS. Scan event, GFS response and validation result are recorded.
+[227] Main Flow:
+[228] 1. User scans QR/barcode at any location.2. Inventory System identifies the local bar record.3. Inventory System retrieves local physical attributes including serial number, product type, weight, purity, current location and status.4. Inventory System calls GFS using the bar identifier/serial number and any required request context.5. GFS returns live actual owner/customer account information and average purchase cost.6. Inventory System updates the bar record with the latest owner/customer account and average purchase cost received from GFS.7. Inventory System displays combined local physical attributes and latest GFS data to the user.8. Inventory System stores the scan event, GFS response timestamp, updated values and validation outcome in the audit trail.9. Inventory System displays Is Damaged status and blocks continuation of Main Vault outbound movement workflows if Is Damaged = Yes.
+[229] Alternative Flow:
+[230] A1. Manual serial entry may be allowed only under controlled operational fallback with reason capture and Checker control.A2. If scan is performed only for inquiry, Inventory System still fetches latest GFS data and updates the bar record.A3. If multiple GFS records are returned for the bar identifier, the system routes the event to exception handling and does not update the bar record until resolved.
+[231] Exceptions:
+[232] E1. QR not found: reject scan and log exception.E2. GFS lookup fails: display integration error, do not update owner or average purchase cost, and block workflows that require those values for validation.E3. GFS returns incomplete owner or average purchase cost data: route to data-quality exception.E4. Bar is blocked/damaged: display warning and route to exception handling where applicable.
+[233] Includes:
+[234] Audit Logging; GFS Live Lookup; Bar Record Update; Exception Handling
+[235] Reporting:
+[236] Business Rules:
+[237] BR-003, BR-009, BR-019, BR-036, BR-037, BR-039BR-040, BR-041, BR-042, BR-044
+[238] Assumptions:
+[239] GFS provides a reliable API or interface to fetch live owner/customer account information and average purchase cost using the bar identifier. Inventory System stores the latest GFS values as a reference snapshot, while GFS remains the source of truth.
+[240] Notes and Issues:
+[241] Define service SLA for real-time scan lookup.
+[242] UC03 - Receipt of Precious Metals from Supplier
+[243] Use Case ID:
+[244] UC03
+[245] Use Case Name:
+[246] Receipt of Precious Metals from Supplier
+[247] Created By:
+[248] Ahmed M. ElBaz
+[249] Last Updated By:
+[250] Ahmed M. ElBaz
+[251] Date Created:
+[252] 09/08/2026
+[253] Date Last Updated:
+[254] 09/08/2026
+[255] Actors:
+[256] Vault Operations Maker, Vault Checker, Supplier, Inventory System
+[257] Description:
+[258] Receive supplier-delivered gold into Main Vault and create/activate physical inventory records.
+[259] Trigger:
+[260] Approved supplier shipment arrives at Main Vault.
+[261] Pre-Conditions:
+[262] Supplier documents are available; user authorized; bar details captured.
+[263] Post Conditions:
+[264] Approved bars are recorded in Main Vault location with QR/barcodes and audit trail.
+[265] Main Flow:
+[266] 1. Maker records shipment details.2. Maker captures bar serial, type, weight, purity and receiving date.3. System validates completeness and duplicate serial.4. QR/barcode is assigned.5. Supporting documents are attached.6. Checker verifies and approves receipt.7. System updates location to Main Vault.
+[267] Alternative Flow:
+[268] A1. Partial shipment receipt allowed with discrepancy reason.A2. Damaged bar accepted with Is Damaged flag and exception approval.
+[269] Exceptions:
+[270] E1. Duplicate serial: reject.E2. Missing document: hold request.E3. Weight/purity variance: route to exception.
+[271] Includes:
+[272] UC01; UC02; Maker-Checker; Document Attachment
+[273] Reporting:
+[274] Business Rules:
+[275] BR-001, BR-002, BR-007, BR-009
+[276] Assumptions:
+[277] Supplier purchasing and financial posting are handled outside Inventory System.
+[278] Notes and Issues:
+[279] Confirm supplier document retention period.
+[280] UC04 - Courier to Branch Delivery Receipt and Validation
+[281] Use Case ID:
+[282] UC04
+[283] Use Case Name:
+[284] Courier to Branch Delivery Receipt and Validation
+[285] Created By:
+[286] Ahmed M. ElBaz
+[287] Last Updated By:
+[288] Ahmed M. ElBaz
+[289] Date Created:
+[290] 09/08/2026
+[291] Date Last Updated:
+[292] 09/08/2026
+[293] Actors:
+[294] Branch Operations Maker, Branch Checker, Courier Representative, Inventory System, GFS, GFS Branch Automation System
+[295] Description:
+[296] Receive a courier-delivered gold bar at the destination branch for a customer-generated branch delivery request. The branch must scan the QR/barcode and validate the bar against the GFS request, live owner/account data, customer-requested bar and destination branch. If any validation fails, the transfer request is cancelled and the bar is handed back to courier for return to Main Vault.
+[297] Trigger:
+[298] Courier arrives at the destination branch with a bar for a pending GFS branch delivery request.
+[299] Pre-Conditions:
+[300] 1. GFS request exists in Pending Branch Receipt status.2. Courier handover record exists.3. Bar is expected to be In-Transit.4. Branch user is authorized.5. Live owner/account lookup is available or controlled exception process is configured.
+[301] Post Conditions:
+[302] Successful: Bar location changes to the Branch Number and status becomes Received at Branch/Pending Customer Handover.Failure: Transfer request is cancelled; bar is handed back to courier for return to Main Vault; branch location is not assigned.
+[303] Main Flow:
+[304] 1. Branch Maker opens the GFS delivery request.2. System displays expected bar, customer account and destination branch.3. Branch Maker scans received bar QR/barcode.4. System retrieves inventory attributes and live owner/account details.5. System validates bar identity against GFS required bar.6. System validates live owner/customer account against the request customer.7. System validates that bar received is the one requested by customer.8. System validates receiving branch equals destination branch in GFS.9. Maker submits receipt confirmation.10. Checker reviews validation results and approves.11. System changes bar location to Branch Number.12. System logs receipt, scan results and evidence.
+[305] Alternative Flow:
+[306] A1. QR unreadable: controlled manual serial entry may be allowed with mandatory Checker approval and reason.A2. External owner lookup unavailable: hold in Pending Integration Verification; no branch location update.A3. Multiple bars received: each bar must be scanned and matched to its own GFS request.
+[307] Exceptions:
+[308] E1. Wrong bar: cancel request and hand bar back to courier for return to Main Vault.E2. Owner/account mismatch: cancel request and hand bar back to courier.E3. Customer-requested bar mismatch: cancel request and hand bar back to courier.E4. Branch mismatch: cancel request and hand bar back to courier.E5. Bar is not In-Transit or is blocked/damaged: block receipt and raise exception.E6. Bar is marked as damaged in Main Vault but was dispatched: cancel branch receipt, hand bar back to courier for return to Main Vault, and raise control breach exception.
+[309] Includes:
+[310] UC02; Maker-Checker Approval; GFS Request Validation; External Owner/Account Lookup; Courier Return Handling
+[311] Reporting:
+[312] Business Rules:
+[313] BR-001, BR-002, BR-003, BR-005, BR-009, BR-012, BR-016, BR-017, BR-018, BR-020, BR-036, BR-037, BR-039BR-041, BR-042, BR-044
+[314] Assumptions:
+[315] GFS Branch Automation System is authoritative for branch delivery request details, actual owner/customer account information and average purchase cost. During QR validation, Inventory System fetches live GFS data and updates bar reference fields before applying workflow validations.
+[316] Notes and Issues:
+[317] Open point: decide whether the return to Main Vault should create a new GFS return request automatically.
+[318] UC05 - Main Vault Dispatch to Courier for Branch Delivery
+[319] Use Case ID:
+[320] UC05
+[321] Use Case Name:
+[322] Main Vault Dispatch to Courier for Branch Delivery
+[323] Created By:
+[324] Ahmed M. ElBaz
+[325] Last Updated By:
+[326] Ahmed M. ElBaz
+[327] Date Created:
+[328] 09/08/2026
+[329] Date Last Updated:
+[330] 09/08/2026
+[331] Actors:
+[332] Vault Operations Maker, Vault Checker, Courier Representative, Inventory System, GFS, GFS Branch Automation System
+[333] Description:
+[334] Dispatch a gold bar from Main Vault to courier for branch delivery. The vault must scan QR/barcode to verify the bar is the exact bar required in the GFS branch delivery request and that the live owner/customer account still matches the requesting customer. If any validation fails, the request is cancelled and location remains unchanged. If validations pass, location changes to In-Transit.
+[335] Trigger:
+[336] Approved GFS branch delivery request is ready for physical dispatch from Main Vault to courier.
+[337] Pre-Conditions:
+[338] 1. GFS request is approved and pending Main Vault dispatch.2. Bar is physically in Main Vault and eligible for movement.3. Bar has active QR/barcode.4. Maker and Checker are authorized.5. Live owner/account lookup is available or controlled exception process is configured.6. Bar must not be marked as damaged. Damaged bars in Main Vault are not eligible for dispatch to courier or branch delivery.
+[339] Post Conditions:
+[340] Successful: Bar location changes to In-Transit; courier handover details are recorded; GFS is updated.Failure: Transfer request is cancelled; bar location remains unchanged; failed validation is logged.
+[341] Main Flow:
+[342] 1. Vault Maker opens approved GFS branch delivery request.2. System displays expected bar, customer account and destination branch.3. Vault Maker scans selected physical bar QR/barcode.4. System retrieves inventory attributes and current location/status.5. System retrieves live owner/customer account from external source.6. System validates scanned bar equals required bar in GFS.7. System validates live owner/customer account equals request customer account.8. System validates bar is available in Main Vault and not blocked/damaged.9. Maker submits dispatch for approval.10. Checker reviews validation evidence and courier details.11. Checker approves dispatch.12. System changes bar location to In-Transit.13. System records courier handover reference and audit details.14. System sends dispatch status to GFS and notifies destination branch.8A. System validates Is Damaged flag before Maker submission. If Is Damaged = Yes, dispatch is blocked and bar location remains Main Vault.
+[343] Alternative Flow:
+[344] A1. QR unreadable: controlled manual entry may be allowed with reason and Checker approval.A2. Multiple candidate bars: system must force the exact GFS bar, no substitute bar.A3. External owner lookup unavailable: keep request Pending Validation; no location change.
+[345] Exceptions:
+[346] E1. Wrong bar scanned: cancel transfer request; location unchanged.E2. Owner/account mismatch: cancel transfer request; location unchanged.E3. Bar not in Main Vault or already In-Transit: reject dispatch.E4. Bar blocked/damaged: reject and route to exception.E5. Checker rejects: no location change; return for correction or cancel.E6. GFS update failure: dispatch must not be finalized until consistency is restored or compensation is approved.E7. Bar is marked as damaged in Main Vault: cancel/reject dispatch; do not update location; route to damaged bar handling.
+[347] Includes:
+[348] UC02; Maker-Checker Approval; GFS Request Validation; External Owner/Account Lookup; Courier Handover Capture
+[349] Reporting:
+[350] Business Rules:
+[351] BR-001, BR-002, BR-003, BR-005, BR-009, BR-011, BR-012, BR-013, BR-014, BR-015, BR-020, BR-036, BR-037, BR-039BR-040, BR-041, BR-042, BR-044
+[352] Assumptions:
+[353] GFS Branch Automation System is authoritative for branch delivery request details, actual owner/customer account information and average purchase cost. During QR validation, Inventory System fetches live GFS data and updates bar reference fields before applying workflow validations.
+[354] Notes and Issues:
+[355] Open point: confirm whether automatic cancellation after validation failure requires Checker confirmation.
+[356] UC06 - Branch to Main Vault Transfer
+[357] Use Case ID:
+[358] UC06
+[359] Use Case Name:
+[360] Branch to Main Vault Transfer
+[361] Created By:
+[362] Ahmed M. ElBaz
+[363] Last Updated By:
+[364] Ahmed M. ElBaz
+[365] Date Created:
+[366] 09/08/2026
+[367] Date Last Updated:
+[368] 09/08/2026
+[369] Actors:
+[370] Branch Operations Maker, Branch Checker, Courier, Vault Operations, Inventory System
+[371] Description:
+[372] Return or transfer a bar from a branch back to Main Vault while maintaining traceability.
+[373] Trigger:
+[374] Branch initiates approved return/transfer to Main Vault.
+[375] Pre-Conditions:
+[376] Bar exists at branch and is eligible for return.
+[377] Post Conditions:
+[378] Bar location changes from Branch to In-Transit, then Main Vault after receipt.
+[379] Main Flow:
+[380] 1. Branch Maker initiates return.2. QR is scanned and validated.3. Checker approves.4. Location changes to In-Transit.5. Main Vault receives and scans bar.6. Location changes to Main Vault.
+[381] Alternative Flow:
+[382] A1. Partial return shipment supported by separate bar-level records.A2. If a damaged bar is being returned to Main Vault from another location, receipt into Main Vault may proceed subject to exception handling and audit logging.
+[383] Exceptions:
+[384] E1. Wrong bar scanned: reject.E2. Owner mismatch: route to exception if applicable.
+[385] Includes:
+[386] UC02; Maker-Checker; Courier Tracking
+[387] Reporting:
+[388] Business Rules:
+[389] BR-002, BR-003, BR-007, BR-009BR-041, BR-042, BR-044
+[390] Assumptions:
+[391] Return reasons are configurable.
+[392] Notes and Issues:
+[393] Define if GFS controls all return movements.
+[394] UC07 - Main Vault to Home Delivery Courier
+[395] Use Case ID:
+[396] UC07
+[397] Use Case Name:
+[398] Main Vault to Home Delivery Courier
+[399] Created By:
+[400] Ahmed M. ElBaz
+[401] Last Updated By:
+[402] Ahmed M. ElBaz
+[403] Date Created:
+[404] 09/08/2026
+[405] Date Last Updated:
+[406] 09/08/2026
+[407] Actors:
+[408] Vault Operations Maker, Vault Checker, Courier, Inventory System
+[409] Description:
+[410] Dispatch bar from Main Vault to courier for home delivery where configured.
+[411] Trigger:
+[412] Approved home delivery instruction is received.
+[413] Pre-Conditions:
+[414] Instruction approved, bar eligible and QR active.Bar must not be marked as damaged. Damaged bars in Main Vault are not eligible for home delivery courier dispatch.
+[415] Post Conditions:
+[416] Bar location changes to In-Transit/Courier and delivery evidence is stored.
+[417] Main Flow:
+[418] 1. Open delivery instruction.2. Scan bar.3. Validate identity and eligibility.4. Checker approves.5. Update location to In-Transit/Courier.6. Store courier evidence.7. Before changing location to In-Transit/Courier, system validates Is Damaged. If Is Damaged = Yes, dispatch is blocked.
+[419] Alternative Flow:
+[420] A1. Delivery may later be failed and returned to Main Vault.
+[421] Exceptions:
+[422] E1. Wrong bar or owner mismatch: cancel/hold and no location change.E2. Bar is marked as damaged in Main Vault: cancel/reject delivery dispatch and keep location unchanged.
+[423] Includes:
+[424] UC02; Courier Handover
+[425] Reporting:
+[426] Business Rules:
+[427] BR-003, BR-007, BR-009, BR-012BR-041, BR-042, BR-044
+[428] Assumptions:
+[429] Home delivery may be a future phase.
+[430] Notes and Issues:
+[431] Confirm customer delivery confirmation integration.
+[432] UC08 - EOD GFS Reference Data Synchronization
+[433] Use Case ID:
+[434] UC08
+[435] Use Case Name:
+[436] EOD GFS Reference Data Synchronization
+[437] Created By:
+[438] Ahmed M. ElBaz
+[439] Last Updated By:
+[440] Ahmed M. ElBaz
+[441] Date Created:
+[442] 09/08/2026
+[443] Date Last Updated:
+[444] 09/08/2026
+[445] Actors:
+[446] Inventory System, GFS Branch Automation System, IT Operations, Audit
+[447] Description:
+[448] At End of Day, synchronize owner/customer account information and average purchase cost from GFS to the Inventory System for applicable bars. The EOD synchronization updates Inventory System bar information with the latest GFS values for reporting, reconciliation, threshold calculations and operational continuity.
+[449] Trigger:
+[450] Scheduled EOD job starts or is manually triggered by authorized IT/Ops user after GFS EOD data is available.
+[451] Pre-Conditions:
+[452] 1. GFS EOD interface/file/API is available.2. Inventory System has bar identifiers required to match GFS records.3. Reconciliation controls are configured.4. Authorized IT/Ops user or scheduler is permitted to run the job.
+[453] Post Conditions:
+[454] Inventory bar reference fields for owner/customer account and average purchase cost are updated from GFS. Sync summary, updated records, rejected records and exceptions are logged and reported.
+[455] Main Flow:
+[456] 1. EOD synchronization job starts.2. Inventory System requests or receives GFS EOD bar reference data.3. Inventory System validates file/API structure, control totals and mandatory fields.4. Inventory System matches GFS records to Inventory System bar records by bar identifier/serial number.5. Inventory System updates owner/customer account information and average purchase cost using the latest GFS values.6. Inventory System records old value, new value, GFS timestamp and update timestamp.7. Inventory System generates EOD synchronization report.8. Inventory System raises exceptions for unmatched, duplicate or incomplete records.
+[457] Alternative Flow:
+[458] A1. Re-run job after correction of failed records.A2. Partial EOD update may be accepted only if KFH approves partial processing and exception reporting.A3. If a bar was already updated during a live scan earlier in the day, EOD synchronization overwrites or confirms values based on latest GFS timestamp and configured conflict rules.
+[459] Exceptions:
+[460] E1. Missing bar identifier: reject record.E2. Duplicate GFS record for same bar: reject and route to exception.E3. GFS EOD interface failure: alert IT/Ops and keep previous snapshot.E4. Owner or average purchase cost missing from GFS record: reject record and raise data-quality exception.E5. Control total mismatch: stop job or route to exception based on KFH policy.
+[461] Includes:
+[462] Audit Logging; GFS EOD Interface; Exception Reporting; Reconciliation Support
+[463] Reporting:
+[464] Business Rules:
+[465] BR-004, BR-006, BR-009, BR-028, BR-036, BR-038, BR-039
+[466] Assumptions:
+[467] GFS is the authoritative source for owner/customer account information and average purchase cost. Inventory System stores synchronized GFS values as a reference snapshot for inventory reporting and downstream validations.
+[468] Notes and Issues:
+[469] Define EOD cut-off time, GFS file/API format, conflict resolution based on timestamp, and retry policy.
+[470] UC09 - Low Stock Alert Monitoring for Turkish Gold and Swiss Gold
+[471] Use Case ID:
+[472] UC09
+[473] Use Case Name:
+[474] Low Stock Alert Monitoring for Turkish Gold and Swiss Gold
+[475] Created By:
+[476] Ahmed M. ElBaz
+[477] Last Updated By:
+[478] Ahmed M. ElBaz
+[479] Date Created:
+[480] 09/08/2026
+[481] Date Last Updated:
+[482] 09/08/2026
+[483] Actors:
+[484] Inventory System, Operations Users, Management Users, Notification Service
+[485] Description:
+[486] Monitor the enterprise-level available stock of Turkish Gold and Swiss Gold by denomination and raise alerts when the aggregated KFH-Kuwait owned stock balance reaches or falls below the configured low-stock cut-off level. Enterprise-level means stock is calculated across all eligible KFH-Kuwait inventory locations combined. The low-stock calculation must only include bars owned by KFH-Kuwait. Bars owned by customer accounts, KFH-Turkey, or any other owner must be excluded from the calculation. The initial low-stock threshold values remain configurable and must not be hardcoded.
+[487] Trigger:
+[488] Inventory balance update after approved movement, scheduled monitoring run, or manual authorized monitoring execution.
+[489] Pre-Conditions:
+[490] 1. Active low-stock cut-off threshold configurations exist for applicable product type and denomination combinations.2. Product types Turkish Gold and Swiss Gold are configured as precious metal stock categories.3. Inventory balances are available by product type, denomination, location and owner.4. Owner information is available from the latest live lookup or latest successful EOD synchronization snapshot.5. Enterprise-level aggregation is enabled for stock alert calculations.6. Notification recipients and escalation rules are maintained.
+[491] Post Conditions:
+[492] If enterprise-level KFH-Kuwait owned stock balance reaches or falls below the configured low-stock cut-off, alert is generated, routed to configured recipients and available in alert dashboard. Bars owned by Customer, KFH-Turkey or any other owner are excluded and do not affect alert decisioning.
+[493] Main Flow:
+[494] 1. System initiates low-stock monitoring after inventory update or scheduled run.2. System retrieves active low-stock threshold configurations for Turkish Gold and Swiss Gold by denomination.3. System retrieves bar inventory balances and owner information from all eligible inventory locations.4. System filters included bars to Owner = KFH-Kuwait only.5. System excludes bars owned by Customer accounts, KFH-Turkey, or any owner other than KFH-Kuwait.6. System aggregates included stock across all locations at enterprise level.7. System calculates available KFH-Kuwait owned enterprise-level stock balance in KG equivalent for each product type and denomination.8. System compares enterprise-level balance against configured low-stock cut-off threshold.9. For 100g denomination, alert if Turkish Gold <= 100 KG or Swiss Gold <= 100 KG for enterprise-level KFH-Kuwait owned stock only.10. For 50g denomination, alert if Turkish Gold <= 50 KG or Swiss Gold <= 50 KG for enterprise-level KFH-Kuwait owned stock only.11. For 20g denomination, alert if Turkish Gold <= 50 KG or Swiss Gold <= 50 KG for enterprise-level KFH-Kuwait owned stock only.12. For 10g denomination, alert if Turkish Gold <= 50 KG or Swiss Gold <= 50 KG for enterprise-level KFH-Kuwait owned stock only.13. For 5g denomination, alert if Swiss Gold <= 50 KG for enterprise-level KFH-Kuwait owned stock only; Turkish Gold is N/A unless later configured.14. System generates alert with product type, denomination, enterprise-level KFH-Kuwait owned current balance, threshold, timestamp and excluded-owner count where applicable.15. System routes alert to configured recipients and records audit log.16. User reviews alert and records action/closure comments where applicable.
+[495] Alternative Flow:
+[496] A1. Product/denomination threshold is N/A: system skips low-stock alert evaluation for that combination and logs it as Not Applicable.A2. Customer-owned or KFH-Turkey-owned bars exist in the same denomination: system excludes those bars and records them as excluded from the alert calculation.A3. Alert has already been raised and remains open: system updates existing alert with latest enterprise-level KFH-Kuwait owned balance instead of creating duplicate alert, if configured.A4. Future business requests location-level thresholds: system enhancement/change request is required because current approved scope is enterprise-level threshold evaluation.
+[497] Exceptions:
+[498] E1. Missing mandatory threshold configuration for an active denomination: generate configuration exception and do not apply an assumed threshold.E2. Invalid threshold value such as negative number or invalid UOM: reject configuration or monitoring input.E3. Balance conversion to KG fails due to missing UOM conversion: raise data-quality exception.E4. Owner value is missing or ambiguous: exclude the bar from low-stock calculation and raise data-quality exception for investigation.E5. Notification delivery fails: log failure, retry based on notification policy and show alert in dashboard.
+[499] Includes:
+[500] Notification Service; Reporting; UC10 Configure Precious Metal Denomination Cut-Off Thresholds
+[501] Reporting:
+[502] Business Rules:
+[503] BR-009, BR-010, BR-021, BR-022, BR-024, BR-025, BR-026, BR-027, BR-028, BR-034, BR-035, BR-036, BR-038
+[504] Assumptions:
+[505] Low-stock alert calculation is enterprise-level only. The Owner value KFH-Kuwait is the only eligible ownership category for low-stock alert calculation. Customer-owned bars, KFH-Turkey bars and any non-KFH-Kuwait owner categories are excluded even if physically located in KFH Kuwait locations.Owner values used for stock alert eligibility are sourced from GFS through live scan updates or latest successful EOD synchronization snapshot.
+[506] Notes and Issues:
+[507] Confirmed business decision: Option A Enterprise-Level Threshold is selected for stock alert calculations.
+[508] UC10 - Configure Precious Metal Denomination Low and High Stock Cut-Off Thresholds
+[509] Use Case ID:
+[510] UC10
+[511] Use Case Name:
+[512] Configure Precious Metal Denomination Low and High Stock Cut-Off Thresholds
+[513] Created By:
+[514] Ahmed M. ElBaz
+[515] Last Updated By:
+[516] Ahmed M. ElBaz
+[517] Date Created:
+[518] 09/08/2026
+[519] Date Last Updated:
+[520] 09/08/2026
+[521] Actors:
+[522] Operations Maker, Operations Checker, Inventory System, Audit Log Service
+[523] Description:
+[524] Maintain configurable low-stock and high-stock cut-off thresholds for any precious metal product type and denomination, including Turkish Gold, Swiss Gold and future configured products. All low-stock and high-stock configuration changes must use Maker-Checker workflow before becoming effective. The threshold configuration controls product type, denomination, alert type and cut-off value. Owner scope is fixed to KFH-Kuwait only and location scope is fixed to Enterprise Level.
+[525] Trigger:
+[526] Authorized operations user needs to create, amend, deactivate or activate a low-stock or high-stock cut-off threshold for a product type and denomination.
+[527] Pre-Conditions:
+[528] 1. User has threshold maintenance access.2. Product type and denomination exist or are approved for configuration.3. Cut-off UOM and conversion rules are available.4. Alert type is defined as Low Stock or High Stock.5. Maker and Checker are not the same user if segregation of duties is enabled.
+[529] Post Conditions:
+[530] Approved low-stock or high-stock configuration becomes active and is used by UC09 low-stock monitoring or UC11 high-stock monitoring. Rejected or returned configuration remains inactive and does not affect alerts.
+[531] Main Flow:
+[532] 1. Maker opens threshold configuration screen.2. Maker selects alert type: Low Stock or High Stock.3. Maker selects product type such as Turkish Gold or Swiss Gold.4. Maker selects denomination such as 100g, 50g, 20g, 10g or 5g, or a future configured denomination.5. Maker enters cut-off quantity and UOM, or selects N/A where threshold is not applicable.6. System displays owner scope as KFH-Kuwait only and location scope as Enterprise Level.7. System prevents configuration of Customer, KFH-Turkey, any other owner, or branch/location-level thresholds for stock alert calculation.8. System validates alert type, product type, denomination, UOM, threshold value and effective date.9. System validates that Low Stock and High Stock thresholds are maintained as separate configuration records for the same product/denomination.10. Maker submits configuration for approval.11. Checker reviews old value, new value, alert type, enterprise-level scope, reason, effective date and impact.12. Checker approves.13. System activates the threshold configuration from the effective date/time.14. System records full audit trail and makes configuration available for UC09 or UC11 monitoring.
+[533] Alternative Flow:
+[534] A1. Checker returns configuration for correction: Maker updates and resubmits without losing history.A2. Maker sets N/A: system records the combination as not monitored for the selected alert type.A3. Future effective date is selected: configuration remains approved but pending activation until the effective date.A4. Bulk upload may be supported if each row includes alert type and passes validation and Checker approval.A5. Maker attempts to configure owner-level or location-level threshold: system displays that stock alert scope is fixed as KFH-Kuwait and Enterprise Level, then prevents alternative scope selection.
+[535] Exceptions:
+[536] E1. Duplicate active threshold exists for same alert type, product type, denomination, KFH-Kuwait owner scope and Enterprise Level location scope: reject or require amendment of existing record.E2. Negative or zero cut-off value entered where threshold is applicable: reject.E3. Invalid denomination or UOM: reject and display validation error.E4. Maker attempts to approve own change: block approval if segregation of duties is enabled.E5. Checker rejects: configuration remains inactive and reason is stored.E6. User attempts to configure Customer, KFH-Turkey, any non-KFH-Kuwait owner, or location-level stock alert scope: reject because stock alert calculation is restricted to KFH-Kuwait at Enterprise Level only.E7. Low-stock and high-stock threshold values create an illogical range for the same product and denomination, where low threshold is greater than or equal to high threshold: reject or route to exception approval based on KFH policy.
+[537] Includes:
+[538] Audit Logging; Maker-Checker Workflow; UC09 Low Stock Alert Monitoring; UC11 High Stock Alert Monitoring
+[539] Reporting:
+[540] Business Rules:
+[541] BR-002, BR-009, BR-010, BR-021, BR-022, BR-023, BR-024, BR-025, BR-026, BR-027, BR-028, BR-029, BR-030, BR-031, BR-032, BR-033, BR-034, BR-035
+[542] Assumptions:
+[543] Cut-off configuration is maintained in the Inventory System and does not require source-system ownership synchronization. KFH may later add new product types or denominations without code change. Stock alert calculation owner scope remains KFH-Kuwait only and location scope remains Enterprise Level unless KFH approves a business rule change.
+[544] Notes and Issues:
+[545] Confirmed business decision: thresholds are configured and evaluated at Enterprise Level, not branch/location level.
+[546] UC12 - Mark Gold Bar as Damaged
+[547] Use Case ID:
+[548] UC12
+[549] Use Case Name:
+[550] Mark Gold Bar as Damaged
+[551] Created By:
+[552] Ahmed M. ElBaz
+[553] Last Updated By:
+[554] Ahmed M. ElBaz
+[555] Date Created:
+[556] 09/08/2026
+[557] Date Last Updated:
+[558] 09/08/2026
+[559] Actors:
+[560] Vault Operations Maker, Vault Checker, Inventory System, GFS Branch Automation System, Audit Log Service
+[561] Description:
+[562] Allow authorized operations users to mark a gold bar as damaged through Maker-Checker workflow. Once approved, the Inventory System updates the Is Damaged flag to Yes and blocks any Main Vault outbound movement for that bar. The damaged update is a bar-status/control update only and must not change ownership, average purchase cost, denomination, product type, quantity, weight, purity or physical location.
+[563] Trigger:
+[564] Physical inspection, audit finding, vault handling incident, branch return inspection, courier return, or operational exception identifies a bar as damaged.
+[565] Pre-Conditions:
+[566] 1. Bar exists in the Inventory System and has a valid QR/barcode or serial number.2. User has Maker access to initiate damaged bar update.3. Supporting evidence or reason for damage is available.4. Bar is not already marked as damaged unless the request is an evidence update or correction.5. If the bar is in Main Vault, the bar must not be under an active outbound movement workflow.
+[567] Post Conditions:
+[568] Successful path: Is Damaged flag is set to Yes; damaged status is visible on scan, reports and movement validations; Main Vault outbound movement is blocked; full audit trail is recorded.Failure/rejection path: Is Damaged flag remains unchanged; rejection reason is recorded; no movement or ownership data is changed.
+[569] Main Flow:
+[570] 1. Maker opens damaged bar update screen.2. Maker scans QR/barcode or enters bar serial number using controlled manual entry.3. Inventory System retrieves local bar attributes and calls GFS to refresh latest owner and average purchase cost reference data.4. System displays bar serial number, product type, denomination, weight, purity, current location, owner, average purchase cost and current Is Damaged status.5. Maker selects Mark as Damaged.6. Maker enters damage reason, damage description, inspection date, and attaches supporting evidence where available.7. System validates that the bar exists, is not currently in an active outbound movement, and that mandatory reason/evidence fields are complete.8. Maker submits damaged update request for approval.9. Checker reviews bar details, current location, damage reason, evidence and audit context.10. Checker approves the damaged update.11. System sets Is Damaged = Yes and status/category = Damaged/Blocked where applicable.12. System prevents any future movement from Main Vault to branch, courier, home delivery, or any other non-Main Vault location.13. System records old value, new value, maker, checker, timestamps, reason and evidence references in the audit trail.14. System makes damaged status visible in QR scan results, dashboards, reports and movement validations.
+[571] Alternative Flow:
+[572] A1. QR/barcode cannot be scanned: Maker may use manual serial number entry only if permitted; reason capture and Checker approval remain mandatory.A2. Checker returns for correction: Maker updates reason/evidence and resubmits without losing history.A3. Bar is not in Main Vault: damaged flag may still be recorded, but any subsequent movement must follow approved exception/return handling and must not permit dispatch from Main Vault after receipt.A4. Request is submitted to update evidence for an already damaged bar: system records evidence update without changing the Is Damaged flag value.
+[573] Exceptions:
+[574] E1. Bar not found: reject request and log exception.E2. Bar is already part of an active outbound movement from Main Vault: block damaged update or require cancellation of outbound movement first based on KFH policy.E3. Mandatory damage reason/evidence is missing: return request for correction.E4. Checker rejects request: Is Damaged remains unchanged and rejection reason is logged.E5. GFS live lookup fails during request initiation: allow status update only if KFH approves, but record GFS lookup failure and keep previous GFS snapshot; location-changing workflows remain blocked until GFS lookup is resolved.E6. User attempts to move a damaged bar from Main Vault after approval: reject movement, keep location unchanged, and raise control exception.
+[575] Includes:
+[576] UC02 Scan QR and Retrieve Live Bar Details from GFS; Maker-Checker Approval; Audit Logging; Document/Evidence Attachment; Movement Blocking Validation
+[577] Reporting:
+[578] Business Rules:
+[579] BR-002, BR-003, BR-009, BR-036, BR-037, BR-039, BR-040, BR-041, BR-042, BR-043, BR-044
+[580] Assumptions:
+[581] The damaged flag is maintained in the Inventory System as a physical inventory control attribute. GFS remains the source of truth for owner and average purchase cost, but GFS does not override the Inventory System damaged flag. Damaged bars may be received into Main Vault for control purposes, but must not be moved from Main Vault to any other location once marked damaged.
+[582] Notes and Issues:
+[583] Confirm whether unmarking a damaged bar requires a separate repair/quality clearance use case with enhanced approval.

@@ -402,8 +402,6 @@ public class PMIMSTests
             null!,
             null!,
             null!,
-            null!,
-            null!,
             null!
         );
 
@@ -1008,6 +1006,300 @@ public class PMIMSTests
         Assert.NotNull(tx);
         Assert.Equal("CUSTOMER_OWNED", tx!.SourceOwnership);
         Assert.Null(tx.DestinationLocationId);
+    }
+
+    [Fact]
+    public async Task TestGfsQrScanAndLookup()
+    {
+        using var setup = CreateContext();
+        await SeedBasicDataAsync(setup.Context);
+
+        var item = new InventoryItem
+        {
+            ItemId = 200,
+            SerialNumber = "SN-GFS-SCAN-TEST",
+            ProductId = 1,
+            LotId = 1,
+            LocationId = 1,
+            OwnershipType = "KFH_OWNED",
+            StatusCode = "READY"
+        };
+        setup.Context.InventoryItems.Add(item);
+        await setup.Context.SaveChangesAsync();
+
+        var gfsService = new GfsService(setup.Context);
+        var repo = new InventoryRepository(setup.Context, gfsService: gfsService);
+
+        var scannedItem = await repo.ScanBarWithGfsLookupAsync("SN-GFS-SCAN-TEST");
+        Assert.NotNull(scannedItem);
+        Assert.Equal("GFS-CUST-88771122", scannedItem!.CustomerAccountNumber);
+        Assert.Equal(62.50m, scannedItem.AveragePurchaseCost);
+        Assert.Equal("CUSTOMER_OWNED", scannedItem.OwnershipType);
+    }
+
+    [Fact]
+    public async Task TestDamagedBarBlocking()
+    {
+        using var setup = CreateContext();
+        await SeedBasicDataAsync(setup.Context);
+
+        var item = new InventoryItem
+        {
+            ItemId = 201,
+            SerialNumber = "SN-DAMAGED-TEST",
+            ProductId = 1,
+            LotId = 1,
+            LocationId = 1,
+            OwnershipType = "KFH_OWNED",
+            StatusCode = "READY",
+            IsDamaged = true
+        };
+        setup.Context.InventoryItems.Add(item);
+        await setup.Context.SaveChangesAsync();
+
+        var repo = new InventoryRepository(setup.Context);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await repo.InitiateBranchTransferAsync(201, 2, "Courier", "test-user");
+        });
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await repo.InitiateWorkflowBranchTransferAsync(201, 2, "Courier", "test-user");
+        });
+    }
+
+    [Fact]
+    public async Task TestKuwaitCivilIdValidation()
+    {
+        using var setup = CreateContext();
+        var repo = new InventoryRepository(setup.Context);
+
+        // Valid Kuwait PACI Civil IDs (tested with real PACI Modulus-11 checksums)
+        // Format: CYYMMDDGSSSC
+        // 289101201928: C=2 (1989), YY=89, MM=10, DD=12, GSSSC...
+        // Let's compute a valid one:
+        // C=2, YY=90, MM=01, DD=15 (1990-01-15) -> "2900115" + "0123" + check digit
+        // Weights: [2, 1, 6, 3, 7, 9, 10, 5, 8, 4, 2]
+        // 2*2 + 9*1 + 0*6 + 0*3 + 1*7 + 1*9 + 5*10 + 0*5 + 1*8 + 2*4 + 3*2 = 4 + 9 + 0 + 0 + 7 + 9 + 50 + 0 + 8 + 8 + 6 = 101
+        // 101 % 11 = 2 -> 11 - 2 = 9. Check digit = 9.
+        // Valid Civil ID: "290011501239"
+        Assert.True(repo.ValidateKuwaitCivilId("290011501239"));
+
+        // Invalid cases
+        Assert.False(repo.ValidateKuwaitCivilId(""));
+        Assert.False(repo.ValidateKuwaitCivilId("12345")); // too short
+        Assert.False(repo.ValidateKuwaitCivilId("290011501238")); // wrong check digit
+        Assert.False(repo.ValidateKuwaitCivilId("190011501239")); // invalid century (must be 2 or 3)
+        Assert.False(repo.ValidateKuwaitCivilId("290131501239")); // invalid month 13
+        Assert.False(repo.ValidateKuwaitCivilId("290013201239")); // invalid day 32
+    }
+
+    [Fact]
+    public async Task TestHomeDeliveryLifecycle()
+    {
+        using var setup = CreateContext();
+        await SeedBasicDataAsync(setup.Context);
+
+        var item = new InventoryItem
+        {
+            ItemId = 205,
+            SerialNumber = "SN-HD-TEST-001",
+            ProductId = 1,
+            LotId = 1,
+            LocationId = 1, // Main Vault
+            OwnershipType = "KFH_OWNED",
+            StatusCode = "READY"
+        };
+        setup.Context.InventoryItems.Add(item);
+        await setup.Context.SaveChangesAsync();
+
+        var repo = new InventoryRepository(setup.Context);
+
+        // 1. Create Home Delivery Request (UC07)
+        var hd = await repo.CreateHomeDeliveryRequestAsync(
+            "HD-KFH-2026-9001", 205, "KWD-902910-101", "290011501239",
+            "Fatima Al-Kandari", "+96590001234", "Hawalli", "Jabriya", "4", "Street 10", "House 12", "Flat 3", "Call before arrival", "maker-user");
+
+        Assert.NotNull(hd);
+        Assert.Equal("PENDING_DISPATCH", hd.Status);
+        Assert.False(string.IsNullOrWhiteSpace(hd.VerificationOtp));
+
+        // 2. Dispatch Home Delivery to Courier
+        var dispatchResult = await repo.DispatchHomeDeliveryAsync(
+            hd.RequestId, "KFH Express Logistics", "Saad Al-Azmi", "290011501239", "KWT-55-1234", "SEAL-HD-9988", "maker-user");
+
+        Assert.Equal("SUCCESS", dispatchResult);
+
+        var itemAfterDispatch = await setup.Context.InventoryItems.FindAsync(205);
+        Assert.Equal("IN_TRANSFER", itemAfterDispatch!.StatusCode);
+
+        // 3. Confirm Handover with Customer OTP & Civil ID
+        var confirmResult = await repo.ConfirmHomeDeliveryHandoverAsync(
+            hd.RequestId, hd.VerificationOtp, "290011501239", "data:image/png;base64,signature_data", "courier-app");
+
+        Assert.Equal("SUCCESS", confirmResult);
+
+        var itemAfterDelivered = await setup.Context.InventoryItems.FindAsync(205);
+        Assert.Equal("SOLD", itemAfterDelivered!.StatusCode);
+        Assert.Equal("CUSTOMER_OWNED", itemAfterDelivered.OwnershipType);
+        Assert.Null(itemAfterDelivered.LocationId); // Physically in customer possession
+    }
+
+    [Fact]
+    public async Task TestDamagedBarMakerCheckerWorkflow()
+    {
+        using var setup = CreateContext();
+        await SeedBasicDataAsync(setup.Context);
+
+        var item = new InventoryItem
+        {
+            ItemId = 206,
+            SerialNumber = "SN-DAMAGE-MC-001",
+            ProductId = 1,
+            LotId = 1,
+            LocationId = 1,
+            OwnershipType = "KFH_OWNED",
+            StatusCode = "READY",
+            IsDamaged = false
+        };
+        setup.Context.InventoryItems.Add(item);
+        await setup.Context.SaveChangesAsync();
+
+        var repo = new InventoryRepository(setup.Context);
+
+        // 1. Maker reports damage (UC12)
+        await repo.MarkBarDamagedAsync(206, "SCRATCHED_SURFACE", "Deep scratch across hallmark", "DOC-EVID-101", "treasury-maker");
+
+        var itemReported = await setup.Context.InventoryItems.FindAsync(206);
+        Assert.Equal("PENDING_APPROVAL", itemReported!.DamageApprovalStatus);
+        Assert.Equal("treasury-maker", itemReported.DamageReportedBy);
+        Assert.False(itemReported.IsDamaged); // Not yet officially damaged
+
+        // 2. Maker cannot approve their own report (4-eyes invariant)
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await repo.ProcessDamagedBarActionAsync(206, "APPROVE", "treasury-maker");
+        });
+
+        // 3. Checker approves
+        var approveResult = await repo.ProcessDamagedBarActionAsync(206, "APPROVE", "treasury-checker");
+        Assert.Equal("SUCCESS", approveResult);
+
+        var itemApproved = await setup.Context.InventoryItems.FindAsync(206);
+        Assert.True(itemApproved!.IsDamaged);
+        Assert.Equal("APPROVED", itemApproved.DamageApprovalStatus);
+        Assert.Equal("DAMAGED", itemApproved.StatusCode);
+        Assert.Equal("treasury-checker", itemApproved.DamageApprovedBy);
+    }
+
+    [Fact]
+    public async Task TestGfsDeliveryRequestValidationAndCourierReturn()
+    {
+        using var setup = CreateContext();
+        await SeedBasicDataAsync(setup.Context);
+
+        var item = new InventoryItem
+        {
+            ItemId = 202,
+            SerialNumber = "SN-GFS-DELIVERY-TEST",
+            ProductId = 1,
+            LotId = 1,
+            LocationId = 1, // Main Vault
+            OwnershipType = "KFH_OWNED",
+            StatusCode = "READY",
+            IsDamaged = false
+        };
+        setup.Context.InventoryItems.Add(item);
+
+        var request = new GfsDeliveryRequest
+        {
+            RequestId = 10,
+            GfsRefNumber = "GFS-REF-12345",
+            BarId = 202,
+            CustomerAccountNumber = null,
+            DestinationBranchId = 1,
+            Status = "PENDING_DISPATCH"
+        };
+        setup.Context.GfsDeliveryRequests.Add(request);
+        await setup.Context.SaveChangesAsync();
+
+        var repo = new InventoryRepository(setup.Context);
+
+        // 1. Dispatch
+        var dispatchResult = await repo.DispatchGfsBranchDeliveryAsync(
+            10, "KFH Trans", "Ahmad", "290011501239", "KWT-11", "SEAL-01", "maker");
+        Assert.Equal("SUCCESS", dispatchResult);
+
+        // 2. Receive with serial mismatch -> Return to Courier
+        var receiveFailResult = await repo.ReceiveGfsBranchDeliveryAsync(
+            10, "WRONG-SERIAL-SCANNED", 1, "branch-checker");
+        Assert.Contains("RETURN_TO_COURIER", receiveFailResult);
+
+        var reqInDb = await setup.Context.GfsDeliveryRequests.FindAsync(10);
+        Assert.Equal("RETURN_TO_COURIER", reqInDb!.Status);
+    }
+
+    [Fact]
+    public async Task TestEnterpriseStockCutoffThresholds()
+    {
+        using var setup = CreateContext();
+        await SeedBasicDataAsync(setup.Context);
+
+        var threshold = new StockCutoffThreshold
+        {
+            ThresholdId = 5,
+            AlertType = "LOW_STOCK",
+            ProductId = 1,
+            DenominationId = 1,
+            CutoffValueKg = 100m,
+            StatusCode = "APPROVED",
+            CreatedBy = "maker"
+        };
+        setup.Context.StockCutoffThresholds.Add(threshold);
+        await setup.Context.SaveChangesAsync();
+
+        var repo = new InventoryRepository(setup.Context);
+        var alerts = await repo.EvaluateEnterpriseStockAlertsAsync();
+        
+        Assert.NotEmpty(alerts);
+    }
+
+    [Fact]
+    public async Task TestBrandMasterDataAndProductLookup()
+    {
+        using var setup = CreateContext();
+        await SeedBasicDataAsync(setup.Context);
+
+        var repo = new InventoryRepository(setup.Context);
+
+        // 1. Create Brand
+        var brand = await repo.CreateBrandAsync("VALCAMBI", "Valcambi Suisse", "Switzerland", "VALC-CH", true, "Swiss LBMA refiner");
+        Assert.NotNull(brand);
+        Assert.True(brand.BrandId > 0);
+
+        // 2. Retrieve Brands
+        var allBrands = (await repo.GetBrandsAsync()).ToList();
+        Assert.Contains(allBrands, b => b.BrandCode == "VALCAMBI");
+
+        // 3. Create Product with Brand reference
+        var product = await repo.CreateDenominationProductAsync("100 Gram Gold Bar", "Gold", 100.0m, "Switzerland", brand.BrandId);
+        Assert.NotNull(product);
+        Assert.Equal(brand.BrandId, product.BrandId);
+        Assert.Contains("VALCAMBI", product.ProductCode);
+
+        // 4. Update Brand
+        var updated = await repo.UpdateBrandAsync(brand.BrandId, "VALCAMBI-CH", "Valcambi SA Suisse", "Switzerland", "VALC-CH-01", true, "Updated description");
+        Assert.NotNull(updated);
+        Assert.Equal("VALCAMBI-CH", updated.BrandCode);
+
+        // 5. Delete Brand (soft-deletes when referenced)
+        var deleted = await repo.DeleteBrandAsync(brand.BrandId);
+        Assert.True(deleted);
+        var brandAfterDelete = await repo.GetBrandByIdAsync(brand.BrandId);
+        Assert.NotNull(brandAfterDelete);
+        Assert.False(brandAfterDelete.IsActive);
     }
 }
 

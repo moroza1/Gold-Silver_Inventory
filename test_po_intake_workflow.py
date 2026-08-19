@@ -222,16 +222,16 @@ def phase_2_approve_po():
     results.data['po_workflow_id'] = po_workflow['instance_id']
     results.pass_test("2.1_get_workflow")
 
-    # Test 2.2a: Approve workflow - Step 1 by Checker
-    print("\n[2.2a] Approving PO workflow Step 1 (Checker)...")
+    # Test 2.2a: Approve workflow - Step 1 by Maker
+    print("\n[2.2a] Approving PO workflow Step 1 (Maker)...")
     action_data = {
         "action": "APPROVED",
         "comments": "Gold verified. Approved step 1.",
-        "username": CHECKER_USER
+        "username": TREASURER_USER
     }
 
     endpoint = f"/workflows/instances/{results.data['po_workflow_id']}/action"
-    success, data, error = make_request("POST", endpoint, action_data, username=CHECKER_USER)
+    success, data, error = make_request("POST", endpoint, action_data, username=TREASURER_USER)
 
     if not success:
         results.fail_test("2.2a_approve_workflow_step1", error)
@@ -239,15 +239,15 @@ def phase_2_approve_po():
 
     results.pass_test("2.2a_approve_workflow_step1")
 
-    # Test 2.2b: Approve workflow - Step 2 by Reconciler
-    print("\n[2.2b] Approving PO workflow Step 2 (Reconciler)...")
+    # Test 2.2b: Approve workflow - Step 2 by Checker
+    print("\n[2.2b] Approving PO workflow Step 2 (Checker)...")
     action_data = {
         "action": "APPROVED",
         "comments": "Ledger checked. Approved step 2.",
-        "username": RECON_USER
+        "username": CHECKER_USER
     }
 
-    success, data, error = make_request("POST", endpoint, action_data, username=RECON_USER)
+    success, data, error = make_request("POST", endpoint, action_data, username=CHECKER_USER)
 
     if not success:
         results.fail_test("2.2b_approve_workflow_step2", error)
@@ -368,22 +368,38 @@ def phase_4_approve_intake():
     results.data['intake_workflow_id'] = intake_workflow['instance_id']
     results.pass_test("4.1_get_intake_workflow")
 
-    # Test 4.2: Approve intake workflow
-    print("\n[4.2] Approving intake workflow...")
+    # Test 4.2a: Approve intake workflow - Step 1 by Maker
+    print("\n[4.2a] Approving intake workflow Step 1 (Maker)...")
+    action_data = {
+        "action": "APPROVED",
+        "comments": "Shipment verified. Submitted step 1.",
+        "username": TREASURER_USER
+    }
+
+    endpoint = f"/workflows/instances/{results.data['intake_workflow_id']}/action"
+    success, data, error = make_request("POST", endpoint, action_data, username=TREASURER_USER)
+
+    if not success:
+        results.fail_test("4.2a_approve_intake_step1", error)
+        return False
+
+    results.pass_test("4.2a_approve_intake_step1")
+
+    # Test 4.2b: Approve intake workflow - Step 2 by Checker
+    print("\n[4.2b] Approving intake workflow Step 2 (Checker)...")
     action_data = {
         "action": "APPROVED",
         "comments": "Shipment verified. All items confirmed.",
         "username": CHECKER_USER
     }
 
-    endpoint = f"/workflows/instances/{results.data['intake_workflow_id']}/action"
     success, data, error = make_request("POST", endpoint, action_data, username=CHECKER_USER)
 
     if not success:
-        results.fail_test("4.2_approve_intake", error)
+        results.fail_test("4.2b_approve_intake_step2", error)
         return False
 
-    results.pass_test("4.2_approve_intake")
+    results.pass_test("4.2b_approve_intake_step2")
     time.sleep(1)  # Wait for database processing
 
     # Test 4.3: Verify workflow completed (no longer active)

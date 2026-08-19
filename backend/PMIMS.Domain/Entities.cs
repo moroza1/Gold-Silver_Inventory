@@ -40,6 +40,19 @@ public class MetalDenomination
     public MetalType? MetalType { get; set; }
 }
 
+public class MetalBrand
+{
+    public int BrandId { get; set; }
+    public string BrandCode { get; set; } = null!;
+    public string BrandName { get; set; } = null!;
+    public string CountryOfOrigin { get; set; } = "Switzerland";
+    public string? LbmaRefinerId { get; set; }
+    public bool IsLbmaCertified { get; set; } = true;
+    public bool IsActive { get; set; } = true;
+    public string? Description { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
 public class MetalProduct
 {
     public int ProductId { get; set; }
@@ -48,11 +61,14 @@ public class MetalProduct
     public int DenominationId { get; set; }
     public int PurityId { get; set; }
     public string OriginCountry { get; set; } = null!;
+    public int? BrandId { get; set; }
+    public string? BrandName { get; set; }
     public bool IsActive { get; set; } = true;
 
     public MetalType? MetalType { get; set; }
     public MetalDenomination? Denomination { get; set; }
     public MetalPurityLevel? Purity { get; set; }
+    public MetalBrand? Brand { get; set; }
 }
 
 public class Vendor
@@ -195,6 +211,14 @@ public class InventoryLot
     public decimal AverageUnitCost { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
+    // UC03: Receipt of Precious Metals from Supplier attributes
+    public string? ShipmentReference { get; set; }
+    public string? DeliveryNoteNumber { get; set; }
+    public string? AirwayBillNumber { get; set; }
+    public string? SupportingDocumentUrl { get; set; }
+    public string? DiscrepancyNotes { get; set; }
+    public DateTime? ReceivingDate { get; set; }
+
     public PurchaseOrder? PurchaseOrder { get; set; }
     public Vendor? Vendor { get; set; }
 }
@@ -227,6 +251,27 @@ public class InventoryItem
     // NOT_ASSESSED (no data yet) | GDL_LISTED (refiner is on the current LBMA
     // Good Delivery List) | NOT_LISTED (assessed and found not GDL-eligible)
     public string GoodDeliveryStatus { get; set; } = "NOT_ASSESSED";
+
+    // GFS & Damaged fields
+    public string? CustomerAccountNumber { get; set; }
+    public decimal? AveragePurchaseCost { get; set; }
+    public DateTime? GfsLastSyncAt { get; set; }
+    public bool IsDamaged { get; set; } = false;
+    public string? DamageReason { get; set; }
+    public string? DamageDescription { get; set; }
+    public DateTime? InspectionDate { get; set; }
+    public string? DamageEvidenceDocId { get; set; }
+    public string DamageApprovalStatus { get; set; } = "NONE"; // NONE, PENDING_APPROVAL, APPROVED, REJECTED
+    public string? DamageReportedBy { get; set; }
+    public string? DamageApprovedBy { get; set; }
+    public DateTime? DamageApprovedAt { get; set; }
+
+    // Kuwait MOCI Assay (إدارة المعادن الثمينة - وسم وزارة التجارة والصناعة)
+    public string? MociAssayNumber { get; set; }
+    public DateTime? MociInspectionDate { get; set; }
+
+    public int? BrandId { get; set; }
+    public MetalBrand? Brand { get; set; }
 
     public MetalProduct? Product { get; set; }
     public InventoryLot? Lot { get; set; }
@@ -298,60 +343,7 @@ public class IfrsValuationDisclosure
 }
 
 // ============================================================
-// Gold Dispensing Machine (GDM) Integration -- Scalability Hook
-// ------------------------------------------------------------
-// Domain.Enums.LocationType already reserves a "GDM" location kind; this is
-// the concrete integration surface for it. A DispensingDevice is a physical
-// machine bound to one InventoryLocation (its internal cassette/hopper,
-// modeled like any other vault/branch location so existing balance and
-// transaction machinery applies unchanged). DispenseTransaction reuses the
-// same allocate -> confirm/fail lifecycle already proven by ReservationRequest,
-// so a machine vendor integration is "call these endpoints" rather than a
-// core rework. See IInventoryRepository.RequestDispenseAsync /
-// CompleteDispenseAsync / FailDispenseAsync and docs/PERMISSIONS.md for the
-// new `dispensing` (operational) / `device_integration` (admin) modules.
-// ============================================================
-public class DispensingDevice
-{
-    public int DeviceId { get; set; }
-    public string DeviceCode { get; set; } = null!;
-    public string DeviceName { get; set; } = null!;
-    public int LocationId { get; set; } // the machine's own cassette, modeled as an InventoryLocation (LocationType.GDM)
-    public int BranchId { get; set; }
-    public string? Manufacturer { get; set; }
-    public string? Model { get; set; }
-    public string? ApiEndpoint { get; set; }
-    public string StatusCode { get; set; } = "OFFLINE"; // ACTIVE, OFFLINE, MAINTENANCE, DECOMMISSIONED
-    public DateTime? LastHeartbeatAt { get; set; }
-    public DateTime RegisteredAt { get; set; } = DateTime.UtcNow;
-    public string RegisteredBy { get; set; } = "SYSTEM";
-    public bool IsActive { get; set; } = true;
 
-    public InventoryLocation? Location { get; set; }
-    public Branch? Branch { get; set; }
-}
-
-public class DispenseTransaction
-{
-    public int DispenseId { get; set; }
-    public int DeviceId { get; set; }
-    public int ProductId { get; set; }
-    public int? ItemId { get; set; } // bound once an available serialized bar is allocated
-    public int? CustomerId { get; set; }
-    public int ChannelId { get; set; }
-    public string IdempotencyKey { get; set; } = null!;
-    public string StatusCode { get; set; } = "REQUESTED"; // REQUESTED, DISPENSED, FAILED, CANCELLED
-    public string InitiatedBy { get; set; } = null!;
-    public DateTime RequestedAt { get; set; } = DateTime.UtcNow;
-    public DateTime? DispensedAt { get; set; }
-    public string? FailureReason { get; set; }
-
-    public DispensingDevice? Device { get; set; }
-    public MetalProduct? Product { get; set; }
-    public InventoryItem? Item { get; set; }
-    public Customer? Customer { get; set; }
-    public Channel? Channel { get; set; }
-}
 
 public class InventoryBalance
 {
@@ -937,6 +929,13 @@ public class PendingIntake
     public int PendingIntakeId { get; set; }
     public int? PoId { get; set; }
     public string SourceType { get; set; } = "SUPPLIER"; // SUPPLIER | CUSTOMER
+    public int? VendorId { get; set; }
+    public string? ShipmentReference { get; set; }
+    public string? DeliveryNoteNumber { get; set; }
+    public string? AirwayBillNumber { get; set; }
+    public string? SupportingDocumentUrl { get; set; }
+    public string? DiscrepancyNotes { get; set; }
+    public DateTime? ReceivingDate { get; set; }
     public int? CustomerId { get; set; }
     public int? AccountId { get; set; } // CustomerAccount -- only meaningful when ReceiptReason == CUSTODY_DEPOSIT
     public string? ReceiptReason { get; set; } // BUYBACK | CUSTODY_DEPOSIT | RETURN -- customer receipts only
@@ -948,6 +947,7 @@ public class PendingIntake
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     public PurchaseOrder? PurchaseOrder { get; set; }
+    public Vendor? Vendor { get; set; }
     public InventoryLocation? Location { get; set; }
     public Customer? Customer { get; set; }
 }
@@ -1146,5 +1146,118 @@ public class KFHOnlineTransactionLog
     public string? RequestJson { get; set; } // Full incoming request
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public string CreatedBy { get; set; } = "KFHOnline"; // Source: KFHOnline, API, WebUI, etc
+}
+
+// ============================================================
+// GFS Delivery Request (Branch Fulfillment)
+// ============================================================
+public class GfsDeliveryRequest
+{
+    public int RequestId { get; set; }
+    public string GfsRefNumber { get; set; } = null!;
+    public int BarId { get; set; }
+    public string? CustomerAccountNumber { get; set; }
+    public int DestinationBranchId { get; set; }
+    public string Status { get; set; } = "PENDING_DISPATCH"; // PENDING_DISPATCH, DISPATCHED, RECEIVED, CANCELLED, RETURN_TO_COURIER
+    public string? RouteDetails { get; set; }
+
+    // Courier Logistics & Handover Details (KFH Secure Transport)
+    public string? CourierCompany { get; set; }
+    public string? CourierRepName { get; set; }
+    public string? CourierCivilId { get; set; }
+    public string? VehiclePlate { get; set; }
+    public string? SecuritySealNumber { get; set; }
+    public string? HandoverVoucherRef { get; set; }
+    public DateTime? DispatchedAt { get; set; }
+    public string? DispatchedBy { get; set; }
+    public DateTime? ReceivedAt { get; set; }
+    public string? ReceivedBy { get; set; }
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? UpdatedAt { get; set; }
+
+    public InventoryItem? Bar { get; set; }
+    public Branch? DestinationBranch { get; set; }
+}
+
+// ============================================================
+// Home Delivery Request (UC07: Main Vault to Home Delivery Courier)
+// ============================================================
+public class HomeDeliveryRequest
+{
+    public int RequestId { get; set; }
+    public string DeliveryNumber { get; set; } = null!;
+    public int BarId { get; set; }
+    public string CustomerAccountNumber { get; set; } = null!;
+    public string CustomerCivilId { get; set; } = null!;
+    public string CustomerName { get; set; } = null!;
+    public string CustomerPhone { get; set; } = null!;
+    
+    // Residential Address in Kuwait
+    public string Governorate { get; set; } = null!; // Capital, Hawalli, Farwaniya, Ahmadi, Jahra, Mubarak Al-Kabeer
+    public string Area { get; set; } = null!;
+    public string Block { get; set; } = null!;
+    public string Street { get; set; } = null!;
+    public string BuildingHouse { get; set; } = null!;
+    public string? FloorFlat { get; set; }
+    public string? SpecialInstructions { get; set; }
+
+    // Security Handover Verification
+    public string VerificationOtp { get; set; } = null!;
+    public string Status { get; set; } = "PENDING_DISPATCH"; // PENDING_DISPATCH, DISPATCHED_TO_COURIER, DELIVERED_TO_CUSTOMER, FAILED_RETURNED
+
+    // Courier Handover Details
+    public string? CourierCompany { get; set; }
+    public string? CourierRepName { get; set; }
+    public string? CourierCivilId { get; set; }
+    public string? VehiclePlate { get; set; }
+    public string? SecuritySealNumber { get; set; }
+
+    // Customer Handover Confirmation
+    public string? RecipientCivilId { get; set; }
+    public string? RecipientSignature { get; set; }
+    
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public string CreatedBy { get; set; } = "GFS";
+    public DateTime? DispatchedAt { get; set; }
+    public string? DispatchedBy { get; set; }
+    public DateTime? DeliveredAt { get; set; }
+    public string? DeliveredBy { get; set; }
+
+    public InventoryItem? Bar { get; set; }
+}
+
+// ============================================================
+// Stock Cut-off Threshold
+// ============================================================
+public class StockCutoffThreshold
+{
+    public int ThresholdId { get; set; }
+    public string AlertType { get; set; } = null!; // LOW_STOCK or HIGH_STOCK
+    public int ProductId { get; set; }
+    public int DenominationId { get; set; }
+    public decimal CutoffValueKg { get; set; }
+    public string StatusCode { get; set; } = "PENDING_MAKER"; // PENDING_MAKER, APPROVED
+    public string CreatedBy { get; set; } = null!;
+    public string? ApprovedBy { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? ApprovedAt { get; set; }
+
+    public MetalProduct? Product { get; set; }
+    public MetalDenomination? Denomination { get; set; }
+}
+
+// ============================================================
+// GFS Sync Log
+// ============================================================
+public class GfsSyncLog
+{
+    public int SyncLogId { get; set; }
+    public DateTime SyncTimestamp { get; set; } = DateTime.UtcNow;
+    public string ExecutedBy { get; set; } = null!;
+    public int TotalRecordsSynced { get; set; }
+    public int TotalRecordsRejected { get; set; }
+    public string Status { get; set; } = "SUCCESS"; // SUCCESS, FAILED
+    public string? SyncDetails { get; set; } // logs old vs new values, etc.
 }
 

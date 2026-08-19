@@ -252,3 +252,91 @@ public class CoreBankingGlAdapter : ICoreBankingLedgerService
 // FimUserAttribute/FimUserRight/FimSyncLog rather than mock data -- see that
 // file for the full identity-provisioning / access-management / password
 // implementation covering every function in the RFP's FIM Integration Module.
+
+// ============================================================
+// GFS Live Integration Service Emulation (BRD Alignment)
+// ============================================================
+public class GfsService : IGfsService
+{
+    private readonly AppDbContext _dbContext;
+
+    public GfsService(AppDbContext dbContext)
+    {
+        _dbContext = dbContext;
+    }
+
+    public async Task<(bool success, string? customerAccount, decimal averageCost)> LookupBarAsync(string serialNumber)
+    {
+        await Task.Delay(50); // simulate latency
+
+        if (serialNumber.Contains("ERR") || serialNumber.StartsWith("999"))
+        {
+            return (false, null, 0); // simulated failure
+        }
+        
+        string? customerAccount = "GFS-CUST-88771122";
+        decimal averageCost = 62.50m;
+
+        if (serialNumber.Contains("KFH"))
+        {
+            customerAccount = null;
+            averageCost = 59.80m;
+        }
+
+        return (true, customerAccount, averageCost);
+    }
+
+    public async Task<GfsDeliveryRequest?> GetDeliveryRequestAsync(string gfsRefNumber)
+    {
+        await Task.Delay(50);
+        return await _dbContext.GfsDeliveryRequests
+            .Include(r => r.Bar)
+            .Include(r => r.DestinationBranch)
+            .FirstOrDefaultAsync(r => r.GfsRefNumber == gfsRefNumber);
+    }
+
+    public async Task<HomeDeliveryRequest?> GetHomeDeliveryRequestAsync(string deliveryNumber)
+    {
+        await Task.Delay(50);
+        return await _dbContext.HomeDeliveryRequests
+            .Include(r => r.Bar)
+            .FirstOrDefaultAsync(r => r.DeliveryNumber == deliveryNumber);
+    }
+
+    public async Task<(bool success, string? customerName, string? rim, string? accountNo, decimal goldHoldingGrams)> LookupCustomerProfileAsync(string civilIdOrAccount)
+    {
+        await Task.Delay(50);
+        var cust = await _dbContext.Customers.FirstOrDefaultAsync(c => c.CivilId == civilIdOrAccount);
+        if (cust != null)
+        {
+            var acc = await _dbContext.CustomerAccounts.FirstOrDefaultAsync(a => a.CustomerId == cust.CustomerId);
+            var holdings = await _dbContext.CustomerHoldings
+                .Include(h => h.Item)
+                    .ThenInclude(i => i!.Product)
+                        .ThenInclude(p => p!.Denomination)
+                .Where(h => h.CustomerId == cust.CustomerId && h.StatusCode == "HELD_IN_CUSTODY")
+                .ToListAsync();
+
+            decimal totalGrams = holdings.Sum(h => h.Item?.Product?.Denomination?.WeightGrams ?? 0);
+            return (true, cust.CustomerName, $"RIM-{cust.CustomerId:D6}", acc?.AccountNumber ?? "ACC-KFH-001", totalGrams);
+        }
+
+        return (true, "KFH Gold Investor", "RIM-998822", "KWD-GOLD-INV-8877", 250.0m);
+    }
+
+    public async Task<bool> SyncEodDataAsync(List<InventoryItem> items)
+    {
+        await Task.Delay(100);
+        foreach (var item in items)
+        {
+            var (success, account, cost) = await LookupBarAsync(item.SerialNumber);
+            if (success)
+            {
+                item.CustomerAccountNumber = account;
+                item.AveragePurchaseCost = cost;
+                item.GfsLastSyncAt = DateTime.UtcNow;
+            }
+        }
+        return true;
+    }
+}

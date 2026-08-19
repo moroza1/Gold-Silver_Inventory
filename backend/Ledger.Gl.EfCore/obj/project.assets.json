@@ -651,11 +651,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "D:\\Projects\\Gold2\\backend\\Ledger.Gl.EfCore\\Ledger.Gl.EfCore.csproj",
+      "projectUniqueName": "d:\\Projects\\Gold2\\backend\\Ledger.Gl.EfCore\\Ledger.Gl.EfCore.csproj",
       "projectName": "Ledger.Gl.EfCore",
-      "projectPath": "D:\\Projects\\Gold2\\backend\\Ledger.Gl.EfCore\\Ledger.Gl.EfCore.csproj",
+      "projectPath": "d:\\Projects\\Gold2\\backend\\Ledger.Gl.EfCore\\Ledger.Gl.EfCore.csproj",
       "packagesPath": "C:\\Users\\Roshdy\\.nuget\\packages\\",
-      "outputPath": "D:\\Projects\\Gold2\\backend\\Ledger.Gl.EfCore\\obj\\",
+      "outputPath": "d:\\Projects\\Gold2\\backend\\Ledger.Gl.EfCore\\obj\\",
       "projectStyle": "PackageReference",
       "configFilePaths": [
         "C:\\Users\\Roshdy\\AppData\\Roaming\\NuGet\\NuGet.Config"
@@ -671,8 +671,8 @@
           "framework": "net10.0",
           "targetAlias": "net10.0",
           "projectReferences": {
-            "D:\\Projects\\Gold2\\backend\\Ledger.Gl\\Ledger.Gl.csproj": {
-              "projectPath": "D:\\Projects\\Gold2\\backend\\Ledger.Gl\\Ledger.Gl.csproj"
+            "d:\\Projects\\Gold2\\backend\\Ledger.Gl\\Ledger.Gl.csproj": {
+              "projectPath": "d:\\Projects\\Gold2\\backend\\Ledger.Gl\\Ledger.Gl.csproj"
             }
           }
         }
@@ -1000,5 +1000,13 @@
         }
       }
     }
-  }
+  },
+  "logs": [
+    {
+      "code": "NU1900",
+      "level": "Warning",
+      "warningLevel": 1,
+      "message": "Error occurred while getting package vulnerability data: Unable to load the service index for source https://api.nuget.org/v3/index.json."
+    }
+  ]
 }

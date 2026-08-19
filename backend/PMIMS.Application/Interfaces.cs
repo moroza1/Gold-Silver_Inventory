@@ -18,7 +18,9 @@ public interface IInventoryRepository
     // sourceType: "SUPPLIER" (default, requires poId) or "CUSTOMER" (requires customerId;
     // receiptReason of BUYBACK/RETURN -> KFH_OWNED, CUSTODY_DEPOSIT -> CUSTOMER_OWNED + custody holding).
     Task<string> IntakeInventoryItemsAsync(int? poId, string lotNumber, int locationId, string receivedBy, string serialsJsonList,
-        string sourceType = "SUPPLIER", int? customerId = null, int? accountId = null, string? receiptReason = null);
+        string sourceType = "SUPPLIER", int? customerId = null, int? accountId = null, string? receiptReason = null,
+        int? vendorId = null, string? shipmentReference = null, string? deliveryNoteNumber = null, string? airwayBillNumber = null,
+        string? supportingDocumentUrl = null, string? discrepancyNotes = null, DateTime? receivingDate = null);
     Task<IEnumerable<dynamic>> QueryAvailableStockAsync(int? branchId, int? metalTypeId, string? originCountry, int? denominationId);
     Task<Guid?> ReserveStockAsync(int customerId, int productId, int branchId, int channelId, string idempotencyKey, int ttlSeconds);
     Task<string> ConfirmPurchaseWithCustodyAsync(Guid reservationToken, int accountId, decimal salePrice, decimal markupAmount, string invoiceNumber, string? custodyAgreementNumber);
@@ -49,11 +51,17 @@ public interface IInventoryRepository
     Task<IEnumerable<AuditLog>> GetAuditLogsAsync();
     Task<IEnumerable<ReconciliationRun>> GetReconciliationRunsAsync();
 
-    // Standard CRUD helpers for configs
+    // Standard CRUD helpers for configs & Master Data Brands
+    Task<IEnumerable<MetalBrand>> GetBrandsAsync();
+    Task<MetalBrand?> GetBrandByIdAsync(int brandId);
+    Task<MetalBrand> CreateBrandAsync(string brandCode, string brandName, string countryOfOrigin, string? lbmaRefinerId = null, bool isLbmaCertified = true, string? description = null);
+    Task<MetalBrand?> UpdateBrandAsync(int brandId, string brandCode, string brandName, string countryOfOrigin, string? lbmaRefinerId = null, bool isLbmaCertified = true, string? description = null);
+    Task<bool> DeleteBrandAsync(int brandId);
+
     Task AddVendorAsync(Vendor vendor);
     Task AddProductAsync(MetalProduct product);
     Task AddDenominationAsync(MetalDenomination denomination);
-    Task<MetalProduct> CreateDenominationProductAsync(string label, string metalName, decimal weightGrams, string? originCountry = null);
+    Task<MetalProduct> CreateDenominationProductAsync(string label, string metalName, decimal weightGrams, string? originCountry = null, int? brandId = null);
     Task SaveAuditLogAsync(string username, string ipAddress, string moduleName, string actionDescription, string? sqlExecuted = null, string? entityType = null, string? entityId = null);
     
     // Workflow Engine
@@ -123,7 +131,9 @@ public interface IInventoryRepository
     Task<BranchTransfer> InitiateWorkflowBranchTransferAsync(int itemId, int destinationBranchId, string courierInfo, string initiatedBy);
     Task<string> ReceiveBranchTransferAsync(int transferId, string receivedBy);
     Task<PendingIntake> InitiateWorkflowIntakeAsync(int? poId, string lotNumber, int locationId, string receivedBy, string serialsJsonList,
-        string sourceType = "SUPPLIER", int? customerId = null, int? accountId = null, string? receiptReason = null);
+        string sourceType = "SUPPLIER", int? customerId = null, int? accountId = null, string? receiptReason = null,
+        int? vendorId = null, string? shipmentReference = null, string? deliveryNoteNumber = null, string? airwayBillNumber = null,
+        string? supportingDocumentUrl = null, string? discrepancyNotes = null, DateTime? receivingDate = null);
     Task<string> NotifyBranchesOfReceivedInventoryAsync(int lotId, string lotNumber, int totalItemsReceived, decimal totalWeightGrams, string metalType, DateTime acquisitionDate, string notifiedBy);
     Task<IEnumerable<PendingIntake>> GetPendingIntakesAsync();
 
@@ -218,17 +228,7 @@ public interface IInventoryRepository
     Task<IfrsValuationDisclosure> GenerateIfrsValuationDisclosureAsync(string generatedBy);
     Task<IEnumerable<IfrsValuationDisclosure>> GetIfrsValuationDisclosuresAsync();
 
-    // =========================================================================
-    // Gold Dispensing Machine (GDM) Integration -- scalability hook
-    // =========================================================================
-    Task<IEnumerable<DispensingDevice>> GetDispensingDevicesAsync();
-    Task<DispensingDevice> SaveDispensingDeviceAsync(DispensingDevice device);
-    Task<bool> DeleteDispensingDeviceAsync(int deviceId);
-    Task<DispensingDevice?> RecordDeviceHeartbeatAsync(int deviceId, string statusCode);
-    Task<IEnumerable<DispenseTransaction>> GetDispenseTransactionsAsync(int? deviceId = null);
-    Task<(DispenseTransaction? txn, string result)> RequestDispenseAsync(int deviceId, int productId, int? customerId, int channelId, string idempotencyKey, string initiatedBy);
-    Task<(bool success, string result)> CompleteDispenseAsync(int dispenseId, string completedBy);
-    Task<bool> FailDispenseAsync(int dispenseId, string reason);
+
 
     // =========================================================================
     // Cost Tracking & Valuation -- Core Banking (IMAL) GL Integration
@@ -248,7 +248,11 @@ public interface IInventoryRepository
     Task<bool> PurchaseBarsAsync(string customerRim, string customerName, List<int> itemIds);
     // Mark bars as available again when customer sells
     Task<bool> SellBarsAsync(string customerRim, List<int> itemIds);
-    // Log all KFHOnline transactions (buy, sell, delivery) - both successes and failures
+    // Transfer gold bars as a gift from sender customer to recipient customer
+    Task<bool> TransferGiftBarsAsync(string senderRim, string senderName, string recipientRim, string recipientName, List<int> itemIds, string occasion, string giftMessage);
+    // Get all customers with accounts and custody holdings for GFS portal
+    Task<IEnumerable<dynamic>> GetCustomersWithDetailsAsync();
+    // Log all KFHOnline transactions (buy, sell, delivery, gift) - both successes and failures
     Task LogKFHOnlineTransactionAsync(KFHOnlineTransactionLog logEntry);
     // Get transaction logs for monitoring/audit
     Task<IEnumerable<KFHOnlineTransactionLog>> GetKFHOnlineTransactionLogsAsync(int? customerId = null, string? status = null, DateTime? from = null, DateTime? to = null, int limit = 1000);
@@ -282,6 +286,51 @@ public interface IInventoryRepository
     // Admin SQL Query Tool (Development/Debugging Only)
     // =========================================================================
     Task<List<Dictionary<string, object?>>> ExecuteRawSqlQueryAsync(string sqlQuery);
+
+    // =========================================================================
+    // GFS & Damaged Bar Operations (BRD UC02, UC12)
+    // =========================================================================
+    Task<InventoryItem?> ScanBarWithGfsLookupAsync(string serialOrQr);
+    Task<string> MarkBarDamagedAsync(int itemId, string reason, string desc, string docId, string user);
+    Task<string> ProcessDamagedBarActionAsync(int itemId, string action, string approvedBy);
+    Task<IEnumerable<InventoryItem>> GetDamagedBarsAsync();
+
+    // =========================================================================
+    // GFS Branch Delivery & Courier Handover (BRD UC04, UC05)
+    // =========================================================================
+    Task<GfsDeliveryRequest> CreateGfsDeliveryRequestAsync(string gfsRefNumber, int barId, string? customerAccountNumber, int destinationBranchId, string routeDetails);
+    Task<IEnumerable<GfsDeliveryRequest>> GetGfsDeliveryRequestsAsync();
+    Task<GfsDeliveryRequest?> GetGfsDeliveryRequestByIdAsync(int requestId);
+    Task<string> DispatchGfsBranchDeliveryAsync(int requestId, string courierCompany, string courierRepName, string courierCivilId, string vehiclePlate, string securitySealNumber, string dispatchedBy);
+    Task<string> ReceiveGfsBranchDeliveryAsync(int requestId, string scannedSerial, int destinationBranchId, string receivedBy, bool manualOverride = false, string? overrideReason = null);
+
+    // =========================================================================
+    // Home Delivery Lifecycle (BRD UC07)
+    // =========================================================================
+    Task<HomeDeliveryRequest> CreateHomeDeliveryRequestAsync(string deliveryNumber, int barId, string customerAccountNumber, string customerCivilId, string customerName, string customerPhone, string governorate, string area, string block, string street, string buildingHouse, string? floorFlat, string? specialInstructions, string createdBy);
+    Task<IEnumerable<HomeDeliveryRequest>> GetHomeDeliveryRequestsAsync();
+    Task<HomeDeliveryRequest?> GetHomeDeliveryRequestByIdAsync(int requestId);
+    Task<string> DispatchHomeDeliveryAsync(int requestId, string courierCompany, string courierRepName, string courierCivilId, string vehiclePlate, string securitySealNumber, string dispatchedBy);
+    Task<string> ConfirmHomeDeliveryHandoverAsync(int requestId, string verificationOtp, string recipientCivilId, string recipientSignature, string confirmedBy);
+
+    // =========================================================================
+    // GFS EOD Sync (BRD UC08)
+    // =========================================================================
+    Task<GfsSyncLog> SyncGfsEodAsync(string executedBy);
+    Task<IEnumerable<GfsSyncLog>> GetGfsSyncLogsAsync();
+
+    // =========================================================================
+    // Enterprise Stock Cutoff Thresholds (BRD UC09, UC10, UC11)
+    // =========================================================================
+    Task<IEnumerable<StockCutoffThreshold>> GetStockCutoffThresholdsAsync();
+    Task<StockCutoffThreshold> SaveStockCutoffThresholdAsync(StockCutoffThreshold threshold);
+    Task<string> ProcessStockCutoffThresholdActionAsync(int thresholdId, string username, string action);
+    Task<IEnumerable<dynamic>> EvaluateEnterpriseStockAlertsAsync();
+
+    // =========================================================================
+    // Kuwait Regulatory / PACI Civil ID Validation
+    // =========================================================================
+    bool ValidateKuwaitCivilId(string civilId);
 }
 
 public interface IActiveDirectoryService
@@ -390,3 +439,16 @@ public interface IInventoryMonitoringNotifier
     Task NotifyMovementAsync(PMIMS.Domain.InventoryTransaction transaction);
     Task NotifyBalanceChangedAsync(PMIMS.Domain.InventoryBalance balance);
 }
+
+// ============================================================
+// GFS Live Integration Service (KFH Branch Core & Fulfillment)
+// ============================================================
+public interface IGfsService
+{
+    Task<(bool success, string? customerAccount, decimal averageCost)> LookupBarAsync(string serialNumber);
+    Task<PMIMS.Domain.GfsDeliveryRequest?> GetDeliveryRequestAsync(string gfsRefNumber);
+    Task<PMIMS.Domain.HomeDeliveryRequest?> GetHomeDeliveryRequestAsync(string deliveryNumber);
+    Task<(bool success, string? customerName, string? rim, string? accountNo, decimal goldHoldingGrams)> LookupCustomerProfileAsync(string civilIdOrAccount);
+    Task<bool> SyncEodDataAsync(List<PMIMS.Domain.InventoryItem> items);
+}
+

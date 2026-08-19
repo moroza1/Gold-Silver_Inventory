@@ -72,6 +72,7 @@ public class AppDbContext : DbContext
     public DbSet<MetalType> MetalTypes { get; set; } = null!;
     public DbSet<MetalPurityLevel> MetalPurityLevels { get; set; } = null!;
     public DbSet<MetalDenomination> MetalDenominations { get; set; } = null!;
+    public DbSet<MetalBrand> Brands { get; set; } = null!;
     public DbSet<MetalProduct> MetalProducts { get; set; } = null!;
     public DbSet<Vendor> Vendors { get; set; } = null!;
     public DbSet<Vault> Vaults { get; set; } = null!;
@@ -141,10 +142,6 @@ public class AppDbContext : DbContext
     public DbSet<ChainOfCustodyEvent> ChainOfCustodyEvents { get; set; } = null!;
     public DbSet<IfrsValuationDisclosure> IfrsValuationDisclosures { get; set; } = null!;
 
-    // Gold Dispensing Machine (GDM) Integration -- scalability hook
-    public DbSet<DispensingDevice> DispensingDevices { get; set; } = null!;
-    public DbSet<DispenseTransaction> DispenseTransactions { get; set; } = null!;
-
     // Cost Tracking & Valuation -- Core Banking (IMAL) GL Integration
     public DbSet<CoreBankingLedgerPosting> CoreBankingLedgerPostings { get; set; } = null!;
 
@@ -156,6 +153,11 @@ public class AppDbContext : DbContext
 
     // KFHOnline Transaction Audit Log
     public DbSet<KFHOnlineTransactionLog> KFHOnlineTransactionLogs { get; set; } = null!;
+
+    public DbSet<GfsDeliveryRequest> GfsDeliveryRequests { get; set; } = null!;
+    public DbSet<HomeDeliveryRequest> HomeDeliveryRequests { get; set; } = null!;
+    public DbSet<StockCutoffThreshold> StockCutoffThresholds { get; set; } = null!;
+    public DbSet<GfsSyncLog> GfsSyncLogs { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -211,6 +213,15 @@ public class AppDbContext : DbContext
             entity.HasOne(e => e.MetalType).WithMany().HasForeignKey(e => e.MetalTypeId);
             entity.HasOne(e => e.Denomination).WithMany().HasForeignKey(e => e.DenominationId);
             entity.HasOne(e => e.Purity).WithMany().HasForeignKey(e => e.PurityId);
+            entity.HasOne(e => e.Brand).WithMany().HasForeignKey(e => e.BrandId).IsRequired(false);
+        });
+
+        // Brand Configuration
+        modelBuilder.Entity<MetalBrand>(entity =>
+        {
+            entity.HasKey(e => e.BrandId);
+            entity.ToTable("metal_brands");
+            entity.HasIndex(e => e.BrandCode).IsUnique();
         });
 
         // Vendor Configuration
@@ -798,29 +809,7 @@ public class AppDbContext : DbContext
             entity.HasOne(e => e.MetalType).WithMany().HasForeignKey(e => e.MetalTypeId);
         });
 
-        // ============================================================
-        // Gold Dispensing Machine (GDM) Integration Configuration
-        // ============================================================
-        modelBuilder.Entity<DispensingDevice>(entity =>
-        {
-            entity.HasKey(e => e.DeviceId);
-            entity.ToTable("dispensing_devices");
-            entity.HasIndex(e => e.DeviceCode).IsUnique();
-            entity.HasOne(e => e.Location).WithMany().HasForeignKey(e => e.LocationId).OnDelete(DeleteBehavior.Restrict);
-            entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
-        });
 
-        modelBuilder.Entity<DispenseTransaction>(entity =>
-        {
-            entity.HasKey(e => e.DispenseId);
-            entity.ToTable("dispense_transactions");
-            entity.HasIndex(e => e.IdempotencyKey).IsUnique();
-            entity.HasOne(e => e.Device).WithMany().HasForeignKey(e => e.DeviceId).OnDelete(DeleteBehavior.Restrict);
-            entity.HasOne(e => e.Product).WithMany().HasForeignKey(e => e.ProductId).OnDelete(DeleteBehavior.Restrict);
-            entity.HasOne(e => e.Item).WithMany().HasForeignKey(e => e.ItemId).OnDelete(DeleteBehavior.Restrict);
-            entity.HasOne(e => e.Customer).WithMany().HasForeignKey(e => e.CustomerId).OnDelete(DeleteBehavior.Restrict);
-            entity.HasOne(e => e.Channel).WithMany().HasForeignKey(e => e.ChannelId).OnDelete(DeleteBehavior.Restrict);
-        });
 
         // ============================================================
         // Reporting Requirements Gap Analysis -- Cost Analysis & Variance (Item 8)
@@ -851,6 +840,42 @@ public class AppDbContext : DbContext
             entity.HasIndex(e => e.CustomerId);
             entity.HasIndex(e => e.StatusCode);
             entity.HasIndex(e => e.CreatedAt);
+        });
+
+        // GfsDeliveryRequest Configuration
+        modelBuilder.Entity<GfsDeliveryRequest>(entity =>
+        {
+            entity.HasKey(e => e.RequestId);
+            entity.ToTable("gfs_delivery_requests");
+            entity.HasOne(e => e.Bar).WithMany().HasForeignKey(e => e.BarId);
+            entity.HasOne(e => e.DestinationBranch).WithMany().HasForeignKey(e => e.DestinationBranchId);
+        });
+
+        // HomeDeliveryRequest Configuration (UC07)
+        modelBuilder.Entity<HomeDeliveryRequest>(entity =>
+        {
+            entity.HasKey(e => e.RequestId);
+            entity.ToTable("home_delivery_requests");
+            entity.HasIndex(e => e.DeliveryNumber).IsUnique();
+            entity.HasIndex(e => e.CustomerCivilId);
+            entity.HasIndex(e => e.Status);
+            entity.HasOne(e => e.Bar).WithMany().HasForeignKey(e => e.BarId);
+        });
+
+        // StockCutoffThreshold Configuration
+        modelBuilder.Entity<StockCutoffThreshold>(entity =>
+        {
+            entity.HasKey(e => e.ThresholdId);
+            entity.ToTable("stock_cutoff_thresholds");
+            entity.HasOne(e => e.Product).WithMany().HasForeignKey(e => e.ProductId);
+            entity.HasOne(e => e.Denomination).WithMany().HasForeignKey(e => e.DenominationId);
+        });
+
+        // GfsSyncLog Configuration
+        modelBuilder.Entity<GfsSyncLog>(entity =>
+        {
+            entity.HasKey(e => e.SyncLogId);
+            entity.ToTable("gfs_sync_logs");
         });
     }
 

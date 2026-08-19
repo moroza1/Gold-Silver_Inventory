@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import GlConfigScreen from './GlConfigScreen';
+import GfsApp from './GfsApp';
 
 const API_BASE = 'http://localhost:5000/api';
 
@@ -764,6 +764,7 @@ const checkUserRoleMatches = (requiredRole: string | null | undefined, userRole:
 };
 
 export default function App() {
+  const [activeApp, setActiveApp] = useState<'PMIMS' | 'GFS'>('PMIMS');
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [username, setUsername] = useState('treasury-maker');
   const [password, setPassword] = useState('Password123');
@@ -879,11 +880,47 @@ export default function App() {
   const [showIntakeModal, setShowIntakeModal] = useState(false);
   const [intakePOId, setIntakePOId] = useState<number | null>(null);
   const [intakePONumber, setIntakePONumber] = useState('');
-  const [intakeLotNum, setIntakeLotNum] = useState('');
+  const [intakeLotNum, setIntakeLotNum] = useState(`LOT-SUP-${new Date().toISOString().slice(0,10).replace(/-/g,'')}`);
   const [intakeSelectedLocation, setIntakeSelectedLocation] = useState<number>(1);
   const [scannedSerials, setScannedSerials] = useState<{ serial: string; product_id: number; product_code: string }[]>([]);
   const [currentScanSerial, setCurrentScanSerial] = useState('');
   const [intakeSelectedProductId, setIntakeSelectedProductId] = useState<number>(1);
+
+  // UC03: Receipt of Precious Metals from Supplier workbench states
+  const [intakeVendorId, setIntakeVendorId] = useState<number>(1);
+  const [intakeShipmentRef, setIntakeShipmentRef] = useState('');
+  const [intakeDeliveryNote, setIntakeDeliveryNote] = useState('');
+  const [intakeAirwayBill, setIntakeAirwayBill] = useState('');
+  const [intakeReceivingDate, setIntakeReceivingDate] = useState(toDateInputValue(new Date()));
+  const [intakeDocUrl, setIntakeDocUrl] = useState('');
+  const [intakeDiscrepancyNotes, setIntakeDiscrepancyNotes] = useState('');
+  const [intakeBars, setIntakeBars] = useState<{
+    id: string;
+    serial: string;
+    product_id: number;
+    weight_grams: number;
+    purity: number;
+    is_damaged: boolean;
+    damage_reason: string;
+    refiner_name: string;
+    assay_certificate_number?: string;
+  }[]>([
+    {
+      id: 'bar-1',
+      serial: `BAR-SUP-${Date.now().toString().slice(-4)}-01`,
+      product_id: 1,
+      weight_grams: 1000,
+      purity: 999.9,
+      is_damaged: false,
+      damage_reason: '',
+      refiner_name: 'Valcambi Suisse',
+      assay_certificate_number: 'ASSAY-VAL-999'
+    }
+  ]);
+  const [pendingIntakesList, setPendingIntakesList] = useState<any[]>([]);
+  const [previewBarcodeModal, setPreviewBarcodeModal] = useState<any>(null);
+  const [intakeActiveSubTab, setIntakeActiveSubTab] = useState<'RECEIVE_FORM' | 'IN_FLIGHT_LOG'>('RECEIVE_FORM');
+
   // Track which P.O. is expanded to show its line items in Receive Shipments
   const [expandedPOId, setExpandedPOId] = useState<number | null>(null);
   // Receipt of precious metals FROM a customer (buyback / custody deposit / return) --
@@ -937,25 +974,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   ];
   const isInstantReportType = (rt: string) => rt === 'TRANSFER_COMPLETED' || rt === 'INVENTORY_DISCREPANCY';
 
-  // GDM Device Integration (device_integration module) + Dispensing (dispensing module)
-  const [gdmDevices, setGdmDevices] = useState<any[]>([]);
-  const [dispenseTransactions, setDispenseTransactions] = useState<any[]>([]);
-  const [editingDeviceId, setEditingDeviceId] = useState<number | null>(null);
-  const [deviceFormCode, setDeviceFormCode] = useState('');
-  const [deviceFormName, setDeviceFormName] = useState('');
-  const [deviceFormLocationId, setDeviceFormLocationId] = useState('1');
-  const [deviceFormBranchId, setDeviceFormBranchId] = useState('');
-  const [deviceFormManufacturer, setDeviceFormManufacturer] = useState('');
-  const [deviceFormModel, setDeviceFormModel] = useState('');
-  const [deviceFormActive, setDeviceFormActive] = useState(true);
-  const [dispenseFormDeviceId, setDispenseFormDeviceId] = useState('');
-  const [dispenseFormProductId, setDispenseFormProductId] = useState('');
-  const [dispenseFormChannelId, setDispenseFormChannelId] = useState('6');
-  const DISPENSING_CHANNELS = [
-    { value: 6, label: 'GDM (self-service)' },
-    { value: 1, label: 'Branch' },
-    { value: 5, label: 'API' }
-  ];
+
 
   // Business Rules Engine (rules_engine module)
   const [businessRules, setBusinessRules] = useState<any[]>([]);
@@ -963,8 +982,10 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   const [ruleFormCode, setRuleFormCode] = useState('');
   const [ruleFormName, setRuleFormName] = useState('');
   const [ruleFormType, setRuleFormType] = useState('TRANSFER_LIMIT');
-  const [ruleFormExpression, setRuleFormExpression] = useState('{}');
   const [ruleFormSeverity, setRuleFormSeverity] = useState('BLOCK');
+  const [builderField, setBuilderField] = useState('weightGrams');
+  const [builderOp, setBuilderOp] = useState('gt');
+  const [builderValue, setBuilderValue] = useState('5000');
 
   // Monitoring (monitoring module -- RFP item 8: SLA metrics, events, alert routing)
   const [slaMetrics, setSlaMetrics] = useState<any>(null);
@@ -984,6 +1005,22 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   const [newSupName, setNewSupName] = useState('');
   const [newSupOrigin, setNewSupOrigin] = useState('Switzerland');
   const [newSupSharia, setNewSupSharia] = useState(true);
+
+  // Brands / Refiners master data state (Master Data Lookup)
+  const [brandsList, setBrandsList] = useState<any[]>([]);
+  const [newBrandCode, setNewBrandCode] = useState('');
+  const [newBrandName, setNewBrandName] = useState('');
+  const [newBrandOrigin, setNewBrandOrigin] = useState('Switzerland');
+  const [newBrandLbmaId, setNewBrandLbmaId] = useState('');
+  const [newBrandLbmaCert, setNewBrandLbmaCert] = useState(true);
+  const [newBrandDesc, setNewBrandDesc] = useState('');
+  const [editingBrandIdx, setEditingBrandIdx] = useState<number | null>(null);
+  const [editBrandCode, setEditBrandCode] = useState('');
+  const [editBrandName, setEditBrandName] = useState('');
+  const [editBrandOrigin, setEditBrandOrigin] = useState('Switzerland');
+  const [editBrandLbmaId, setEditBrandLbmaId] = useState('');
+  const [editBrandLbmaCert, setEditBrandLbmaCert] = useState(true);
+  const [editBrandDesc, setEditBrandDesc] = useState('');
 
   // Stock Reorder Thresholds
   const [reorderThresholds, setReorderThresholds] = useState<any[]>([]);
@@ -1031,24 +1068,21 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   const [newDenomMetal, setNewDenomMetal] = useState('Gold');
   const [newDenomWeight, setNewDenomWeight] = useState('');
   const [newDenomOrigin, setNewDenomOrigin] = useState('Switzerland');
+  const [newDenomBrandId, setNewDenomBrandId] = useState('');
   const [denomFilterText, setDenomFilterText] = useState('');
   const [denomFilterOrigin, setDenomFilterOrigin] = useState('');
   const [denomSortBy, setDenomSortBy] = useState<'label' | 'metal' | 'weight' | 'origin'>('label');
   const [branchFilterText, setBranchFilterText] = useState('');
   const [branchSortBy, setBranchSortBy] = useState<'name' | 'code'>('name');
-  const [poFilterStatus, setPoFilterStatus] = useState('');
-  const [poFilterSupplier, setPoFilterSupplier] = useState('');
-  const [poSortBy, setPoSortBy] = useState<'po_number' | 'supplier' | 'cost'>('po_number');
   const [editingDenomIdx, setEditingDenomIdx] = useState<number | null>(null);
   const [editDenomLabel, setEditDenomLabel] = useState('');
   const [editDenomMetal, setEditDenomMetal] = useState('Gold');
   const [editDenomWeight, setEditDenomWeight] = useState('');
   const [editDenomOrigin, setEditDenomOrigin] = useState('Switzerland');
+  const [editDenomBrandId, setEditDenomBrandId] = useState('');
 
   const handleAddDenom = async () => {
-    console.log('Register clicked:', { newDenomLabel, newDenomMetal, newDenomWeight, newDenomOrigin });
     if (!newDenomLabel.trim() || !newDenomWeight) {
-      console.log('Validation failed - missing label or weight');
       alert(currentLang === 'en' ? 'Please fill in all required fields' : 'يرجى ملء جميع الحقول المطلوبة');
       return;
     }
@@ -1057,20 +1091,21 @@ const [migrationApproved, setMigrationApproved] = useState(false);
         label: newDenomLabel.trim(),
         metalName: newDenomMetal,
         weightGrams: parseFloat(newDenomWeight),
-        originCountry: newDenomOrigin
+        originCountry: newDenomOrigin,
+        brandId: newDenomBrandId ? parseInt(newDenomBrandId) : null
       };
-      console.log('Sending payload:', payload);
       const res = await fetch(`${API_BASE}/catalog/products`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
-      console.log('Response status:', res.status);
       if (res.ok) {
         await fetchProducts();
+        const selectedBrand = brandsList.find((b: any) => b.brand_id === parseInt(newDenomBrandId));
+        const brandCodePart = selectedBrand ? `-${selectedBrand.brand_code}` : '';
         const metalSymbol = newDenomMetal === 'Gold' ? 'AU' : 'SV';
-        const originAbbrev = newDenomOrigin === 'Switzerland' ? 'SWIS' : 'TURK';
-        const generatedCode = `${metalSymbol}-${(parseInt(newDenomWeight))}G-${originAbbrev}`;
+        const originAbbrev = newDenomOrigin === 'Switzerland' ? 'SWIS' : newDenomOrigin === 'Turkey' ? 'TURK' : 'ORIG';
+        const generatedCode = `${metalSymbol}-${parseInt(newDenomWeight)}G-${originAbbrev}${brandCodePart}`;
         const successMsg = currentLang === 'en'
           ? `✓ Product created successfully!\n\nProduct Code: ${generatedCode}\n${newDenomLabel} (${newDenomOrigin})`
           : `✓ تم إنشاء المنتج بنجاح!\n\nرمز المنتج: ${generatedCode}\n${newDenomLabel} (${newDenomOrigin})`;
@@ -1079,18 +1114,115 @@ const [migrationApproved, setMigrationApproved] = useState(false);
         setNewDenomMetal('Gold');
         setNewDenomWeight('');
         setNewDenomOrigin('Switzerland');
+        setNewDenomBrandId('');
       } else {
         const error = await res.text();
-        console.log('Error response:', error);
         const errorMsg = currentLang === 'en'
           ? `Failed to add denomination.\n\nError: ${error}`
           : `فشل إضافة فئة الوزن.\n\nالخطأ: ${error}`;
         alert(errorMsg);
       }
     } catch (e) {
-      console.error('Exception:', e);
       alert(currentLang === 'en' ? 'Error connecting to server.' : 'خطأ في الاتصال بالخادم.');
     }
+  };
+
+  const fetchBrands = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/catalog/brands`);
+      if (res.ok) {
+        const data = await res.json();
+        setBrandsList(data);
+      } else {
+        setBrandsList([]);
+      }
+    } catch (e) {
+      console.warn("Backend catalog/brands not responding.", e);
+      setBrandsList([]);
+    }
+  };
+
+  const handleAddBrand = async () => {
+    if (!newBrandCode.trim() || !newBrandName.trim()) {
+      alert(currentLang === 'en' ? 'Please fill in brand code and name.' : 'يرجى إدخال رمز واسم العلامة التجارية.');
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/catalog/brands`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          brandCode: newBrandCode.trim(),
+          brandName: newBrandName.trim(),
+          countryOfOrigin: newBrandOrigin,
+          lbmaRefinerId: newBrandLbmaId.trim(),
+          isLbmaCertified: newBrandLbmaCert,
+          description: newBrandDesc.trim()
+        })
+      });
+      if (res.ok) {
+        alert(currentLang === 'en' ? 'Brand registered successfully.' : 'تم تسجيل العلامة التجارية بنجاح.');
+        setNewBrandCode('');
+        setNewBrandName('');
+        setNewBrandLbmaId('');
+        setNewBrandDesc('');
+        fetchBrands();
+      } else {
+        const err = await res.json();
+        alert(err.error || 'Failed to create brand.');
+      }
+    } catch (_) {
+      alert('Error creating brand.');
+    }
+  };
+
+  const handleStartEditBrand = (idx: number) => {
+    const b = brandsList[idx];
+    setEditingBrandIdx(idx);
+    setEditBrandCode(b.brand_code);
+    setEditBrandName(b.brand_name);
+    setEditBrandOrigin(b.country_of_origin);
+    setEditBrandLbmaId(b.lbma_refiner_id || '');
+    setEditBrandLbmaCert(b.is_lbma_certified);
+    setEditBrandDesc(b.description || '');
+  };
+
+  const handleSaveEditBrand = async (idx: number) => {
+    const b = brandsList[idx];
+    try {
+      const res = await fetch(`${API_BASE}/catalog/brands/${b.brand_id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          brandCode: editBrandCode.trim(),
+          brandName: editBrandName.trim(),
+          countryOfOrigin: editBrandOrigin,
+          lbmaRefinerId: editBrandLbmaId.trim(),
+          isLbmaCertified: editBrandLbmaCert,
+          description: editBrandDesc.trim()
+        })
+      });
+      if (res.ok) {
+        alert(currentLang === 'en' ? 'Brand updated successfully.' : 'تم تحديث العلامة التجارية بنجاح.');
+        setEditingBrandIdx(null);
+        fetchBrands();
+      } else {
+        alert('Failed to update brand.');
+      }
+    } catch (_) {
+      alert('Error updating brand.');
+    }
+  };
+
+  const handleDeleteBrand = async (idx: number) => {
+    const b = brandsList[idx];
+    if (!window.confirm(currentLang === 'en' ? `Delete brand ${b.brand_name}?` : `هل تريد حذف العلامة ${b.brand_name}؟`)) return;
+    try {
+      const res = await fetch(`${API_BASE}/catalog/brands/${b.brand_id}`, { method: 'DELETE' });
+      if (res.ok) {
+        fetchBrands();
+      }
+    } catch (_) {}
   };
 
   const handleStartEditDenom = (idx: number) => {
@@ -1099,11 +1231,22 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     setEditDenomLabel(d.label);
     setEditDenomMetal(d.metal);
     setEditDenomWeight(String(d.weight));
+    setEditDenomOrigin(d.origin || 'Switzerland');
+    setEditDenomBrandId(d.brand_id ? String(d.brand_id) : '');
   };
 
   const handleSaveEditDenom = (idx: number) => {
+    const selectedBrand = brandsList.find((b: any) => b.brand_id === parseInt(editDenomBrandId));
     setDenomsList(prev => prev.map((d, i) => i === idx
-      ? { label: editDenomLabel.trim(), metal: editDenomMetal, weight: parseFloat(editDenomWeight) }
+      ? {
+          ...d,
+          label: editDenomLabel.trim(),
+          metal: editDenomMetal,
+          weight: parseFloat(editDenomWeight),
+          origin: editDenomOrigin,
+          brand_id: editDenomBrandId ? parseInt(editDenomBrandId) : d.brand_id,
+          brand_name: selectedBrand ? selectedBrand.brand_name : d.brand_name
+        }
       : d
     ));
     setEditingDenomIdx(null);
@@ -1199,6 +1342,79 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   const [transferDestBranchId, setTransferDestBranchId] = useState('');
   const [transferCourierInfo, setTransferCourierInfo] = useState('');
 
+  // GFS & Stock Threshold states
+  const [gfsDeliveryRequests, setGfsDeliveryRequests] = useState<any[]>([]);
+  const [gfsSyncLogs, setGfsSyncLogs] = useState<any[]>([]);
+  const [stockThresholds, setStockThresholds] = useState<any[]>([]);
+  const [enterpriseAlerts, setEnterpriseAlerts] = useState<any[]>([]);
+  const [gfsSyncLoading, setGfsSyncLoading] = useState(false);
+  const [showScanQrModal, setShowScanQrModal] = useState(false);
+  const [scanQrInput, setScanQrInput] = useState('');
+  const [scanQrResult, setScanQrResult] = useState<any>(null);
+  const [scanQrError, setScanQrError] = useState('');
+  
+  // UC07: Home Delivery states (KFH Kuwait Door-to-Door Fulfillment)
+  const [homeDeliveries, setHomeDeliveries] = useState<any[]>([]);
+  const [showCreateHomeDeliveryModal, setShowCreateHomeDeliveryModal] = useState(false);
+  const [newHdBarId, setNewHdBarId] = useState('');
+  const [newHdAccount, setNewHdAccount] = useState('');
+  const [newHdCivilId, setNewHdCivilId] = useState('');
+  const [newHdName, setNewHdName] = useState('');
+  const [newHdPhone, setNewHdPhone] = useState('');
+  const [newHdGovernorate, setNewHdGovernorate] = useState('Capital');
+  const [newHdArea, setNewHdArea] = useState('Shuwaikh');
+  const [newHdBlock, setNewHdBlock] = useState('1');
+  const [newHdStreet, setNewHdStreet] = useState('Street 10');
+  const [newHdBuilding, setNewHdBuilding] = useState('Building 5');
+  const [newHdFlat, setNewHdFlat] = useState('');
+  const [newHdInstructions, setNewHdInstructions] = useState('');
+  const [civilIdValidationResult, setCivilIdValidationResult] = useState<{ isValid: boolean; message: string } | null>(null);
+
+  // Home Delivery Dispatch & Handover modals
+  const [showDispatchHdModal, setShowDispatchHdModal] = useState(false);
+  const [dispatchHdId, setDispatchHdId] = useState<number | null>(null);
+  const [hdCourierCompany, setHdCourierCompany] = useState('KFH Secure Express Logistics');
+  const [hdCourierRepName, setHdCourierRepName] = useState('Saad Al-Azmi');
+  const [hdCourierCivilId, setHdCourierCivilId] = useState('290011501239');
+  const [hdVehiclePlate, setHdVehiclePlate] = useState('KWT-10-9988');
+  const [hdSecuritySeal, setHdSecuritySeal] = useState(`SEAL-HD-${Date.now().toString().slice(-6)}`);
+
+  const [showConfirmHandoverModal, setShowConfirmHandoverModal] = useState(false);
+  const [confirmHdId, setConfirmHdId] = useState<number | null>(null);
+  const [confirmHdOtp, setConfirmHdOtp] = useState('');
+  const [confirmHdCivilId, setConfirmHdCivilId] = useState('');
+  const [confirmHdSignature, setConfirmHdSignature] = useState('CUSTOMER_DIGITAL_SIGNED');
+
+  // GFS Branch Courier Dispatch Modal
+  const [showGfsDispatchModal, setShowGfsDispatchModal] = useState(false);
+  const [gfsDispatchId, setGfsDispatchId] = useState<number | null>(null);
+  const [gfsCourierCompany, setGfsCourierCompany] = useState('KFH Security Logistics Group');
+  const [gfsCourierRepName, setGfsCourierRepName] = useState('Nasser Al-Mutairi');
+  const [gfsCourierCivilId, setGfsCourierCivilId] = useState('290011501239');
+  const [gfsVehiclePlate, setGfsVehiclePlate] = useState('KWT-08-4422');
+  const [gfsSecuritySeal, setGfsSecuritySeal] = useState(`SEAL-GFS-${Date.now().toString().slice(-6)}`);
+
+  // Damaged Bar Maker-Checker state
+  const [damagedBarsList, setDamagedBarsList] = useState<any[]>([]);
+  const [showDamageModal, setShowDamageModal] = useState(false);
+  const [damageItemId, setDamageItemId] = useState<number | null>(null);
+  const [damageReason, setDamageReason] = useState('SCRATCHED_HALLMARK');
+  const [damageDesc, setDamageDesc] = useState('');
+  const [damageDocId, setDamageDocId] = useState(`DOC-MOCI-${Date.now().toString().slice(-4)}`);
+
+  // Threshold form inputs
+  const [thresholdAlertType, setThresholdAlertType] = useState('LOW_STOCK');
+  const [thresholdProductId, setThresholdProductId] = useState('');
+  const [thresholdDenominationId, setThresholdDenominationId] = useState('');
+  const [thresholdCutoffKg, setThresholdCutoffKg] = useState('');
+
+  // Branch verification Modal
+  const [showReceiveModal, setShowReceiveModal] = useState(false);
+  const [receiveRequestId, setReceiveRequestId] = useState<number | null>(null);
+  const [receiveScannedSerial, setReceiveScannedSerial] = useState('');
+  const [receiveBranchId, setReceiveBranchId] = useState(1);
+  const [receiveValidationPassed, setReceiveValidationPassed] = useState(true);
+
   // User permissions from login (group-based access control)
   const [userPermissions, setUserPermissions] = useState<Record<string, string>>({});
 
@@ -1247,24 +1463,19 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     // --- Operations ---
     { key: 'dashboard', label: 'Executive Dashboard', tier: 'Operations' },
     { key: 'pending_actions', label: 'My Pending Actions', tier: 'Operations' },
-    { key: 'purchase_orders', label: 'P.O. & Procurement', tier: 'Operations' },
     { key: 'spatial_map', label: 'Vault Spatial Map (view)', tier: 'Operations' },
     { key: 'custody', label: 'Customer Custody', tier: 'Operations' },
     { key: 'stocktake', label: 'Stocktake', tier: 'Operations' },
     { key: 'reports', label: 'Reporting & Analytics', tier: 'Operations' },
     { key: 'workflows', label: 'Workflow Actions (approve/reject)', tier: 'Operations' },
     { key: 'intake', label: 'Receive Shipment', tier: 'Operations' },
-    { key: 'dispensing', label: 'GDM Dispensing (view/operate)', tier: 'Operations' },
     // --- Administration / Setup ---
     { key: 'vault_location', label: 'Vault Location Setup (manage shelves)', tier: 'Administration' },
     { key: 'master_data', label: 'Master Data (branches, vendors, thresholds)', tier: 'Administration' },
     { key: 'migration', label: 'Bulk Ingestion', tier: 'Administration' },
     { key: 'rules_engine', label: 'Business Rules Engine (author/version rules)', tier: 'Administration' },
-    { key: 'notifications', label: 'Notifications (distribution lists & alerts)', tier: 'Administration' },
     { key: 'monitoring', label: 'Monitoring (SLA metrics & alert routing)', tier: 'Administration' },
-    { key: 'device_integration', label: 'GDM Device Registration (manage machines)', tier: 'Administration' },
     { key: 'workflow_design', label: 'Workflow Designer (templates)', tier: 'Administration' },
-    { key: 'gl_config', label: 'GL Configuration (accounts & posting rules)', tier: 'Administration' },
     { key: 'user_admin', label: 'User & Group Admin', tier: 'Administration' },
     { key: 'settings', label: 'System Settings', tier: 'Administration' }
   ];
@@ -1616,6 +1827,116 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     return dbMap[val] || val;
   };
 
+  const fetchGfsDeliveryRequests = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/gfs/delivery-requests`);
+      if (res.ok) {
+        const data = await res.json();
+        setGfsDeliveryRequests(data);
+      }
+    } catch (e) {
+      console.warn("Error fetching GFS delivery requests", e);
+    }
+  };
+
+  const fetchGfsSyncLogs = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/gfs/sync-logs`);
+      if (res.ok) {
+        const data = await res.json();
+        setGfsSyncLogs(data);
+      }
+    } catch (e) {
+      console.warn("Error fetching GFS EOD sync logs", e);
+    }
+  };
+
+  const fetchStockThresholds = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/inventory/stock-thresholds`);
+      if (res.ok) {
+        const data = await res.json();
+        setStockThresholds(data);
+      }
+    } catch (e) {
+      console.warn("Error fetching stock thresholds", e);
+    }
+  };
+
+  const fetchHomeDeliveries = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/gfs/home-delivery`);
+      if (res.ok) {
+        const data = await res.json();
+        setHomeDeliveries(data);
+      }
+    } catch (e) {
+      console.warn("Error fetching home deliveries", e);
+    }
+  };
+
+  const fetchDamagedBars = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/inventory/damaged-items`);
+      if (res.ok) {
+        const data = await res.json();
+        setDamagedBarsList(data);
+      }
+    } catch (e) {
+      console.warn("Error fetching damaged bars", e);
+    }
+  };
+
+  const handleValidateCivilIdApi = async (civilId: string) => {
+    if (!civilId || civilId.length !== 12) {
+      setCivilIdValidationResult({ isValid: false, message: currentLang === 'en' ? 'Kuwait Civil ID must be 12 digits.' : 'الرقم المدني الكويتي يجب أن يتكون من 12 رقماً.' });
+      return false;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/validation/civil-id/${civilId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setCivilIdValidationResult(data);
+        return data.isValid;
+      }
+    } catch (_) {}
+    return false;
+  };
+
+  const handleProcessDamageAction = async (itemId: number, action: 'APPROVE' | 'REJECT') => {
+    try {
+      const res = await fetch(`${API_BASE}/inventory/items/${itemId}/damage-action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action })
+      });
+      if (res.ok) {
+        alert(action === 'APPROVE' 
+          ? (currentLang === 'en' ? 'Damage report APPROVED by Checker. Bar status set to DAMAGED.' : 'تم اعتماد تقرير التلف من المراجع. تم تحويل السبيكة إلى تالفة.')
+          : (currentLang === 'en' ? 'Damage report REJECTED by Checker. Bar status restored.' : 'تم رفض تقرير التلف واستعادة حالة السبيكة.'));
+        fetchDamagedBars();
+        fetchInventory();
+      } else {
+        const err = await res.json();
+        alert(err.error || 'Action failed');
+      }
+    } catch (e) {
+      alert('Error processing damage action');
+    }
+  };
+
+  const fetchEnterpriseStockAlerts = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/inventory/stock-alerts/enterprise`);
+      if (res.ok) {
+        const data = await res.json();
+        setEnterpriseAlerts(data);
+      }
+    } catch (e) {
+      console.warn("Error evaluating enterprise stock alerts", e);
+    }
+  };
+
   const fetchRates = async () => {
     try {
       const res = await fetch(`${API_BASE}/rates`);
@@ -1793,7 +2114,10 @@ const [migrationApproved, setMigrationApproved] = useState(false);
           weight: p.weight_grams,
           product_id: p.product_id,
           product_code: p.product_code,
-          origin: p.origin_country
+          origin: p.origin_country,
+          brand_id: p.brand_id,
+          brand_name: p.brand_name,
+          denomination_id: p.denomination_id
         })));
       }
     } catch (_) {}
@@ -2271,161 +2595,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     }
   };
 
-  // =========================================================================
-  // GDM Device Integration (device_integration module) + Dispensing (dispensing module)
-  // =========================================================================
-  const fetchGdmDevices = async () => {
-    try {
-      const res = await fetch(`${API_BASE}/admin/devices`);
-      setGdmDevices(res.ok ? await res.json() : []);
-    } catch (e) {
-      console.warn("Backend admin/devices not responding.", e);
-      setGdmDevices([]);
-    }
-  };
 
-  const fetchDispenseTransactions = async () => {
-    try {
-      const res = await fetch(`${API_BASE}/dispensing/transactions`);
-      setDispenseTransactions(res.ok ? await res.json() : []);
-    } catch (e) {
-      console.warn("Backend dispensing/transactions not responding.", e);
-      setDispenseTransactions([]);
-    }
-  };
-
-  const resetDeviceForm = () => {
-    setEditingDeviceId(null);
-    setDeviceFormCode('');
-    setDeviceFormName('');
-    setDeviceFormLocationId('1');
-    setDeviceFormBranchId('');
-    setDeviceFormManufacturer('');
-    setDeviceFormModel('');
-    setDeviceFormActive(true);
-  };
-
-  const handleStartEditDevice = (d: any) => {
-    setEditingDeviceId(d.device_id);
-    setDeviceFormCode(d.device_code);
-    setDeviceFormName(d.device_name);
-    setDeviceFormLocationId(String(d.location_id));
-    setDeviceFormBranchId(String(d.branch_id));
-    setDeviceFormManufacturer(d.manufacturer || '');
-    setDeviceFormModel(d.model || '');
-    setDeviceFormActive(d.is_active);
-  };
-
-  const handleSaveDevice = async () => {
-    if (!deviceFormCode.trim() || !deviceFormName.trim() || !deviceFormBranchId) {
-      alert(currentLang === 'en' ? 'Please fill in device code, name, and branch.' : 'يرجى تعبئة رمز الجهاز والاسم والفرع.');
-      return;
-    }
-    try {
-      const res = await fetch(`${API_BASE}/admin/devices`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          deviceId: editingDeviceId,
-          deviceCode: deviceFormCode,
-          deviceName: deviceFormName,
-          locationId: parseInt(deviceFormLocationId) || 1,
-          branchId: parseInt(deviceFormBranchId),
-          manufacturer: deviceFormManufacturer || null,
-          model: deviceFormModel || null,
-          isActive: deviceFormActive,
-          registeredBy: username
-        })
-      });
-      if (res.ok) {
-        alert(currentLang === 'en' ? 'Device saved successfully.' : 'تم حفظ الجهاز بنجاح.');
-        resetDeviceForm();
-        fetchGdmDevices();
-      } else {
-        alert(await describeApiError(res, currentLang, 'Failed to save device', 'فشل حفظ الجهاز'));
-      }
-    } catch (e) {
-      alert(currentLang === 'en' ? 'Error saving device.' : 'خطأ أثناء حفظ الجهاز.');
-    }
-  };
-
-  const handleDeleteDevice = async (id: number) => {
-    if (!window.confirm(currentLang === 'en' ? 'Decommission this device?' : 'هل تريد إلغاء تشغيل هذا الجهاز؟')) return;
-    try {
-      const res = await fetch(`${API_BASE}/admin/devices/${id}`, { method: 'DELETE' });
-      if (res.ok) {
-        fetchGdmDevices();
-      } else {
-        alert(await describeApiError(res, currentLang, 'Failed to decommission device', 'فشل إلغاء تشغيل الجهاز'));
-      }
-    } catch (e) {
-      alert(currentLang === 'en' ? 'Error decommissioning device.' : 'خطأ أثناء إلغاء تشغيل الجهاز.');
-    }
-  };
-
-  const handleRequestDispense = async () => {
-    if (!dispenseFormDeviceId || !dispenseFormProductId) {
-      alert(currentLang === 'en' ? 'Please select a device and a product.' : 'يرجى اختيار الجهاز والمنتج.');
-      return;
-    }
-    try {
-      const res = await fetch(`${API_BASE}/dispensing/request`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          deviceId: parseInt(dispenseFormDeviceId),
-          productId: parseInt(dispenseFormProductId),
-          channelId: parseInt(dispenseFormChannelId),
-          idempotencyKey: `${username}-${Date.now()}`,
-          initiatedBy: username
-        })
-      });
-      if (res.ok) {
-        alert(currentLang === 'en' ? 'Dispense requested; bar allocated.' : 'تم طلب الصرف وتخصيص السبيكة.');
-        fetchDispenseTransactions();
-      } else {
-        alert(await describeApiError(res, currentLang, 'Failed to request dispense', 'فشل طلب الصرف'));
-      }
-    } catch (e) {
-      alert(currentLang === 'en' ? 'Error requesting dispense.' : 'خطأ أثناء طلب الصرف.');
-    }
-  };
-
-  const handleCompleteDispense = async (id: number) => {
-    try {
-      const res = await fetch(`${API_BASE}/dispensing/${id}/complete`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ completedBy: username })
-      });
-      if (res.ok) {
-        fetchDispenseTransactions();
-      } else {
-        alert(await describeApiError(res, currentLang, 'Failed to complete dispense', 'فشل إتمام الصرف'));
-      }
-    } catch (e) {
-      alert(currentLang === 'en' ? 'Error completing dispense.' : 'خطأ أثناء إتمام الصرف.');
-    }
-  };
-
-  const handleFailDispense = async (id: number) => {
-    const reason = window.prompt(currentLang === 'en' ? 'Reason for failure (e.g. jam):' : 'سبب الفشل (مثال: انحشار):', 'Machine jam');
-    if (!reason) return;
-    try {
-      const res = await fetch(`${API_BASE}/dispensing/${id}/fail`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason })
-      });
-      if (res.ok) {
-        fetchDispenseTransactions();
-      } else {
-        alert(await describeApiError(res, currentLang, 'Failed to mark dispense failed', 'فشل تسجيل فشل الصرف'));
-      }
-    } catch (e) {
-      alert(currentLang === 'en' ? 'Error marking dispense failed.' : 'خطأ أثناء تسجيل فشل الصرف.');
-    }
-  };
 
   // =========================================================================
   // Business Rules Engine (rules_engine module, RFP item 5)
@@ -2445,8 +2615,10 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     setRuleFormCode('');
     setRuleFormName('');
     setRuleFormType('TRANSFER_LIMIT');
-    setRuleFormExpression('{}');
     setRuleFormSeverity('BLOCK');
+    setBuilderField('weightGrams');
+    setBuilderOp('gt');
+    setBuilderValue('5000');
   };
 
   const handleStartEditRule = (r: any) => {
@@ -2454,19 +2626,33 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     setRuleFormCode(r.rule_code);
     setRuleFormName(r.rule_name);
     setRuleFormType(r.rule_type);
-    setRuleFormExpression(r.expression_json);
     setRuleFormSeverity(r.severity);
+    try {
+      const parsed = JSON.parse(r.expression_json || '{}');
+      const leaf = parsed.all?.[0] || parsed.any?.[0] || parsed;
+      setBuilderField(leaf.field || 'weightGrams');
+      setBuilderOp(leaf.op || 'gt');
+      setBuilderValue(String(leaf.value ?? ''));
+    } catch {
+      setBuilderField('weightGrams');
+      setBuilderOp('gt');
+      setBuilderValue('');
+    }
   };
 
   const handleSaveRule = async () => {
-    if (!ruleFormCode.trim() || !ruleFormName.trim() || !ruleFormExpression.trim()) {
-      alert(currentLang === 'en' ? 'Please fill in rule code, name, and expression.' : 'يرجى تعبئة رمز القاعدة والاسم والتعبير.');
-      return;
-    }
-    try {
-      JSON.parse(ruleFormExpression);
-    } catch {
-      alert(currentLang === 'en' ? 'Expression must be valid JSON.' : 'يجب أن يكون التعبير بصيغة JSON صحيحة.');
+    const computedExpression = JSON.stringify({
+      all: [
+        {
+          field: builderField,
+          op: builderOp,
+          value: isNaN(Number(builderValue)) || builderValue.trim() === '' ? builderValue : Number(builderValue)
+        }
+      ]
+    });
+
+    if (!ruleFormCode.trim() || !ruleFormName.trim() || !builderValue.trim()) {
+      alert(currentLang === 'en' ? 'Please fill in rule code, name, and expression value.' : 'يرجى تعبئة رمز القاعدة والاسم وقيمة التعبير.');
       return;
     }
     try {
@@ -2478,14 +2664,14 @@ const [migrationApproved, setMigrationApproved] = useState(false);
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(isEdit ? {
             ruleName: ruleFormName,
-            expressionJson: ruleFormExpression,
+            expressionJson: computedExpression,
             severity: ruleFormSeverity,
             updatedBy: username
           } : {
             ruleCode: ruleFormCode,
             ruleName: ruleFormName,
             ruleType: ruleFormType,
-            expressionJson: ruleFormExpression,
+            expressionJson: computedExpression,
             severity: ruleFormSeverity,
             createdBy: username
           })
@@ -2841,6 +3027,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
         fetchPOs();
         fetchWorkflows();
         fetchProducts();
+        fetchBrands();
         fetchLocations();
         fetchSuppliers();
         fetchTransfers();
@@ -3153,6 +3340,22 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     return () => window.removeEventListener('afterprint', handleAfterPrint);
   }, []);
 
+  const handleOpenDirectIntake = () => {
+    setIntakePOId(null);
+    setIntakePONumber('DIRECT');
+    setIntakeLotNum(`LOT-DIRECT-${Date.now()}`);
+    setScannedSerials([]);
+    setCurrentScanSerial('');
+    // Default the scanned-bar denomination to the first product if available
+    setIntakeSelectedProductId(products.length > 0 ? products[0].product_id : 1);
+
+    // Find first free location slot or default to 1
+    const flatSlots = locations.flatMap(loc => loc.slots);
+    const firstFreeSlot = flatSlots.find((s: any) => !s.occupied);
+    setIntakeSelectedLocation(firstFreeSlot ? firstFreeSlot.id : 1);
+    setShowIntakeModal(true);
+  };
+
   const handleIntakePO = (id: number) => {
     const po = poList.find(p => p.po_id === id);
     if (!po) return;
@@ -3178,8 +3381,15 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     setShowIntakeModal(true);
   };
 
+  void poItemsSummary;
+  void handleOpenDirectIntake;
+  void handleIntakePO;
+
   const handleSubmitIntake = async () => {
-    if (!intakePOId) return;
+    if (!intakePOId && intakePONumber !== 'DIRECT') {
+      alert(currentLang === 'en' ? "Missing Purchase Order association." : "ارتباط طلب الشراء مفقود.");
+      return;
+    }
     if (!intakeLotNum.trim()) {
       alert(currentLang === 'en' ? "Please enter a Lot Number." : "يرجى إدخال رقم التشغيلة/اللوت.");
       return;
@@ -3218,6 +3428,172 @@ const [migrationApproved, setMigrationApproved] = useState(false);
       }
     } catch (e) {
       alert("Error submitting shipment receipt. Please ensure the backend is running.");
+    }
+  };
+
+  const fetchPendingIntakes = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/vault/intake/pending`);
+      if (res.ok) {
+        const data = await res.json();
+        setPendingIntakesList(data);
+      }
+    } catch (e) {
+      console.warn('Failed to fetch pending intakes', e);
+    }
+  };
+
+  const handleAddIntakeBar = () => {
+    const nextIdx = intakeBars.length + 1;
+    const defaultProduct = products.length > 0 ? products[0] : null;
+    setIntakeBars([
+      ...intakeBars,
+      {
+        id: `bar-${Date.now()}-${nextIdx}`,
+        serial: `BAR-SUP-${Date.now().toString().slice(-4)}-${pad2(nextIdx)}`,
+        product_id: defaultProduct ? defaultProduct.product_id : 1,
+        weight_grams: defaultProduct ? defaultProduct.weight_grams : 1000,
+        purity: defaultProduct && defaultProduct.purity_value ? parseFloat(defaultProduct.purity_value) : 999.9,
+        is_damaged: false,
+        damage_reason: '',
+        refiner_name: 'Valcambi Suisse',
+        assay_certificate_number: `ASSAY-VAL-${nextIdx}`
+      }
+    ]);
+  };
+
+  const handleAdd5BatchDemo = () => {
+    const baseTime = Date.now().toString().slice(-4);
+    const defaultProduct = products.length > 0 ? products[0] : null;
+    const newBars = Array.from({ length: 5 }, (_, i) => {
+      const idx = intakeBars.length + i + 1;
+      return {
+        id: `bar-${Date.now()}-${idx}`,
+        serial: `BAR-SUP-${baseTime}-${pad2(idx)}`,
+        product_id: defaultProduct ? defaultProduct.product_id : 1,
+        weight_grams: defaultProduct ? defaultProduct.weight_grams : 1000,
+        purity: defaultProduct && defaultProduct.purity_value ? parseFloat(defaultProduct.purity_value) : 999.9,
+        is_damaged: false,
+        damage_reason: '',
+        refiner_name: 'Valcambi Suisse',
+        assay_certificate_number: `ASSAY-VAL-${idx}`
+      };
+    });
+    setIntakeBars([...intakeBars, ...newBars]);
+  };
+
+  const handleRemoveIntakeBar = (id: string) => {
+    if (intakeBars.length <= 1) {
+      alert(currentLang === 'en' ? 'Shipment must contain at least one bar.' : 'يجب أن تحتوي الشحنة على سبيكة واحدة على الأقل.');
+      return;
+    }
+    setIntakeBars(intakeBars.filter(b => b.id !== id));
+  };
+
+  const handleUpdateIntakeBar = (id: string, field: string, value: any) => {
+    setIntakeBars(intakeBars.map(b => {
+      if (b.id !== id) return b;
+      const updated = { ...b, [field]: value };
+      if (field === 'product_id') {
+        const prod = products.find((p: any) => p.product_id === parseInt(value));
+        if (prod) {
+          updated.weight_grams = prod.weight_grams;
+          if (prod.purity_value) updated.purity = parseFloat(prod.purity_value);
+        }
+      } else if (field === 'weight_grams') {
+        const numWeight = parseFloat(value) || 0;
+        const matchingProd = products.find((p: any) => p.weight_grams === numWeight);
+        if (matchingProd) {
+          updated.product_id = matchingProd.product_id;
+        }
+      }
+      return updated;
+    }));
+  };
+
+  const handleSubmitUC03Intake = async () => {
+    if (!intakeLotNum.trim()) {
+      alert(currentLang === 'en' ? 'Please enter a Lot / Batch Number.' : 'يرجى إدخال رقم اللوت / التشغيلة.');
+      return;
+    }
+    if (intakeBars.length === 0) {
+      alert(currentLang === 'en' ? 'Please add at least one bar to the shipment.' : 'يرجى إضافة سبيكة واحدة على الأقل للشحنة.');
+      return;
+    }
+    const emptySerial = intakeBars.find(b => !b.serial.trim());
+    if (emptySerial) {
+      alert(currentLang === 'en' ? 'Every bar must have a Serial Number.' : 'يجب أن تحتوي كل سبيكة على رقم تسلسلي.');
+      return;
+    }
+    const serials = intakeBars.map(b => b.serial.trim().toUpperCase());
+    const duplicates = serials.filter((item, index) => serials.indexOf(item) !== index);
+    if (duplicates.length > 0) {
+      alert(currentLang === 'en' 
+        ? `Duplicate serial detected in shipment: ${duplicates[0]}. (UC03 E1: Duplicate serials rejected)` 
+        : `تم اكتشاف رقم تسلسلي مكرر في الشحنة: ${duplicates[0]}. (قاعدة UC03 E1: رفض الأرقام المكررة)`);
+      return;
+    }
+
+    try {
+      const payload = {
+        vendorId: intakeVendorId || (suppliersList.length > 0 ? suppliersList[0].vendor_id : 1),
+        shipmentReference: intakeShipmentRef || null,
+        deliveryNoteNumber: intakeDeliveryNote || null,
+        airwayBillNumber: intakeAirwayBill || null,
+        receivingDate: intakeReceivingDate ? new Date(intakeReceivingDate).toISOString() : new Date().toISOString(),
+        supportingDocumentUrl: intakeDocUrl || null,
+        discrepancyNotes: intakeDiscrepancyNotes || null,
+        lotNumber: intakeLotNum.trim(),
+        locationId: intakeSelectedLocation || 1,
+        receivedBy: displayName,
+        items: intakeBars.map(b => ({
+          serial: b.serial.trim(),
+          product_id: b.product_id,
+          weight_grams: b.weight_grams,
+          purity: b.purity,
+          is_damaged: b.is_damaged,
+          damage_reason: b.is_damaged ? (b.damage_reason || 'Damaged upon supplier receipt') : null,
+          refiner_name: b.refiner_name,
+          fineness_ppt: b.purity,
+          assay_certificate_number: b.assay_certificate_number || `CERT-${b.serial.trim()}`
+        }))
+      };
+
+      const res = await fetch(`${API_BASE}/vault/intake`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (res.ok) {
+        alert(currentLang === 'en' 
+          ? 'Supplier shipment receipt recorded successfully! Routed to Vault Checker Maker-Checker review.' 
+          : 'تم تسجيل استلام شحنة المورد بنجاح وتوجيهها لاعتماد مراجع الخزينة!');
+        setIntakeLotNum(`LOT-SUP-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${Date.now().toString().slice(-4)}`);
+        setIntakeShipmentRef('');
+        setIntakeDeliveryNote('');
+        setIntakeAirwayBill('');
+        setIntakeDocUrl('');
+        setIntakeDiscrepancyNotes('');
+        setIntakeBars([{
+          id: `bar-${Date.now()}`,
+          serial: `BAR-SUP-${Date.now().toString().slice(-4)}-01`,
+          product_id: products.length > 0 ? products[0].product_id : 1,
+          weight_grams: 1000,
+          purity: 999.9,
+          is_damaged: false,
+          damage_reason: '',
+          refiner_name: 'Valcambi Suisse',
+          assay_certificate_number: 'ASSAY-VAL-01'
+        }]);
+        fetchPendingIntakes();
+        fetchWorkflows();
+        setIntakeActiveSubTab('IN_FLIGHT_LOG');
+      } else {
+        alert(await describeApiError(res, currentLang, 'Failed to record shipment intake', 'فشل تسجيل استلام الشحنة'));
+      }
+    } catch (e) {
+      alert(currentLang === 'en' ? 'Network error submitting supplier receipt.' : 'خطأ في الشبكة أثناء إرسال استلام المورد.');
     }
   };
 
@@ -3616,6 +3992,10 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     return Translations[currentLang]?.[key] || key;
   };
 
+  if (activeApp === 'GFS') {
+    return <GfsApp onBackToPmims={() => setActiveApp('PMIMS')} initialLang={currentLang} />;
+  }
+
   if (!isLoggedIn) {
     return (
       <div style={{
@@ -3645,6 +4025,29 @@ const [migrationApproved, setMigrationApproved] = useState(false);
           <div style={{ marginTop: '20px', fontSize: '11px', color: 'var(--text-muted)', textAlign: 'center' }}>
             Maker: treasury-maker | Checker: treasury-checker (Pass: Password123)
           </div>
+
+          <div style={{ marginTop: '20px', borderTop: '1px dashed var(--surface-border)', paddingTop: '16px', textAlign: 'center' }}>
+            <button
+              type="button"
+              onClick={() => setActiveApp('GFS')}
+              style={{
+                background: 'linear-gradient(135deg, #D4AF37 0%, #AA771C 100%)',
+                color: '#070b14',
+                border: 'none',
+                borderRadius: '8px',
+                padding: '10px 18px',
+                fontSize: '13px',
+                fontWeight: '800',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                boxShadow: '0 4px 15px rgba(212, 175, 55, 0.4)'
+              }}
+            >
+              <i className="fa-solid fa-coins"></i> Open GFS Customer Portal
+            </button>
+          </div>
         </form>
       </div>
     );
@@ -3668,39 +4071,42 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     | { type: 'item'; key: string; label: string; icon: string; permission?: string; onClick: () => void; showLiveDot?: boolean };
 
   const menuNodesCanonical: MenuNode[] = [
+    // 1. Dashboards & Real-Time Overview (Continuous / Highest Frequency)
     { type: 'section', key: 'section-dashboards', label: t('menu_dashboards') },
     { type: 'item', key: 'screen-exec', label: t('menu_exec'), icon: 'fa-solid fa-chart-line', permission: 'dashboard', onClick: () => setActiveTab('screen-exec') },
+    { type: 'item', key: 'screen-pending-req', label: t('menu_pending_requests'), icon: 'fa-solid fa-circle-exclamation', permission: 'pending_actions', onClick: () => { setActiveTab('screen-pending-req'); fetchWorkflows(); } },
+    { type: 'item', key: 'screen-realtime', label: currentLang === 'en' ? 'Real-Time Monitoring' : 'المراقبة اللحظية', icon: 'fa-solid fa-tower-broadcast', permission: 'reports', onClick: () => { setActiveTab('screen-realtime'); fetchLiveBalances(); }, showLiveDot: true },
     { type: 'item', key: 'screen-my-activity', label: t('menu_my_activity'), icon: 'fa-solid fa-user-clock', permission: 'dashboard', onClick: () => { setActiveTab('screen-my-activity'); fetchMyActivity(); } },
-    { type: 'item', key: 'screen-pending-req', label: t('menu_pending_requests'), icon: 'fa-solid fa-circle-exclamation', permission: 'pending_actions', onClick: () => { setActiveTab('screen-pending-req'); fetchWorkflows(); fetchPOs(); } },
 
+    // 2. Core Vault & Physical Operations (Daily Operations - Highest Frequency)
     { type: 'section', key: 'section-operations', label: t('menu_operations') },
-    { type: 'item', key: 'screen-po', label: t('menu_po'), icon: 'fa-solid fa-file-invoice-dollar', permission: 'purchase_orders', onClick: () => { setActiveTab('screen-po'); fetchPOs(); fetchWorkflows(); } },
-    { type: 'item', key: 'screen-active-deals', label: t('menu_active_deals'), icon: 'fa-solid fa-handshake', permission: 'purchase_orders', onClick: () => { setActiveTab('screen-active-deals'); fetchPOs(); fetchWorkflows(); } },
+    { type: 'item', key: 'screen-intake', label: currentLang === 'en' ? 'Receive Shipment' : 'استلام الشحنات', icon: 'fa-solid fa-dolly', permission: 'intake', onClick: () => { setActiveTab('screen-intake'); fetchSuppliers(); fetchPendingIntakes(); fetchLocations(); fetchProducts(); } },
     { type: 'item', key: 'screen-spatial', label: t('menu_spatial'), icon: 'fa-solid fa-warehouse', permission: 'spatial_map', onClick: () => setActiveTab('screen-spatial') },
-    { type: 'item', key: 'screen-custody', label: t('menu_custody'), icon: 'fa-solid fa-user-shield', permission: 'custody', onClick: () => setActiveTab('screen-custody') },
-    { type: 'item', key: 'screen-transfers', label: t('menu_transfers'), icon: 'fa-solid fa-truck-ramp-box', permission: 'purchase_orders', onClick: () => { setActiveTab('screen-transfers'); fetchTransfers(); } },
-    { type: 'item', key: 'screen-intake', label: currentLang === 'en' ? 'Receive Shipment' : 'استلام الشحنات', icon: 'fa-solid fa-circle-down', permission: 'intake', onClick: () => { setActiveTab('screen-intake'); fetchPOs(); } },
+    { type: 'item', key: 'screen-transfers', label: t('menu_transfers'), icon: 'fa-solid fa-truck-arrow-right', permission: 'intake', onClick: () => { setActiveTab('screen-transfers'); fetchTransfers(); } },
+    { type: 'item', key: 'screen-custody', label: t('menu_custody'), icon: 'fa-solid fa-vault', permission: 'custody', onClick: () => setActiveTab('screen-custody') },
     { type: 'item', key: 'screen-customer-receipt', label: t('menu_customer_receipt'), icon: 'fa-solid fa-hand-holding-dollar', permission: 'intake', onClick: () => { setActiveTab('screen-customer-receipt'); resetCustomerReceiptForm(); } },
-    { type: 'item', key: 'screen-dispensing', label: currentLang === 'en' ? 'GDM Dispensing' : 'صرف الأجهزة الذاتية', icon: 'fa-solid fa-vault', permission: 'dispensing', onClick: () => { setActiveTab('screen-dispensing'); fetchDispenseTransactions(); fetchGdmDevices(); fetchProducts(); } },
+    { type: 'item', key: 'screen-gfs-delivery', label: currentLang === 'en' ? 'GFS Branch Delivery' : 'طلبات فروع GFS', icon: 'fa-solid fa-truck-fast', permission: 'intake', onClick: () => { setActiveTab('screen-gfs-delivery'); fetchGfsDeliveryRequests(); fetchGfsSyncLogs(); } },
+    { type: 'item', key: 'screen-home-delivery', label: currentLang === 'en' ? 'Home Delivery (UC07)' : 'توصيل المنازل (UC07)', icon: 'fa-solid fa-house-chimney-user', permission: 'intake', onClick: () => { setActiveTab('screen-home-delivery'); fetchHomeDeliveries(); } },
+    { type: 'item', key: 'screen-damaged-bars', label: currentLang === 'en' ? 'Damaged Bar Approvals (UC12)' : 'اعتماد السبائك التالفة (UC12)', icon: 'fa-solid fa-triangle-exclamation', permission: 'custody', onClick: () => { setActiveTab('screen-damaged-bars'); fetchDamagedBars(); } },
 
+    // 3. Stock Cut-Off Thresholds (BRD UC09 & UC10)
+    { type: 'item', key: 'screen-stock-thresholds', label: currentLang === 'en' ? 'Stock Cut-Off Thresholds' : 'حدود المخزون', icon: 'fa-solid fa-calculator', permission: 'master_data', onClick: () => { setActiveTab('screen-stock-thresholds'); fetchStockThresholds(); fetchEnterpriseStockAlerts(); fetchProducts(); } },
+
+    // 4. Audit, Controls & Compliance (Periodic / Weekly / Regulatory Frequency)
     { type: 'section', key: 'section-controls', label: t('menu_controls') },
     { type: 'item', key: 'screen-stocktake', label: t('menu_stocktake'), icon: 'fa-solid fa-clipboard-check', permission: 'stocktake', onClick: () => setActiveTab('screen-stocktake') },
     { type: 'item', key: 'screen-reports', label: t('menu_reports'), icon: 'fa-solid fa-chart-pie', permission: 'reports', onClick: () => { setActiveTab('screen-reports'); loadReport(reportType); } },
+    { type: 'item', key: 'screen-compliance', label: t('menu_compliance'), icon: 'fa-solid fa-shield-halved', permission: 'dashboard', onClick: () => { setActiveTab('screen-compliance'); fetchComplianceDashboard(); } },
     { type: 'item', key: 'screen-audit-trail', label: t('menu_audit_trail'), icon: 'fa-solid fa-magnifying-glass-chart', permission: 'reports', onClick: () => window.open('/pmims-audit-trail.html', '_blank') },
-    { type: 'item', key: 'screen-kfhonline-logs', label: t('menu_kfhonline_logs'), icon: 'fa-solid fa-receipt', permission: 'reports', onClick: () => window.open('/kfhonline-transaction-logs.html', '_blank') },
-    { type: 'item', key: 'screen-realtime', label: currentLang === 'en' ? 'Real-Time Monitoring' : 'المراقبة اللحظية', icon: 'fa-solid fa-tower-broadcast', permission: 'reports', onClick: () => { setActiveTab('screen-realtime'); fetchLiveBalances(); }, showLiveDot: true },
 
+    // 5. Administration & Governance (Low Frequency / Setup & Maintenance)
     { type: 'section', key: 'section-admin', label: currentLang === 'en' ? 'Administration & Setup' : 'الإدارة والإعداد' },
     { type: 'item', key: 'screen-workflows', label: canAccess('workflow_design') ? t('menu_workflows') : t('menu_workflows_queue'), icon: 'fa-solid fa-diagram-project', permission: 'workflows', onClick: () => { setActiveTab('screen-workflows'); fetchWorkflows(); } },
     { type: 'item', key: 'screen-user-admin', label: t('menu_user_admin'), icon: 'fa-solid fa-users-gear', permission: 'user_admin', onClick: () => { setActiveTab('screen-user-admin'); fetchAdminData(); } },
-    { type: 'item', key: 'screen-sql-admin', label: currentLang === 'en' ? 'SQL Query Tool' : 'أداة SQL', icon: 'fa-solid fa-database', permission: 'user_admin', onClick: () => setActiveTab('screen-sql-admin') },
-    { type: 'item', key: 'screen-compliance', label: t('menu_compliance'), icon: 'fa-solid fa-shield-halved', permission: 'dashboard', onClick: () => { setActiveTab('screen-compliance'); fetchComplianceDashboard(); } },
-    { type: 'item', key: 'screen-migration', label: t('menu_migration'), icon: 'fa-solid fa-file-import', permission: 'migration', onClick: () => setActiveTab('screen-migration') },
-    { type: 'item', key: 'screen-notifications', label: t('menu_notifications'), icon: 'fa-solid fa-bell', permission: 'notifications', onClick: () => { setActiveTab('screen-notifications'); fetchNotificationSubscriptions(); fetchNotificationDeliveries(); } },
-    { type: 'item', key: 'screen-devices', label: currentLang === 'en' ? 'GDM Device Registration' : 'تسجيل أجهزة الصرف الذاتي', icon: 'fa-solid fa-microchip', permission: 'device_integration', onClick: () => { setActiveTab('screen-devices'); fetchGdmDevices(); fetchBranches(); } },
     { type: 'item', key: 'screen-rules', label: currentLang === 'en' ? 'Business Rules Engine' : 'محرك قواعد الأعمال', icon: 'fa-solid fa-scale-balanced', permission: 'rules_engine', onClick: () => { setActiveTab('screen-rules'); fetchBusinessRules(); } },
     { type: 'item', key: 'screen-monitoring', label: currentLang === 'en' ? 'Monitoring' : 'المراقبة والتنبيهات', icon: 'fa-solid fa-heart-pulse', permission: 'monitoring', onClick: () => { setActiveTab('screen-monitoring'); fetchSlaMetrics(); fetchMonitoringEvents(); fetchAlertRoutes(); } },
-    { type: 'item', key: 'screen-gl-config', label: currentLang === 'en' ? 'GL Configuration' : 'إعدادات دفتر الأستاذ', icon: 'fa-solid fa-book', permission: 'gl_config', onClick: () => setActiveTab('screen-gl-config') },
+    { type: 'item', key: 'screen-migration', label: t('menu_migration'), icon: 'fa-solid fa-file-import', permission: 'migration', onClick: () => setActiveTab('screen-migration') },
+    { type: 'item', key: 'screen-sql-admin', label: currentLang === 'en' ? 'SQL Query Tool' : 'أداة SQL', icon: 'fa-solid fa-database', permission: 'user_admin', onClick: () => setActiveTab('screen-sql-admin') },
     { type: 'item', key: 'screen-admin', label: t('menu_settings'), icon: 'fa-solid fa-gears', permission: 'settings', onClick: () => setActiveTab('screen-admin') },
   ];
 
@@ -3905,6 +4311,26 @@ const [migrationApproved, setMigrationApproved] = useState(false);
             <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
               <i className="fa-regular fa-clock"></i> {t('header_timezone')}
             </span>
+            <button
+              className="btn"
+              onClick={() => setActiveApp('GFS')}
+              style={{
+                padding: '6px 14px',
+                fontSize: '13px',
+                background: 'linear-gradient(135deg, #D4AF37 0%, #AA771C 100%)',
+                color: '#070b14',
+                border: 'none',
+                fontWeight: '700',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                boxShadow: '0 2px 8px rgba(212, 175, 55, 0.4)'
+              }}
+            >
+              <i className="fa-solid fa-coins"></i> {currentLang === 'en' ? 'GFS Customer Portal' : 'بوابة عملاء الذهب (GFS)'}
+            </button>
             <button className="btn" onClick={toggleLanguage} style={{ padding: '6px 12px', fontSize: '13px', borderColor: 'var(--accent-gold)', color: 'var(--accent-gold)', fontWeight: '600' }}>
               <i className="fa-solid fa-globe"></i> {currentLang === 'en' ? 'العربية' : 'English'}
             </button>
@@ -3961,23 +4387,23 @@ const [migrationApproved, setMigrationApproved] = useState(false);
               <span className="kpi-title">{t('kpi_prop_gold')}</span>
               <span className="kpi-value gold-txt">{(execBoard?.total_gold_weight_kg ?? 0).toFixed(3)} KG</span>
               <span className="kpi-sub" style={{ color: 'var(--accent-green)' }}>
-                <i className="fa-solid fa-circle-check"></i> {t('kpi_sync')}
+                <i className="fa-solid fa-scale-balanced"></i> {((execBoard?.total_gold_weight_kg ?? 0) * 1000).toLocaleString()} g • <i className="fa-solid fa-circle-check"></i> {t('kpi_sync')}
               </span>
             </div>
             <div className="glass-card kpi-card">
               <span className="kpi-title">{t('kpi_ready')}</span>
               <span className="kpi-value">{(execBoard?.available_weight_kg ?? 0).toFixed(3)} KG</span>
-              <span className="kpi-sub">{t('kpi_ready_sub')}</span>
+              <span className="kpi-sub">{((execBoard?.available_weight_kg ?? 0) * 1000).toLocaleString()} g • {t('kpi_ready_sub')}</span>
             </div>
             <div className="glass-card kpi-card">
               <span className="kpi-title">{t('kpi_reserved')}</span>
               <span className="kpi-value" style={{ color: 'var(--accent-orange)' }}>{(execBoard?.reserved_weight_kg ?? 0).toFixed(3)} KG</span>
-              <span className="kpi-sub"><i className="fa-solid fa-hourglass-start"></i> {t('kpi_reserved_sub')}</span>
+              <span className="kpi-sub"><i className="fa-solid fa-hourglass-start"></i> {((execBoard?.reserved_weight_kg ?? 0) * 1000).toLocaleString()} g • {t('kpi_reserved_sub')}</span>
             </div>
             <div className="glass-card kpi-card">
               <span className="kpi-title">{t('kpi_custody')}</span>
               <span className="kpi-value" style={{ color: 'var(--accent-blue)' }}>{(execBoard?.custody_weight_kg ?? 0).toFixed(3)} KG</span>
-              <span className="kpi-sub">{t('kpi_custody_sub')}</span>
+              <span className="kpi-sub">{((execBoard?.custody_weight_kg ?? 0) * 1000).toLocaleString()} g • {t('kpi_custody_sub')}</span>
             </div>
           </div>
 
@@ -4041,18 +4467,37 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                           <span className={`badge badge-${item.status.toLowerCase()}`}>
                             {translateDb(item.status)}
                           </span>
+                          {item.is_damaged && (
+                            <span className="badge badge-error" style={{ background: '#dc3545', color: '#fff', marginLeft: '6px' }}>
+                              {currentLang === 'ar' ? 'تالف' : 'Damaged'}
+                            </span>
+                          )}
                         </td>
                         <td style={{ textAlign: 'center' }}>
-                          {item.status === 'READY' && (
-                            <button className="btn btn-primary" style={{ padding: '4px 10px', fontSize: '11px' }}
-                              onClick={() => {
-                                setTransferItemId(item.item_id);
-                                setTransferItemSerial(item.serial_number);
-                                setShowTransferModal(true);
-                              }}>
-                              <i className="fa-solid fa-paper-plane"></i> {currentLang === 'ar' ? 'تحويل' : 'Transfer'}
-                            </button>
-                          )}
+                          <div style={{ display: 'flex', gap: '5px', justifyContent: 'center' }}>
+                            {item.status === 'READY' && !item.is_damaged && (
+                              <button className="btn btn-primary" style={{ padding: '4px 10px', fontSize: '11px' }}
+                                onClick={() => {
+                                  setTransferItemId(item.item_id);
+                                  setTransferItemSerial(item.serial_number);
+                                  setShowTransferModal(true);
+                                }}>
+                                <i className="fa-solid fa-paper-plane"></i> {currentLang === 'ar' ? 'تحويل' : 'Transfer'}
+                              </button>
+                            )}
+                            {item.status === 'READY' && !item.is_damaged && (
+                              <button className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: '11px', background: '#dc3545' }}
+                                onClick={() => {
+                                  setDamageItemId(item.item_id);
+                                  setDamageReason('');
+                                  setDamageDesc('');
+                                  setDamageDocId('');
+                                  setShowDamageModal(true);
+                                }}>
+                                <i className="fa-solid fa-triangle-exclamation"></i> {currentLang === 'ar' ? 'تالف' : 'Damaged'}
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -4070,14 +4515,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
           </div>
         </section>
 
-        {/* SCREEN VIEWPORT: GL CONFIGURATION (chart of accounts + posting rules, maker-checker).
-            Self-contained component (see GlConfigScreen.tsx); talks to /api/gl-config. Gated by
-            the gl_config module; edit/approve controls appear only when canModify('gl_config'). */}
-        <section className={`screen-viewport ${activeTab === 'screen-gl-config' ? 'active' : ''}`}>
-          {activeTab === 'screen-gl-config' && (
-            <GlConfigScreen apiBase={API_BASE} canModify={canModify('gl_config')} lang={currentLang} />
-          )}
-        </section>
+
 
         {/* SCREEN VIEWPORT: COMPLIANCE DASHBOARD (Reporting Requirements Gap Analysis, Item 6) --
             Management gets Executive Board above; Compliance/Audit gets this curated summary of
@@ -4823,196 +5261,498 @@ const [migrationApproved, setMigrationApproved] = useState(false);
           </div>
         </section>
 
-        {/* SCREEN VIEWPORT: RECEIVE SHIPMENTS (INTAKE) */}
+        {/* SCREEN VIEWPORT: RECEIVE SHIPMENTS (INTAKE - UC03) */}
         <section className={`screen-viewport ${activeTab === 'screen-intake' ? 'active' : ''}`}>
           <div className="glass-card">
-            <h3>{currentLang === 'en' ? 'Receive Shipments (Vault Intake)' : 'استلام الشحنات (إدخل الخزينة)'}</h3>
-            <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>
-              {currentLang === 'en' 
-                ? 'Select an approved Purchase Order from the list below to verify serials and log coordinates in the vault.' 
-                : 'اختر طلب شراء معتمدًا من القائمة أدناه للتحقق من الأرقام التسلسلية وتسجيل المواقع في الخزينة.'}
-            </p>
-            {!canModify('intake') && (
-              <div style={{ padding: '10px', background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.25)', borderRadius: '8px', color: 'var(--accent-red)', fontSize: '12px', marginBottom: '15px' }}>
-                <i className="fa-solid fa-circle-exclamation"></i> {currentLang === 'en' ? 'Read-Only Mode: You cannot initiate shipment intakes.' : 'وضع القراءة فقط: لا يمكنك بدء عمليات استلام الشحنات.'}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+              <div>
+                <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <i className="fa-solid fa-truck-ramp-box" style={{ color: 'var(--kfh-green)' }}></i>
+                  {currentLang === 'en' ? 'UC-03: Receipt of Precious Metals from Supplier' : 'UC-03: استلام المعادن الثمينة من المورد'}
+                </h3>
+                <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: '4px 0 0 0' }}>
+                  {currentLang === 'en' 
+                    ? 'Verify shipment manifest, record individual bar serials, purity, and gross weight, flag physical condition/damage, and submit to Vault Maker-Checker approval.' 
+                    : 'التحقق من بيان الشحنة، تسجيل الأرقام التسلسلي والنقاوة والوزن، توثيق حالة السبائك والتلفيات، وإرسالها لاعتماد مراجع الخزينة.'}
+                </p>
               </div>
-            )}
 
-            {/* Filter & Sort for P.O.s */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '12px', marginBottom: '15px' }}>
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <label style={{ fontSize: '12px' }}>Search Supplier</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  placeholder="e.g., Valcambi"
-                  value={poFilterSupplier}
-                  onChange={e => setPoFilterSupplier(e.target.value)}
-                  style={{ padding: '6px 8px', fontSize: '12px' }}
-                />
-              </div>
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <label style={{ fontSize: '12px' }}>Filter by Status</label>
-                <select
-                  value={poFilterStatus}
-                  onChange={e => setPoFilterStatus(e.target.value)}
-                  style={{ padding: '6px 8px', fontSize: '12px' }}
-                >
-                  <option value="">All Status</option>
-                  <option value="APPROVED">Approved</option>
-                  <option value="PARTIAL_RECEIPT">Partial Receipt</option>
-                  <option value="RECEIVED">Received</option>
-                </select>
-              </div>
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <label style={{ fontSize: '12px' }}>Sort by</label>
-                <select
-                  value={poSortBy}
-                  onChange={e => setPoSortBy(e.target.value as any)}
-                  style={{ padding: '6px 8px', fontSize: '12px' }}
-                >
-                  <option value="po_number">P.O. Number</option>
-                  <option value="supplier">Supplier</option>
-                  <option value="cost">Cost</option>
-                </select>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+              <div style={{ display: 'flex', gap: '8px' }}>
                 <button
-                  className="btn"
-                  style={{ width: '100%', padding: '6px 8px', fontSize: '12px', backgroundColor: 'var(--accent-red)', color: '#fff' }}
+                  className={`btn ${intakeActiveSubTab === 'RECEIVE_FORM' ? 'btn-primary' : ''}`}
+                  style={intakeActiveSubTab !== 'RECEIVE_FORM' ? { backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--surface-border)' } : {}}
+                  onClick={() => setIntakeActiveSubTab('RECEIVE_FORM')}
+                >
+                  <i className="fa-solid fa-plus-circle"></i> {currentLang === 'en' ? 'New Shipment Intake' : 'استلام شحنة جديدة'}
+                </button>
+                <button
+                  className={`btn ${intakeActiveSubTab === 'IN_FLIGHT_LOG' ? 'btn-primary' : ''}`}
+                  style={intakeActiveSubTab !== 'IN_FLIGHT_LOG' ? { backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--surface-border)' } : {}}
                   onClick={() => {
-                    setPoFilterSupplier('');
-                    setPoFilterStatus('');
-                    setPoSortBy('po_number');
+                    setIntakeActiveSubTab('IN_FLIGHT_LOG');
+                    fetchPendingIntakes();
                   }}
                 >
-                  <i className="fa-solid fa-redo"></i> Reset Filters
+                  <i className="fa-solid fa-clock-rotate-left"></i> {currentLang === 'en' ? 'In-Flight & Pending Receipts' : 'الشحنات قيد الاعتماد والتدقيق'}
+                  {pendingIntakesList.length > 0 && (
+                    <span className="badge badge-reserved" style={{ marginLeft: '6px', fontSize: '10px' }}>{pendingIntakesList.length}</span>
+                  )}
                 </button>
               </div>
             </div>
 
-            <div className="table-responsive">
-              <table>
-                <thead>
-                  <tr>
-                    <th>{t('th_po_code')}</th>
-                    <th>{t('th_supplier')}</th>
-                    <th>{t('th_weight')}</th>
-                    <th>{t('th_cost')}</th>
-                    <th>{currentLang === 'en' ? 'Quantity' : 'الكمية'}</th>
-                    <th>{t('th_status')}</th>
-                    {canModify('intake') && <th>{t('th_action')}</th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {(() => {
-                    let filtered = poList.filter((po: any) => {
-                      const matchesSupplier = po.supplier.toLowerCase().includes(poFilterSupplier.toLowerCase());
-                      const matchesStatus = !poFilterStatus || po.status_code === poFilterStatus;
-                      return matchesSupplier && matchesStatus;
-                    });
+            {!canModify('intake') && (
+              <div style={{ padding: '10px 14px', background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.25)', borderRadius: '8px', color: 'var(--accent-red)', fontSize: '12px', marginBottom: '15px' }}>
+                <i className="fa-solid fa-circle-exclamation"></i> {currentLang === 'en' ? 'Read-Only Mode: You cannot initiate shipment receipts (Maker role required).' : 'وضع القراءة فقط: لا يمكنك بدء استلام شحنات جديدة (يتطلب صلاحية المنشئ/المسؤول).'}
+              </div>
+            )}
 
-                    filtered.sort((a: any, b: any) => {
-                      switch (poSortBy) {
-                        case 'supplier':
-                          return a.supplier.localeCompare(b.supplier);
-                        case 'cost':
-                          return b.cost - a.cost;
-                        default: // po_number
-                          return a.po_number.localeCompare(b.po_number);
-                      }
-                    });
+            {/* TAB 1: NEW SHIPMENT INTAKE WORKBENCH (UC03) */}
+            {intakeActiveSubTab === 'RECEIVE_FORM' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                
+                {/* SECTION 1: SHIPMENT HEADER & MANIFEST */}
+                <div style={{ backgroundColor: 'rgba(255,255,255,0.02)', padding: '16px', borderRadius: '8px', border: '1px solid var(--surface-border)' }}>
+                  <h4 style={{ margin: '0 0 14px 0', fontSize: '14px', color: 'var(--kfh-green)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <i className="fa-solid fa-file-invoice"></i> {currentLang === 'en' ? '1. Shipment Manifest & Supplier Details' : '1. بيان الشحنة وتفاصيل المورد'}
+                  </h4>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Supplier / Vendor' : 'المورد'}</label>
+                      <select 
+                        className="form-control" 
+                        value={intakeVendorId} 
+                        onChange={e => setIntakeVendorId(parseInt(e.target.value))}
+                        style={{ fontSize: '12px', padding: '6px 8px' }}
+                      >
+                        {suppliersList.length > 0 ? (
+                          suppliersList.map((v: any) => (
+                            <option key={v.vendor_id} value={v.vendor_id}>{v.name} ({v.country || 'Global'})</option>
+                          ))
+                        ) : (
+                          <>
+                            <option value={1}>Valcambi Suisse (Switzerland)</option>
+                            <option value={2}>PAMP SA (Switzerland)</option>
+                            <option value={3}>Emirates Gold (UAE)</option>
+                          </>
+                        )}
+                      </select>
+                    </div>
 
-                    return filtered.length === 0 ? (
-                    <tr>
-                      <td colSpan={canModify('intake') ? 7 : 6} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '20px' }}>
-                        {currentLang === 'en' ? 'No purchase orders found.' : 'لا توجد طلبات شراء.'}
-                      </td>
-                    </tr>
-                  ) : (
-                    filtered.map((po: any, idx: number) => (
-                      <React.Fragment key={idx}>
-                        <tr onClick={() => setExpandedPOId(expandedPOId === po.po_id ? null : po.po_id)} style={{ cursor: 'pointer' }}>
-                          <td>
-                            <span style={{ marginInlineEnd: '8px' }}>
-                              <i className={`fa-solid fa-chevron-${expandedPOId === po.po_id ? 'down' : 'right'}`} style={{ color: 'var(--accent-blue)' }}></i>
-                            </span>
-                            <strong>{po.po_number}</strong>
-                          </td>
-                          <td>{po.supplier}</td>
-                          <td>{po.weight}g</td>
-                          <td>${po.cost.toLocaleString()}</td>
-                          <td>
-                            <div>{po.qty || 1}</div>
-                            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{poItemsSummary(po)}</div>
-                          </td>
-                          <td>
-                            <span className="badge badge-ready">
-                              {translateDb(po.status_code)}
-                            </span>
-                          </td>
-                          {canModify('intake') && (
-                            <td onClick={e => e.stopPropagation()}>
-                              <button className="btn" style={{ backgroundColor: 'var(--accent-blue)', padding: '4px 8px', fontSize: '11px' }} onClick={() => handleIntakePO(po.po_id)}>
-                                {currentLang === 'en' ? 'Receive Shipment' : 'استلام الشحنة'}
-                              </button>
-                            </td>
-                          )}
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Airway Bill / Waybill #' : 'رقم بوليصة الشحن (Airway Bill)'}</label>
+                      <input 
+                        type="text" 
+                        className="form-control" 
+                        placeholder="e.g., AWB-8849201" 
+                        value={intakeAirwayBill} 
+                        onChange={e => setIntakeAirwayBill(e.target.value)}
+                        style={{ fontSize: '12px', padding: '6px 8px' }}
+                      />
+                    </div>
+
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Delivery Note #' : 'رقم إشعار التسليم (Delivery Note)'}</label>
+                      <input 
+                        type="text" 
+                        className="form-control" 
+                        placeholder="e.g., DN-2026-091" 
+                        value={intakeDeliveryNote} 
+                        onChange={e => setIntakeDeliveryNote(e.target.value)}
+                        style={{ fontSize: '12px', padding: '6px 8px' }}
+                      />
+                    </div>
+
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Shipment Reference' : 'مرجع الشحنة'}</label>
+                      <input 
+                        type="text" 
+                        className="form-control" 
+                        placeholder="e.g., SHIP-KFH-2026-VAL" 
+                        value={intakeShipmentRef} 
+                        onChange={e => setIntakeShipmentRef(e.target.value)}
+                        style={{ fontSize: '12px', padding: '6px 8px' }}
+                      />
+                    </div>
+
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Receiving Date' : 'تاريخ الاستلام الفعلي'}</label>
+                      <input 
+                        type="date" 
+                        className="form-control" 
+                        value={intakeReceivingDate} 
+                        onChange={e => setIntakeReceivingDate(e.target.value)}
+                        style={{ fontSize: '12px', padding: '6px 8px' }}
+                      />
+                    </div>
+
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Lot / Batch Number' : 'رقم اللوت / التشغيلة'}</label>
+                      <input 
+                        type="text" 
+                        className="form-control" 
+                        value={intakeLotNum} 
+                        onChange={e => setIntakeLotNum(e.target.value)}
+                        style={{ fontSize: '12px', padding: '6px 8px' }}
+                      />
+                    </div>
+
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Vault Target Slot' : 'موقع التخزين الإحداثي بالخزينة'}</label>
+                      <select 
+                        className="form-control" 
+                        value={intakeSelectedLocation} 
+                        onChange={e => setIntakeSelectedLocation(parseInt(e.target.value))}
+                        style={{ fontSize: '12px', padding: '6px 8px' }}
+                      >
+                        {locations.flatMap(loc =>
+                          loc.slots ? loc.slots.map((s: any) => ({
+                            id: s.location_id,
+                            label: `${loc.vault_name || 'Main Vault'} - ${loc.zone_room} - Row ${s.shelf_row} - Slot ${s.slot_bin}`
+                          })) : []
+                        ).map(item => (
+                          <option key={item.id} value={item.id}>{item.label}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Supporting Documents Ref / URL' : 'مرجع / رابط المستندات المرفقة (Assay/Cert)'}</label>
+                      <input 
+                        type="text" 
+                        className="form-control" 
+                        placeholder="e.g., https://kfh-docs/shipment-88492.pdf" 
+                        value={intakeDocUrl} 
+                        onChange={e => setIntakeDocUrl(e.target.value)}
+                        style={{ fontSize: '12px', padding: '6px 8px' }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="form-group" style={{ marginTop: '12px', marginBottom: 0 }}>
+                    <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Discrepancy / Partial Shipment Notes' : 'ملاحظات الفروقات أو الاستلام الجزئي'}</label>
+                    <input 
+                      type="text" 
+                      className="form-control" 
+                      placeholder={currentLang === 'en' ? 'e.g. Shipment delivered in 2 containers, assay certificates matched.' : 'مثال: تم تسليم الشحنة في حاويتين، وشهادات الفحص مطابقة.'}
+                      value={intakeDiscrepancyNotes} 
+                      onChange={e => setIntakeDiscrepancyNotes(e.target.value)}
+                      style={{ fontSize: '12px', padding: '6px 8px' }}
+                    />
+                  </div>
+                </div>
+
+                {/* SECTION 2: BARS ENTRY & VERIFICATION TABLE */}
+                <div style={{ backgroundColor: 'rgba(255,255,255,0.02)', padding: '16px', borderRadius: '8px', border: '1px solid var(--surface-border)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
+                    <div>
+                      <h4 style={{ margin: 0, fontSize: '14px', color: 'var(--kfh-green)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <i className="fa-solid fa-bars"></i> {currentLang === 'en' ? '2. Precious Metal Bars Manifest (Serials & Physical Quality)' : '2. كشف السبائك المستلمة (الأرقام التسلسلية وفحص الجودة)'}
+                      </h4>
+                      <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: '4px 0 0 0' }}>
+                        {currentLang === 'en' 
+                          ? 'Enter each bar serial number, product denomination, fineness, and flag damaged bars for quarantine.' 
+                          : 'أدخل الرقم التسلسلي لكل سبيكة، الفئة، النقاوة، وحدد السبائك التالفة للعزل.'}
+                      </p>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button className="btn btn-secondary" style={{ fontSize: '11px', padding: '6px 10px' }} onClick={handleAddIntakeBar}>
+                        <i className="fa-solid fa-plus"></i> {currentLang === 'en' ? 'Add Bar' : 'إضافة سبيكة'}
+                      </button>
+                      <button className="btn btn-secondary" style={{ fontSize: '11px', padding: '6px 10px', backgroundColor: 'rgba(212, 160, 23, 0.15)', color: 'var(--accent-gold)' }} onClick={handleAdd5BatchDemo}>
+                        <i className="fa-solid fa-layer-group"></i> {currentLang === 'en' ? '+5 Batch Demo' : '+5 سبائك تجريبية'}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="table-responsive" style={{ maxHeight: '420px', overflowY: 'auto' }}>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th style={{ width: '40px' }}>#</th>
+                          <th style={{ minWidth: '160px' }}>{currentLang === 'en' ? 'Serial Number (UC03 E1)' : 'الرقم التسلسلي'}</th>
+                          <th style={{ minWidth: '160px' }}>{currentLang === 'en' ? 'Product / Denomination' : 'نوع المنتج / الفئة'}</th>
+                          <th style={{ minWidth: '100px' }}>{currentLang === 'en' ? 'Gross Wt (g)' : 'الوزن القائم (جرام)'}</th>
+                          <th style={{ minWidth: '100px' }}>{currentLang === 'en' ? 'Purity (PPT)' : 'النقاوة'}</th>
+                          <th style={{ minWidth: '140px' }}>{currentLang === 'en' ? 'Refiner / Brand' : 'المصفاة / الماركة'}</th>
+                          <th style={{ minWidth: '180px' }}>{currentLang === 'en' ? 'Damaged / Inspection' : 'حالة التلف / الفحص'}</th>
+                          <th style={{ width: '90px' }}>{currentLang === 'en' ? 'GS1 Tag' : 'الباركود'}</th>
+                          <th style={{ width: '50px' }}></th>
                         </tr>
-                        {/* Expanded Items List */}
-                        {expandedPOId === po.po_id && (
-                          <tr style={{ backgroundColor: 'rgba(59, 130, 246, 0.04)' }}>
-                            <td colSpan={canModify('intake') ? 7 : 6} style={{ padding: '12px' }}>
-                              <div style={{ marginLeft: '20px' }}>
-                                <h5 style={{ margin: '0 0 10px 0', fontSize: '12px', color: 'var(--accent-blue)', fontWeight: 'bold' }}>
-                                  {currentLang === 'en' ? 'Items to Receive:' : 'السلع المطلوب استقبالها:'}
-                                </h5>
-                                {po.items && po.items.length > 0 ? (
-                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                    {po.items.map((item: any, itemIdx: number) => {
-                                      const prod = products.find((p: any) => p.product_id === item.product_id);
-                                      const prodName = prod ? `${prod.metal_name} ${prod.denomination_label}` : (item.product_code || `Product #${item.product_id}`);
-                                      const orderedQty = item.qty || item.ordered_qty || 0;
-                                      return (
-                                        <div key={itemIdx} style={{
-                                          padding: '8px 10px',
-                                          backgroundColor: 'rgba(255, 255, 255, 0.5)',
-                                          border: '1px solid rgba(59, 130, 246, 0.2)',
-                                          borderRadius: '4px',
-                                          fontSize: '12px',
-                                          display: 'flex',
-                                          justifyContent: 'space-between',
-                                          alignItems: 'center'
-                                        }}>
-                                          <span>
-                                            <strong style={{ color: 'var(--accent-blue)' }}>{prodName}</strong>
-                                            {prod && prod.purity_value && <span style={{ color: 'var(--text-muted)', marginLeft: '8px' }}>({prod.purity_value} {currentLang === 'ar' ? 'نقاوة' : 'Purity'})</span>}
-                                          </span>
-                                          <span style={{ color: 'var(--text-muted)' }}>
-                                            <strong style={{ color: 'var(--kfh-green)' }}>{orderedQty}</strong> {currentLang === 'en' ? 'units' : 'وحدات'}
-                                          </span>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                ) : (
-                                  <div style={{ padding: '8px 10px', color: 'var(--text-muted)', fontSize: '12px', fontStyle: 'italic' }}>
-                                    {currentLang === 'en' ? 'No items associated with this purchase order.' : 'لا توجد سلع مرتبطة بهذا طلب الشراء.'}
+                      </thead>
+                      <tbody>
+                        {intakeBars.map((bar, idx) => {
+                          const isDuplicate = intakeBars.filter(b => b.serial.trim() && b.serial.trim().toUpperCase() === bar.serial.trim().toUpperCase()).length > 1;
+                          return (
+                            <tr key={bar.id} style={{ backgroundColor: bar.is_damaged ? 'rgba(239, 68, 68, 0.04)' : isDuplicate ? 'rgba(245, 158, 11, 0.08)' : 'transparent' }}>
+                              <td><span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{idx + 1}</span></td>
+                              <td>
+                                <input
+                                  type="text"
+                                  className="form-control"
+                                  value={bar.serial}
+                                  onChange={e => handleUpdateIntakeBar(bar.id, 'serial', e.target.value)}
+                                  placeholder="e.g. BAR-10001"
+                                  style={{
+                                    fontSize: '12px',
+                                    padding: '4px 8px',
+                                    borderColor: isDuplicate ? 'var(--accent-orange)' : 'var(--surface-border)',
+                                    fontWeight: 'bold'
+                                  }}
+                                />
+                                {isDuplicate && (
+                                  <div style={{ color: 'var(--accent-orange)', fontSize: '10px', marginTop: '2px' }}>
+                                    <i className="fa-solid fa-triangle-exclamation"></i> Duplicate serial in batch
                                   </div>
                                 )}
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                      </React.Fragment>
-                    ))
-                  );
-                  })()}
-                </tbody>
-              </table>
-            </div>
-          </div>
+                              </td>
+                              <td>
+                                <select
+                                  className="form-control"
+                                  value={bar.product_id}
+                                  onChange={e => handleUpdateIntakeBar(bar.id, 'product_id', e.target.value)}
+                                  style={{ fontSize: '12px', padding: '4px 8px' }}
+                                >
+                                  {products.map((p: any) => (
+                                    <option key={p.product_id} value={p.product_id}>
+                                      {p.metal_name} {p.denomination_label} ({p.weight_grams}g)
+                                    </option>
+                                  ))}
+                                </select>
+                              </td>
+                              <td>
+                                <input
+                                  type="number"
+                                  className="form-control"
+                                  value={bar.weight_grams}
+                                  onChange={e => handleUpdateIntakeBar(bar.id, 'weight_grams', parseFloat(e.target.value) || 0)}
+                                  style={{ fontSize: '12px', padding: '4px 8px' }}
+                                />
+                              </td>
+                              <td>
+                                <input
+                                  type="number"
+                                  step="0.1"
+                                  className="form-control"
+                                  value={bar.purity}
+                                  onChange={e => handleUpdateIntakeBar(bar.id, 'purity', parseFloat(e.target.value) || 0)}
+                                  style={{ fontSize: '12px', padding: '4px 8px' }}
+                                />
+                              </td>
+                              <td>
+                                <select
+                                  className="form-control"
+                                  value={bar.refiner_name}
+                                  onChange={e => handleUpdateIntakeBar(bar.id, 'refiner_name', e.target.value)}
+                                  style={{ fontSize: '12px', padding: '4px 8px' }}
+                                >
+                                  {brandsList.map((b: any) => (
+                                    <option key={b.brand_id} value={b.brand_name}>
+                                      {b.brand_name} {b.is_lbma_certified ? '★ LBMA' : ''}
+                                    </option>
+                                  ))}
+                                  {brandsList.length === 0 && (
+                                    <>
+                                      <option value="Valcambi Suisse">Valcambi Suisse ★ LBMA</option>
+                                      <option value="PAMP Suisse">PAMP Suisse ★ LBMA</option>
+                                      <option value="Argor-Heraeus">Argor-Heraeus ★ LBMA</option>
+                                      <option value="Nadir Gold Refinery">Nadir Gold Refinery ★ LBMA</option>
+                                      <option value="Emirates Gold">Emirates Gold</option>
+                                      <option value="KFH Custom Mint Gold">KFH Custom Mint Gold</option>
+                                    </>
+                                  )}
+                                </select>
+                              </td>
+                              <td>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                  <label style={{ fontSize: '11px', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                                    <input
+                                      type="checkbox"
+                                      checked={bar.is_damaged}
+                                      onChange={e => handleUpdateIntakeBar(bar.id, 'is_damaged', e.target.checked)}
+                                    />
+                                    <span style={{ color: bar.is_damaged ? 'var(--accent-red)' : 'inherit', fontWeight: bar.is_damaged ? 'bold' : 'normal' }}>
+                                      {currentLang === 'en' ? 'Damaged / Scratch' : 'تالف / مخدوش'}
+                                    </span>
+                                  </label>
+                                  {bar.is_damaged && (
+                                    <input
+                                      type="text"
+                                      className="form-control"
+                                      placeholder={currentLang === 'en' ? 'Reason (e.g. Broken seal, dented)' : 'سبب التلف...'}
+                                      value={bar.damage_reason}
+                                      onChange={e => handleUpdateIntakeBar(bar.id, 'damage_reason', e.target.value)}
+                                      style={{ fontSize: '11px', padding: '2px 6px', borderColor: 'var(--accent-red)' }}
+                                    />
+                                  )}
+                                </div>
+                              </td>
+                              <td>
+                                <button
+                                  className="btn"
+                                  style={{ padding: '4px 8px', fontSize: '11px', backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--surface-border)' }}
+                                  title={currentLang === 'en' ? 'Preview & Print GS1 Barcode Tag' : 'معاينة وطباعة ملصق الباركود'}
+                                  onClick={() => setPreviewBarcodeModal({
+                                    serial: bar.serial,
+                                    lot: intakeLotNum,
+                                    product: (products.find((p: any) => p.product_id === bar.product_id)?.denomination_label) || '1 KG Gold Bar',
+                                    weight: bar.weight_grams,
+                                    purity: bar.purity,
+                                    refiner: bar.refiner_name,
+                                    isDamaged: bar.is_damaged
+                                  })}
+                                >
+                                  <i className="fa-solid fa-qrcode" style={{ color: 'var(--kfh-green)' }}></i> Tag
+                                </button>
+                              </td>
+                              <td>
+                                <button
+                                  className="btn"
+                                  style={{ padding: '4px 8px', fontSize: '11px', color: 'var(--accent-red)', background: 'transparent' }}
+                                  onClick={() => handleRemoveIntakeBar(bar.id)}
+                                  title={currentLang === 'en' ? 'Remove Bar' : 'حذف السبيكة'}
+                                >
+                                  <i className="fa-solid fa-trash-can"></i>
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
 
+                {/* SECTION 3: VERIFICATION SUMMARY & SUBMISSION */}
+                {(() => {
+                  const totalBarsCount = intakeBars.length;
+                  const totalGrossWeightG = intakeBars.reduce((sum, b) => sum + (b.weight_grams || 0), 0);
+                  const totalDamagedCount = intakeBars.filter(b => b.is_damaged).length;
+
+                  return (
+                    <div style={{
+                      backgroundColor: 'rgba(0, 155, 78, 0.05)',
+                      border: '1px solid rgba(0, 155, 78, 0.25)',
+                      borderRadius: '8px',
+                      padding: '16px',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      flexWrap: 'wrap',
+                      gap: '14px'
+                    }}>
+                      <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap', alignItems: 'center' }}>
+                        <div>
+                          <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Total Bars in Manifest' : 'إجمالي عدد السبائك'}</div>
+                          <div style={{ fontSize: '18px', fontWeight: 'bold', color: 'var(--text-primary)' }}>{totalBarsCount} {currentLang === 'en' ? 'units' : 'سبيكة'}</div>
+                        </div>
+
+                        <div>
+                          <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Total Gross Weight' : 'إجمالي الوزن القائم'}</div>
+                          <div style={{ fontSize: '18px', fontWeight: 'bold', color: 'var(--kfh-green)' }}>
+                            {totalGrossWeightG.toLocaleString()} g <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>({(totalGrossWeightG / 1000).toFixed(3)} KG)</span>
+                          </div>
+                        </div>
+
+                        {totalDamagedCount > 0 && (
+                          <div style={{ padding: '6px 12px', borderRadius: '6px', backgroundColor: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
+                            <div style={{ fontSize: '11px', color: 'var(--accent-red)', fontWeight: 'bold' }}>
+                              <i className="fa-solid fa-triangle-exclamation"></i> {currentLang === 'en' ? 'Damaged Bars Flagged' : 'سبائك تالفة مرصودة'}
+                            </div>
+                            <div style={{ fontSize: '14px', fontWeight: 'bold', color: 'var(--accent-red)' }}>
+                              {totalDamagedCount} {currentLang === 'en' ? 'quarantine items' : 'قطع للعزل'}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {canModify('intake') && (
+                        <button
+                          className="btn btn-primary"
+                          style={{ padding: '10px 20px', fontSize: '13px', fontWeight: 'bold' }}
+                          onClick={handleSubmitUC03Intake}
+                        >
+                          <i className="fa-solid fa-paper-plane"></i> {currentLang === 'en' ? 'Submit for Vault Checker Approval' : 'إرسال لاعتماد مراجع الخزينة (Maker-Checker)'}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })()}
+
+              </div>
+            )}
+
+            {/* TAB 2: IN-FLIGHT & PENDING RECEIPTS LOG */}
+            {intakeActiveSubTab === 'IN_FLIGHT_LOG' && (
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                  <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: 0 }}>
+                    {currentLang === 'en' 
+                      ? 'Live list of all supplier receipts awaiting 4-eyes Maker-Checker verification or recently completed.' 
+                      : 'سجل شحنات الموردين التي تنتظر اعتماد وتدقيق مبدأ الأعين الأربعة أو المكتملة حديثاً.'}
+                  </p>
+                  <button className="btn btn-secondary" style={{ fontSize: '11px', padding: '4px 10px' }} onClick={fetchPendingIntakes}>
+                    <i className="fa-solid fa-arrows-rotate"></i> {currentLang === 'en' ? 'Refresh' : 'تحديث'}
+                  </button>
+                </div>
+
+                <div className="table-responsive">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>{currentLang === 'en' ? 'Lot Number' : 'رقم اللوت'}</th>
+                        <th>{currentLang === 'en' ? 'Supplier' : 'المورد'}</th>
+                        <th>{currentLang === 'en' ? 'Airway Bill / Ref' : 'بوليصة الشحن / المرجع'}</th>
+                        <th>{currentLang === 'en' ? 'Delivery Note' : 'إشعار التسليم'}</th>
+                        <th>{currentLang === 'en' ? 'Receiving Date' : 'تاريخ الاستلام'}</th>
+                        <th>{currentLang === 'en' ? 'Maker (Received By)' : 'المنشئ'}</th>
+                        <th>{currentLang === 'en' ? 'Target Location' : 'موقع الوجهة'}</th>
+                        <th>{currentLang === 'en' ? 'Status' : 'الحالة'}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pendingIntakesList.length === 0 ? (
+                        <tr>
+                          <td colSpan={8} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '24px' }}>
+                            {currentLang === 'en' ? 'No pending supplier shipment receipts found.' : 'لا توجد شحنات موردين قيد التدقيق حالياً.'}
+                          </td>
+                        </tr>
+                      ) : (
+                        pendingIntakesList.map((pi: any, idx: number) => {
+                          let itemCount = 0;
+                          try {
+                            if (pi.serials_json) itemCount = JSON.parse(pi.serials_json).length;
+                          } catch (_) {}
+
+                          return (
+                            <tr key={idx}>
+                              <td>
+                                <strong>{pi.lot_number}</strong>
+                                {itemCount > 0 && <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: '6px' }}>({itemCount} bars)</span>}
+                              </td>
+                              <td>{pi.vendor_name || 'Direct Supplier'}</td>
+                              <td>{pi.airway_bill || pi.shipment_reference || 'N/A'}</td>
+                              <td>{pi.delivery_note || 'N/A'}</td>
+                              <td>{new Date(pi.receiving_date || pi.created_at).toLocaleDateString()}</td>
+                              <td>{pi.received_by}</td>
+                              <td><span style={{ fontSize: '11px' }}>{pi.location_desc}</span></td>
+                              <td>
+                                <span className={`badge ${pi.status_code === 'APPROVED' ? 'badge-ready' : 'badge-reserved'}`}>
+                                  {translateDb(pi.status_code)}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+          </div>
         </section>
 
         {/* SCREEN VIEWPORT: RECEIVE FROM CUSTOMER -- moved out of the Receive Shipment screen
@@ -5119,7 +5859,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
               </div>
 
               <div className="form-group" style={{ marginTop: '10px', marginBottom: 0 }}>
-                <label style={{ fontSize: '11px' }}>{currentLang === 'ar' ? 'صنف المنتج' : 'Product Denomination'}</label>
+                <label style={{ fontSize: '11px' }}>{currentLang === 'ar' ? 'صنف وسبيكة المنتج / العلامة' : 'Product Denomination & Refiner Brand'}</label>
                 <select
                   value={receiptSelectedProductId}
                   onChange={e => setReceiptSelectedProductId(parseInt(e.target.value))}
@@ -5129,7 +5869,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     .filter((p: any) => p.is_active !== false)
                     .map((p: any) => (
                       <option key={p.product_id} value={p.product_id}>
-                        {`${p.metal_name} ${p.denomination_label}` + (p.purity_value ? ` (${p.purity_value} ${currentLang === 'ar' ? 'نقاوة' : 'Purity'})` : '')}
+                        {`${p.metal_name} ${p.denomination_label}` + (p.brand_name ? ` — ${p.brand_name}` : '') + (p.origin_country ? ` (${p.origin_country})` : '')}
                       </option>
                     ))}
                 </select>
@@ -5318,102 +6058,598 @@ const [migrationApproved, setMigrationApproved] = useState(false);
           </div>
         </section>
 
-        {/* SCREEN VIEWPORT: GDM DISPENSING (operational -- dispensing module) */}
-        <section className={`screen-viewport ${activeTab === 'screen-dispensing' ? 'active' : ''}`}>
+        {/* SCREEN VIEWPORT: GFS DELIVERY & DISPATCH (operational -- intake module) */}
+        <section className={`screen-viewport ${activeTab === 'screen-gfs-delivery' ? 'active' : ''}`}>
           <div className="split-grid-3">
             <div className="glass-card" style={{ gridColumn: 'span 2' }}>
-              <h3>{currentLang === 'en' ? 'Dispense Transactions' : 'حركات صرف الأجهزة الذاتية'}</h3>
+              <h3>{currentLang === 'en' ? 'GFS Branch Delivery & Dispatch Module' : 'طلبات تسليم وتوزيع فروع GFS'}</h3>
               <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>
-                {currentLang === 'en'
-                  ? 'View and operate self-service dispense transactions against registered GDM machines.'
-                  : 'عرض وتشغيل حركات الصرف الذاتي على أجهزة الصرف المسجّلة.'}
+                {currentLang === 'en' 
+                  ? 'Manage live GFS delivery requests, validate bar details on scan, and dispatch shipments to branches.'
+                  : 'إدارة طلبات تسليم GFS، والتحقق من تفاصيل السبائك عند المسح، وإرسال الشحنات إلى الفروع مع توثيق الناقل.'}
               </p>
+
+              <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
+                <button className="btn btn-primary" onClick={() => { setShowScanQrModal(true); setScanQrResult(null); setScanQrError(''); setScanQrInput(''); }}>
+                  <i className="fa-solid fa-qrcode"></i> {currentLang === 'en' ? 'Scan & Lookup GFS Bar' : 'مسح والتحقق من سبيكة GFS'}
+                </button>
+              </div>
+
               <div className="table-responsive">
                 <table>
                   <thead>
                     <tr>
-                      <th>{currentLang === 'en' ? 'Device' : 'الجهاز'}</th>
-                      <th>{currentLang === 'en' ? 'Product' : 'المنتج'}</th>
-                      <th>{t('th_serial')}</th>
-                      <th>{t('th_status')}</th>
-                      <th>{currentLang === 'en' ? 'Requested At' : 'وقت الطلب'}</th>
-                      {canModify('dispensing') && <th>{t('th_action')}</th>}
+                      <th>{currentLang === 'en' ? 'GFS Ref #' : 'مرجع GFS'}</th>
+                      <th>{currentLang === 'en' ? 'Bar Serial' : 'الرقم التسلسلي'}</th>
+                      <th>{currentLang === 'en' ? 'Customer Account' : 'حساب العميل'}</th>
+                      <th>{currentLang === 'en' ? 'Destination' : 'الفرع المستهدف'}</th>
+                      <th>{currentLang === 'en' ? 'Courier / Logistics' : 'الناقل الأمني'}</th>
+                      <th>{currentLang === 'en' ? 'Status' : 'الحالة'}</th>
+                      <th>{currentLang === 'en' ? 'Actions' : 'العمليات'}</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {dispenseTransactions.length === 0 ? (
-                      <tr><td colSpan={canModify('dispensing') ? 6 : 5} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '20px' }}>
-                        {currentLang === 'en' ? 'No dispense transactions found.' : 'لا توجد حركات صرف حالياً.'}
-                      </td></tr>
-                    ) : dispenseTransactions.map((tx: any) => (
-                      <tr key={tx.dispense_id}>
-                        <td>{tx.device_code}</td>
-                        <td>{tx.product_label}</td>
-                        <td>{tx.serial_number || '—'}</td>
-                        <td><span className={`badge badge-${(tx.status_code || '').toLowerCase()}`}>{tx.status_code}</span></td>
-                        <td>{tx.requested_at ? new Date(tx.requested_at).toLocaleString() : '—'}</td>
-                        {canModify('dispensing') && (
-                          <td>
-                            {tx.status_code === 'ALLOCATED' && (
-                              <div style={{ display: 'flex', gap: '6px' }}>
-                                <button className="btn btn-primary" style={{ padding: '4px 10px', fontSize: '11px' }} onClick={() => handleCompleteDispense(tx.dispense_id)}>
-                                  {currentLang === 'en' ? 'Complete' : 'إتمام'}
-                                </button>
-                                <button className="btn btn-danger" style={{ padding: '4px 10px', fontSize: '11px' }} onClick={() => handleFailDispense(tx.dispense_id)}>
-                                  {currentLang === 'en' ? 'Fail' : 'فشل'}
-                                </button>
-                              </div>
-                            )}
-                          </td>
-                        )}
+                    {gfsDeliveryRequests.map((req: any, idx: number) => (
+                      <tr key={idx}>
+                        <td><strong>{req.gfsRefNumber}</strong></td>
+                        <td>{req.bar?.serialNumber || req.barId}</td>
+                        <td>{req.customerAccountNumber || '—'}</td>
+                        <td>{req.destinationBranch?.branchName || req.destinationBranchId}</td>
+                        <td>
+                          {req.courierCompany ? (
+                            <span style={{ fontSize: '11px' }}>
+                              <i className="fa-solid fa-truck-shield" style={{ marginRight: '4px', color: 'var(--accent-green)' }}></i>
+                              {req.courierCompany} ({req.vehiclePlate || 'N/A'})
+                            </span>
+                          ) : '—'}
+                        </td>
+                        <td>
+                          <span className={`badge badge-${req.status.toLowerCase()}`}>
+                            {req.status}
+                          </span>
+                        </td>
+                        <td>
+                          {req.status === 'PENDING_DISPATCH' && (
+                            <button className="btn btn-primary btn-sm" onClick={() => {
+                              setGfsDispatchId(req.requestId);
+                              setShowGfsDispatchModal(true);
+                            }}>
+                              <i className="fa-solid fa-truck"></i> {currentLang === 'en' ? 'Dispatch' : 'إرسال'}
+                            </button>
+                          )}
+                          {req.status === 'DISPATCHED' && (
+                            <button className="btn btn-secondary btn-sm" onClick={() => {
+                              setReceiveRequestId(req.requestId);
+                              setReceiveScannedSerial(req.bar?.serialNumber || '');
+                              setReceiveBranchId(req.destinationBranchId || 1);
+                              setReceiveValidationPassed(true);
+                              setShowReceiveModal(true);
+                            }}>
+                              <i className="fa-solid fa-circle-check"></i> {currentLang === 'en' ? 'Receive & Verify' : 'استلام وتحقق'}
+                            </button>
+                          )}
+                        </td>
                       </tr>
                     ))}
+                    {gfsDeliveryRequests.length === 0 && (
+                      <tr>
+                        <td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '20px' }}>
+                          {currentLang === 'en' ? 'No GFS delivery requests found.' : 'لا توجد طلبات تسليم GFS.'}
+                        </td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>
             </div>
 
             <div className="glass-card">
-              <h3>{currentLang === 'en' ? 'Request Dispense' : 'طلب صرف'}</h3>
-              {!canModify('dispensing') && (
-                <div style={{ padding: '10px', background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.25)', borderRadius: '8px', color: 'var(--accent-red)', fontSize: '12px', marginBottom: '15px' }}>
-                  <i className="fa-solid fa-circle-exclamation"></i> {currentLang === 'en' ? 'Read-Only Mode: You cannot operate dispensing.' : 'وضع القراءة فقط: لا يمكنك تشغيل الصرف الذاتي.'}
-                </div>
-              )}
-              <div className="form-group">
-                <label>{currentLang === 'en' ? 'Device' : 'الجهاز'}</label>
-                <select value={dispenseFormDeviceId} onChange={e => setDispenseFormDeviceId(e.target.value)} style={{ color: '#000' }} disabled={!canModify('dispensing')}>
-                  <option value="">-- {currentLang === 'en' ? 'Select Device' : 'اختر الجهاز'} --</option>
-                  {gdmDevices.filter((d: any) => d.is_active).map((d: any) => (
-                    <option key={d.device_id} value={d.device_id}>{d.device_code} — {d.device_name}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="form-group">
-                <label>{currentLang === 'en' ? 'Product' : 'المنتج'}</label>
-                <select value={dispenseFormProductId} onChange={e => setDispenseFormProductId(e.target.value)} style={{ color: '#000' }} disabled={!canModify('dispensing')}>
-                  <option value="">-- {currentLang === 'en' ? 'Select Product' : 'اختر المنتج'} --</option>
-                  {products.map((p: any) => (
-                    <option key={p.product_id} value={p.product_id}>{p.metal_name} {p.denomination_label} ({p.product_code})</option>
-                  ))}
-                </select>
-              </div>
-              <div className="form-group">
-                <label>{currentLang === 'en' ? 'Channel' : 'القناة'}</label>
-                <select value={dispenseFormChannelId} onChange={e => setDispenseFormChannelId(e.target.value)} style={{ color: '#000' }} disabled={!canModify('dispensing')}>
-                  {DISPENSING_CHANNELS.map(c => (
-                    <option key={c.value} value={c.value}>{c.label}</option>
-                  ))}
-                </select>
-              </div>
-              <button className="btn btn-primary" style={{ width: '100%', marginTop: '10px' }}
-                onClick={handleRequestDispense}
-                disabled={!dispenseFormDeviceId || !dispenseFormProductId || !canModify('dispensing')}>
-                <i className="fa-solid fa-hand-point-down"></i> {currentLang === 'en' ? 'Request Dispense' : 'طلب الصرف'}
+              <h3>{currentLang === 'en' ? 'EOD GFS Synchronization' : 'مزامنة نهاية اليوم مع GFS'}</h3>
+              <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>
+                {currentLang === 'en' 
+                  ? 'Trigger EOD batch sync job to update customer account details and standard purchase costs from external GFS database.'
+                  : 'تشغيل عملية المزامنة الكلية لنهاية اليوم لتحديث بيانات حسابات العملاء وتكلفة الشراء القياسية من قاعدة بيانات GFS الخارجية.'}
+              </p>
+
+              <button className="btn btn-primary" style={{ width: '100%', marginBottom: '20px' }} disabled={gfsSyncLoading} onClick={async () => {
+                setGfsSyncLoading(true);
+                try {
+                  const res = await fetch(`${API_BASE}/gfs/sync-eod`, {
+                    method: 'POST'
+                  });
+                  if (res.ok) {
+                    alert(currentLang === 'en' ? 'EOD Synchronization completed successfully!' : 'اكتملت مزامنة نهاية اليوم بنجاح!');
+                    fetchGfsSyncLogs();
+                    fetchInventory();
+                  } else {
+                    alert('Sync failed');
+                  }
+                } catch (e) {
+                  console.error(e);
+                } finally {
+                  setGfsSyncLoading(false);
+                }
+              }}>
+                <i className="fa-solid fa-rotate"></i> {gfsSyncLoading ? (currentLang === 'en' ? 'Syncing...' : 'جاري المزامنة...') : (currentLang === 'en' ? 'Run EOD GFS Sync' : 'مزامنة GFS الآن')}
               </button>
+
+              <h4>{currentLang === 'en' ? 'GFS Sync Logs' : 'سجلات مزامنة GFS'}</h4>
+              <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
+                {gfsSyncLogs.map((log: any, idx: number) => (
+                  <div key={idx} style={{ padding: '10px', borderBottom: '1px solid var(--surface-border)', fontSize: '12px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}>
+                      <span>{new Date(log.syncTimestamp).toLocaleTimeString()}</span>
+                      <span style={{ color: log.status === 'SUCCESS' ? 'var(--accent-green)' : 'var(--accent-red)' }}>{log.status}</span>
+                    </div>
+                    <div>{currentLang === 'en' ? 'Synced: ' : 'تمت مزامنة: '}{log.totalRecordsSynced} | {currentLang === 'en' ? 'Rejected: ' : 'تم رفض: '}{log.totalRecordsRejected}</div>
+                    <pre style={{ fontSize: '10px', background: 'rgba(0,0,0,0.2)', padding: '5px', borderRadius: '4px', marginTop: '5px', overflowX: 'auto', whiteSpace: 'pre-wrap' }}>
+                      {log.syncDetails}
+                    </pre>
+                  </div>
+                ))}
+                {gfsSyncLogs.length === 0 && (
+                  <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px', padding: '10px' }}>
+                    {currentLang === 'en' ? 'No sync logs yet.' : 'لا توجد سجلات مزامنة بعد.'}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </section>
+
+        {/* SCREEN VIEWPORT: HOME DELIVERY FULFILLMENT (UC07) */}
+        <section className={`screen-viewport ${activeTab === 'screen-home-delivery' ? 'active' : ''}`}>
+          <div className="glass-card">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '15px' }}>
+              <div>
+                <h3>{currentLang === 'en' ? 'Home Delivery Door-to-Door Fulfillment (UC07)' : 'خدمة التوصيل المنزلي لسبائك الذهب (UC07)'}</h3>
+                <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>
+                  {currentLang === 'en'
+                    ? 'Manage residential deliveries across Kuwait with PACI Civil ID validation, courier logistics tracking, and secure 6-digit OTP customer handover confirmation.'
+                    : 'إدارة وتتبع توصيل سبائك الذهب لمنازل العملاء داخل دولة الكويت مع التحقق من الرقم المدني، وتتبع الناقل، وتأكيد الاستلام برمز التحقق (OTP).'}
+                </p>
+              </div>
+              <button className="btn btn-primary" onClick={() => {
+                setShowCreateHomeDeliveryModal(true);
+                setCivilIdValidationResult(null);
+              }}>
+                <i className="fa-solid fa-plus"></i> {currentLang === 'en' ? 'New Home Delivery Request' : 'طلب توصيل منزلي جديد'}
+              </button>
+            </div>
+
+            {/* Quick Metrics */}
+            <div className="split-grid-3" style={{ marginBottom: '24px' }}>
+              <div className="glass-card" style={{ marginBottom: 0 }}>
+                <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Pending Dispatch' : 'بانتظار التسليم للناقل'}</div>
+                <div style={{ fontSize: '24px', fontWeight: 'bold', color: 'var(--accent-gold)' }}>
+                  {homeDeliveries.filter((d: any) => d.status === 'PENDING_DISPATCH').length}
+                </div>
+              </div>
+              <div className="glass-card" style={{ marginBottom: 0 }}>
+                <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'In Transit / Dispatched' : 'في الطريق مع الناقل'}</div>
+                <div style={{ fontSize: '24px', fontWeight: 'bold', color: 'var(--accent-blue)' }}>
+                  {homeDeliveries.filter((d: any) => d.status === 'DISPATCHED_TO_COURIER').length}
+                </div>
+              </div>
+              <div className="glass-card" style={{ marginBottom: 0 }}>
+                <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Delivered to Customer' : 'تم التسليم للعميل'}</div>
+                <div style={{ fontSize: '24px', fontWeight: 'bold', color: 'var(--accent-green)' }}>
+                  {homeDeliveries.filter((d: any) => d.status === 'DELIVERED_TO_CUSTOMER').length}
+                </div>
+              </div>
+            </div>
+
+            <div className="table-responsive">
+              <table>
+                <thead>
+                  <tr>
+                    <th>{currentLang === 'en' ? 'Ref #' : 'رقم الطلب'}</th>
+                    <th>{currentLang === 'en' ? 'Bar Serial / Weight' : 'الرقم التسلسلي / الوزن'}</th>
+                    <th>{currentLang === 'en' ? 'Customer Civil ID & Name' : 'الرقم المدني واسم العميل'}</th>
+                    <th>{currentLang === 'en' ? 'Kuwait Delivery Address' : 'عنوان التوصيل (الكويت)'}</th>
+                    <th>{currentLang === 'en' ? 'Courier Details' : 'بيانات الناقل'}</th>
+                    <th>{currentLang === 'en' ? 'Status' : 'الحالة'}</th>
+                    <th>{currentLang === 'en' ? 'Actions' : 'العمليات'}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {homeDeliveries.map((hd: any, idx: number) => (
+                    <tr key={idx}>
+                      <td><strong>{hd.deliveryReferenceNumber}</strong></td>
+                      <td>
+                        <span style={{ fontWeight: '600' }}>{hd.bar?.serialNumber || hd.barId}</span>
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                          {hd.bar?.weightGrams ? `${hd.bar.weightGrams}g 24K (999.9)` : '24K Gold'}
+                        </div>
+                      </td>
+                      <td>
+                        <div style={{ fontWeight: '500' }}>{hd.recipientName}</div>
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                          <i className="fa-solid fa-id-card" style={{ marginRight: '4px' }}></i>
+                          {hd.recipientCivilId} | {hd.recipientPhone}
+                        </div>
+                      </td>
+                      <td>
+                        <div style={{ fontSize: '12px' }}>
+                          <strong>{hd.governorate}</strong>, {hd.area}
+                        </div>
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                          {currentLang === 'en' ? `Blk ${hd.block}, St ${hd.street}, Bld ${hd.building}` : `قطعة ${hd.block}، شارع ${hd.street}، مبنى ${hd.building}`}
+                          {hd.flat ? `, Flat ${hd.flat}` : ''}
+                        </div>
+                      </td>
+                      <td>
+                        {hd.courierCompany ? (
+                          <div style={{ fontSize: '11px' }}>
+                            <div><strong>{hd.courierCompany}</strong></div>
+                            <div style={{ color: 'var(--text-muted)' }}>{hd.courierRepName} ({hd.vehiclePlate || 'Plate N/A'})</div>
+                            <div style={{ color: 'var(--accent-gold)' }}>Seal: {hd.securitySealNumber}</div>
+                          </div>
+                        ) : (
+                          <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{currentLang === 'en' ? 'Unassigned' : 'غير معين'}</span>
+                        )}
+                      </td>
+                      <td>
+                        <span className={`badge ${hd.status === 'DELIVERED_TO_CUSTOMER' ? 'badge-ready' : hd.status === 'DISPATCHED_TO_COURIER' ? 'badge-reserved' : 'badge-quarantined'}`}>
+                          {hd.status}
+                        </span>
+                      </td>
+                      <td>
+                        {hd.status === 'PENDING_DISPATCH' && (
+                          <button className="btn btn-primary btn-sm" onClick={() => {
+                            setDispatchHdId(hd.deliveryId);
+                            setShowDispatchHdModal(true);
+                          }}>
+                            <i className="fa-solid fa-truck-ramp-box"></i> {currentLang === 'en' ? 'Dispatch' : 'تسليم للناقل'}
+                          </button>
+                        )}
+                        {hd.status === 'DISPATCHED_TO_COURIER' && (
+                          <div style={{ display: 'flex', gap: '5px' }}>
+                            <button className="btn btn-primary btn-sm" onClick={() => {
+                              setConfirmHdId(hd.deliveryId);
+                              setConfirmHdOtp(hd.verificationOtp || '');
+                              setConfirmHdCivilId(hd.recipientCivilId || '');
+                              setShowConfirmHandoverModal(true);
+                            }}>
+                              <i className="fa-solid fa-signature"></i> {currentLang === 'en' ? 'Confirm Delivery' : 'تأكيد الاستلام'}
+                            </button>
+                            <button className="btn btn-secondary btn-sm" title={currentLang === 'en' ? 'Customer OTP' : 'رمز التحقق'} onClick={() => {
+                              alert(`KFH Verification OTP for ${hd.recipientName}: ${hd.verificationOtp}\nKuwait PACI Address: ${hd.governorate}, ${hd.area}, Blk ${hd.block}`);
+                            }}>
+                              <i className="fa-solid fa-key"></i>
+                            </button>
+                          </div>
+                        )}
+                        {hd.status === 'DELIVERED_TO_CUSTOMER' && (
+                          <span style={{ color: 'var(--accent-green)', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <i className="fa-solid fa-circle-check"></i> {currentLang === 'en' ? 'Completed' : 'مكتمل'}
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                  {homeDeliveries.length === 0 && (
+                    <tr>
+                      <td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '24px' }}>
+                        {currentLang === 'en' ? 'No Home Delivery requests found.' : 'لا توجد طلبات توصيل منزلي.'}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        {/* SCREEN VIEWPORT: DAMAGED BAR MAKER-CHECKER (UC12) */}
+        <section className={`screen-viewport ${activeTab === 'screen-damaged-bars' ? 'active' : ''}`}>
+          <div className="glass-card">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '15px' }}>
+              <div>
+                <h3>{currentLang === 'en' ? 'Damaged Bar Governance & Maker-Checker Approvals (UC12)' : 'حوكمة واعتماد السبائك التالفة (UC12)'}</h3>
+                <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>
+                  {currentLang === 'en'
+                    ? '4-Eyes verification for damaged gold bars. Maker reports physical defects/MOCI assay deviations; Checker independently approves or rejects quarantine.'
+                    : 'حوكمة مبدأ الرقابة الثنائية (Maker-Checker) للسبائك التالفة. يقوم الصانع بالإبلاغ عن العيوب، ويقوم المراجع بالاعتماد المستقل للعزل أو الرفض.'}
+                </p>
+              </div>
+              {canModify('custody') && (
+                <button className="btn btn-primary" onClick={() => {
+                  setDamageItemId(null);
+                  setDamageReason('SCRATCHED_HALLMARK');
+                  setDamageDesc('');
+                  setDamageDocId(`DOC-MOCI-${Date.now().toString().slice(-4)}`);
+                  setShowDamageModal(true);
+                }}>
+                  <i className="fa-solid fa-triangle-exclamation"></i> {currentLang === 'en' ? 'Report Damaged Bar' : 'الإبلاغ عن سبيكة تالفة'}
+                </button>
+              )}
+            </div>
+
+            <div className="table-responsive">
+              <table>
+                <thead>
+                  <tr>
+                    <th>{currentLang === 'en' ? 'Bar Serial' : 'الرقم التسلسلي'}</th>
+                    <th>{currentLang === 'en' ? 'Weight / Metal' : 'الوزن / المعدن'}</th>
+                    <th>{currentLang === 'en' ? 'Reported By' : 'تم الإبلاغ بواسطة'}</th>
+                    <th>{currentLang === 'en' ? 'Damage Reason' : 'سبب التلف'}</th>
+                    <th>{currentLang === 'en' ? 'MOCI Assay / Inspection Doc' : 'مستند الفحص / وزارة التجارة'}</th>
+                    <th>{currentLang === 'en' ? 'Approval Status' : 'حالة الاعتماد'}</th>
+                    <th>{currentLang === 'en' ? 'Checker Actions' : 'إجراءات المراجع'}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {damagedBarsList.map((bar: any, idx: number) => {
+                    const isPending = bar.damageApprovalStatus === 'PENDING_APPROVAL';
+                    const isApproved = bar.damageApprovalStatus === 'APPROVED' || bar.status === 'DAMAGED';
+                    const isRejected = bar.damageApprovalStatus === 'REJECTED';
+                    return (
+                      <tr key={idx}>
+                        <td><strong>{bar.serialNumber}</strong></td>
+                        <td>{bar.weightGrams ? `${bar.weightGrams}g` : ''} 24K Gold (999.9)</td>
+                        <td>
+                          <div>{bar.damageReportedBy || 'Treasury Maker'}</div>
+                          <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                            {bar.mociInspectionDate ? new Date(bar.mociInspectionDate).toLocaleDateString() : 'Today'}
+                          </div>
+                        </td>
+                        <td>
+                          <span style={{ color: 'var(--accent-red)', fontWeight: '600' }}>
+                            {bar.damageReason || 'SCRATCHED_HALLMARK'}
+                          </span>
+                        </td>
+                        <td>
+                          <span style={{ fontSize: '12px', background: 'rgba(255,255,255,0.05)', padding: '3px 8px', borderRadius: '4px' }}>
+                            {bar.mociAssayNumber || 'MOCI-KW-2026'}
+                          </span>
+                        </td>
+                        <td>
+                          <span className={`badge ${isApproved ? 'badge-quarantined' : isRejected ? 'badge-sold' : 'badge-reserved'}`}>
+                            {bar.damageApprovalStatus || (bar.status === 'DAMAGED' ? 'APPROVED' : 'PENDING_APPROVAL')}
+                          </span>
+                        </td>
+                        <td>
+                          {isPending && checkUserRoleMatches('Operations Checker', userRole) && (
+                            <div style={{ display: 'flex', gap: '6px' }}>
+                              <button className="btn btn-primary btn-sm" onClick={() => handleProcessDamageAction(bar.itemId, 'APPROVE')}>
+                                <i className="fa-solid fa-check"></i> {currentLang === 'en' ? 'Approve' : 'اعتماد'}
+                              </button>
+                              <button className="btn btn-secondary btn-sm" style={{ background: '#dc3545' }} onClick={() => handleProcessDamageAction(bar.itemId, 'REJECT')}>
+                                <i className="fa-solid fa-xmark"></i> {currentLang === 'en' ? 'Reject' : 'رفض'}
+                              </button>
+                            </div>
+                          )}
+                          {isPending && !checkUserRoleMatches('Operations Checker', userRole) && (
+                            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                              {currentLang === 'en' ? 'Awaiting Checker (4-Eyes)' : 'بانتظار مراجع العمليات'}
+                            </span>
+                          )}
+                          {isApproved && (
+                            <span style={{ color: 'var(--accent-red)', fontSize: '12px' }}>
+                              <i className="fa-solid fa-ban"></i> {currentLang === 'en' ? 'Quarantined / Defective' : 'معزولة / تالفة'}
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {damagedBarsList.length === 0 && (
+                    <tr>
+                      <td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '24px' }}>
+                        {currentLang === 'en' ? 'No damaged bars pending review or on record.' : 'لا توجد سبائك تالفة معلقة أو مسجلة.'}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        {/* SCREEN VIEWPORT: STOCK THRESHOLDS & ALERTS (operational -- master_data module) */}
+        <section className={`screen-viewport ${activeTab === 'screen-stock-thresholds' ? 'active' : ''}`}>
+          <div className="split-grid-3">
+            <div className="glass-card" style={{ gridColumn: 'span 2' }}>
+              <h3>{currentLang === 'en' ? 'Enterprise Stock Thresholds Configuration' : 'إعداد حدود مخزون المؤسسة'}</h3>
+              <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>
+                {currentLang === 'en' 
+                  ? 'Configure Enterprise Level Low-Stock and High-Stock cut-off thresholds for physical gold denominations. Maker-Checker rules apply.'
+                  : 'تهيئة حدود المخزون المنخفض والمرتفع للمؤسسة لسبائك الذهب المختلفة. تخضع لقواعد صانع ومراجع.'}
+              </p>
+
+              {/* Threshold setup form */}
+              <div style={{ background: 'rgba(255,255,255,0.02)', padding: '20px', borderRadius: '8px', border: '1px solid var(--surface-border)', marginBottom: '25px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '15px' }}>
+                  <div className="form-group">
+                    <label>{currentLang === 'en' ? 'Alert Type' : 'نوع التنبيه'}</label>
+                    <select className="form-control" style={{ color: '#000' }} value={thresholdAlertType} onChange={e => setThresholdAlertType(e.target.value)}>
+                      <option value="LOW_STOCK">{currentLang === 'en' ? 'Low Stock Limit' : 'حد أدنى للمخزون'}</option>
+                      <option value="HIGH_STOCK">{currentLang === 'en' ? 'High Stock Limit' : 'حد أقصى للمخزون'}</option>
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label>{currentLang === 'en' ? 'Product' : 'المنتج'}</label>
+                    <select className="form-control" style={{ color: '#000' }} value={thresholdProductId} onChange={e => {
+                      setThresholdProductId(e.target.value);
+                      const p = products.find((prod: any) => prod.product_id === parseInt(e.target.value));
+                      if (p) {
+                        setThresholdDenominationId(p.denomination_id);
+                      }
+                    }}>
+                      <option value="">-- Choose --</option>
+                      {products.map((p: any, idx: number) => (
+                        <option key={idx} value={p.product_id}>{p.product_code}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label>{currentLang === 'en' ? 'Denomination' : 'الفئة الوزن'}</label>
+                    <select className="form-control" style={{ color: '#000' }} value={thresholdDenominationId} onChange={e => setThresholdDenominationId(e.target.value)}>
+                      <option value="">-- Choose --</option>
+                      {denomsList.map((d: any, idx: number) => (
+                        <option key={idx} value={d.denomination_id}>{d.label} ({d.metal})</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label>{currentLang === 'en' ? 'Cutoff Value (KG)' : 'القيمة بالـ كجم'}</label>
+                    <input type="number" step="0.001" className="form-control" placeholder="e.g. 50.0" value={thresholdCutoffKg} onChange={e => setThresholdCutoffKg(e.target.value)} />
+                  </div>
+                </div>
+                <button className="btn btn-primary" style={{ marginTop: '15px' }} onClick={async () => {
+                  if (!thresholdProductId || !thresholdDenominationId || !thresholdCutoffKg) {
+                    alert('Please fill all fields');
+                    return;
+                  }
+                  const res = await fetch(`${API_BASE}/inventory/stock-thresholds`, {
+                    method: 'POST',
+                    headers: { 
+                      'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                      alertType: thresholdAlertType,
+                      productId: parseInt(thresholdProductId),
+                      denominationId: parseInt(thresholdDenominationId),
+                      cutoffValueKg: parseFloat(thresholdCutoffKg)
+                    })
+                  });
+                  if (res.ok) {
+                    alert(currentLang === 'en' ? 'Threshold submitted for checker approval!' : 'تم تقديم حدود المخزون للاعتماد!');
+                    setThresholdCutoffKg('');
+                    fetchStockThresholds();
+                  } else {
+                    alert('Submission failed');
+                  }
+                }}>
+                  <i className="fa-solid fa-plus"></i> {currentLang === 'en' ? 'Submit Threshold' : 'إرسال حد المخزون'}
+                </button>
+              </div>
+
+              {/* Threshold list table */}
+              <div className="table-responsive">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>{currentLang === 'en' ? 'Alert Type' : 'نوع التنبيه'}</th>
+                      <th>{currentLang === 'en' ? 'Product' : 'المنتج'}</th>
+                      <th>{currentLang === 'en' ? 'Weight' : 'الوزن'}</th>
+                      <th>{currentLang === 'en' ? 'Limit (KG)' : 'الحد (كجم)'}</th>
+                      <th>{currentLang === 'en' ? 'Status' : 'الحالة'}</th>
+                      <th>{currentLang === 'en' ? 'Authorizer Action' : 'اعتماد المراجع'}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stockThresholds.map((th: any, idx: number) => (
+                      <tr key={idx}>
+                        <td>
+                          <span style={{ color: th.alertType === 'LOW_STOCK' ? 'var(--accent-red)' : 'var(--accent-green)' }}>
+                            {th.alertType === 'LOW_STOCK' ? (currentLang === 'en' ? 'LOW STOCK' : 'مخزون منخفض') : (currentLang === 'en' ? 'HIGH STOCK' : 'مخزون مرتفع')}
+                          </span>
+                        </td>
+                        <td>{th.product?.productCode || th.productId}</td>
+                        <td>{th.denomination?.label || `${th.denomination?.weightGrams}g`}</td>
+                        <td><strong>{th.cutoffValueKg} KG</strong></td>
+                        <td>
+                          <span className={`badge badge-${th.statusCode.toLowerCase()}`}>
+                            {th.statusCode}
+                          </span>
+                        </td>
+                        <td>
+                          {th.statusCode === 'PENDING_MAKER' && (
+                            <div style={{ display: 'flex', gap: '5px' }}>
+                              <button className="btn btn-primary btn-sm" onClick={async () => {
+                                const res = await fetch(`${API_BASE}/inventory/stock-thresholds/${th.thresholdId}/action`, {
+                                  method: 'POST',
+                                  headers: { 
+                                    'Content-Type': 'application/json'
+                                  },
+                                  body: JSON.stringify({ action: 'APPROVE' })
+                                });
+                                if (res.ok) {
+                                  alert(currentLang === 'en' ? 'Approved!' : 'تم الاعتماد!');
+                                  fetchStockThresholds();
+                                  fetchEnterpriseStockAlerts();
+                                } else {
+                                  const err = await res.json();
+                                  alert(err.error || 'Approval failed');
+                                }
+                              }}>
+                                {currentLang === 'en' ? 'Approve' : 'اعتماد'}
+                              </button>
+                              <button className="btn btn-secondary btn-sm" style={{ background: '#dc3545' }} onClick={async () => {
+                                const res = await fetch(`${API_BASE}/inventory/stock-thresholds/${th.thresholdId}/action`, {
+                                  method: 'POST',
+                                  headers: { 
+                                    'Content-Type': 'application/json'
+                                  },
+                                  body: JSON.stringify({ action: 'REJECT' })
+                                });
+                                if (res.ok) {
+                                  alert(currentLang === 'en' ? 'Rejected' : 'تم الرفض');
+                                  fetchStockThresholds();
+                                }
+                              }}>
+                                {currentLang === 'en' ? 'Reject' : 'رفض'}
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                    {stockThresholds.length === 0 && (
+                      <tr>
+                        <td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '20px' }}>
+                          {currentLang === 'en' ? 'No stock thresholds configured.' : 'لم يتم تكوين أي حدود للمخزون.'}
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="glass-card">
+              <h3>{currentLang === 'en' ? 'Enterprise Stock Alerts' : 'تنبيهات المخزون للمؤسسة'}</h3>
+              <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>
+                {currentLang === 'en' 
+                  ? 'Real-time alert indicators aggregating KFH-Kuwait physical gold holdings in KG equivalent.'
+                  : 'مؤشرات التنبيه اللحظية التي تجمع ممتلكات بيت التمويل الكويتي من الذهب بالـ كجم.'}
+              </p>
+
+              {enterpriseAlerts.length === 0 ? (
+                <div style={{ padding: '20px', textAlign: 'center', background: 'rgba(40, 167, 69, 0.1)', borderRadius: '8px', border: '1px solid var(--accent-green)' }}>
+                  <i className="fa-solid fa-circle-check" style={{ fontSize: '24px', color: 'var(--accent-green)', marginBottom: '10px', display: 'block' }}></i>
+                  <span style={{ fontWeight: 'bold' }}>{currentLang === 'en' ? 'All stock levels are optimal.' : 'جميع مستويات المخزون ممتازة.'}</span>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                  {enterpriseAlerts.map((alert: any, idx: number) => (
+                    <div key={idx} style={{ 
+                      padding: '15px', 
+                      background: alert.alertType === 'LOW_STOCK' ? 'rgba(220, 53, 69, 0.15)' : 'rgba(255, 193, 7, 0.15)', 
+                      borderRadius: '8px', 
+                      borderLeft: alert.alertType === 'LOW_STOCK' ? '4px solid #dc3545' : '4px solid #ffc107',
+                      fontSize: '13px'
+                    }}>
+                      <div style={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '5px' }}>
+                        <i className="fa-solid fa-triangle-exclamation"></i>
+                        <span>{alert.alertType}</span>
+                      </div>
+                      <p style={{ margin: '0 0 8px 0' }}>{alert.alertMessage}</p>
+                      <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                        {currentLang === 'en' ? 'Cutoff: ' : 'الحد: '}{alert.cutoffValueKg.toFixed(3)} KG | {currentLang === 'en' ? 'Current: ' : 'الحالي: '}{alert.currentValueKg.toFixed(3)} KG
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
+
+        {/* SCREEN VIEWPORT: GDM DISPENSING (operational -- dispensing module) */}
+
 
         {/* SCREEN VIEWPORT: VAULT SPATIAL MAP */}
         <section className={`screen-viewport ${activeTab === 'screen-spatial' ? 'active' : ''}`}>
@@ -5989,115 +7225,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
           </div>
         </section>
 
-        {/* SCREEN VIEWPORT: GDM DEVICE REGISTRATION (admin/governance tier -- device_integration module) */}
-        <section className={`screen-viewport ${activeTab === 'screen-devices' ? 'active' : ''}`}>
-          <div className="glass-card">
-            <h3>{currentLang === 'en' ? 'GDM Device Registration' : 'تسجيل أجهزة الصرف الذاتي'}</h3>
-            <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>
-              {currentLang === 'en'
-                ? 'Register and decommission physical Gold Dispensing Machines. Day-to-day dispense operation lives on the GDM Dispensing screen.'
-                : 'تسجيل وإلغاء تشغيل أجهزة الصرف الذاتي للذهب. تشغيل الصرف اليومي في شاشة صرف الأجهزة الذاتية.'}
-            </p>
 
-            {canModify('device_integration') && (
-              <div className="glass-card" style={{ marginBottom: '24px' }}>
-                <h4>{editingDeviceId !== null ? (currentLang === 'en' ? 'Edit Device' : 'تعديل الجهاز') : (currentLang === 'en' ? 'Register New Device' : 'تسجيل جهاز جديد')}</h4>
-                <div className="split-grid-2">
-                  <div className="form-group">
-                    <label>{currentLang === 'en' ? 'Device Code' : 'رمز الجهاز'}</label>
-                    <input type="text" className="form-control" placeholder="GDM-001" value={deviceFormCode} onChange={e => setDeviceFormCode(e.target.value)} disabled={editingDeviceId !== null} />
-                  </div>
-                  <div className="form-group">
-                    <label>{currentLang === 'en' ? 'Device Name' : 'اسم الجهاز'}</label>
-                    <input type="text" className="form-control" placeholder="Lobby ATM-style Dispenser" value={deviceFormName} onChange={e => setDeviceFormName(e.target.value)} />
-                  </div>
-                  <div className="form-group">
-                    <label>{currentLang === 'en' ? 'Branch' : 'الفرع'}</label>
-                    <select value={deviceFormBranchId} onChange={e => setDeviceFormBranchId(e.target.value)} style={{ color: '#000' }}>
-                      <option value="">-- {currentLang === 'en' ? 'Select Branch' : 'اختر الفرع'} --</option>
-                      {branchesList.map((b: any, idx: number) => (
-                        <option key={idx} value={b.branch_id}>{b.branch_name}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="form-group">
-                    <label>{currentLang === 'en' ? 'Cassette Location ID' : 'رقم موقع الخرطوشة'}</label>
-                    <input type="number" className="form-control" value={deviceFormLocationId} onChange={e => setDeviceFormLocationId(e.target.value)} min="1" />
-                  </div>
-                  <div className="form-group">
-                    <label>{currentLang === 'en' ? 'Manufacturer' : 'الشركة المصنعة'}</label>
-                    <input type="text" className="form-control" value={deviceFormManufacturer} onChange={e => setDeviceFormManufacturer(e.target.value)} />
-                  </div>
-                  <div className="form-group">
-                    <label>{currentLang === 'en' ? 'Model' : 'الطراز'}</label>
-                    <input type="text" className="form-control" value={deviceFormModel} onChange={e => setDeviceFormModel(e.target.value)} />
-                  </div>
-                  <div className="form-group">
-                    <label>{currentLang === 'en' ? 'Status' : 'الحالة'}</label>
-                    <select value={deviceFormActive ? 'true' : 'false'} onChange={e => setDeviceFormActive(e.target.value === 'true')} style={{ color: '#000' }}>
-                      <option value="true">{currentLang === 'en' ? 'Active' : 'نشط'}</option>
-                      <option value="false">{currentLang === 'en' ? 'Disabled' : 'معطل'}</option>
-                    </select>
-                  </div>
-                </div>
-                <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
-                  <button className="btn btn-primary" onClick={handleSaveDevice}>{currentLang === 'en' ? 'Save Device' : 'حفظ الجهاز'}</button>
-                  {editingDeviceId !== null && (
-                    <button className="btn" onClick={resetDeviceForm}>{currentLang === 'en' ? 'Cancel' : 'إلغاء'}</button>
-                  )}
-                </div>
-              </div>
-            )}
-
-            <div className="table-responsive">
-              <table>
-                <thead>
-                  <tr>
-                    <th>{currentLang === 'en' ? 'Device Code' : 'رمز الجهاز'}</th>
-                    <th>{currentLang === 'en' ? 'Name' : 'الاسم'}</th>
-                    <th>{currentLang === 'en' ? 'Branch' : 'الفرع'}</th>
-                    <th>{currentLang === 'en' ? 'Manufacturer / Model' : 'الشركة المصنعة / الطراز'}</th>
-                    <th>{t('th_status')}</th>
-                    <th>{currentLang === 'en' ? 'Last Heartbeat' : 'آخر نبضة'}</th>
-                    {canModify('device_integration') && <th>{t('th_action')}</th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {gdmDevices.length === 0 ? (
-                    <tr><td colSpan={canModify('device_integration') ? 7 : 6} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '20px' }}>
-                      {currentLang === 'en' ? 'No devices registered yet.' : 'لا توجد أجهزة مسجّلة بعد.'}
-                    </td></tr>
-                  ) : gdmDevices.map((d: any) => (
-                    <tr key={d.device_id}>
-                      <td><strong>{d.device_code}</strong></td>
-                      <td>{d.device_name}</td>
-                      <td>{d.branch_name}</td>
-                      <td>{d.manufacturer} {d.model}</td>
-                      <td>
-                        <span className={`badge ${d.is_active ? 'badge-ready' : 'badge-sold'}`}>
-                          {d.is_active ? (currentLang === 'en' ? 'Active' : 'نشط') : (currentLang === 'en' ? 'Disabled' : 'معطل')}
-                        </span>
-                      </td>
-                      <td>{d.last_heartbeat_at ? new Date(d.last_heartbeat_at).toLocaleString() : '—'}</td>
-                      {canModify('device_integration') && (
-                        <td>
-                          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                            <button className="btn" style={{ padding: '4px 8px', fontSize: '12px' }} onClick={() => handleStartEditDevice(d)}>
-                              <i className="fa-solid fa-pen"></i>
-                            </button>
-                            <button className="btn btn-danger" style={{ padding: '4px 8px', fontSize: '12px' }} onClick={() => handleDeleteDevice(d.device_id)}>
-                              <i className="fa-solid fa-trash"></i>
-                            </button>
-                          </div>
-                        </td>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </section>
 
         {/* SCREEN VIEWPORT: BUSINESS RULES ENGINE (admin/governance tier -- rules_engine module, RFP item 5) */}
         <section className={`screen-viewport ${activeTab === 'screen-rules' ? 'active' : ''}`}>
@@ -6123,7 +7251,21 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                   </div>
                   <div className="form-group">
                     <label>{currentLang === 'en' ? 'Rule Type' : 'نوع القاعدة'}</label>
-                    <input type="text" className="form-control" placeholder="TRANSFER_LIMIT" value={ruleFormType} onChange={e => setRuleFormType(e.target.value)} disabled={editingRuleCode !== null} />
+                    <select value={ruleFormType} onChange={e => {
+                      const newType = e.target.value;
+                      setRuleFormType(newType);
+                      if (newType === 'TRANSFER_LIMIT') setBuilderField('weightGrams');
+                      else if (newType === 'RECEIPT_VALIDATION') setBuilderField('quantity');
+                      else if (newType === 'CUSTOMER_ELIGIBILITY') setBuilderField('customerId');
+                      else if (newType === 'RATE_THRESHOLD') setBuilderField('rate');
+                      else if (newType === 'INVENTORY_CHECK') setBuilderField('availableQty');
+                    }} disabled={editingRuleCode !== null} style={{ color: '#000' }}>
+                      <option value="TRANSFER_LIMIT">TRANSFER_LIMIT</option>
+                      <option value="RECEIPT_VALIDATION">RECEIPT_VALIDATION</option>
+                      <option value="CUSTOMER_ELIGIBILITY">CUSTOMER_ELIGIBILITY</option>
+                      <option value="RATE_THRESHOLD">RATE_THRESHOLD</option>
+                      <option value="INVENTORY_CHECK">INVENTORY_CHECK</option>
+                    </select>
                   </div>
                   <div className="form-group">
                     <label>{currentLang === 'en' ? 'Severity' : 'الخطورة'}</label>
@@ -6132,10 +7274,62 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       <option value="WARN">WARN</option>
                     </select>
                   </div>
-                  <div className="form-group" style={{ gridColumn: '1 / -1' }}>
-                    <label>{currentLang === 'en' ? 'Expression (JSON)' : 'التعبير (JSON)'}</label>
-                    <textarea className="form-control" rows={3} placeholder='{"maxWeightGrams": 5000}'
-                      value={ruleFormExpression} onChange={e => setRuleFormExpression(e.target.value)} style={{ fontFamily: 'monospace', fontSize: '12px' }} />
+                  <div className="glass-card" style={{ gridColumn: '1 / -1', background: 'rgba(255, 255, 255, 0.05)', padding: '15px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                    <h5 style={{ margin: '0 0 12px 0', fontSize: '13px', fontWeight: 600, color: 'var(--kfh-green)' }}>
+                      <i className="fa-solid fa-wand-magic-sparkles"></i> {currentLang === 'en' ? 'Visual Expression Builder' : 'منشئ التعبيرات المرئي'}
+                    </h5>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '15px' }}>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Field' : 'الحقل'}</label>
+                        <select value={builderField} onChange={e => setBuilderField(e.target.value)} style={{ color: '#000', fontSize: '12px', padding: '6px' }}>
+                          {ruleFormType === 'TRANSFER_LIMIT' && (
+                            <>
+                              <option value="weightGrams">weightGrams (Total Weight / Grams)</option>
+                              <option value="itemCount">itemCount (Number of Items)</option>
+                            </>
+                          )}
+                          {ruleFormType === 'RECEIPT_VALIDATION' && (
+                            <>
+                              <option value="quantity">quantity (Shipment Quantity)</option>
+                              <option value="cost">cost (Unit or Total Cost)</option>
+                            </>
+                          )}
+                          {ruleFormType === 'CUSTOMER_ELIGIBILITY' && (
+                            <>
+                              <option value="customerId">customerId (Customer Identity ID)</option>
+                              <option value="isResident">isResident (Resident Status)</option>
+                            </>
+                          )}
+                          {ruleFormType === 'RATE_THRESHOLD' && (
+                            <option value="rate">rate (Market Rate / Gram)</option>
+                          )}
+                          {ruleFormType === 'INVENTORY_CHECK' && (
+                            <>
+                              <option value="availableQty">availableQty (Available In-Stock)</option>
+                              <option value="reorderPoint">reorderPoint (Reorder Threshold)</option>
+                            </>
+                          )}
+                        </select>
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Operator' : 'المعامل'}</label>
+                        <select value={builderOp} onChange={e => setBuilderOp(e.target.value)} style={{ color: '#000', fontSize: '12px', padding: '6px' }}>
+                          <option value="gt">is greater than (&gt;)</option>
+                          <option value="gte">is greater than or equal to (&gt;=)</option>
+                          <option value="lt">is less than (&lt;)</option>
+                          <option value="lte">is less than or equal to (&lt;=)</option>
+                          <option value="eq">equals (==)</option>
+                          <option value="neq">not equal (!=)</option>
+                        </select>
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Value' : 'القيمة'}</label>
+                        <input type="text" className="form-control" placeholder="e.g. 5000" value={builderValue} onChange={e => setBuilderValue(e.target.value)} style={{ fontSize: '12px', padding: '6px', height: '34px' }} />
+                      </div>
+                    </div>
+                    <div style={{ marginTop: '12px', fontSize: '11px', color: 'var(--text-muted)', background: 'rgba(0,0,0,0.15)', padding: '6px 10px', borderRadius: '4px', fontFamily: 'monospace' }}>
+                      <strong>JSON Preview:</strong> {JSON.stringify({ all: [{ field: builderField, op: builderOp, value: isNaN(Number(builderValue)) || builderValue.trim() === '' ? builderValue : Number(builderValue) }] })}
+                    </div>
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
@@ -7142,10 +8336,13 @@ const [migrationApproved, setMigrationApproved] = useState(false);
             <h3>{t('settings_title')}</h3>
             <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>{t('settings_subtitle')}</p>
 
-            <div style={{ display: 'flex', gap: '10px', borderBottom: '1px solid var(--surface-border)', marginBottom: '24px' }}>
+            <div style={{ display: 'flex', gap: '10px', borderBottom: '1px solid var(--surface-border)', marginBottom: '24px', flexWrap: 'wrap' }}>
               <button className={`btn-tab ${settingsTab === 'ai' ? 'active' : ''}`} onClick={() => setSettingsTab('ai')}>{t('tab_ai_gateway')}</button>
+              <button className={`btn-tab ${settingsTab === 'brands' ? 'active' : ''}`} onClick={() => { setSettingsTab('brands'); fetchBrands(); }}>
+                <i className="fa-solid fa-certificate"></i> {currentLang === 'ar' ? 'العلامات والمصانع' : 'Brands & Refiners'}
+              </button>
               <button className={`btn-tab ${settingsTab === 'suppliers' ? 'active' : ''}`} onClick={() => setSettingsTab('suppliers')}>{t('tab_suppliers')}</button>
-              <button className={`btn-tab ${settingsTab === 'denoms' ? 'active' : ''}`} onClick={() => setSettingsTab('denoms')}>{t('tab_denoms')}</button>
+              <button className={`btn-tab ${settingsTab === 'denoms' ? 'active' : ''}`} onClick={() => { setSettingsTab('denoms'); fetchProducts(); fetchBrands(); }}>{t('tab_denoms')}</button>
               <button className={`btn-tab ${settingsTab === 'stocklimits' ? 'active' : ''}`} onClick={() => { setSettingsTab('stocklimits'); fetchReorderThresholds(); }}>
                 <i className="fa-solid fa-gauge-high"></i> {currentLang === 'ar' ? 'حدود المخزون' : 'Stock Limits'}
               </button>
@@ -7413,6 +8610,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                         <th>{t('th_metal_type')}</th>
                         <th>{t('th_weight_grams')}</th>
                         <th>Product Code</th>
+                        <th>{currentLang === 'ar' ? 'العلامة / المصنع' : 'Brand / Mint'}</th>
                         <th>Origin Country</th>
                         {canModify('master_data') && <th style={{ width: '110px', textAlign: 'center' }}>{t('th_action')}</th>}
                       </tr>
@@ -7473,6 +8671,27 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                                 />
                               </td>
                               <td>
+                                <code style={{ color: 'var(--accent-blue)', fontSize: '12px' }}>{d.product_code || 'N/A'}</code>
+                              </td>
+                              <td>
+                                <select
+                                  value={editDenomBrandId}
+                                  onChange={e => {
+                                    setEditDenomBrandId(e.target.value);
+                                    const b = brandsList.find((x: any) => x.brand_id === parseInt(e.target.value));
+                                    if (b) setEditDenomOrigin(b.country_of_origin);
+                                  }}
+                                  style={{ padding: '6px 8px', fontSize: '13px' }}
+                                >
+                                  <option value="">-- Brand --</option>
+                                  {brandsList.map((b: any) => (
+                                    <option key={b.brand_id} value={b.brand_id}>
+                                      {b.brand_name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </td>
+                              <td>
                                 <select
                                   value={editDenomOrigin}
                                   onChange={e => setEditDenomOrigin(e.target.value)}
@@ -7480,6 +8699,9 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                                 >
                                   <option value="Switzerland">Switzerland</option>
                                   <option value="Turkey">Turkey</option>
+                                  <option value="United Arab Emirates">United Arab Emirates</option>
+                                  <option value="Australia">Australia</option>
+                                  <option value="Kuwait">Kuwait</option>
                                 </select>
                               </td>
                               <td style={{ textAlign: 'center' }}>
@@ -7511,6 +8733,12 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                               </td>
                               <td>{d.weight}g</td>
                               <td><code style={{ color: 'var(--accent-blue)', fontSize: '12px' }}>{d.product_code || 'N/A'}</code></td>
+                              <td>
+                                <span className="badge badge-ready" style={{ fontSize: '11px' }}>
+                                  <i className="fa-solid fa-certificate" style={{ marginRight: '4px' }}></i>
+                                  {d.brand_name || (d.origin === 'Switzerland' ? 'Valcambi Suisse' : d.origin === 'Turkey' ? 'Nadir Refinery' : 'KFH Mint')}
+                                </span>
+                              </td>
                               <td><span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{d.origin || 'N/A'}</span></td>
                               {canModify('master_data') && (
                                 <td style={{ textAlign: 'center' }}>
@@ -7577,10 +8805,32 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       />
                     </div>
                     <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label>{currentLang === 'ar' ? 'العلامة التجارية / المصنع (Lookup)' : 'Refiner / Mint Brand (Lookup)'}</label>
+                      <select 
+                        value={newDenomBrandId} 
+                        onChange={e => {
+                          const val = e.target.value;
+                          setNewDenomBrandId(val);
+                          const b = brandsList.find((x: any) => x.brand_id === parseInt(val));
+                          if (b) setNewDenomOrigin(b.country_of_origin);
+                        }}
+                      >
+                        <option value="">-- {currentLang === 'ar' ? 'اختر العلامة / المصنع' : 'Select Refiner / Mint Brand'} --</option>
+                        {brandsList.map((b: any) => (
+                          <option key={b.brand_id} value={b.brand_id}>
+                            {b.brand_name} ({b.country_of_origin}) {b.is_lbma_certified ? '★ LBMA' : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
                       <label>Product Origin</label>
                       <select value={newDenomOrigin} onChange={e => setNewDenomOrigin(e.target.value)}>
                         <option value="Switzerland">Switzerland</option>
                         <option value="Turkey">Turkey</option>
+                        <option value="United Arab Emirates">United Arab Emirates</option>
+                        <option value="Australia">Australia</option>
+                        <option value="Kuwait">Kuwait</option>
                       </select>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'flex-end' }}>
@@ -7595,6 +8845,284 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     </div>
                   </div>
                 </div>
+                )}
+              </div>
+            )}
+
+            {/* BRANDS & REFINERS LOOKUP MASTER DATA TAB */}
+            {settingsTab === 'brands' && (
+              <div className="settings-tab-pane active">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
+                  <div>
+                    <h4 style={{ margin: 0, fontSize: '16px' }}>{currentLang === 'ar' ? 'سجل العلامات التجارية والمصانع المعتمدة (Brand Lookup)' : 'Approved Brands & Refiners Master Data (Brand Lookup)'}</h4>
+                    <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: '4px 0 0 0' }}>
+                      {currentLang === 'ar'
+                        ? 'إدارة مصانع وسكّاك الذهب والفضة المعتمدة لدى بيت التمويل الكويتي (KFH) مع شهادات اعتماد LBMA وبلد المنشأ.'
+                        : 'Manage KFH-approved mint and bullion refiner brands with LBMA certification status and country of origin.'}
+                    </p>
+                  </div>
+                  <button className="btn" onClick={fetchBrands} style={{ fontSize: '12px' }}>
+                    <i className="fa-solid fa-rotate"></i> {currentLang === 'ar' ? 'تحديث القائمة' : 'Refresh Brands'}
+                  </button>
+                </div>
+
+                {!canModify('master_data') && (
+                  <div style={{ padding: '10px', background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.25)', borderRadius: '8px', color: 'var(--accent-red)', fontSize: '12px', marginBottom: '15px' }}>
+                    <i className="fa-solid fa-circle-exclamation"></i> {currentLang === 'en' ? 'Read-Only Mode: You cannot manage brands (requires Master Data policy).' : 'وضع القراءة فقط: لا يمكنك تعديل العلامات التجارية (تتطلب وحدة البيانات الرئيسية).'}
+                  </div>
+                )}
+
+                <div className="table-responsive">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>{currentLang === 'ar' ? 'رمز العلامة' : 'Brand Code'}</th>
+                        <th>{currentLang === 'ar' ? 'اسم العلامة / المصفاة' : 'Brand / Refiner Name'}</th>
+                        <th>{currentLang === 'ar' ? 'بلد المنشأ' : 'Country of Origin'}</th>
+                        <th>{currentLang === 'ar' ? 'معرف المصفاة' : 'LBMA / Refiner Ref'}</th>
+                        <th>{currentLang === 'ar' ? 'اعتماد LBMA' : 'LBMA Certified'}</th>
+                        <th>{currentLang === 'ar' ? 'الحالة' : 'Status'}</th>
+                        <th>{currentLang === 'ar' ? 'الوصف' : 'Description'}</th>
+                        {canModify('master_data') && <th style={{ width: '110px', textAlign: 'center' }}>{t('th_action')}</th>}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {brandsList.map((b: any, idx: number) => (
+                        <tr key={b.brand_id || idx}>
+                          {editingBrandIdx === idx ? (
+                            <>
+                              <td>
+                                <input
+                                  type="text"
+                                  className="form-control"
+                                  value={editBrandCode}
+                                  onChange={e => setEditBrandCode(e.target.value)}
+                                  style={{ padding: '4px 8px', fontSize: '12px' }}
+                                />
+                              </td>
+                              <td>
+                                <input
+                                  type="text"
+                                  className="form-control"
+                                  value={editBrandName}
+                                  onChange={e => setEditBrandName(e.target.value)}
+                                  style={{ padding: '4px 8px', fontSize: '12px' }}
+                                />
+                              </td>
+                              <td>
+                                <select
+                                  value={editBrandOrigin}
+                                  onChange={e => setEditBrandOrigin(e.target.value)}
+                                  style={{ padding: '4px 8px', fontSize: '12px' }}
+                                >
+                                  <option value="Switzerland">Switzerland</option>
+                                  <option value="Turkey">Turkey</option>
+                                  <option value="United Arab Emirates">United Arab Emirates</option>
+                                  <option value="Australia">Australia</option>
+                                  <option value="Kuwait">Kuwait</option>
+                                  <option value="United Kingdom">United Kingdom</option>
+                                </select>
+                              </td>
+                              <td>
+                                <input
+                                  type="text"
+                                  className="form-control"
+                                  value={editBrandLbmaId}
+                                  onChange={e => setEditBrandLbmaId(e.target.value)}
+                                  style={{ padding: '4px 8px', fontSize: '12px' }}
+                                />
+                              </td>
+                              <td>
+                                <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', cursor: 'pointer' }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={editBrandLbmaCert}
+                                    onChange={e => setEditBrandLbmaCert(e.target.checked)}
+                                  />
+                                  <span>LBMA</span>
+                                </label>
+                              </td>
+                              <td>
+                                <span className="badge badge-ready">Active</span>
+                              </td>
+                              <td>
+                                <input
+                                  type="text"
+                                  className="form-control"
+                                  value={editBrandDesc}
+                                  onChange={e => setEditBrandDesc(e.target.value)}
+                                  style={{ padding: '4px 8px', fontSize: '12px' }}
+                                />
+                              </td>
+                              <td style={{ textAlign: 'center' }}>
+                                <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
+                                  <button
+                                    className="btn btn-primary"
+                                    style={{ padding: '4px 10px', fontSize: '12px' }}
+                                    onClick={() => handleSaveEditBrand(idx)}
+                                  >
+                                    <i className="fa-solid fa-check"></i>
+                                  </button>
+                                  <button
+                                    className="btn"
+                                    style={{ padding: '4px 10px', fontSize: '12px' }}
+                                    onClick={() => setEditingBrandIdx(null)}
+                                  >
+                                    <i className="fa-solid fa-xmark"></i>
+                                  </button>
+                                </div>
+                              </td>
+                            </>
+                          ) : (
+                            <>
+                              <td>
+                                <code style={{ color: 'var(--accent-blue)', fontWeight: 'bold' }}>{b.brand_code}</code>
+                              </td>
+                              <td>
+                                <strong>{b.brand_name}</strong>
+                              </td>
+                              <td>
+                                <span>{b.country_of_origin}</span>
+                              </td>
+                              <td>
+                                <code style={{ fontSize: '11px' }}>{b.lbma_refiner_id || 'N/A'}</code>
+                              </td>
+                              <td>
+                                {b.is_lbma_certified ? (
+                                  <span className="badge badge-ready" style={{ fontSize: '11px' }}>
+                                    <i className="fa-solid fa-shield-halved" style={{ marginRight: '3px' }}></i> LBMA Certified
+                                  </span>
+                                ) : (
+                                  <span className="badge" style={{ fontSize: '11px', background: 'rgba(156,163,175,0.2)', color: 'var(--text-muted)' }}>
+                                    Non-LBMA
+                                  </span>
+                                )}
+                              </td>
+                              <td>
+                                <span className={`badge ${b.is_active !== false ? 'badge-ready' : 'badge-reserved'}`}>
+                                  {b.is_active !== false ? (currentLang === 'ar' ? 'نشط' : 'Active') : (currentLang === 'ar' ? 'موقوف' : 'Inactive')}
+                                </span>
+                              </td>
+                              <td>
+                                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{b.description || '—'}</span>
+                              </td>
+                              {canModify('master_data') && (
+                                <td style={{ textAlign: 'center' }}>
+                                  <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
+                                    <button
+                                      className="btn"
+                                      style={{ padding: '4px 8px', fontSize: '12px', color: 'var(--kfh-green)', borderColor: 'var(--kfh-green)' }}
+                                      onClick={() => handleStartEditBrand(idx)}
+                                      title="Edit"
+                                    >
+                                      <i className="fa-solid fa-pen"></i>
+                                    </button>
+                                    <button
+                                      className="btn"
+                                      style={{ padding: '4px 8px', fontSize: '12px', color: 'var(--accent-red)', borderColor: '#FECACA' }}
+                                      onClick={() => handleDeleteBrand(idx)}
+                                      title="Delete"
+                                    >
+                                      <i className="fa-solid fa-trash"></i>
+                                    </button>
+                                  </div>
+                                </td>
+                              )}
+                            </>
+                          )}
+                        </tr>
+                      ))}
+                      {brandsList.length === 0 && (
+                        <tr>
+                          <td colSpan={8} style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>
+                            {currentLang === 'ar' ? 'لا توجد علامات تجارية مسجلة. انقر على "تحديث" أو سجّل علامة جديدة أدناه.' : 'No brands registered. Click refresh or register a new brand below.'}
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Register New Brand Form */}
+                {canModify('master_data') && (
+                  <div className="glass-card" style={{ marginTop: '24px' }}>
+                    <h4 style={{ marginBottom: '16px', fontSize: '15px' }}>
+                      <i className="fa-solid fa-plus" style={{ color: 'var(--kfh-green)', marginRight: '6px' }}></i>
+                      {currentLang === 'ar' ? 'تسجيل علامة تجارية / مصنع جديد' : 'Register New Brand / Bullion Refiner'}
+                    </h4>
+                    <div className="split-grid-3" style={{ gap: '16px', marginBottom: '16px' }}>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label>{currentLang === 'ar' ? 'رمز العلامة (مثل PAMP)' : 'Brand Code (e.g. PAMP)'}</label>
+                        <input
+                          type="text"
+                          className="form-control"
+                          placeholder="e.g. PAMP"
+                          value={newBrandCode}
+                          onChange={e => setNewBrandCode(e.target.value.toUpperCase())}
+                        />
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label>{currentLang === 'ar' ? 'اسم المصفاة / العلامة' : 'Brand / Refiner Full Name'}</label>
+                        <input
+                          type="text"
+                          className="form-control"
+                          placeholder="e.g. PAMP Suisse SA"
+                          value={newBrandName}
+                          onChange={e => setNewBrandName(e.target.value)}
+                        />
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label>{currentLang === 'ar' ? 'بلد المنشأ' : 'Country of Origin'}</label>
+                        <select value={newBrandOrigin} onChange={e => setNewBrandOrigin(e.target.value)}>
+                          <option value="Switzerland">Switzerland</option>
+                          <option value="Turkey">Turkey</option>
+                          <option value="United Arab Emirates">United Arab Emirates</option>
+                          <option value="Australia">Australia</option>
+                          <option value="Kuwait">Kuwait</option>
+                          <option value="United Kingdom">United Kingdom</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div className="split-grid-3" style={{ gap: '16px', marginBottom: '16px' }}>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label>{currentLang === 'ar' ? 'معرف المصفاة / كود الاعتماد' : 'LBMA Refiner ID / Certificate Code'}</label>
+                        <input
+                          type="text"
+                          className="form-control"
+                          placeholder="e.g. LBMA-CH-0042"
+                          value={newBrandLbmaId}
+                          onChange={e => setNewBrandLbmaId(e.target.value)}
+                        />
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label>{currentLang === 'ar' ? 'الوصف / ملاحظات المطابقة' : 'Description / Compliance Notes'}</label>
+                        <input
+                          type="text"
+                          className="form-control"
+                          placeholder="e.g. LBMA Good Delivery accredited Swiss gold refiner"
+                          value={newBrandDesc}
+                          onChange={e => setNewBrandDesc(e.target.value)}
+                        />
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 0, display: 'flex', alignItems: 'center', paddingTop: '25px' }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontWeight: 'bold' }}>
+                          <input
+                            type="checkbox"
+                            checked={newBrandLbmaCert}
+                            onChange={e => setNewBrandLbmaCert(e.target.checked)}
+                          />
+                          <span>{currentLang === 'ar' ? 'معتمد رسمياً من LBMA (Good Delivery)' : 'LBMA Good Delivery Certified'}</span>
+                        </label>
+                      </div>
+                    </div>
+                    <button
+                      className="btn btn-primary"
+                      onClick={handleAddBrand}
+                      disabled={!newBrandCode.trim() || !newBrandName.trim()}
+                    >
+                      <i className="fa-solid fa-plus"></i> {currentLang === 'ar' ? 'تسجيل العلامة التجارية' : 'Register Brand'}
+                    </button>
+                  </div>
                 )}
               </div>
             )}
@@ -8810,12 +10338,81 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                           <div><strong>{currentLang === 'en' ? 'Status Code:' : 'حالة الاعتماد:'}</strong> {selectedWfInstance.details.status_code}</div>
                         </div>
                       ) : selectedWfInstance.workflow_type === "INTAKE_SHIPMENT" ? (
-                        <div className="split-grid-2" style={{ gap: '10px 20px' }}>
-                          <div><strong>{currentLang === 'en' ? 'P.O. Number:' : 'رقم طلب الشراء:'}</strong> {selectedWfInstance.details.po_number}</div>
-                          <div><strong>{currentLang === 'en' ? 'Lot Number:' : 'رقم اللوت:'}</strong> {selectedWfInstance.details.lot_number}</div>
-                          <div><strong>{currentLang === 'en' ? 'Destination Location:' : 'موقع الوجهة:'}</strong> {selectedWfInstance.details.location_name}</div>
-                          <div><strong>{currentLang === 'en' ? 'Received By:' : 'المستلم:'}</strong> {selectedWfInstance.details.received_by}</div>
-                          <div><strong>{currentLang === 'en' ? 'Status Code:' : 'حالة الاعتماد:'}</strong> {selectedWfInstance.details.status_code}</div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                          <div className="split-grid-2" style={{ gap: '10px 20px' }}>
+                            <div><strong>{currentLang === 'en' ? 'Supplier:' : 'المورد:'}</strong> {selectedWfInstance.details.vendor_name || 'Direct Supplier'}</div>
+                            <div><strong>{currentLang === 'en' ? 'Airway Bill / Ref:' : 'بوليصة الشحن / المرجع:'}</strong> {selectedWfInstance.details.airway_bill || selectedWfInstance.details.shipment_reference || 'N/A'}</div>
+                            <div><strong>{currentLang === 'en' ? 'Delivery Note:' : 'إشعار التسليم:'}</strong> {selectedWfInstance.details.delivery_note || 'N/A'}</div>
+                            <div><strong>{currentLang === 'en' ? 'Receiving Date:' : 'تاريخ الاستلام:'}</strong> {selectedWfInstance.details.receiving_date ? new Date(selectedWfInstance.details.receiving_date).toLocaleDateString() : 'N/A'}</div>
+                            <div><strong>{currentLang === 'en' ? 'Lot Number:' : 'رقم اللوت:'}</strong> {selectedWfInstance.details.lot_number}</div>
+                            <div><strong>{currentLang === 'en' ? 'Vault Location:' : 'موقع الخزينة:'}</strong> {selectedWfInstance.details.location_name}</div>
+                            <div><strong>{currentLang === 'en' ? 'Received By (Maker):' : 'المستلم (المنشئ):'}</strong> {selectedWfInstance.details.received_by}</div>
+                            <div><strong>{currentLang === 'en' ? 'Status Code:' : 'حالة الاعتماد:'}</strong> {selectedWfInstance.details.status_code}</div>
+                            {selectedWfInstance.details.supporting_document_url && (
+                              <div style={{ gridColumn: 'span 2' }}>
+                                <strong>{currentLang === 'en' ? 'Attached Document:' : 'المستند المرفق:'}</strong> <a href={selectedWfInstance.details.supporting_document_url} target="_blank" rel="noreferrer" style={{ color: 'var(--accent-blue)', textDecoration: 'underline' }}>{selectedWfInstance.details.supporting_document_url}</a>
+                              </div>
+                            )}
+                            {selectedWfInstance.details.discrepancy_notes && (
+                              <div style={{ gridColumn: 'span 2', color: 'var(--accent-orange)' }}>
+                                <strong>{currentLang === 'en' ? 'Discrepancy / Notes:' : 'ملاحظات الفروقات / الاستلام:'}</strong> {selectedWfInstance.details.discrepancy_notes}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Bars in Shipment Table for Checker Review */}
+                          {(() => {
+                            let itemsList: any[] = [];
+                            try {
+                              if (selectedWfInstance.details.serials_json) {
+                                itemsList = JSON.parse(selectedWfInstance.details.serials_json);
+                              }
+                            } catch (_) {}
+
+                            if (itemsList.length === 0) return null;
+
+                            return (
+                              <div style={{ marginTop: '8px', borderTop: '1px solid var(--surface-border)', paddingTop: '10px' }}>
+                                <div style={{ fontSize: '12px', fontWeight: 'bold', marginBottom: '6px', color: 'var(--kfh-green)' }}>
+                                  {currentLang === 'en' ? `Bars Manifest for Verification (${itemsList.length} items):` : `كشف السبائك المطلوب التحقق منها (${itemsList.length} قطعة):`}
+                                </div>
+                                <div className="table-responsive" style={{ maxHeight: '180px', overflowY: 'auto' }}>
+                                  <table style={{ fontSize: '11px' }}>
+                                    <thead>
+                                      <tr>
+                                        <th>#</th>
+                                        <th>{currentLang === 'en' ? 'Serial Number' : 'الرقم التسلسلي'}</th>
+                                        <th>{currentLang === 'en' ? 'Gross Wt' : 'الوزن'}</th>
+                                        <th>{currentLang === 'en' ? 'Purity' : 'النقاوة'}</th>
+                                        <th>{currentLang === 'en' ? 'Refiner' : 'المصفاة'}</th>
+                                        <th>{currentLang === 'en' ? 'Condition' : 'الحالة'}</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {itemsList.map((it: any, iIdx: number) => (
+                                        <tr key={iIdx} style={{ backgroundColor: it.is_damaged ? 'rgba(239, 68, 68, 0.06)' : 'transparent' }}>
+                                          <td>{iIdx + 1}</td>
+                                          <td><strong>{it.serial}</strong></td>
+                                          <td>{it.weight_grams ? `${it.weight_grams}g` : '1000g'}</td>
+                                          <td>{it.purity || it.fineness_ppt || '999.9'} PPT</td>
+                                          <td>{it.refiner_name || 'Valcambi Suisse'}</td>
+                                          <td>
+                                            {it.is_damaged ? (
+                                              <span className="badge" style={{ backgroundColor: 'var(--accent-red)', color: '#fff' }}>
+                                                Damaged: {it.damage_reason || 'Quarantined'}
+                                              </span>
+                                            ) : (
+                                              <span className="badge badge-ready">Good Condition</span>
+                                            )}
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+                            );
+                          })()}
                         </div>
                       ) : selectedWfInstance.workflow_type === "BRANCH_TRANSFER" ? (
                         <div className="split-grid-2" style={{ gap: '10px 20px' }}>
@@ -9125,8 +10722,585 @@ const [migrationApproved, setMigrationApproved] = useState(false);
             </div>
           </div>
         )}
+        {showScanQrModal && (
+          <div className="modal-overlay active" onClick={() => setShowScanQrModal(false)}>
+            <div className="glass-card modal-content-box" onClick={e => e.stopPropagation()} style={{ maxWidth: '500px' }}>
+              <div className="modal-header">
+                <h3>{currentLang === 'ar' ? 'مسح والتحقق من سبيكة GFS' : 'Scan & Lookup GFS Bar'}</h3>
+                <span className="modal-close-btn" onClick={() => setShowScanQrModal(false)}>&times;</span>
+              </div>
+              <div style={{ padding: '15px 0' }}>
+                <div className="form-group">
+                  <label>{currentLang === 'ar' ? 'أدخل الرقم التسلسلي أو امسح الباركود' : 'Enter Serial or Scan Barcode'}</label>
+                  <div style={{ display: 'flex', gap: '10px' }}>
+                    <input type="text" className="form-control" placeholder="e.g. SN-KFH-100G-001" value={scanQrInput} onChange={e => setScanQrInput(e.target.value)} />
+                    <button className="btn btn-primary" onClick={async () => {
+                      setScanQrError('');
+                      setScanQrResult(null);
+                      try {
+                        const res = await fetch(`${API_BASE}/inventory/items/scan-qr`, {
+                          method: 'POST',
+                          headers: { 
+                            'Content-Type': 'application/json'
+                          },
+                          body: JSON.stringify({ serialNumber: scanQrInput })
+                        });
+                        if (res.ok) {
+                          setScanQrResult(await res.json());
+                        } else {
+                          const err = await res.json();
+                          setScanQrError(err.error || 'Lookup failed');
+                        }
+                      } catch (e: any) {
+                        setScanQrError(e.message);
+                      }
+                    }}>{currentLang === 'ar' ? 'تحقق' : 'Verify'}</button>
+                  </div>
+                </div>
+
+                {scanQrError && (
+                  <div style={{ padding: '10px', background: 'rgba(220, 53, 69, 0.1)', border: '1px solid #dc3545', color: '#dc3545', borderRadius: '4px', marginTop: '10px' }}>
+                    {scanQrError}
+                  </div>
+                )}
+
+                {scanQrResult && (
+                  <div style={{ marginTop: '15px', padding: '15px', background: 'rgba(255,255,255,0.03)', borderRadius: '6px', border: '1px solid var(--surface-border)', fontSize: '13px' }}>
+                    <div style={{ marginBottom: '8px' }}><strong>{currentLang === 'ar' ? 'الرقم التسلسلي:' : 'Serial Number:'}</strong> {scanQrResult.serialNumber}</div>
+                    <div style={{ marginBottom: '8px' }}><strong>{currentLang === 'ar' ? 'الملكية:' : 'Ownership Type:'}</strong> {scanQrResult.ownershipType}</div>
+                    <div style={{ marginBottom: '8px' }}><strong>{currentLang === 'ar' ? 'حساب العميل:' : 'Customer Account:'}</strong> {scanQrResult.customerAccountNumber || '—'}</div>
+                    <div style={{ marginBottom: '8px' }}><strong>{currentLang === 'ar' ? 'متوسط تكلفة الشراء:' : 'Average Purchase Cost:'}</strong> {scanQrResult.averagePurchaseCost ? `$${scanQrResult.averagePurchaseCost.toFixed(2)}` : '—'}</div>
+                    <div><strong>{currentLang === 'ar' ? 'آخر مزامنة مع GFS:' : 'GFS Last Sync:'}</strong> {scanQrResult.gfsLastSyncAt ? new Date(scanQrResult.gfsLastSyncAt).toLocaleString() : '—'}</div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+        {/* CREATE HOME DELIVERY REQUEST MODAL (UC07) */}
+        {showCreateHomeDeliveryModal && (
+          <div className="modal-overlay active" onClick={() => setShowCreateHomeDeliveryModal(false)}>
+            <div className="glass-card modal-content-box" onClick={e => e.stopPropagation()} style={{ maxWidth: '600px', width: '90%' }}>
+              <div className="modal-header">
+                <h3>{currentLang === 'en' ? 'New Home Delivery Fulfillment Request' : 'طلب توصيل منزلي جديد (بيت التمويل الكويتي)'}</h3>
+                <span className="modal-close-btn" onClick={() => setShowCreateHomeDeliveryModal(false)}>&times;</span>
+              </div>
+              <div style={{ padding: '15px 0' }}>
+                <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '15px' }}>
+                  {currentLang === 'en'
+                    ? 'Create door-to-door residential delivery order in Kuwait. Requires PACI-compliant 12-digit Civil ID.'
+                    : 'إنشاء طلب توصيل منزلي داخل الكويت. يتطلب رقماً مدنياً صالحاً وفق خوارزمية الهيئة العامة للمعلومات المدنية.'}
+                </p>
+
+                <div className="split-grid-2" style={{ gap: '12px' }}>
+                  <div className="form-group">
+                    <label>{currentLang === 'en' ? 'Recipient Civil ID (PACI 12-digits)' : 'الرقم المدني للمستلم (12 رقماً)'}</label>
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <input 
+                        type="text" 
+                        maxLength={12}
+                        className="form-control" 
+                        placeholder="e.g. 290011501239" 
+                        value={newHdCivilId} 
+                        onChange={e => {
+                          const val = e.target.value;
+                          setNewHdCivilId(val);
+                          if (val.length === 12) {
+                            handleValidateCivilIdApi(val);
+                          } else {
+                            setCivilIdValidationResult(null);
+                          }
+                        }} 
+                      />
+                      <button className="btn btn-secondary btn-sm" type="button" onClick={() => handleValidateCivilIdApi(newHdCivilId)}>
+                        {currentLang === 'en' ? 'Verify' : 'تحقق'}
+                      </button>
+                    </div>
+                    {civilIdValidationResult && (
+                      <div style={{ fontSize: '11px', marginTop: '4px', color: civilIdValidationResult.isValid ? 'var(--accent-green)' : 'var(--accent-red)' }}>
+                        <i className={`fa-solid ${civilIdValidationResult.isValid ? 'fa-circle-check' : 'fa-circle-xmark'}`}></i> {civilIdValidationResult.message}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="form-group">
+                    <label>{currentLang === 'en' ? 'Recipient Full Name' : 'اسم المستلم الثلاثي'}</label>
+                    <input type="text" className="form-control" placeholder="e.g. Abdullah Al-Sabah" value={newHdName} onChange={e => setNewHdName(e.target.value)} />
+                  </div>
+
+                  <div className="form-group">
+                    <label>{currentLang === 'en' ? 'Contact Phone (Kuwait Mobile)' : 'رقم الهاتف المتنقل'}</label>
+                    <input type="text" className="form-control" placeholder="+965 99887766" value={newHdPhone} onChange={e => setNewHdPhone(e.target.value)} />
+                  </div>
+
+                  <div className="form-group">
+                    <label>{currentLang === 'en' ? 'Customer GFS Account #' : 'رقم حساب العميل بـ GFS'}</label>
+                    <input type="text" className="form-control" placeholder="e.g. ACC-KFH-889900" value={newHdAccount} onChange={e => setNewHdAccount(e.target.value)} />
+                  </div>
+
+                  <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+                    <label>{currentLang === 'en' ? 'Select 24K Gold Bar from Vault (Ready)' : 'اختر سبيكة الذهب 24 قيراط الجاهزة من الخزينة'}</label>
+                    <select className="form-control" style={{ color: '#000' }} value={newHdBarId} onChange={e => setNewHdBarId(e.target.value)}>
+                      <option value="">-- {currentLang === 'en' ? 'Select Bar' : 'اختر السبيكة'} --</option>
+                      {inventoryList.filter((i: any) => i.status === 'READY').map((item: any, idx: number) => (
+                        <option key={idx} value={item.item_id}>
+                          {item.serial_number} - {item.metal} ({item.denomination}) - 24K (999.9)
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Kuwait Address Elements */}
+                  <div className="form-group">
+                    <label>{currentLang === 'en' ? 'Governorate' : 'المحافظة'}</label>
+                    <select className="form-control" style={{ color: '#000' }} value={newHdGovernorate} onChange={e => setNewHdGovernorate(e.target.value)}>
+                      <option value="Capital">{currentLang === 'en' ? 'Capital (Al-Asimah)' : 'العاصمة'}</option>
+                      <option value="Hawalli">{currentLang === 'en' ? 'Hawalli' : 'حولي'}</option>
+                      <option value="Farwaniya">{currentLang === 'en' ? 'Farwaniya' : 'الفروانية'}</option>
+                      <option value="Ahmadi">{currentLang === 'en' ? 'Ahmadi' : 'الأحمدي'}</option>
+                      <option value="Jahra">{currentLang === 'en' ? 'Jahra' : 'الجهراء'}</option>
+                      <option value="Mubarak Al-Kabeer">{currentLang === 'en' ? 'Mubarak Al-Kabeer' : 'مبارك الكبير'}</option>
+                    </select>
+                  </div>
+
+                  <div className="form-group">
+                    <label>{currentLang === 'en' ? 'Area / City' : 'المنطقة'}</label>
+                    <input type="text" className="form-control" placeholder="e.g. Shuwaikh / Jabriya" value={newHdArea} onChange={e => setNewHdArea(e.target.value)} />
+                  </div>
+
+                  <div className="form-group">
+                    <label>{currentLang === 'en' ? 'Block #' : 'القطعة'}</label>
+                    <input type="text" className="form-control" placeholder="e.g. 1" value={newHdBlock} onChange={e => setNewHdBlock(e.target.value)} />
+                  </div>
+
+                  <div className="form-group">
+                    <label>{currentLang === 'en' ? 'Street #' : 'الشارع'}</label>
+                    <input type="text" className="form-control" placeholder="e.g. Street 10" value={newHdStreet} onChange={e => setNewHdStreet(e.target.value)} />
+                  </div>
+
+                  <div className="form-group">
+                    <label>{currentLang === 'en' ? 'Building / House #' : 'المبنى / المنزل'}</label>
+                    <input type="text" className="form-control" placeholder="e.g. Building 5" value={newHdBuilding} onChange={e => setNewHdBuilding(e.target.value)} />
+                  </div>
+
+                  <div className="form-group">
+                    <label>{currentLang === 'en' ? 'Floor / Flat (Optional)' : 'الدور / الشقة (اختياري)'}</label>
+                    <input type="text" className="form-control" placeholder="e.g. Flat 3" value={newHdFlat} onChange={e => setNewHdFlat(e.target.value)} />
+                  </div>
+
+                  <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+                    <label>{currentLang === 'en' ? 'Delivery Special Instructions' : 'تعليمات خاصة للتسليم'}</label>
+                    <input type="text" className="form-control" placeholder="e.g. Call before arrival, VIP client" value={newHdInstructions} onChange={e => setNewHdInstructions(e.target.value)} />
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
+                  <button className="btn btn-primary" style={{ flex: 1 }} onClick={async () => {
+                    if (!newHdBarId || !newHdCivilId || !newHdName || !newHdPhone) {
+                      alert(currentLang === 'en' ? 'Please fill in all mandatory fields.' : 'يرجى استكمال جميع الحقول الإلزامية.');
+                      return;
+                    }
+                    try {
+                      const res = await fetch(`${API_BASE}/gfs/home-delivery`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          barId: parseInt(newHdBarId),
+                          customerAccountNumber: newHdAccount,
+                          recipientCivilId: newHdCivilId,
+                          recipientName: newHdName,
+                          recipientPhone: newHdPhone,
+                          governorate: newHdGovernorate,
+                          area: newHdArea,
+                          block: newHdBlock,
+                          street: newHdStreet,
+                          building: newHdBuilding,
+                          flat: newHdFlat,
+                          deliveryInstructions: newHdInstructions,
+                          createdBy: username || 'SYSTEM'
+                        })
+                      });
+                      if (res.ok) {
+                        const data = await res.json();
+                        alert(currentLang === 'en' 
+                          ? `Home delivery created! Ref: ${data.deliveryReferenceNumber}\n6-Digit Verification OTP: ${data.verificationOtp}` 
+                          : `تم إنشاء طلب التوصيل المنزلي! المرجع: ${data.deliveryReferenceNumber}\nرمز التحقق (OTP): ${data.verificationOtp}`);
+                        setShowCreateHomeDeliveryModal(false);
+                        fetchHomeDeliveries();
+                        fetchInventory();
+                      } else {
+                        const err = await res.json();
+                        alert(err.error || 'Creation failed');
+                      }
+                    } catch (e) {
+                      alert('Error submitting home delivery request');
+                    }
+                  }}>
+                    <i className="fa-solid fa-paper-plane"></i> {currentLang === 'en' ? 'Create Order' : 'إنشاء الطلب'}
+                  </button>
+                  <button className="btn" onClick={() => setShowCreateHomeDeliveryModal(false)}>
+                    {currentLang === 'en' ? 'Cancel' : 'إلغاء'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* DISPATCH HOME DELIVERY MODAL */}
+        {showDispatchHdModal && (
+          <div className="modal-overlay active" onClick={() => setShowDispatchHdModal(false)}>
+            <div className="glass-card modal-content-box" onClick={e => e.stopPropagation()} style={{ maxWidth: '480px' }}>
+              <div className="modal-header">
+                <h3>{currentLang === 'en' ? 'Dispatch Home Delivery to Courier' : 'تسليم الشحنة لمندوب التوصيل المنزلي'}</h3>
+                <span className="modal-close-btn" onClick={() => setShowDispatchHdModal(false)}>&times;</span>
+              </div>
+              <div style={{ padding: '15px 0' }}>
+                <div className="form-group">
+                  <label>{currentLang === 'en' ? 'Courier Logistics Company' : 'شركة النقل واللوجستيات'}</label>
+                  <input type="text" className="form-control" value={hdCourierCompany} onChange={e => setHdCourierCompany(e.target.value)} />
+                </div>
+                <div className="form-group">
+                  <label>{currentLang === 'en' ? 'Courier Representative Name' : 'اسم المندوب / المرافق الأمني'}</label>
+                  <input type="text" className="form-control" value={hdCourierRepName} onChange={e => setHdCourierRepName(e.target.value)} />
+                </div>
+                <div className="form-group">
+                  <label>{currentLang === 'en' ? 'Representative Civil ID' : 'الرقم المدني للمندوب'}</label>
+                  <input type="text" className="form-control" value={hdCourierCivilId} onChange={e => setHdCourierCivilId(e.target.value)} />
+                </div>
+                <div className="form-group">
+                  <label>{currentLang === 'en' ? 'Vehicle Plate Number' : 'رقم لوحة المركبة الأمنية'}</label>
+                  <input type="text" className="form-control" value={hdVehiclePlate} onChange={e => setHdVehiclePlate(e.target.value)} />
+                </div>
+                <div className="form-group">
+                  <label>{currentLang === 'en' ? 'Tamper-Evident Security Seal #' : 'رقم القفل الأمني المشمع'}</label>
+                  <input type="text" className="form-control" value={hdSecuritySeal} onChange={e => setHdSecuritySeal(e.target.value)} />
+                </div>
+                <button className="btn btn-primary" style={{ width: '100%', marginTop: '10px' }} onClick={async () => {
+                  try {
+                    const res = await fetch(`${API_BASE}/gfs/home-delivery/${dispatchHdId}/dispatch`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        courierCompany: hdCourierCompany,
+                        courierRepName: hdCourierRepName,
+                        courierCivilId: hdCourierCivilId,
+                        vehiclePlate: hdVehiclePlate,
+                        securitySealNumber: hdSecuritySeal,
+                        dispatchedBy: username || 'SYSTEM'
+                      })
+                    });
+                    if (res.ok) {
+                      alert(currentLang === 'en' ? 'Dispatched to courier! Status set to IN_TRANSIT.' : 'تم تسليم الشحنة للناقل! تم التحديث إلى قيد النقل.');
+                      setShowDispatchHdModal(false);
+                      fetchHomeDeliveries();
+                    } else {
+                      const err = await res.json();
+                      alert(err.error || 'Dispatch failed');
+                    }
+                  } catch (e) {
+                    alert('Error dispatching home delivery');
+                  }
+                }}>
+                  <i className="fa-solid fa-truck"></i> {currentLang === 'en' ? 'Confirm Dispatch' : 'تأكيد التسليم للناقل'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* CONFIRM HOME DELIVERY HANDOVER MODAL */}
+        {showConfirmHandoverModal && (
+          <div className="modal-overlay active" onClick={() => setShowConfirmHandoverModal(false)}>
+            <div className="glass-card modal-content-box" onClick={e => e.stopPropagation()} style={{ maxWidth: '480px' }}>
+              <div className="modal-header">
+                <h3>{currentLang === 'en' ? 'Confirm Customer Handover (OTP Verification)' : 'تأكيد تسليم العميل (التحقق برمز OTP)'}</h3>
+                <span className="modal-close-btn" onClick={() => setShowConfirmHandoverModal(false)}>&times;</span>
+              </div>
+              <div style={{ padding: '15px 0' }}>
+                <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '15px' }}>
+                  {currentLang === 'en'
+                    ? 'Enter 6-digit OTP provided by the customer and verify recipient Civil ID at the doorstep.'
+                    : 'أدخل رمز التحقق (OTP) المكون من 6 أرقام والمستلم من العميل وتحقق من بطاقته المدنية عند الاستلام.'}
+                </p>
+
+                <div className="form-group">
+                  <label>{currentLang === 'en' ? '6-Digit Verification OTP' : 'رمز التحقق (OTP) 6 أرقام'}</label>
+                  <input type="text" maxLength={6} className="form-control" style={{ fontSize: '18px', letterSpacing: '4px', textAlign: 'center', fontWeight: 'bold' }} placeholder="123456" value={confirmHdOtp} onChange={e => setConfirmHdOtp(e.target.value)} />
+                </div>
+
+                <div className="form-group">
+                  <label>{currentLang === 'en' ? 'Recipient Civil ID Verified' : 'الرقم المدني للمستلم الفعلي'}</label>
+                  <input type="text" maxLength={12} className="form-control" value={confirmHdCivilId} onChange={e => setConfirmHdCivilId(e.target.value)} />
+                </div>
+
+                <div className="form-group">
+                  <label>{currentLang === 'en' ? 'Customer Digital Signature Reference' : 'مرجع التوقيع الإلكتروني'}</label>
+                  <input type="text" className="form-control" value={confirmHdSignature} onChange={e => setConfirmHdSignature(e.target.value)} />
+                </div>
+
+                <button className="btn btn-primary" style={{ width: '100%', marginTop: '10px', background: 'var(--accent-green)' }} onClick={async () => {
+                  try {
+                    const res = await fetch(`${API_BASE}/gfs/home-delivery/${confirmHdId}/confirm-handover`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        verificationOtp: confirmHdOtp,
+                        receivedByCivilId: confirmHdCivilId,
+                        customerSignature: confirmHdSignature
+                      })
+                    });
+                    if (res.ok) {
+                      alert(currentLang === 'en' ? 'Delivery successfully confirmed and completed!' : 'تم تأكيد واكتمال تسليم الشحنة للعميل بنجاح!');
+                      setShowConfirmHandoverModal(false);
+                      fetchHomeDeliveries();
+                      fetchInventory();
+                    } else {
+                      const err = await res.json();
+                      alert(err.error || 'Handover confirmation failed');
+                    }
+                  } catch (e) {
+                    alert('Error confirming handover');
+                  }
+                }}>
+                  <i className="fa-solid fa-circle-check"></i> {currentLang === 'en' ? 'Confirm Delivery Complete' : 'تأكيد اكتمال التسليم'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* GFS BRANCH DISPATCH MODAL */}
+        {showGfsDispatchModal && (
+          <div className="modal-overlay active" onClick={() => setShowGfsDispatchModal(false)}>
+            <div className="glass-card modal-content-box" onClick={e => e.stopPropagation()} style={{ maxWidth: '480px' }}>
+              <div className="modal-header">
+                <h3>{currentLang === 'en' ? 'Dispatch GFS Delivery to Courier' : 'تسليم شحنة GFS للناقل الأمني'}</h3>
+                <span className="modal-close-btn" onClick={() => setShowGfsDispatchModal(false)}>&times;</span>
+              </div>
+              <div style={{ padding: '15px 0' }}>
+                <div className="form-group">
+                  <label>{currentLang === 'en' ? 'Courier Logistics Company' : 'شركة النقل واللوجستيات'}</label>
+                  <input type="text" className="form-control" value={gfsCourierCompany} onChange={e => setGfsCourierCompany(e.target.value)} />
+                </div>
+                <div className="form-group">
+                  <label>{currentLang === 'en' ? 'Courier Representative Name' : 'اسم المندوب / المرافق الأمني'}</label>
+                  <input type="text" className="form-control" value={gfsCourierRepName} onChange={e => setGfsCourierRepName(e.target.value)} />
+                </div>
+                <div className="form-group">
+                  <label>{currentLang === 'en' ? 'Representative Civil ID' : 'الرقم المدني للمندوب'}</label>
+                  <input type="text" className="form-control" value={gfsCourierCivilId} onChange={e => setGfsCourierCivilId(e.target.value)} />
+                </div>
+                <div className="form-group">
+                  <label>{currentLang === 'en' ? 'Vehicle Plate Number' : 'رقم لوحة المركبة الأمنية'}</label>
+                  <input type="text" className="form-control" value={gfsVehiclePlate} onChange={e => setGfsVehiclePlate(e.target.value)} />
+                </div>
+                <div className="form-group">
+                  <label>{currentLang === 'en' ? 'Security Seal #' : 'رقم القفل الأمني'}</label>
+                  <input type="text" className="form-control" value={gfsSecuritySeal} onChange={e => setGfsSecuritySeal(e.target.value)} />
+                </div>
+                <button className="btn btn-primary" style={{ width: '100%', marginTop: '10px' }} onClick={async () => {
+                  try {
+                    const res = await fetch(`${API_BASE}/gfs/delivery-requests/${gfsDispatchId}/dispatch`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        courierCompany: gfsCourierCompany,
+                        courierRepName: gfsCourierRepName,
+                        courierCivilId: gfsCourierCivilId,
+                        vehiclePlate: gfsVehiclePlate,
+                        securitySealNumber: gfsSecuritySeal,
+                        dispatchedBy: username || 'SYSTEM'
+                      })
+                    });
+                    if (res.ok) {
+                      alert(currentLang === 'en' ? 'Dispatched to branch courier!' : 'تم تسليم الشحنة لناقل الفرع بنجاح!');
+                      setShowGfsDispatchModal(false);
+                      fetchGfsDeliveryRequests();
+                    } else {
+                      const err = await res.json();
+                      alert(err.error || 'Dispatch failed');
+                    }
+                  } catch (e) {
+                    alert('Error dispatching GFS delivery');
+                  }
+                }}>
+                  <i className="fa-solid fa-truck"></i> {currentLang === 'en' ? 'Confirm Dispatch' : 'تأكيد التسليم للناقل'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* DAMAGED BAR MODAL (UC12) */}
+        {showDamageModal && (
+          <div className="modal-overlay active" onClick={() => setShowDamageModal(false)}>
+            <div className="glass-card modal-content-box" onClick={e => e.stopPropagation()} style={{ maxWidth: '480px' }}>
+              <div className="modal-header">
+                <h3>{currentLang === 'ar' ? 'إبلاغ عن سبيكة تالفة (Maker-Checker)' : 'Report Damaged Gold Bar (UC12)'}</h3>
+                <span className="modal-close-btn" onClick={() => setShowDamageModal(false)}>&times;</span>
+              </div>
+              <div style={{ padding: '15px 0' }}>
+                <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '15px' }}>
+                  {currentLang === 'en'
+                    ? 'Submits damaged bar to Checker for mandatory 4-Eyes quarantine approval. Reporter cannot self-approve.'
+                    : 'تقديم تقرير التلف للمراجع للاعتماد الإلزامي بموجب مبدأ 4-Eyes. لا يحق للصانع اعتماد تقريره ذاتياً.'}
+                </p>
+
+                <div className="form-group">
+                  <label>{currentLang === 'en' ? 'Select Bar from Vault' : 'اختر السبيكة من الخزينة'}</label>
+                  <select className="form-control" style={{ color: '#000' }} value={damageItemId || ''} onChange={e => setDamageItemId(parseInt(e.target.value))}>
+                    <option value="">-- {currentLang === 'en' ? 'Choose Bar' : 'اختر السبيكة'} --</option>
+                    {inventoryList.map((item: any, idx: number) => (
+                      <option key={idx} value={item.item_id}>
+                        {item.serial_number} - {item.metal} ({item.denomination}) - Status: {item.status}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label>{currentLang === 'ar' ? 'سبب التلف والخلل الفني' : 'Reason for Damage / Defect'}</label>
+                  <select className="form-control" style={{ color: '#000' }} value={damageReason} onChange={e => setDamageReason(e.target.value)}>
+                    <option value="SCRATCHED_HALLMARK">{currentLang === 'en' ? 'Scratched Hallmark / Stamp Defect' : 'ختم مخدوش / تلف في الدمغة'}</option>
+                    <option value="DENT_DEFORMATION">{currentLang === 'en' ? 'Dent / Physical Deformation' : 'انبعاج / تشوه مادي'}</option>
+                    <option value="PURITY_ASSAY_DISCREPANCY">{currentLang === 'en' ? 'Assay / Purity Discrepancy (< 999.9)' : 'اختلاف في النقاوة والفحص (< 999.9)'}</option>
+                    <option value="WEIGHT_VARIANCE">{currentLang === 'en' ? 'Weight Under Tolerance' : 'نقص في الوزن الفعلي'}</option>
+                    <option value="OXIDATION_TARNISH">{currentLang === 'en' ? 'Surface Oxidation / Discoloration' : 'أكسدة / تغير لون السطح'}</option>
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label>{currentLang === 'ar' ? 'الوصف التفصيلي للخلل' : 'Detailed Technical Description'}</label>
+                  <textarea className="form-control" rows={3} placeholder={currentLang === 'en' ? 'Enter physical inspection findings...' : 'أدخل نتائج الفحص المادي...'} value={damageDesc} onChange={e => setDamageDesc(e.target.value)} />
+                </div>
+
+                <div className="form-group">
+                  <label>{currentLang === 'ar' ? 'رقم محضر فحص وزارة التجارة (MOCI) / المستند' : 'MOCI Assay / Inspection Document Ref #'}</label>
+                  <input type="text" className="form-control" value={damageDocId} onChange={e => setDamageDocId(e.target.value)} />
+                </div>
+
+                <button className="btn btn-primary" style={{ width: '100%', marginTop: '15px', background: '#dc3545' }} onClick={async () => {
+                  if (!damageItemId || !damageReason || !damageDesc) {
+                    alert(currentLang === 'en' ? 'Please provide bar selection, reason, and description.' : 'يرجى اختيار السبيكة وتحديد السبب والوصف.');
+                    return;
+                  }
+                  try {
+                    const res = await fetch(`${API_BASE}/inventory/items/${damageItemId}/mark-damaged`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        reason: damageReason,
+                        description: damageDesc,
+                        evidenceDocId: damageDocId,
+                        reportedBy: username || 'treasury-maker'
+                      })
+                    });
+                    if (res.ok) {
+                      alert(currentLang === 'en' ? 'Damage report submitted! Awaiting Checker 4-Eyes approval.' : 'تم إرسال بلاغ التلف! بانتظار اعتماد المراجع وفق مبدأ 4-Eyes.');
+                      setShowDamageModal(false);
+                      fetchInventory();
+                      fetchDamagedBars();
+                    } else {
+                      const err = await res.json();
+                      alert(err.error || 'Failed to mark damaged');
+                    }
+                  } catch (e) {
+                    alert('Error submitting damage report');
+                  }
+                }}>
+                  <i className="fa-solid fa-triangle-exclamation"></i> {currentLang === 'ar' ? 'تقديم بلاغ التلف للمراجع' : 'Submit Damage Report to Checker'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ENHANCED RECEIVE & 4-POINT VERIFICATION MODAL */}
+        {showReceiveModal && (
+          <div className="modal-overlay active" onClick={() => setShowReceiveModal(false)}>
+            <div className="glass-card modal-content-box" onClick={e => e.stopPropagation()} style={{ maxWidth: '480px' }}>
+              <div className="modal-header">
+                <h3>{currentLang === 'ar' ? 'التحقق واستلام شحنة GFS (4-Point Verification)' : 'Verify & Receive GFS Delivery'}</h3>
+                <span className="modal-close-btn" onClick={() => setShowReceiveModal(false)}>&times;</span>
+              </div>
+              <div style={{ padding: '15px 0' }}>
+                <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '15px' }}>
+                  {currentLang === 'ar' 
+                    ? 'التحقق الآلي الإلزامي: 1) تطابق السيريال، 2) تطابق فرع الوجهة، 3) فحص سلامة السبيكة، 4) حالة النقل.'
+                    : 'Mandatory 4-Point Check: 1) Bar Serial Match, 2) Destination Branch Match, 3) Undamaged Status, 4) In-Transfer State.'}
+                </p>
+
+                <div className="form-group">
+                  <label>{currentLang === 'en' ? 'Scanned Bar Serial' : 'الرقم التسلسلي الممسوح للقطعة'}</label>
+                  <input type="text" className="form-control" value={receiveScannedSerial} onChange={e => setReceiveScannedSerial(e.target.value)} />
+                </div>
+
+                <div className="form-group">
+                  <label>{currentLang === 'en' ? 'Receiving Branch' : 'الفرع المستلم'}</label>
+                  <select className="form-control" style={{ color: '#000' }} value={receiveBranchId} onChange={e => setReceiveBranchId(parseInt(e.target.value))}>
+                    {branchesList.map((b: any, idx: number) => (
+                      <option key={idx} value={b.branch_id}>{b.branch_name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '10px', margin: '15px 0' }}>
+                  <input type="checkbox" id="validationPassed" checked={receiveValidationPassed} onChange={e => setReceiveValidationPassed(e.target.checked)} />
+                  <label htmlFor="validationPassed" style={{ margin: 0, cursor: 'pointer', fontWeight: 'bold' }}>
+                    {currentLang === 'ar' ? 'اجتياز الفحص المادي وتطابق جميع المعايير' : 'Physical inspection passed and all criteria match'}
+                  </label>
+                </div>
+
+                {!receiveValidationPassed && (
+                  <div style={{ padding: '10px', background: 'rgba(220, 53, 69, 0.12)', border: '1px solid #dc3545', color: '#dc3545', borderRadius: '4px', fontSize: '12px', marginBottom: '15px' }}>
+                    <strong>{currentLang === 'ar' ? 'تنبيه الإرجاع للناقل الأمني:' : 'Return to Courier Notice:'}</strong><br />
+                    {currentLang === 'ar' 
+                      ? 'سيتم إلغاء الاستلام فوراً ووسم الشحنة للإرجاع إلى الخزينة الرئيسية.'
+                      : 'Failure cancels delivery. The bar will be flagged for immediate return to Main Vault.'}
+                  </div>
+                )}
+
+                <button className="btn btn-primary" style={{ width: '100%', background: receiveValidationPassed ? 'var(--accent-green)' : '#dc3545' }} onClick={async () => {
+                  try {
+                    const res = await fetch(`${API_BASE}/gfs/delivery-requests/${receiveRequestId}/receive`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ 
+                        validationPassed: receiveValidationPassed,
+                        scannedSerialNumber: receiveScannedSerial,
+                        receivingBranchId: receiveBranchId,
+                        receivedBy: username || 'SYSTEM'
+                      })
+                    });
+                    if (res.ok) {
+                      const data = await res.json();
+                      alert(data.passed 
+                        ? (currentLang === 'en' ? 'Delivery received and verified successfully!' : 'تم التحقق واستلام الشحنة بالفرع بنجاح!') 
+                        : (currentLang === 'en' ? `Verification Failed: ${data.message}. Delivery cancelled and returned to courier!` : `فشل التحقق: ${data.message}. تم إلغاء الشحنة وإرجاعها للناقل!`)
+                      );
+                      setShowReceiveModal(false);
+                      fetchGfsDeliveryRequests();
+                      fetchInventory();
+                    } else {
+                      const err = await res.json();
+                      alert(err.error || 'Receive failed');
+                    }
+                  } catch (e) {
+                    alert('Error receiving delivery');
+                  }
+                }}>
+                  {receiveValidationPassed 
+                    ? (currentLang === 'en' ? 'Confirm Receipt & Verification' : 'تأكيد الاستلام والتحقق') 
+                    : (currentLang === 'en' ? 'Cancel & Return to Courier' : 'إلغاء وإرجاع للناقل')
+                  }
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
         {/* INTAKE SHIPMENT MODAL - FULL SCREEN WITH DATA GRID */}
-        {showIntakeModal && intakePOId && (
+        {showIntakeModal && (intakePOId || intakePONumber === 'DIRECT') && (
           <div className="modal-overlay active" onClick={() => setShowIntakeModal(false)}>
             <div className="glass-card modal-content-box" onClick={e => e.stopPropagation()} style={{ maxWidth: '95vw', width: '95vw', maxHeight: '95vh', height: '95vh', display: 'flex', flexDirection: 'column' }}>
               {/* HEADER */}
@@ -9432,6 +11606,103 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                 </div>
               </div>
 
+            </div>
+          </div>
+        )}
+
+        {/* GS1 BARCODE & QR LABEL PRINT MODAL (UC03 BR-009) */}
+        {previewBarcodeModal && (
+          <div className="modal-overlay active" onClick={() => setPreviewBarcodeModal(null)}>
+            <div className="glass-card modal-content-box" style={{ width: '460px', padding: '24px' }} onClick={e => e.stopPropagation()}>
+              <div className="modal-header" style={{ marginBottom: '16px' }}>
+                <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}>
+                  <i className="fa-solid fa-qrcode" style={{ color: 'var(--kfh-green)' }}></i>
+                  {currentLang === 'en' ? 'Precious Metal Bar GS1 Tag' : 'ملصق الباركود المعتمد للسبيكة (GS1)'}
+                </h3>
+                <span className="modal-close-btn" onClick={() => setPreviewBarcodeModal(null)}>&times;</span>
+              </div>
+
+              {/* Printable Barcode Card */}
+              <div style={{
+                background: '#ffffff',
+                color: '#111827',
+                padding: '20px',
+                borderRadius: '8px',
+                border: '2px solid #e5e7eb',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '14px',
+                textAlign: 'center'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #009B4E', paddingBottom: '8px' }}>
+                  <div style={{ fontWeight: '900', color: '#009B4E', fontSize: '15px', letterSpacing: '1px' }}>KFH PMIMS</div>
+                  <div style={{ fontSize: '10px', color: '#6b7280', fontWeight: 'bold' }}>SHARIA VERIFIED</div>
+                </div>
+
+                {/* 2D DataMatrix / QR Simulation */}
+                <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '16px' }}>
+                  <div style={{
+                    width: '100px',
+                    height: '100px',
+                    backgroundColor: '#f3f4f6',
+                    border: '1px solid #d1d5db',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    padding: '6px'
+                  }}>
+                    <i className="fa-solid fa-qrcode" style={{ fontSize: '72px', color: '#111827' }}></i>
+                  </div>
+                  <div style={{ textAlign: 'left', fontSize: '12px', flex: 1 }}>
+                    <div style={{ fontWeight: 'bold', fontSize: '14px', color: '#111827' }}>{previewBarcodeModal.serial}</div>
+                    <div style={{ color: '#4b5563', fontSize: '11px', marginTop: '2px' }}>{previewBarcodeModal.product}</div>
+                    <div style={{ color: '#009B4E', fontWeight: 'bold', marginTop: '4px' }}>
+                      {previewBarcodeModal.weight}g • {previewBarcodeModal.purity} PPT
+                    </div>
+                    <div style={{ color: '#6b7280', fontSize: '11px', marginTop: '2px' }}>
+                      Refiner: {previewBarcodeModal.refiner || 'Valcambi Suisse'}
+                    </div>
+                    <div style={{ color: '#6b7280', fontSize: '10px', marginTop: '2px' }}>
+                      Lot: {previewBarcodeModal.lot}
+                    </div>
+                  </div>
+                </div>
+
+                {/* 1D Barcode Simulation */}
+                <div style={{ borderTop: '1px dashed #d1d5db', paddingTop: '10px' }}>
+                  <div style={{
+                    fontFamily: 'monospace',
+                    letterSpacing: '5px',
+                    fontSize: '22px',
+                    fontWeight: '900',
+                    lineHeight: '1',
+                    color: '#000000',
+                    userSelect: 'none'
+                  }}>
+                    ||| | |||| | || ||| || ||| | |||
+                  </div>
+                  <div style={{ fontFamily: 'monospace', fontSize: '11px', color: '#4b5563', marginTop: '4px' }}>
+                    (21){previewBarcodeModal.serial}(10){previewBarcodeModal.lot}
+                  </div>
+                </div>
+
+                {previewBarcodeModal.isDamaged && (
+                  <div style={{ backgroundColor: '#fee2e2', color: '#dc2626', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold' }}>
+                    QUARANTINE / DAMAGED UPON INTAKE
+                  </div>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px' }}>
+                <button className="btn btn-secondary" onClick={() => setPreviewBarcodeModal(null)}>
+                  {currentLang === 'en' ? 'Close' : 'إغلاق'}
+                </button>
+                <button className="btn btn-primary" onClick={() => window.print()}>
+                  <i className="fa-solid fa-print"></i> {currentLang === 'en' ? 'Print Tag' : 'طباعة الملصق'}
+                </button>
+              </div>
             </div>
           </div>
         )}

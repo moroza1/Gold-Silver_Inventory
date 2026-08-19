@@ -32,9 +32,7 @@ public partial class PMIMSControllers : ControllerBase
     // Items 5-8
     private readonly IRuleEngineService _ruleEngine;
     private readonly IAuditExportService _auditExport;
-    private readonly IEmailSenderService _emailSender;
     private readonly IMonitoringAdapter _monitoringAdapter;
-    private readonly INotificationDispatchService _notificationDispatch;
     private readonly IBarcodeLabelService _barcodeLabelService;
 
     public PMIMSControllers(
@@ -47,9 +45,7 @@ public partial class PMIMSControllers : ControllerBase
         IConfiguration config,
         IRuleEngineService ruleEngine,
         IAuditExportService auditExport,
-        IEmailSenderService emailSender,
         IMonitoringAdapter monitoringAdapter,
-        INotificationDispatchService notificationDispatch,
         IBarcodeLabelService barcodeLabelService)
     {
         _repository = repository;
@@ -61,9 +57,7 @@ public partial class PMIMSControllers : ControllerBase
         _config = config;
         _ruleEngine = ruleEngine;
         _auditExport = auditExport;
-        _emailSender = emailSender;
         _monitoringAdapter = monitoringAdapter;
-        _notificationDispatch = notificationDispatch;
         _barcodeLabelService = barcodeLabelService;
     }
 
@@ -137,22 +131,22 @@ public partial class PMIMSControllers : ControllerBase
             product_id = p.ProductId,
             product_code = p.ProductCode,
             metal_name = p.MetalType?.MetalName ?? "",
+            denomination_id = p.DenominationId,
             denomination_label = p.Denomination?.Label ?? "",
             weight_grams = p.Denomination?.WeightGrams ?? 0,
             purity_value = p.Purity?.PurityValue ?? 0,
             origin_country = p.OriginCountry,
+            brand_id = p.BrandId,
+            brand_name = p.Brand?.BrandName ?? p.BrandName ?? "",
             is_active = p.IsActive
         }));
     }
 
-    // Was missing [Authorize] entirely -- anonymous callers could create new product/
-    // denomination catalog entries. This is master-data (same tier as branches/vendors/
-    // reorder-thresholds below), so gate it the same way.
     [Authorize(Policy = "master_data.write")]
     [HttpPost("catalog/products")]
     public async Task<IActionResult> CreateProduct([FromBody] CreateProductRequestDto req)
     {
-        var product = await _repository.CreateDenominationProductAsync(req.Label, req.MetalName, req.WeightGrams, req.OriginCountry);
+        var product = await _repository.CreateDenominationProductAsync(req.Label, req.MetalName, req.WeightGrams, req.OriginCountry, req.BrandId);
         return Ok(new
         {
             product_id = product.ProductId,
@@ -162,8 +156,84 @@ public partial class PMIMSControllers : ControllerBase
             weight_grams = product.Denomination?.WeightGrams ?? 0,
             purity_value = product.Purity?.PurityValue ?? 0,
             origin_country = product.OriginCountry,
+            brand_id = product.BrandId,
+            brand_name = product.Brand?.BrandName ?? product.BrandName ?? "",
             is_active = product.IsActive
         });
+    }
+
+    // =========================================================================
+    // 2b. BRAND / REFINER / MINT LOOKUP MASTER DATA
+    // =========================================================================
+    [HttpGet("catalog/brands")]
+    public async Task<IActionResult> GetBrands()
+    {
+        var brands = await _repository.GetBrandsAsync();
+        return Ok(brands.Select(b => new
+        {
+            brand_id = b.BrandId,
+            brand_code = b.BrandCode,
+            brand_name = b.BrandName,
+            country_of_origin = b.CountryOfOrigin,
+            lbma_refiner_id = b.LbmaRefinerId,
+            is_lbma_certified = b.IsLbmaCertified,
+            is_active = b.IsActive,
+            description = b.Description,
+            created_at = b.CreatedAt
+        }));
+    }
+
+    [Authorize(Policy = "master_data.write")]
+    [HttpPost("catalog/brands")]
+    public async Task<IActionResult> CreateBrand([FromBody] CreateBrandRequestDto req)
+    {
+        if (string.IsNullOrWhiteSpace(req.BrandCode) || string.IsNullOrWhiteSpace(req.BrandName))
+        {
+            return BadRequest(new { error = "Brand code and brand name are required." });
+        }
+
+        var brand = await _repository.CreateBrandAsync(req.BrandCode, req.BrandName, req.CountryOfOrigin ?? "Switzerland", req.LbmaRefinerId, req.IsLbmaCertified, req.Description);
+        return Created($"/api/catalog/brands/{brand.BrandId}", new
+        {
+            brand_id = brand.BrandId,
+            brand_code = brand.BrandCode,
+            brand_name = brand.BrandName,
+            country_of_origin = brand.CountryOfOrigin,
+            lbma_refiner_id = brand.LbmaRefinerId,
+            is_lbma_certified = brand.IsLbmaCertified,
+            is_active = brand.IsActive,
+            description = brand.Description,
+            created_at = brand.CreatedAt
+        });
+    }
+
+    [Authorize(Policy = "master_data.write")]
+    [HttpPut("catalog/brands/{id}")]
+    public async Task<IActionResult> UpdateBrand(int id, [FromBody] CreateBrandRequestDto req)
+    {
+        var updated = await _repository.UpdateBrandAsync(id, req.BrandCode, req.BrandName, req.CountryOfOrigin ?? "Switzerland", req.LbmaRefinerId, req.IsLbmaCertified, req.Description);
+        if (updated == null) return NotFound(new { error = "Brand not found." });
+
+        return Ok(new
+        {
+            brand_id = updated.BrandId,
+            brand_code = updated.BrandCode,
+            brand_name = updated.BrandName,
+            country_of_origin = updated.CountryOfOrigin,
+            lbma_refiner_id = updated.LbmaRefinerId,
+            is_lbma_certified = updated.IsLbmaCertified,
+            is_active = updated.IsActive,
+            description = updated.Description
+        });
+    }
+
+    [Authorize(Policy = "master_data.write")]
+    [HttpDelete("catalog/brands/{id}")]
+    public async Task<IActionResult> DeleteBrand(int id)
+    {
+        var success = await _repository.DeleteBrandAsync(id);
+        if (!success) return NotFound(new { error = "Brand not found." });
+        return Ok(new { success = true });
     }
 
     [HttpGet("rates")]
@@ -516,14 +586,54 @@ public partial class PMIMSControllers : ControllerBase
                 });
             }
 
+            int? vendorId = req.VendorId;
+            if (vendorId == null || vendorId <= 0)
+            {
+                var defaultVendor = (await _repository.GetVendorsAsync()).FirstOrDefault();
+                vendorId = defaultVendor?.VendorId ?? 1;
+            }
+
             string itemsJson = JsonSerializer.Serialize(req.Items);
-            var pending = await _repository.InitiateWorkflowIntakeAsync(req.PoId, req.LotNumber, req.LocationId, req.ReceivedBy, itemsJson);
+            int? poId = (req.PoId == 0) ? null : req.PoId;
+            var pending = await _repository.InitiateWorkflowIntakeAsync(
+                poId, req.LotNumber, req.LocationId, req.ReceivedBy, itemsJson,
+                sourceType: "SUPPLIER", customerId: null, accountId: null, receiptReason: null,
+                vendorId: vendorId, shipmentReference: req.ShipmentReference, deliveryNoteNumber: req.DeliveryNoteNumber,
+                airwayBillNumber: req.AirwayBillNumber, supportingDocumentUrl: req.SupportingDocumentUrl,
+                discrepancyNotes: req.DiscrepancyNotes, receivingDate: req.ReceivingDate);
+
             return Ok(new { pending_id = pending.PendingIntakeId, message = "Intake shipment verification request initiated and routed to the Maker-Checker workflow approval." });
         }
         catch (Exception ex)
         {
             return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
         }
+    }
+
+    [HttpGet("vault/intake/pending")]
+    [Authorize(Policy = "intake.read")]
+    public async Task<IActionResult> GetPendingIntakes()
+    {
+        var list = await _repository.GetPendingIntakesAsync();
+        return Ok(list.Select(pi => new {
+            pending_id = pi.PendingIntakeId,
+            lot_number = pi.LotNumber,
+            source_type = pi.SourceType,
+            vendor_id = pi.VendorId,
+            vendor_name = pi.Vendor?.VendorName ?? (pi.SourceType == "CUSTOMER" ? (pi.Customer?.CustomerName ?? "Customer") : "Direct Supplier"),
+            shipment_reference = pi.ShipmentReference,
+            delivery_note = pi.DeliveryNoteNumber,
+            airway_bill = pi.AirwayBillNumber,
+            supporting_document_url = pi.SupportingDocumentUrl,
+            discrepancy_notes = pi.DiscrepancyNotes,
+            receiving_date = pi.ReceivingDate ?? pi.CreatedAt,
+            status_code = pi.StatusCode,
+            received_by = pi.ReceivedBy,
+            location_id = pi.LocationId,
+            location_desc = pi.Location != null ? $"{pi.Location.ZoneRoom} - {pi.Location.ShelfRow} - {pi.Location.SlotBin}" : "Main Vault",
+            serials_json = pi.SerialsJsonList,
+            created_at = pi.CreatedAt
+        }));
     }
 
     // Receipt of precious metals from a customer (buyback / custody deposit / return) --
@@ -555,7 +665,7 @@ public partial class PMIMSControllers : ControllerBase
         }
     }
 
-    [Authorize(Policy = "purchase_orders.write")]
+    [Authorize(Policy = "intake.write")]
     [HttpPost("transfers")]
     public async Task<IActionResult> TransferStock([FromBody] TransferRequest req)
     {
@@ -565,16 +675,12 @@ public partial class PMIMSControllers : ControllerBase
         return Ok(new { message = "Branch transfer initiated successfully. Stock locked in TRANSIT status." });
     }
 
-    [Authorize(Policy = "purchase_orders.write")]
+    [Authorize(Policy = "intake.write")]
     [HttpPost("transfers/workflow-initiate")]
     public async Task<IActionResult> TransferStockWorkflow([FromBody] TransferWorkflowRequest req)
     {
         try
         {
-            // Dynamic Business Validation Rules Engine (RFP item 5) -- additive pre-check,
-            // e.g. a business-authored "no single transfer over N grams without dual approval"
-            // rule. Never replaces the workflow's own Maker-Checker approval; a BLOCK-severity
-            // rule match here just stops the transfer from being initiated at all.
             var item = (await _repository.GetItemsAsync()).FirstOrDefault(i => i.ItemId == req.ItemId);
             if (item != null)
             {
@@ -592,16 +698,18 @@ public partial class PMIMSControllers : ControllerBase
                 }
             }
 
-            var transfer = await _repository.InitiateWorkflowBranchTransferAsync(req.ItemId, req.DestinationBranchId, req.CourierInfo, req.InitiatedBy);
-            return Ok(new { transfer_id = transfer.TransferId, message = "Branch transfer initiated and routed to the Maker-Checker workflow approval." });
+            var transfer = await _repository.InitiateWorkflowBranchTransferAsync(
+                req.ItemId, req.DestinationBranchId, req.CourierInfo, req.InitiatedBy);
+
+            return Ok(new { transfer_id = transfer.TransferId, message = "Branch transfer workflow initiated successfully." });
         }
         catch (Exception ex)
         {
-            return BadRequest(new { error = ex.Message });
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
         }
     }
 
-    [Authorize(Policy = "custody.read")]
+    [Authorize(Policy = "intake.read")]
     [HttpGet("transfers")]
     public async Task<IActionResult> GetBranchTransfers()
     {
@@ -624,7 +732,7 @@ public partial class PMIMSControllers : ControllerBase
         }));
     }
 
-    [Authorize(Policy = "purchase_orders.write")]
+    [Authorize(Policy = "intake.write")]
     [HttpPost("transfers/{id}/receive")]
     public async Task<IActionResult> ReceiveBranchTransfer([FromRoute] int id, [FromBody] ReceiveTransferRequest req)
     {
@@ -1057,8 +1165,16 @@ public partial class PMIMSControllers : ControllerBase
                     {
                         pending_intake_id = pending.PendingIntakeId,
                         source_type = pending.SourceType,
+                        vendor_id = pending.VendorId,
+                        vendor_name = pending.Vendor?.VendorName ?? (pending.SourceType == "CUSTOMER" ? (pending.Customer?.CustomerName ?? "Customer") : "Direct Supplier"),
+                        shipment_reference = pending.ShipmentReference,
+                        delivery_note = pending.DeliveryNoteNumber,
+                        airway_bill = pending.AirwayBillNumber,
+                        supporting_document_url = pending.SupportingDocumentUrl,
+                        discrepancy_notes = pending.DiscrepancyNotes,
+                        receiving_date = pending.ReceivingDate ?? pending.CreatedAt,
                         po_id = pending.PoId,
-                        po_number = pending.SourceType == "CUSTOMER" ? null : (pending.PurchaseOrder?.PoNumber ?? "Unknown"),
+                        po_number = pending.SourceType == "CUSTOMER" ? null : (pending.PurchaseOrder?.PoNumber ?? "Direct Shipment"),
                         customer_id = pending.CustomerId,
                         customer_name = pending.Customer?.CustomerName,
                         account_id = pending.AccountId,
@@ -1068,6 +1184,7 @@ public partial class PMIMSControllers : ControllerBase
                         location_name = $"{pending.Location?.ZoneRoom}-{pending.Location?.ShelfRow}-{pending.Location?.SlotBin}",
                         received_by = pending.ReceivedBy,
                         status_code = pending.StatusCode,
+                        serials_json = pending.SerialsJsonList,
                         created_by = pending.ReceivedBy
                     };
                 }
@@ -1157,13 +1274,6 @@ public partial class PMIMSControllers : ControllerBase
         var result = await _repository.ProcessWorkflowActionAsync(id, req.Username, req.Action, req.Comments);
         if (result == "SUCCESS")
         {
-            if (req.Action == "APPROVED")
-            {
-                // Customer/management communication (RFP item 7 extension) -- fires only when
-                // this action was the final approval step of a BRANCH_TRANSFER (i.e. the
-                // transfer is now actually complete), not on every intermediate step.
-                await NotifyIfTransferCompletedAsync(id);
-            }
             return Ok(new { message = "Workflow action processed successfully." });
         }
         return BadRequest(new { error = result });
@@ -1473,11 +1583,11 @@ public partial class PMIMSControllers : ControllerBase
 
     private static readonly string[] AllModuleKeys =
     {
-        "dashboard", "pending_actions", "purchase_orders", "spatial_map", "custody",
+        "dashboard", "pending_actions", "spatial_map", "custody",
         "stocktake", "migration", "reports", "workflows", "settings", "user_admin",
         "vault_location", "master_data", "workflow_design", "intake",
-        "rules_engine", "notifications", "monitoring", "dispensing", "device_integration",
-        "barcode_qr_labeling"
+        "rules_engine", "monitoring", "barcode_qr_labeling",
+        "purchase_orders", "dispensing", "device_integration", "notifications"
     };
 
     // Reconstructs the caller's effective module permissions from the JWT "perm:*" claims.
@@ -1499,7 +1609,317 @@ public partial class PMIMSControllers : ControllerBase
         return map;
     }
 
-    // SHA-256 utility for password hashing
+    // =========================================================================
+    // GFS & Damaged Bar Operations (BRD Alignment)
+    // =========================================================================
+    [Authorize(Policy = "intake.read")]
+    [HttpPost("inventory/items/scan-qr")]
+    public async Task<IActionResult> ScanQr([FromBody] ScanQrRequest req)
+    {
+        try
+        {
+            var item = await _repository.ScanBarWithGfsLookupAsync(req.SerialNumber);
+            if (item == null) return NotFound(new { error = "Gold bar not found in inventory." });
+            return Ok(item);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
+    [Authorize(Policy = "custody.write")]
+    [HttpPost("inventory/items/{id}/mark-damaged")]
+    public async Task<IActionResult> MarkDamaged(int id, [FromBody] MarkDamagedRequest req)
+    {
+        try
+        {
+            string username = User.Identity?.Name ?? "system";
+            var result = await _repository.MarkBarDamagedAsync(id, req.Reason, req.Description, req.EvidenceDocId, username);
+            if (result != "SUCCESS") return BadRequest(new { error = result });
+            return Ok(new { message = "Marked as damaged, pending approval." });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
+    [Authorize(Policy = "custody.write")]
+    [HttpPost("inventory/items/{id}/damage-action")]
+    public async Task<IActionResult> ProcessDamagedAction(int id, [FromBody] ProcessDamageActionRequest req)
+    {
+        try
+        {
+            string username = User.Identity?.Name ?? "system";
+            var result = await _repository.ProcessDamagedBarActionAsync(id, req.Action, username);
+            if (result != "SUCCESS") return BadRequest(new { error = result });
+            return Ok(new { message = $"Damage action '{req.Action}' processed successfully." });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
+    [Authorize(Policy = "custody.read")]
+    [HttpGet("inventory/damaged-items")]
+    public async Task<IActionResult> GetDamagedBars()
+    {
+        var bars = await _repository.GetDamagedBarsAsync();
+        return Ok(bars);
+    }
+
+    [Authorize(Policy = "intake.write")]
+    [HttpPost("gfs/delivery-requests")]
+    public async Task<IActionResult> CreateGfsDeliveryRequest([FromBody] CreateGfsDeliveryRequest req)
+    {
+        try
+        {
+            var request = await _repository.CreateGfsDeliveryRequestAsync(req.GfsRefNumber, req.BarId, req.CustomerAccountNumber, req.DestinationBranchId, req.RouteDetails);
+            return Ok(request);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
+    [Authorize(Policy = "intake.read")]
+    [HttpGet("gfs/delivery-requests")]
+    public async Task<IActionResult> GetGfsDeliveryRequests()
+    {
+        var requests = await _repository.GetGfsDeliveryRequestsAsync();
+        return Ok(requests);
+    }
+
+    [Authorize(Policy = "intake.write")]
+    [HttpPost("gfs/delivery-requests/{id}/dispatch")]
+    public async Task<IActionResult> DispatchGfsBranchDelivery(int id, [FromBody] DispatchGfsBranchRequest? req)
+    {
+        try
+        {
+            string username = User.Identity?.Name ?? "system";
+            string company = req?.CourierCompany ?? "KFH Secure Logistics";
+            string repName = req?.CourierRepName ?? "Authorized Transporter";
+            string civilId = req?.CourierCivilId ?? "285010101234";
+            string plate = req?.VehiclePlate ?? "KWT-10-8899";
+            string seal = req?.SecuritySealNumber ?? $"SEAL-{DateTime.UtcNow.Ticks % 1000000:D6}";
+
+            var result = await _repository.DispatchGfsBranchDeliveryAsync(id, company, repName, civilId, plate, seal, username);
+            if (!result.StartsWith("SUCCESS")) return BadRequest(new { error = result });
+            return Ok(new { message = "Dispatched successfully to courier." });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
+    [Authorize(Policy = "intake.write")]
+    [HttpPost("gfs/delivery-requests/{id}/receive")]
+    public async Task<IActionResult> ReceiveGfsBranchDelivery(int id, [FromBody] ReceiveGfsBranchDeliveryRequest req)
+    {
+        try
+        {
+            string username = User.Identity?.Name ?? "system";
+            var result = await _repository.ReceiveGfsBranchDeliveryAsync(id, req.ScannedSerialNumber, req.DestinationBranchId, username, req.ManualOverride, req.OverrideReason);
+            if (!result.StartsWith("SUCCESS")) return BadRequest(new { error = result });
+            return Ok(new { message = "Received successfully at branch." });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
+    // =========================================================================
+    // Home Delivery Endpoints (UC07)
+    // =========================================================================
+    [Authorize(Policy = "intake.write")]
+    [HttpPost("gfs/home-delivery")]
+    public async Task<IActionResult> CreateHomeDelivery([FromBody] CreateHomeDeliveryApiRequest req)
+    {
+        try
+        {
+            string username = User.Identity?.Name ?? "system";
+            if (!_repository.ValidateKuwaitCivilId(req.CustomerCivilId))
+            {
+                return BadRequest(new { error = "Invalid Kuwait PACI Civil ID format or checksum." });
+            }
+
+            string delNum = $"HD-KFH-{DateTime.UtcNow.Year}-{new Random().Next(1000, 9999)}";
+            var hd = await _repository.CreateHomeDeliveryRequestAsync(
+                delNum, req.BarId, req.CustomerAccountNumber, req.CustomerCivilId,
+                req.CustomerName, req.CustomerPhone, req.Governorate, req.Area,
+                req.Block, req.Street, req.BuildingHouse, req.FloorFlat,
+                req.SpecialInstructions, username);
+
+            return Ok(hd);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
+    [Authorize(Policy = "intake.read")]
+    [HttpGet("gfs/home-delivery")]
+    public async Task<IActionResult> GetHomeDeliveries()
+    {
+        var list = await _repository.GetHomeDeliveryRequestsAsync();
+        return Ok(list);
+    }
+
+    [Authorize(Policy = "intake.read")]
+    [HttpGet("gfs/home-delivery/{id:int}")]
+    public async Task<IActionResult> GetHomeDeliveryById(int id)
+    {
+        var hd = await _repository.GetHomeDeliveryRequestByIdAsync(id);
+        if (hd == null) return NotFound(new { error = "Home delivery request not found." });
+        return Ok(hd);
+    }
+
+    [Authorize(Policy = "intake.write")]
+    [HttpPost("gfs/home-delivery/{id:int}/dispatch")]
+    public async Task<IActionResult> DispatchHomeDelivery(int id, [FromBody] DispatchHomeDeliveryApiRequest req)
+    {
+        try
+        {
+            string username = User.Identity?.Name ?? "system";
+            var result = await _repository.DispatchHomeDeliveryAsync(
+                id, req.CourierCompany, req.CourierRepName, req.CourierCivilId,
+                req.VehiclePlate, req.SecuritySealNumber, username);
+
+            if (!result.StartsWith("SUCCESS")) return BadRequest(new { error = result });
+            return Ok(new { message = "Home delivery dispatched to courier." });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
+    [Authorize(Policy = "intake.write")]
+    [HttpPost("gfs/home-delivery/{id:int}/confirm-handover")]
+    public async Task<IActionResult> ConfirmHomeDeliveryHandover(int id, [FromBody] ConfirmHomeDeliveryApiRequest req)
+    {
+        try
+        {
+            string username = User.Identity?.Name ?? "system";
+            var result = await _repository.ConfirmHomeDeliveryHandoverAsync(
+                id, req.VerificationOtp, req.RecipientCivilId, req.RecipientSignature, username);
+
+            if (!result.StartsWith("SUCCESS")) return BadRequest(new { error = result });
+            return Ok(new { message = "Home delivery customer handover confirmed successfully." });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
+    // =========================================================================
+    // Kuwait Regulatory / PACI Civil ID & GFS Customer Profile Lookups
+    // =========================================================================
+    [HttpGet("validation/civil-id/{civilId}")]
+    public IActionResult ValidateCivilId(string civilId)
+    {
+        bool isValid = _repository.ValidateKuwaitCivilId(civilId);
+        return Ok(new { civilId, isValid, message = isValid ? "Valid Kuwait PACI Civil ID" : "Invalid Civil ID format or checksum" });
+    }
+
+    [Authorize(Policy = "dashboard.read")]
+    [HttpGet("gfs/customer-profile/{civilIdOrAccount}")]
+    public async Task<IActionResult> GetGfsCustomerProfile(string civilIdOrAccount, [FromServices] IGfsService gfsService)
+    {
+        var (success, name, rim, acc, holding) = await gfsService.LookupCustomerProfileAsync(civilIdOrAccount);
+        return Ok(new { success, customerName = name, customerRim = rim, accountNumber = acc, goldHoldingGrams = holding });
+    }
+
+    [Authorize(Policy = "intake.write")]
+    [HttpPost("gfs/sync-eod")]
+    public async Task<IActionResult> SyncGfsEod()
+    {
+        try
+        {
+            string username = User.Identity?.Name ?? "system";
+            var log = await _repository.SyncGfsEodAsync(username);
+            return Ok(log);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
+    [Authorize(Policy = "intake.read")]
+    [HttpGet("gfs/sync-logs")]
+    public async Task<IActionResult> GetGfsSyncLogs()
+    {
+        var logs = await _repository.GetGfsSyncLogsAsync();
+        return Ok(logs);
+    }
+
+    [Authorize(Policy = "master_data.read")]
+    [HttpGet("inventory/stock-thresholds")]
+    public async Task<IActionResult> GetStockCutoffThresholds()
+    {
+        var thresholds = await _repository.GetStockCutoffThresholdsAsync();
+        return Ok(thresholds);
+    }
+
+    [Authorize(Policy = "master_data.write")]
+    [HttpPost("inventory/stock-thresholds")]
+    public async Task<IActionResult> SaveStockCutoffThreshold([FromBody] SaveStockThresholdRequest req)
+    {
+        try
+        {
+            string username = User.Identity?.Name ?? "system";
+            var th = new StockCutoffThreshold
+            {
+                ThresholdId = req.ThresholdId ?? 0,
+                AlertType = req.AlertType,
+                ProductId = req.ProductId,
+                DenominationId = req.DenominationId,
+                CutoffValueKg = req.CutoffValueKg,
+                CreatedBy = username,
+                StatusCode = "PENDING_MAKER"
+            };
+            var saved = await _repository.SaveStockCutoffThresholdAsync(th);
+            return Ok(saved);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
+    [Authorize(Policy = "master_data.write")]
+    [HttpPost("inventory/stock-thresholds/{id}/action")]
+    public async Task<IActionResult> ProcessStockThresholdAction(int id, [FromBody] ProcessThresholdActionRequest req)
+    {
+        try
+        {
+            string username = User.Identity?.Name ?? "system";
+            var result = await _repository.ProcessStockCutoffThresholdActionAsync(id, username, req.Action);
+            if (result != "SUCCESS") return BadRequest(new { error = result });
+            return Ok(new { message = "Action processed successfully." });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
+    [Authorize(Policy = "master_data.read")]
+    [HttpGet("inventory/stock-alerts/enterprise")]
+    public async Task<IActionResult> EvaluateEnterpriseStockAlerts()
+    {
+        var alerts = await _repository.EvaluateEnterpriseStockAlertsAsync();
+        return Ok(alerts);
+    }
+
     private static string ComputeSha256(string input)
     {
         using var sha = System.Security.Cryptography.SHA256.Create();
@@ -1507,6 +1927,45 @@ public partial class PMIMSControllers : ControllerBase
         return Convert.ToHexString(bytes).ToLowerInvariant();
     }
 }
+
+public class ScanQrRequest { public string SerialNumber { get; set; } = null!; }
+public class MarkDamagedRequest { public string Reason { get; set; } = null!; public string Description { get; set; } = null!; public string EvidenceDocId { get; set; } = null!; }
+public class ProcessDamageActionRequest { public string Action { get; set; } = null!; }
+public class CreateGfsDeliveryRequest { public string GfsRefNumber { get; set; } = null!; public int BarId { get; set; } public string? CustomerAccountNumber { get; set; } public int DestinationBranchId { get; set; } public string RouteDetails { get; set; } = null!; }
+public class DispatchGfsBranchRequest { public string? CourierCompany { get; set; } public string? CourierRepName { get; set; } public string? CourierCivilId { get; set; } public string? VehiclePlate { get; set; } public string? SecuritySealNumber { get; set; } }
+public class ReceiveGfsBranchDeliveryRequest { public string ScannedSerialNumber { get; set; } = null!; public int DestinationBranchId { get; set; } public bool ManualOverride { get; set; } = false; public string? OverrideReason { get; set; } }
+public class ReceiveGfsDeliveryRequest { public bool ValidationPassed { get; set; } }
+public class CreateHomeDeliveryApiRequest
+{
+    public int BarId { get; set; }
+    public string CustomerAccountNumber { get; set; } = null!;
+    public string CustomerCivilId { get; set; } = null!;
+    public string CustomerName { get; set; } = null!;
+    public string CustomerPhone { get; set; } = null!;
+    public string Governorate { get; set; } = null!;
+    public string Area { get; set; } = null!;
+    public string Block { get; set; } = null!;
+    public string Street { get; set; } = null!;
+    public string BuildingHouse { get; set; } = null!;
+    public string? FloorFlat { get; set; }
+    public string? SpecialInstructions { get; set; }
+}
+public class DispatchHomeDeliveryApiRequest
+{
+    public string CourierCompany { get; set; } = "KFH Secure Transport";
+    public string CourierRepName { get; set; } = "Authorized Driver";
+    public string CourierCivilId { get; set; } = "285010101234";
+    public string VehiclePlate { get; set; } = "KWT-10-8899";
+    public string SecuritySealNumber { get; set; } = "SEAL-009988";
+}
+public class ConfirmHomeDeliveryApiRequest
+{
+    public string VerificationOtp { get; set; } = null!;
+    public string RecipientCivilId { get; set; } = null!;
+    public string? RecipientSignature { get; set; }
+}
+public class SaveStockThresholdRequest { public int? ThresholdId { get; set; } public string AlertType { get; set; } = null!; public int ProductId { get; set; } public int DenominationId { get; set; } public decimal CutoffValueKg { get; set; } }
+public class ProcessThresholdActionRequest { public string Action { get; set; } = null!; }
 
 // Request and DTO payloads
 public class LoginRequest { public string Username { get; set; } = null!; public string Password { get; set; } = null!; }
@@ -1524,15 +1983,32 @@ public class CreatePORequest {
     public string? OtherFeesDescription { get; set; }
 }
 public class POItemDTO { public int product_id { get; set; } public int qty { get; set; } public decimal unit_cost { get; set; } }
-public class IntakeRequest { public int PoId { get; set; } public string LotNumber { get; set; } = null!; public int LocationId { get; set; } public string ReceivedBy { get; set; } = null!; public List<IntakeItemDTO> Items { get; set; } = new(); }
+public class IntakeRequest
+{
+    public int? PoId { get; set; }
+    public int? VendorId { get; set; }
+    public string? ShipmentReference { get; set; }
+    public string? DeliveryNoteNumber { get; set; }
+    public string? AirwayBillNumber { get; set; }
+    public string? SupportingDocumentUrl { get; set; }
+    public string? DiscrepancyNotes { get; set; }
+    public DateTime? ReceivingDate { get; set; }
+    public string LotNumber { get; set; } = null!;
+    public int LocationId { get; set; }
+    public string ReceivedBy { get; set; } = null!;
+    public List<IntakeItemDTO> Items { get; set; } = new();
+}
+
 public class IntakeItemDTO
 {
     public string serial { get; set; } = null!;
     public int product_id { get; set; }
+    public decimal? weight_grams { get; set; }
+    public decimal? purity { get; set; }
+    public bool is_damaged { get; set; } = false;
+    public string? damage_reason { get; set; }
 
-    // LBMA Good Delivery attributes -- all optional; omit for products/lots
-    // where refiner/assay data isn't captured yet (GoodDeliveryStatus then
-    // defaults to NOT_ASSESSED and shows up in GET /api/reports/lbma-compliance).
+    // LBMA Good Delivery attributes
     public string? refiner_name { get; set; }
     public string? refiner_lbma_id { get; set; }
     public string? assay_certificate_number { get; set; }
@@ -1569,6 +2045,17 @@ public class CreateProductRequestDto
     public string MetalName { get; set; } = null!;
     public decimal WeightGrams { get; set; }
     public string OriginCountry { get; set; } = "Unknown";  // Origin country (e.g., Turkey, Switzerland)
+    public int? BrandId { get; set; }
+}
+
+public class CreateBrandRequestDto
+{
+    public string BrandCode { get; set; } = null!;
+    public string BrandName { get; set; } = null!;
+    public string? CountryOfOrigin { get; set; } = "Switzerland";
+    public string? LbmaRefinerId { get; set; }
+    public bool IsLbmaCertified { get; set; } = true;
+    public string? Description { get; set; }
 }
 // FimAddUserRequest / FimAddProfileRequest retired -- see FimAttributesRequest
 // and the rest of the /api/fim/* DTOs in PMIMSControllers.Fim.cs.

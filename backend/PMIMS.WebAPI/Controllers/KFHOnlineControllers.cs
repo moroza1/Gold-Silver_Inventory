@@ -558,3 +558,14 @@ public class DeliveryRequestDto
     public decimal ShippingFee { get; set; }
     public string? Notes { get; set; }
 }
+
+public class CustomerGiftTransferRequest
+{
+    public string SenderCustomerId { get; set; } = null!;
+    public string SenderCustomerName { get; set; } = null!;
+    public string RecipientCustomerId { get; set; } = null!;
+    public string RecipientCustomerName { get; set; } = null!;
+    public List<int> ItemIds { get; set; } = new();
+    public string Occasion { get; set; } = "Gift";
+    public string GiftMessage { get; set; } = "";
+}

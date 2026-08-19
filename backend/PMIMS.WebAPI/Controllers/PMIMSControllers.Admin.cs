@@ -272,30 +272,12 @@ public partial class PMIMSControllers
         return Ok(new { message = "Threshold deleted successfully." });
     }
 
-    // Gated by purchase_orders.read (not master_data.read): the alert itself is what
-    // Maker/Checker/Reconciliation act on from the Executive Dashboard (Maker holds
-    // purchase_orders FULL and creates the draft P.O.; Checker/Recon hold READ_ONLY and
-    // can see it's pending). All three have master_data HIDDEN, so gating this to
-    // master_data would hide the dashboard alert banner from everyone but IT/Admin.
-    [Authorize(Policy = "purchase_orders.read")]
+    [Authorize(Policy = "dashboard.read")]
     [HttpGet("inventory/low-stock-alerts")]
     public async Task<IActionResult> GetLowStockAlerts()
     {
         var alerts = await _repository.CheckLowStockAlertsAsync();
         return Ok(alerts);
-    }
-
-    // Was missing [Authorize] entirely -- anonymous callers could create draft purchase
-    // orders. This creates a PurchaseOrder record the same way POST /api/purchase-orders
-    // does, so gate it with the same policy (Maker holds FULL on purchase_orders).
-    [Authorize(Policy = "purchase_orders.write")]
-    [HttpPost("inventory/low-stock-alerts/{thresholdId}/draft-po")]
-    public async Task<IActionResult> CreateDraftPO(int thresholdId, [FromBody] DraftPORequest req)
-    {
-        var (poId, result) = await _repository.CreateDraftPurchaseOrderAsync(thresholdId, req.CreatedBy);
-        if (result == "THRESHOLD_NOT_FOUND") return NotFound(new { error = "Threshold not found." });
-        if (result == "DRAFT_EXISTS") return Ok(new { po_id = poId, message = "A draft P.O. already exists for this supplier.", already_exists = true });
-        return Created($"/api/purchase-orders/{poId}", new { po_id = poId, message = "Draft P.O. created successfully." });
     }
 
     // =========================================================================
@@ -413,6 +395,64 @@ public partial class PMIMSControllers
             return Ok(new { success = false, error = ex.Message, details = ex.ToString() });
         }
     }
+
+    // =========================================================================
+    // 16. SUPPORT ERROR LOGS (Daily Separated Text Logs for Support Team)
+    // =========================================================================
+    [Authorize(Policy = "reports.read")]
+    [HttpGet("admin/error-logs")]
+    public IActionResult GetErrorLogFiles()
+    {
+        var errorLogsDir = Path.Combine(Directory.GetCurrentDirectory(), "ErrorLogs");
+        if (!Directory.Exists(errorLogsDir))
+        {
+            return Ok(new List<object>());
+        }
+
+        var files = Directory.GetFiles(errorLogsDir, "error-*.txt")
+            .Select(f => new FileInfo(f))
+            .OrderByDescending(f => f.LastWriteTime)
+            .Select(f => new
+            {
+                fileName = f.Name,
+                date = f.Name.Replace("error-", "").Replace(".txt", ""),
+                sizeBytes = f.Length,
+                lastModified = f.LastWriteTimeUtc
+            });
+
+        return Ok(files);
+    }
+
+    [Authorize(Policy = "reports.read")]
+    [HttpGet("admin/error-logs/{fileName}")]
+    public IActionResult GetErrorLogContent(string fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName) || fileName.Contains("..") || fileName.Contains("/") || fileName.Contains("\\"))
+        {
+            return BadRequest(new { error = "Invalid file name." });
+        }
+
+        var errorLogsDir = Path.Combine(Directory.GetCurrentDirectory(), "ErrorLogs");
+        var filePath = Path.Combine(errorLogsDir, fileName);
+        if (!System.IO.File.Exists(filePath))
+        {
+            return NotFound(new { error = "Error log file not found." });
+        }
+
+        using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using var reader = new StreamReader(stream, System.Text.Encoding.UTF8);
+        var content = reader.ReadToEnd();
+        return Content(content, "text/plain; charset=utf-8");
+    }
+
+    [Authorize(Policy = "reports.read")]
+    [HttpPost("admin/error-logs/test-error")]
+    public IActionResult TriggerTestError([FromBody] TestErrorRequest? req)
+    {
+        string message = req?.Message ?? "Test exception generated for support team verification";
+        throw new InvalidOperationException(message);
+    }
 }
 
+public class TestErrorRequest { public string? Message { get; set; } }
 public class SqlQueryRequest { public string Query { get; set; } = null!; }
