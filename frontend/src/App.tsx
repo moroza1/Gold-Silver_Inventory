@@ -2,10 +2,17 @@ import React, { useState, useEffect, useRef } from 'react';
 import GfsApp from './GfsApp';
 import { SerialToolsModal, type GeneratedSerialItem } from './components/SerialToolsModal';
 import { TurkeyPurchaseScreen } from './components/TurkeyPurchaseScreen';
-const API_BASE = (import.meta as any).env?.VITE_API_URL || (
+const rawApiUrl = (import.meta as any).env?.VITE_API_URL;
+const normalizeApiBase = (url?: string) => {
+  if (!url) return null;
+  const clean = url.replace(/\/+$/, '');
+  return clean.endsWith('/api') ? clean : `${clean}/api`;
+};
+
+const API_BASE = normalizeApiBase(rawApiUrl) || (
   typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
     ? (window.location.port === '80' || window.location.port === '8080' ? `http://${window.location.hostname}:8080/api` : 'http://localhost:5000/api')
-    : 'http://69.62.116.52:8080/api'
+    : 'https://api.aisoftwares.cloud/api'
 );
 
 // --- "Between dates" range filter helpers ---------------------------------
