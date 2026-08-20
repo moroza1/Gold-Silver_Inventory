@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "d:\\Projects\\Gold2\\backend\\PMIMS.Infrastructure\\PMIMS.Infrastructure.csproj": {}
+    "D:\\Projects\\Gold2\\backend\\PMIMS.Infrastructure\\PMIMS.Infrastructure.csproj": {}
   },
   "projects": {
-    "d:\\Projects\\Gold2\\backend\\Ledger.Gl\\Ledger.Gl.csproj": {
+    "D:\\Projects\\Gold2\\backend\\Ledger.Gl\\Ledger.Gl.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "d:\\Projects\\Gold2\\backend\\Ledger.Gl\\Ledger.Gl.csproj",
+        "projectUniqueName": "D:\\Projects\\Gold2\\backend\\Ledger.Gl\\Ledger.Gl.csproj",
         "projectName": "Ledger.Gl",
-        "projectPath": "d:\\Projects\\Gold2\\backend\\Ledger.Gl\\Ledger.Gl.csproj",
+        "projectPath": "D:\\Projects\\Gold2\\backend\\Ledger.Gl\\Ledger.Gl.csproj",
         "packagesPath": "C:\\Users\\Roshdy\\.nuget\\packages\\",
-        "outputPath": "d:\\Projects\\Gold2\\backend\\Ledger.Gl\\obj\\",
+        "outputPath": "D:\\Projects\\Gold2\\backend\\Ledger.Gl\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
           "C:\\Users\\Roshdy\\AppData\\Roaming\\NuGet\\NuGet.Config"
@@ -339,14 +339,14 @@
         }
       }
     },
-    "d:\\Projects\\Gold2\\backend\\PMIMS.Application\\PMIMS.Application.csproj": {
+    "D:\\Projects\\Gold2\\backend\\PMIMS.Application\\PMIMS.Application.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "d:\\Projects\\Gold2\\backend\\PMIMS.Application\\PMIMS.Application.csproj",
+        "projectUniqueName": "D:\\Projects\\Gold2\\backend\\PMIMS.Application\\PMIMS.Application.csproj",
         "projectName": "PMIMS.Application",
-        "projectPath": "d:\\Projects\\Gold2\\backend\\PMIMS.Application\\PMIMS.Application.csproj",
+        "projectPath": "D:\\Projects\\Gold2\\backend\\PMIMS.Application\\PMIMS.Application.csproj",
         "packagesPath": "C:\\Users\\Roshdy\\.nuget\\packages\\",
-        "outputPath": "d:\\Projects\\Gold2\\backend\\PMIMS.Application\\obj\\",
+        "outputPath": "D:\\Projects\\Gold2\\backend\\PMIMS.Application\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
           "C:\\Users\\Roshdy\\AppData\\Roaming\\NuGet\\NuGet.Config"
@@ -362,8 +362,8 @@
             "framework": "net10.0",
             "targetAlias": "net10.0",
             "projectReferences": {
-              "d:\\Projects\\Gold2\\backend\\PMIMS.Domain\\PMIMS.Domain.csproj": {
-                "projectPath": "d:\\Projects\\Gold2\\backend\\PMIMS.Domain\\PMIMS.Domain.csproj"
+              "D:\\Projects\\Gold2\\backend\\PMIMS.Domain\\PMIMS.Domain.csproj": {
+                "projectPath": "D:\\Projects\\Gold2\\backend\\PMIMS.Domain\\PMIMS.Domain.csproj"
               }
             }
           }
@@ -684,14 +684,14 @@
         }
       }
     },
-    "d:\\Projects\\Gold2\\backend\\PMIMS.Domain\\PMIMS.Domain.csproj": {
+    "D:\\Projects\\Gold2\\backend\\PMIMS.Domain\\PMIMS.Domain.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "d:\\Projects\\Gold2\\backend\\PMIMS.Domain\\PMIMS.Domain.csproj",
+        "projectUniqueName": "D:\\Projects\\Gold2\\backend\\PMIMS.Domain\\PMIMS.Domain.csproj",
         "projectName": "PMIMS.Domain",
-        "projectPath": "d:\\Projects\\Gold2\\backend\\PMIMS.Domain\\PMIMS.Domain.csproj",
+        "projectPath": "D:\\Projects\\Gold2\\backend\\PMIMS.Domain\\PMIMS.Domain.csproj",
         "packagesPath": "C:\\Users\\Roshdy\\.nuget\\packages\\",
-        "outputPath": "d:\\Projects\\Gold2\\backend\\PMIMS.Domain\\obj\\",
+        "outputPath": "D:\\Projects\\Gold2\\backend\\PMIMS.Domain\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
           "C:\\Users\\Roshdy\\AppData\\Roaming\\NuGet\\NuGet.Config"
@@ -1019,14 +1019,14 @@
         }
       }
     },
-    "d:\\Projects\\Gold2\\backend\\PMIMS.Infrastructure\\PMIMS.Infrastructure.csproj": {
+    "D:\\Projects\\Gold2\\backend\\PMIMS.Infrastructure\\PMIMS.Infrastructure.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "d:\\Projects\\Gold2\\backend\\PMIMS.Infrastructure\\PMIMS.Infrastructure.csproj",
+        "projectUniqueName": "D:\\Projects\\Gold2\\backend\\PMIMS.Infrastructure\\PMIMS.Infrastructure.csproj",
         "projectName": "PMIMS.Infrastructure",
-        "projectPath": "d:\\Projects\\Gold2\\backend\\PMIMS.Infrastructure\\PMIMS.Infrastructure.csproj",
+        "projectPath": "D:\\Projects\\Gold2\\backend\\PMIMS.Infrastructure\\PMIMS.Infrastructure.csproj",
         "packagesPath": "C:\\Users\\Roshdy\\.nuget\\packages\\",
-        "outputPath": "d:\\Projects\\Gold2\\backend\\PMIMS.Infrastructure\\obj\\",
+        "outputPath": "D:\\Projects\\Gold2\\backend\\PMIMS.Infrastructure\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
           "C:\\Users\\Roshdy\\AppData\\Roaming\\NuGet\\NuGet.Config"
@@ -1042,11 +1042,11 @@
             "framework": "net10.0",
             "targetAlias": "net10.0",
             "projectReferences": {
-              "d:\\Projects\\Gold2\\backend\\Ledger.Gl\\Ledger.Gl.csproj": {
-                "projectPath": "d:\\Projects\\Gold2\\backend\\Ledger.Gl\\Ledger.Gl.csproj"
+              "D:\\Projects\\Gold2\\backend\\Ledger.Gl\\Ledger.Gl.csproj": {
+                "projectPath": "D:\\Projects\\Gold2\\backend\\Ledger.Gl\\Ledger.Gl.csproj"
               },
-              "d:\\Projects\\Gold2\\backend\\PMIMS.Application\\PMIMS.Application.csproj": {
-                "projectPath": "d:\\Projects\\Gold2\\backend\\PMIMS.Application\\PMIMS.Application.csproj"
+              "D:\\Projects\\Gold2\\backend\\PMIMS.Application\\PMIMS.Application.csproj": {
+                "projectPath": "D:\\Projects\\Gold2\\backend\\PMIMS.Application\\PMIMS.Application.csproj"
               }
             }
           }

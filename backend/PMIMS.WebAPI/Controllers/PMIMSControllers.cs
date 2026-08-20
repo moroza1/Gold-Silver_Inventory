@@ -600,7 +600,8 @@ public partial class PMIMSControllers : ControllerBase
                 sourceType: "SUPPLIER", customerId: null, accountId: null, receiptReason: null,
                 vendorId: vendorId, shipmentReference: req.ShipmentReference, deliveryNoteNumber: req.DeliveryNoteNumber,
                 airwayBillNumber: req.AirwayBillNumber, supportingDocumentUrl: req.SupportingDocumentUrl,
-                discrepancyNotes: req.DiscrepancyNotes, receivingDate: req.ReceivingDate);
+                discrepancyNotes: req.DiscrepancyNotes, receivingDate: req.ReceivingDate,
+                ownershipType: string.IsNullOrWhiteSpace(req.OwnershipType) ? "KFH_OWNED" : req.OwnershipType);
 
             return Ok(new { pending_id = pending.PendingIntakeId, message = "Intake shipment verification request initiated and routed to the Maker-Checker workflow approval." });
         }
@@ -619,6 +620,7 @@ public partial class PMIMSControllers : ControllerBase
             pending_id = pi.PendingIntakeId,
             lot_number = pi.LotNumber,
             source_type = pi.SourceType,
+            ownership_type = pi.OwnershipType ?? "KFH_OWNED",
             vendor_id = pi.VendorId,
             vendor_name = pi.Vendor?.VendorName ?? (pi.SourceType == "CUSTOMER" ? (pi.Customer?.CustomerName ?? "Customer") : "Direct Supplier"),
             shipment_reference = pi.ShipmentReference,
@@ -1209,6 +1211,28 @@ public partial class PMIMSControllers : ControllerBase
                     };
                 }
             }
+            else if (inst.WorkflowType == "TURKEY_PURCHASE")
+            {
+                var purchases = await _repository.GetPendingTurkeyPurchasesAsync();
+                var pur = purchases.FirstOrDefault(p => p.PendingPurchaseId == inst.EntityId);
+                if (pur != null)
+                {
+                    entityDetails = new
+                    {
+                        pending_purchase_id = pur.PendingPurchaseId,
+                        batch_reference = pur.BatchReference,
+                        total_items = pur.TotalItems,
+                        total_weight_grams = pur.TotalWeightGrams,
+                        unit_price = pur.UnitPricePerGram,
+                        total_cost = pur.TotalCost,
+                        requested_by = pur.RequestedBy,
+                        notes = pur.Notes,
+                        serials_json = pur.SerialsJsonList,
+                        status_code = pur.StatusCode,
+                        created_by = pur.RequestedBy
+                    };
+                }
+            }
 
             var lastAction = approvalActions.OrderByDescending(a => a.ActionTimestamp).ThenByDescending(a => a.ActionId).FirstOrDefault();
             string? stepName = currentStep?.StepName;
@@ -1335,6 +1359,10 @@ public partial class PMIMSControllers : ControllerBase
             {
                 var tr = transfers.FirstOrDefault(t => t.TransferId == entityId);
                 return tr != null ? $"Transfer {tr.Item?.SerialNumber ?? "item"} -> {tr.DestinationBranch?.BranchName ?? "branch"}" : $"Transfer #{entityId}";
+            }
+            if (workflowType == "TURKEY_PURCHASE")
+            {
+                return $"Turkey Purchase #{entityId}";
             }
             return $"{workflowType} #{entityId}";
         }
@@ -1996,7 +2024,16 @@ public class IntakeRequest
     public string LotNumber { get; set; } = null!;
     public int LocationId { get; set; }
     public string ReceivedBy { get; set; } = null!;
+    public string OwnershipType { get; set; } = "KFH_OWNED"; // KFH_OWNED or TURKEY_OWNED
     public List<IntakeItemDTO> Items { get; set; } = new();
+}
+
+public class TurkeyPurchaseRequest
+{
+    public List<string> SerialNumbers { get; set; } = new();
+    public decimal UnitPricePerGram { get; set; }
+    public string? RequestedBy { get; set; }
+    public string? Notes { get; set; }
 }
 
 public class IntakeItemDTO

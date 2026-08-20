@@ -943,6 +943,7 @@ public class PendingIntake
     public int LocationId { get; set; }
     public string ReceivedBy { get; set; } = null!;
     public string SerialsJsonList { get; set; } = null!;
+    public string OwnershipType { get; set; } = "KFH_OWNED"; // KFH_OWNED, TURKEY_OWNED, CUSTOMER_OWNED
     public string StatusCode { get; set; } = "PENDING_APPROVAL"; // PENDING_APPROVAL, APPROVED, REJECTED
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
@@ -950,6 +951,23 @@ public class PendingIntake
     public Vendor? Vendor { get; set; }
     public InventoryLocation? Location { get; set; }
     public Customer? Customer { get; set; }
+}
+
+public class PendingTurkeyPurchase
+{
+    public int PendingPurchaseId { get; set; }
+    public string BatchReference { get; set; } = null!;
+    public string SerialsJsonList { get; set; } = null!;
+    public int TotalItems { get; set; }
+    public decimal TotalWeightGrams { get; set; }
+    public decimal UnitPricePerGram { get; set; }
+    public decimal TotalCost { get; set; }
+    public string RequestedBy { get; set; } = null!;
+    public string? Notes { get; set; }
+    public string StatusCode { get; set; } = "PENDING_APPROVAL"; // PENDING_APPROVAL, APPROVED, REJECTED
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public string? ApprovedBy { get; set; }
+    public DateTime? ApprovedAt { get; set; }
 }
 
 // ============================================================

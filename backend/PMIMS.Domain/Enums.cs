@@ -3,7 +3,8 @@ namespace PMIMS.Domain;
 public enum OwnershipType
 {
     KFH_OWNED,
-    CUSTOMER_OWNED
+    CUSTOMER_OWNED,
+    TURKEY_OWNED
 }
 
 public enum LocationType

@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "d:\\Projects\\Gold2\\backend\\Ledger.Gl.EfCore\\Ledger.Gl.EfCore.csproj": {}
+    "D:\\Projects\\Gold2\\backend\\Ledger.Gl.EfCore\\Ledger.Gl.EfCore.csproj": {}
   },
   "projects": {
-    "d:\\Projects\\Gold2\\backend\\Ledger.Gl.EfCore\\Ledger.Gl.EfCore.csproj": {
+    "D:\\Projects\\Gold2\\backend\\Ledger.Gl.EfCore\\Ledger.Gl.EfCore.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "d:\\Projects\\Gold2\\backend\\Ledger.Gl.EfCore\\Ledger.Gl.EfCore.csproj",
+        "projectUniqueName": "D:\\Projects\\Gold2\\backend\\Ledger.Gl.EfCore\\Ledger.Gl.EfCore.csproj",
         "projectName": "Ledger.Gl.EfCore",
-        "projectPath": "d:\\Projects\\Gold2\\backend\\Ledger.Gl.EfCore\\Ledger.Gl.EfCore.csproj",
+        "projectPath": "D:\\Projects\\Gold2\\backend\\Ledger.Gl.EfCore\\Ledger.Gl.EfCore.csproj",
         "packagesPath": "C:\\Users\\Roshdy\\.nuget\\packages\\",
-        "outputPath": "d:\\Projects\\Gold2\\backend\\Ledger.Gl.EfCore\\obj\\",
+        "outputPath": "D:\\Projects\\Gold2\\backend\\Ledger.Gl.EfCore\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
           "C:\\Users\\Roshdy\\AppData\\Roaming\\NuGet\\NuGet.Config"
@@ -27,8 +27,8 @@
             "framework": "net10.0",
             "targetAlias": "net10.0",
             "projectReferences": {
-              "d:\\Projects\\Gold2\\backend\\Ledger.Gl\\Ledger.Gl.csproj": {
-                "projectPath": "d:\\Projects\\Gold2\\backend\\Ledger.Gl\\Ledger.Gl.csproj"
+              "D:\\Projects\\Gold2\\backend\\Ledger.Gl\\Ledger.Gl.csproj": {
+                "projectPath": "D:\\Projects\\Gold2\\backend\\Ledger.Gl\\Ledger.Gl.csproj"
               }
             }
           }
@@ -357,14 +357,14 @@
         }
       }
     },
-    "d:\\Projects\\Gold2\\backend\\Ledger.Gl\\Ledger.Gl.csproj": {
+    "D:\\Projects\\Gold2\\backend\\Ledger.Gl\\Ledger.Gl.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "d:\\Projects\\Gold2\\backend\\Ledger.Gl\\Ledger.Gl.csproj",
+        "projectUniqueName": "D:\\Projects\\Gold2\\backend\\Ledger.Gl\\Ledger.Gl.csproj",
         "projectName": "Ledger.Gl",
-        "projectPath": "d:\\Projects\\Gold2\\backend\\Ledger.Gl\\Ledger.Gl.csproj",
+        "projectPath": "D:\\Projects\\Gold2\\backend\\Ledger.Gl\\Ledger.Gl.csproj",
         "packagesPath": "C:\\Users\\Roshdy\\.nuget\\packages\\",
-        "outputPath": "d:\\Projects\\Gold2\\backend\\Ledger.Gl\\obj\\",
+        "outputPath": "D:\\Projects\\Gold2\\backend\\Ledger.Gl\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
           "C:\\Users\\Roshdy\\AppData\\Roaming\\NuGet\\NuGet.Config"

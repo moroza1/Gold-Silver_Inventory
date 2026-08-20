@@ -1,5 +1,4 @@
 services:
-  # 1. Backend ASP.NET Core API (.NET 10)
   backend:
     image: ghcr.io/moroza1/pmims-backend:latest
     container_name: pmims-backend
@@ -7,26 +6,38 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - ASPNETCORE_ENVIRONMENT=Production
-      - ASPNETCORE_URLS=http://+:8080
-      - DatabaseConfig__UseSqlServer=false
-      - DatabaseConfig__SqliteConnection=Data Source=/app/data/pmims.db
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+      DatabaseConfig__UseSqlServer: "false"
+      DatabaseConfig__SqliteConnection: "Data Source=/app/data/pmims.db"
     volumes:
       - backend-data:/app/data
       - backend-logs:/app/logs
 
-  # 2. Frontend React SPA (Nginx)
   frontend:
     image: ghcr.io/moroza1/pmims-frontend:latest
     container_name: pmims-frontend
     restart: unless-stopped
     ports:
-      - "80:80"
+      - "8081:80"
     depends_on:
       - backend
+    networks:
+      - default
+      - traefik-proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-proxy"
+      - "traefik.http.routers.goldsilver.rule=Host(`aisoftwares.cloud`) || Host(`www.aisoftwares.cloud`)"
+      - "traefik.http.routers.goldsilver.entrypoints=websecure"
+      - "traefik.http.routers.goldsilver.tls=true"
+      - "traefik.http.routers.goldsilver.tls.certresolver=letsencrypt"
+      - "traefik.http.services.goldsilver.loadbalancer.server.port=80"
 
 volumes:
   backend-data:
   backend-logs:
 
-
+networks:
+  traefik-proxy:
+    external: true

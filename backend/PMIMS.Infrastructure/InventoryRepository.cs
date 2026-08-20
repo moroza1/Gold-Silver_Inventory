@@ -276,7 +276,7 @@ public class InventoryRepository : IInventoryRepository
     public async Task<string> IntakeInventoryItemsAsync(int? poId, string lotNumber, int locationId, string receivedBy, string serialsJsonList,
         string sourceType = "SUPPLIER", int? customerId = null, int? accountId = null, string? receiptReason = null,
         int? vendorId = null, string? shipmentReference = null, string? deliveryNoteNumber = null, string? airwayBillNumber = null,
-        string? supportingDocumentUrl = null, string? discrepancyNotes = null, DateTime? receivingDate = null)
+        string? supportingDocumentUrl = null, string? discrepancyNotes = null, DateTime? receivingDate = null, string ownershipType = "KFH_OWNED")
     {
         sourceType = string.IsNullOrWhiteSpace(sourceType) ? "SUPPLIER" : sourceType.Trim().ToUpperInvariant();
         bool isCustomerReceipt = sourceType == "CUSTOMER";
@@ -369,8 +369,10 @@ public class InventoryRepository : IInventoryRepository
             _dbContext.InventoryLots.Add(lot);
             await _dbContext.SaveChangesAsync();
 
-            // A customer custody deposit stays CUSTOMER_OWNED; every other path (supplier receipt, buyback, return) is KFH_OWNED.
-            string ownershipType = isCustomerReceipt && receiptReason == "CUSTODY_DEPOSIT" ? "CUSTOMER_OWNED" : "KFH_OWNED";
+            // A customer custody deposit stays CUSTOMER_OWNED; Turkey consignment stays TURKEY_OWNED; other supplier receipt is KFH_OWNED.
+            string finalOwnershipType = isCustomerReceipt && receiptReason == "CUSTODY_DEPOSIT" 
+                ? "CUSTOMER_OWNED" 
+                : (!string.IsNullOrWhiteSpace(ownershipType) && ownershipType.Equals("TURKEY_OWNED", StringComparison.OrdinalIgnoreCase) ? "TURKEY_OWNED" : "KFH_OWNED");
 
             var affectedProducts = new HashSet<int>();
             var newItems = new List<InventoryItem>();
@@ -428,7 +430,7 @@ public class InventoryRepository : IInventoryRepository
                     ProductId = productId,
                     LotId = lot.LotId,
                     LocationId = locationId,
-                    OwnershipType = ownershipType,
+                    OwnershipType = finalOwnershipType,
                     StatusCode = "READY",
                     IsDamaged = isDamaged,
                     DamageReason = isDamaged ? (damageReason ?? "Damaged upon receipt from supplier") : null,
@@ -560,7 +562,7 @@ public class InventoryRepository : IInventoryRepository
 
             foreach (var prodId in affectedProducts)
             {
-                await RecalculateInventoryBalanceAsync(locationId, prodId, ownershipType);
+                await RecalculateInventoryBalanceAsync(locationId, prodId, finalOwnershipType);
             }
 
             if (po != null)
@@ -1743,6 +1745,11 @@ public class InventoryRepository : IInventoryRepository
                     item.DamageEvidenceDocId = null;
                 }
             }
+            else if (instance.WorkflowType == "TURKEY_PURCHASE")
+            {
+                var purchase = await _dbContext.PendingTurkeyPurchases.FindAsync(instance.EntityId);
+                if (purchase != null) purchase.StatusCode = "REJECTED";
+            }
         }
         else if (action == "RETURNED")
         {
@@ -1761,6 +1768,11 @@ public class InventoryRepository : IInventoryRepository
             {
                 var pending = await _dbContext.PendingIntakes.FindAsync(instance.EntityId);
                 if (pending != null) pending.StatusCode = "PENDING_APPROVAL";
+            }
+            else if (instance.WorkflowType == "TURKEY_PURCHASE")
+            {
+                var purchase = await _dbContext.PendingTurkeyPurchases.FindAsync(instance.EntityId);
+                if (purchase != null) purchase.StatusCode = "PENDING_APPROVAL";
             }
         }
         else if (action == "APPROVED")
@@ -1837,7 +1849,7 @@ public class InventoryRepository : IInventoryRepository
                         string result = await IntakeInventoryItemsAsync(pending.PoId, pending.LotNumber, pending.LocationId, pending.ReceivedBy, pending.SerialsJsonList,
                             pending.SourceType, pending.CustomerId, pending.AccountId, pending.ReceiptReason,
                             pending.VendorId, pending.ShipmentReference, pending.DeliveryNoteNumber, pending.AirwayBillNumber,
-                            pending.SupportingDocumentUrl, pending.DiscrepancyNotes, pending.ReceivingDate);
+                            pending.SupportingDocumentUrl, pending.DiscrepancyNotes, pending.ReceivingDate, pending.OwnershipType);
                         if (result != "SUCCESS")
                         {
                             throw new InvalidOperationException($"Intake execution failed: {result}");
@@ -1851,6 +1863,14 @@ public class InventoryRepository : IInventoryRepository
                     {
                         item.IsDamaged = true;
                         item.StatusCode = "READY";
+                    }
+                }
+                else if (instance.WorkflowType == "TURKEY_PURCHASE")
+                {
+                    string result = await ApproveTurkeyPurchaseAsync(instance.EntityId, username);
+                    if (result != "SUCCESS")
+                    {
+                        throw new InvalidOperationException($"Turkey purchase approval execution failed: {result}");
                     }
                 }
             }
@@ -2485,7 +2505,7 @@ public class InventoryRepository : IInventoryRepository
     public async Task<PendingIntake> InitiateWorkflowIntakeAsync(int? poId, string lotNumber, int locationId, string receivedBy, string serialsJsonList,
         string sourceType = "SUPPLIER", int? customerId = null, int? accountId = null, string? receiptReason = null,
         int? vendorId = null, string? shipmentReference = null, string? deliveryNoteNumber = null, string? airwayBillNumber = null,
-        string? supportingDocumentUrl = null, string? discrepancyNotes = null, DateTime? receivingDate = null)
+        string? supportingDocumentUrl = null, string? discrepancyNotes = null, DateTime? receivingDate = null, string ownershipType = "KFH_OWNED")
     {
         sourceType = string.IsNullOrWhiteSpace(sourceType) ? "SUPPLIER" : sourceType.Trim().ToUpperInvariant();
         if (sourceType != "SUPPLIER" && sourceType != "CUSTOMER")
@@ -2582,6 +2602,7 @@ public class InventoryRepository : IInventoryRepository
             LocationId = locationId,
             ReceivedBy = receivedBy,
             SerialsJsonList = serialsJsonList,
+            OwnershipType = string.IsNullOrWhiteSpace(ownershipType) ? "KFH_OWNED" : ownershipType.Trim(),
             StatusCode = "PENDING_APPROVAL",
             CreatedAt = DateTime.UtcNow
         };
@@ -4320,6 +4341,179 @@ public class InventoryRepository : IInventoryRepository
         if (checkDigit == 11) checkDigit = 0;
 
         return checkDigit == (civilId[11] - '0');
+    }
+
+    // =========================================================================
+    // Turkey Consignment & Purchase Operations
+    // =========================================================================
+    public async Task<IEnumerable<InventoryItem>> GetTurkeyInventoryAsync()
+    {
+        return await _dbContext.InventoryItems
+            .Include(i => i.Product)
+                .ThenInclude(p => p.MetalType)
+            .Include(i => i.Product)
+                .ThenInclude(p => p.Denomination)
+            .Include(i => i.Product)
+                .ThenInclude(p => p.Purity)
+            .Include(i => i.Product)
+                .ThenInclude(p => p.Brand)
+            .Include(i => i.Location)
+                .ThenInclude(l => l.Vault)
+            .Include(i => i.Location)
+                .ThenInclude(l => l.Branch)
+            .Include(i => i.Lot)
+                .ThenInclude(l => l.Vendor)
+            .Where(i => i.OwnershipType == "TURKEY_OWNED" && i.StatusCode == "READY")
+            .OrderBy(i => i.SerialNumber)
+            .ToListAsync();
+    }
+
+    public async Task<IEnumerable<PendingTurkeyPurchase>> GetPendingTurkeyPurchasesAsync()
+    {
+        return await _dbContext.PendingTurkeyPurchases
+            .OrderByDescending(p => p.CreatedAt)
+            .ToListAsync();
+    }
+
+    public async Task<PendingTurkeyPurchase> InitiateTurkeyPurchaseWorkflowAsync(List<string> serialNumbers, decimal unitPricePerGram, string requestedBy, string? notes)
+    {
+        if (serialNumbers == null || serialNumbers.Count == 0)
+        {
+            throw new InvalidOperationException("At least one serial number must be specified for purchase.");
+        }
+
+        var cleanSerials = serialNumbers.Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s.Trim()).Distinct().ToList();
+        if (cleanSerials.Count == 0)
+        {
+            throw new InvalidOperationException("No valid serial numbers provided.");
+        }
+
+        var items = await _dbContext.InventoryItems
+            .Include(i => i.Product)
+                .ThenInclude(p => p.Denomination)
+            .Where(i => cleanSerials.Contains(i.SerialNumber))
+            .ToListAsync();
+
+        if (items.Count != cleanSerials.Count)
+        {
+            var foundSerials = items.Select(i => i.SerialNumber).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var missing = cleanSerials.Where(s => !foundSerials.Contains(s)).ToList();
+            throw new InvalidOperationException($"The following serial numbers were not found in inventory: {string.Join(", ", missing)}");
+        }
+
+        var invalidOwnerItems = items.Where(i => i.OwnershipType != "TURKEY_OWNED").ToList();
+        if (invalidOwnerItems.Any())
+        {
+            throw new InvalidOperationException($"The following serial numbers are not owned by Turkey: {string.Join(", ", invalidOwnerItems.Select(i => i.SerialNumber))}");
+        }
+
+        var invalidStatusItems = items.Where(i => i.StatusCode != "READY").ToList();
+        if (invalidStatusItems.Any())
+        {
+            throw new InvalidOperationException($"The following serial numbers are not in READY status: {string.Join(", ", invalidStatusItems.Select(i => i.SerialNumber))}");
+        }
+
+        decimal totalWeightGrams = items.Sum(i => i.Product?.Denomination?.WeightGrams ?? 0);
+        decimal totalCost = unitPricePerGram > 0 ? (totalWeightGrams * unitPricePerGram) : 0;
+        string batchRef = $"TR-PUR-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..6].ToUpperInvariant()}";
+
+        var pending = new PendingTurkeyPurchase
+        {
+            BatchReference = batchRef,
+            SerialsJsonList = JsonSerializer.Serialize(cleanSerials),
+            TotalItems = items.Count,
+            TotalWeightGrams = totalWeightGrams,
+            UnitPricePerGram = unitPricePerGram,
+            TotalCost = totalCost,
+            RequestedBy = requestedBy,
+            Notes = notes,
+            StatusCode = "PENDING_APPROVAL",
+            CreatedAt = DateTime.UtcNow
+        };
+
+        _dbContext.PendingTurkeyPurchases.Add(pending);
+        await _dbContext.SaveChangesAsync();
+
+        var template = await _dbContext.WorkflowTemplates.Include(t => t.Steps)
+            .FirstOrDefaultAsync(t => t.WorkflowType == "TURKEY_PURCHASE" && t.IsActive);
+        if (template == null || template.Steps.Count == 0)
+        {
+            throw new InvalidOperationException("Cannot initiate purchase: No active TURKEY_PURCHASE workflow template configured. Please contact an administrator to configure the workflow.");
+        }
+
+        await StartWorkflowInstanceAsync("TURKEY_PURCHASE", pending.PendingPurchaseId, requestedBy);
+        return pending;
+    }
+
+    public async Task<string> ApproveTurkeyPurchaseAsync(int pendingPurchaseId, string approvedBy)
+    {
+        var purchase = await _dbContext.PendingTurkeyPurchases.FindAsync(pendingPurchaseId);
+        if (purchase == null) throw new InvalidOperationException("Pending Turkey purchase not found.");
+        if (purchase.StatusCode == "APPROVED") return "SUCCESS";
+
+        var serials = JsonSerializer.Deserialize<List<string>>(purchase.SerialsJsonList) ?? new List<string>();
+        var items = await _dbContext.InventoryItems
+            .Include(i => i.Product)
+                .ThenInclude(p => p.Denomination)
+            .Include(i => i.Product)
+                .ThenInclude(p => p.MetalType)
+            .Where(i => serials.Contains(i.SerialNumber))
+            .ToListAsync();
+
+        purchase.StatusCode = "APPROVED";
+        purchase.ApprovedBy = approvedBy;
+        purchase.ApprovedAt = DateTime.UtcNow;
+
+        var affectedProductsByLocation = new HashSet<(int locationId, int productId)>();
+
+        foreach (var item in items)
+        {
+            string oldOwnership = item.OwnershipType;
+            item.OwnershipType = "KFH_OWNED";
+            item.StatusCode = "READY";
+
+            if (purchase.UnitPricePerGram > 0 && item.Product?.Denomination?.WeightGrams > 0)
+            {
+                item.AveragePurchaseCost = purchase.UnitPricePerGram * item.Product.Denomination.WeightGrams;
+            }
+
+            if (item.LocationId.HasValue)
+            {
+                affectedProductsByLocation.Add((item.LocationId.Value, item.ProductId));
+            }
+
+            var tx = new InventoryTransaction
+            {
+                TransactionNumber = $"TX-TRPUR-{item.ItemId}-{DateTime.UtcNow:yyyyMMddHHmmssfff}",
+                ItemId = item.ItemId,
+                TransactionType = "PURCHASE",
+                SourceLocationId = item.LocationId,
+                DestinationLocationId = item.LocationId,
+                SourceOwnership = oldOwnership,
+                DestinationOwnership = "KFH_OWNED",
+                InitiatedBy = purchase.RequestedBy,
+                ApprovedBy = approvedBy,
+                TransactionTimestamp = DateTime.UtcNow
+            };
+            _dbContext.InventoryTransactions.Add(tx);
+
+            await RecordChainOfCustodyEventAsync(item.ItemId, "OWNERSHIP_TRANSFER", approvedBy, item.LocationId, tx.TransactionNumber,
+                $"Purchased from Turkey Consignment by KFH. Unit Price/g: {purchase.UnitPricePerGram:N3} KWD. Batch: {purchase.BatchReference}.");
+        }
+
+        await _dbContext.SaveChangesAsync();
+
+        foreach (var (locId, prodId) in affectedProductsByLocation)
+        {
+            await RecalculateInventoryBalanceAsync(locId, prodId, "TURKEY_OWNED");
+            await RecalculateInventoryBalanceAsync(locId, prodId, "KFH_OWNED");
+        }
+
+        await SaveAuditLogAsync(approvedBy, "SYSTEM", "TREASURY_PURCHASE",
+            $"Approved Turkey Gold Purchase #{purchase.PendingPurchaseId} ({purchase.TotalItems} bars, {purchase.TotalWeightGrams:N2}g) at total cost {purchase.TotalCost:N3} KWD.",
+            entityType: "PENDING_TURKEY_PURCHASE", entityId: purchase.PendingPurchaseId.ToString());
+
+        return "SUCCESS";
     }
 }
 

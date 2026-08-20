@@ -1301,5 +1301,103 @@ public class PMIMSTests
         Assert.NotNull(brandAfterDelete);
         Assert.False(brandAfterDelete.IsActive);
     }
+
+    [Fact]
+    public async Task TestTurkeyConsignmentIntake_And_KfhPurchaseWorkflow()
+    {
+        using var setup = CreateContext();
+        await SeedBasicDataAsync(setup.Context);
+
+        // 1. Setup INTAKE_SHIPMENT and TURKEY_PURCHASE workflow templates
+        var intakeWorkflow = new WorkflowTemplate
+        {
+            WorkflowType = "INTAKE_SHIPMENT",
+            Name = "Intake Workflow",
+            Description = "Intake verification",
+            IsActive = true
+        };
+        var turkeyPurchaseWorkflow = new WorkflowTemplate
+        {
+            WorkflowType = "TURKEY_PURCHASE",
+            Name = "Turkey Purchase Workflow",
+            Description = "Consignment purchase verification",
+            IsActive = true
+        };
+        setup.Context.WorkflowTemplates.AddRange(intakeWorkflow, turkeyPurchaseWorkflow);
+        await setup.Context.SaveChangesAsync();
+
+        setup.Context.WorkflowSteps.AddRange(
+            new WorkflowStep { TemplateId = intakeWorkflow.TemplateId, StepOrder = 1, StepName = "Intake Verification", RequiredRole = "Operations Checker", Description = "Verify serials" },
+            new WorkflowStep { TemplateId = turkeyPurchaseWorkflow.TemplateId, StepOrder = 1, StepName = "Purchase Approval", RequiredRole = "Operations Checker", Description = "Approve Turkey purchase" }
+        );
+        await setup.Context.SaveChangesAsync();
+
+        var groupChecker = new PrivilegeGroup { GroupName = "Operations Checker", Description = "Test checker group", IsSystem = true };
+        setup.Context.PrivilegeGroups.Add(groupChecker);
+        await setup.Context.SaveChangesAsync();
+        var checkerUser = new AppUser { Username = "checker-turkey", DisplayName = "Checker Turkey", Email = "checker@turkey.test", PasswordHash = "test-hash" };
+        setup.Context.AppUsers.Add(checkerUser);
+        await setup.Context.SaveChangesAsync();
+        setup.Context.UserGroupMemberships.Add(new UserGroupMembership { UserId = checkerUser.UserId, GroupId = groupChecker.GroupId, AssignedBy = "TEST" });
+        await setup.Context.SaveChangesAsync();
+
+        var repo = new InventoryRepository(setup.Context);
+
+        // 2. Intake shipment with OwnershipType = "TURKEY_OWNED"
+        string serialsJson = "[{\"serial\":\"TR-GOLD-001\",\"product_id\":1},{\"serial\":\"TR-GOLD-002\",\"product_id\":1}]";
+        var pendingIntake = await repo.InitiateWorkflowIntakeAsync(
+            null, "LOT-TR-001", 1, "maker_user", serialsJson,
+            sourceType: "SUPPLIER", vendorId: 1, ownershipType: "TURKEY_OWNED");
+
+        Assert.Equal("TURKEY_OWNED", pendingIntake.OwnershipType);
+
+        // Approve intake
+        var instances = (await repo.GetActiveWorkflowInstancesAsync()).ToList();
+        var intakeInstance = instances.First(i => i.WorkflowType == "INTAKE_SHIPMENT" && i.EntityId == pendingIntake.PendingIntakeId);
+        var intakeResult = await repo.ProcessWorkflowActionAsync(intakeInstance.InstanceId, "checker-turkey", "APPROVED", "Approved Turkey shipment");
+        Assert.Equal("SUCCESS", intakeResult);
+
+        // Verify items created with TURKEY_OWNED
+        var turkeyStock = (await repo.GetTurkeyInventoryAsync()).ToList();
+        Assert.Equal(2, turkeyStock.Count);
+        Assert.All(turkeyStock, item => Assert.Equal("TURKEY_OWNED", item.OwnershipType));
+
+        // 3. Initiate KFH Purchase from Turkey
+        var purchasePending = await repo.InitiateTurkeyPurchaseWorkflowAsync(
+            new List<string> { "TR-GOLD-001", "TR-GOLD-002" },
+            unitPricePerGram: 25.5m,
+            requestedBy: "maker_user",
+            notes: "Purchasing 2 bars for retail demand");
+
+        Assert.NotNull(purchasePending);
+        Assert.Equal(2, purchasePending.TotalItems);
+        Assert.Equal("PENDING_APPROVAL", purchasePending.StatusCode);
+
+        // Verify purchase workflow instance created
+        var activeWorkflows = (await repo.GetActiveWorkflowInstancesAsync()).ToList();
+        var purchaseInstance = activeWorkflows.First(w => w.WorkflowType == "TURKEY_PURCHASE" && w.EntityId == purchasePending.PendingPurchaseId);
+        Assert.NotNull(purchaseInstance);
+
+        // 4. Checker Approves Purchase
+        var purchaseApproveResult = await repo.ProcessWorkflowActionAsync(purchaseInstance.InstanceId, "checker-turkey", "APPROVED", "Price verified against market rate");
+        Assert.Equal("SUCCESS", purchaseApproveResult);
+
+        // 5. Verify ownership transitioned to KFH_OWNED and READY
+        var item1 = await setup.Context.InventoryItems.FirstOrDefaultAsync(i => i.SerialNumber == "TR-GOLD-001");
+        var item2 = await setup.Context.InventoryItems.FirstOrDefaultAsync(i => i.SerialNumber == "TR-GOLD-002");
+        Assert.NotNull(item1);
+        Assert.NotNull(item2);
+        Assert.Equal("KFH_OWNED", item1!.OwnershipType);
+        Assert.Equal("KFH_OWNED", item2!.OwnershipType);
+        Assert.Equal("READY", item1.StatusCode);
+
+        // Verify Turkey inventory is now 0
+        var remainingTurkeyStock = (await repo.GetTurkeyInventoryAsync()).ToList();
+        Assert.Empty(remainingTurkeyStock);
+
+        // Verify purchase ledger transaction was logged
+        var txs = await setup.Context.InventoryTransactions.Where(t => t.TransactionType == "PURCHASE" && t.DestinationOwnership == "KFH_OWNED").ToListAsync();
+        Assert.True(txs.Count >= 2);
+    }
 }
 

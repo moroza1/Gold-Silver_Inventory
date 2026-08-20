@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "d:\\Projects\\Gold2\\backend\\Ledger.Gl\\Ledger.Gl.csproj": {}
+    "D:\\Projects\\Gold2\\backend\\Ledger.Gl\\Ledger.Gl.csproj": {}
   },
   "projects": {
-    "d:\\Projects\\Gold2\\backend\\Ledger.Gl\\Ledger.Gl.csproj": {
+    "D:\\Projects\\Gold2\\backend\\Ledger.Gl\\Ledger.Gl.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "d:\\Projects\\Gold2\\backend\\Ledger.Gl\\Ledger.Gl.csproj",
+        "projectUniqueName": "D:\\Projects\\Gold2\\backend\\Ledger.Gl\\Ledger.Gl.csproj",
         "projectName": "Ledger.Gl",
-        "projectPath": "d:\\Projects\\Gold2\\backend\\Ledger.Gl\\Ledger.Gl.csproj",
+        "projectPath": "D:\\Projects\\Gold2\\backend\\Ledger.Gl\\Ledger.Gl.csproj",
         "packagesPath": "C:\\Users\\Roshdy\\.nuget\\packages\\",
-        "outputPath": "d:\\Projects\\Gold2\\backend\\Ledger.Gl\\obj\\",
+        "outputPath": "D:\\Projects\\Gold2\\backend\\Ledger.Gl\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
           "C:\\Users\\Roshdy\\AppData\\Roaming\\NuGet\\NuGet.Config"

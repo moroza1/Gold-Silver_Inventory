@@ -119,6 +119,7 @@ public class AppDbContext : DbContext
     public DbSet<ReorderThreshold> ReorderThresholds { get; set; } = null!;
     public DbSet<BranchTransfer> BranchTransfers { get; set; } = null!;
     public DbSet<PendingIntake> PendingIntakes { get; set; } = null!;
+    public DbSet<PendingTurkeyPurchase> PendingTurkeyPurchases { get; set; } = null!;
 
     // FIM Integration Module
     public DbSet<FimUserAttribute> FimUserAttributes { get; set; } = null!;
@@ -378,6 +379,15 @@ public class AppDbContext : DbContext
             entity.HasOne(e => e.Customer).WithMany().HasForeignKey(e => e.CustomerId);
             entity.HasOne(e => e.Item).WithMany().HasForeignKey(e => e.ItemId);
             entity.HasOne(e => e.Channel).WithMany().HasForeignKey(e => e.ChannelId);
+        });
+
+        // PendingTurkeyPurchase Configuration
+        modelBuilder.Entity<PendingTurkeyPurchase>(entity =>
+        {
+            entity.HasKey(e => e.PendingPurchaseId);
+            entity.ToTable("pending_turkey_purchases");
+            entity.HasIndex(e => e.StatusCode);
+            entity.HasIndex(e => e.CreatedAt);
         });
 
         // InventoryTransaction Configuration

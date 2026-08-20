@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "Np7AHR8dOh0=",
+  "dgSpecHash": "FhDasS8/bOk=",
   "success": true,
-  "projectFilePath": "d:\\Projects\\Gold2\\backend\\Ledger.Gl.EfCore\\Ledger.Gl.EfCore.csproj",
+  "projectFilePath": "D:\\Projects\\Gold2\\backend\\Ledger.Gl.EfCore\\Ledger.Gl.EfCore.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\Roshdy\\.nuget\\packages\\microsoft.entityframeworkcore\\10.0.9\\microsoft.entityframeworkcore.10.0.9.nupkg.sha512",
     "C:\\Users\\Roshdy\\.nuget\\packages\\microsoft.entityframeworkcore.abstractions\\10.0.9\\microsoft.entityframeworkcore.abstractions.10.0.9.nupkg.sha512",
@@ -18,15 +18,5 @@
     "C:\\Users\\Roshdy\\.nuget\\packages\\microsoft.extensions.options\\10.0.9\\microsoft.extensions.options.10.0.9.nupkg.sha512",
     "C:\\Users\\Roshdy\\.nuget\\packages\\microsoft.extensions.primitives\\10.0.9\\microsoft.extensions.primitives.10.0.9.nupkg.sha512"
   ],
-  "logs": [
-    {
-      "code": "NU1900",
-      "level": "Warning",
-      "message": "Error occurred while getting package vulnerability data: Unable to load the service index for source https://api.nuget.org/v3/index.json.",
-      "projectPath": "d:\\Projects\\Gold2\\backend\\Ledger.Gl.EfCore\\Ledger.Gl.EfCore.csproj",
-      "warningLevel": 1,
-      "filePath": "d:\\Projects\\Gold2\\backend\\Ledger.Gl.EfCore\\Ledger.Gl.EfCore.csproj",
-      "targetGraphs": []
-    }
-  ]
+  "logs": []
 }

@@ -395,6 +395,28 @@ public static class DbSeeder
         context.WorkflowSteps.Add(damageStep1);
         await context.SaveChangesAsync();
 
+        // Seed TURKEY_PURCHASE workflow template
+        var turkeyPurchaseWorkflow = new WorkflowTemplate
+        {
+            WorkflowType = "TURKEY_PURCHASE",
+            Name = "Default Turkey Gold Purchase Workflow",
+            Description = "Maker-Checker verification for purchasing consignment gold from Turkey.",
+            IsActive = true
+        };
+        context.WorkflowTemplates.Add(turkeyPurchaseWorkflow);
+        await context.SaveChangesAsync();
+
+        var turkeyPurchaseStep1 = new WorkflowStep
+        {
+            TemplateId = turkeyPurchaseWorkflow.TemplateId,
+            StepOrder = 1,
+            StepName = "Turkey Purchase Checker Approval",
+            RequiredRole = "Treasury Operations (Checker)",
+            Description = "Checker verifies serials and purchase price, approving ownership transfer to KFH."
+        };
+        context.WorkflowSteps.Add(turkeyPurchaseStep1);
+        await context.SaveChangesAsync();
+
 
         // 19. Default Privilege Groups with Permission Matrices
         // NOTE: Operational *view* modules (spatial_map, workflows) are kept separate from

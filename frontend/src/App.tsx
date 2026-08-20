@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import GfsApp from './GfsApp';
+import { SerialToolsModal, type GeneratedSerialItem } from './components/SerialToolsModal';
+import { TurkeyPurchaseScreen } from './components/TurkeyPurchaseScreen';
 const API_BASE = (import.meta as any).env?.VITE_API_URL || (
   typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
     ? (window.location.port === '80' || window.location.port === '8080' ? `http://${window.location.hostname}:8080/api` : 'http://localhost:5000/api')
@@ -186,6 +188,8 @@ const Translations: Record<string, Record<string, string>> = {
     th_action: "Action",
     menu_active_deals: "Active Purchasing Orders",
     title_active_deals: "Active Purchasing Orders",
+    menu_turkey_purchase: "Purchase from Turkey",
+    title_turkey_purchase: "Purchase Gold from Turkey (Consignment Conversion)",
     menu_customer_receipt: "Receive from Customer",
     title_customer_receipt: "Receive Precious Metals from a Customer",
     active_deals_empty: "No purchase orders yet.",
@@ -498,6 +502,8 @@ const Translations: Record<string, Record<string, string>> = {
     th_action: "الإجراء",
     menu_active_deals: "طلبات الشراء النشطة",
     title_active_deals: "طلبات الشراء النشطة",
+    menu_turkey_purchase: "شراء الذهب من تركيا",
+    title_turkey_purchase: "شراء الذهب من تركيا (تحويل أمانات إلى ملكية البنك)",
     menu_customer_receipt: "استلام من عميل",
     title_customer_receipt: "استلام معادن ثمينة من عميل",
     active_deals_empty: "لا توجد طلبات شراء بعد.",
@@ -920,6 +926,13 @@ export default function App() {
       assay_certificate_number: 'ASSAY-VAL-999'
     }
   ]);
+  const [intakeOwnershipType, setIntakeOwnershipType] = useState<'TURKEY_OWNED' | 'KFH_OWNED'>('TURKEY_OWNED');
+  const [showSerialToolsModal, setShowSerialToolsModal] = useState<boolean>(false);
+  const [turkeyInventory, setTurkeyInventory] = useState<{
+    summary: { total_bars: number; total_weight_grams: number; total_weight_kg: number; by_product: any[] };
+    items: any[];
+  } | null>(null);
+  const [pendingTurkeyPurchases, setPendingTurkeyPurchases] = useState<any[]>([]);
   const [pendingIntakesList, setPendingIntakesList] = useState<any[]>([]);
   const [previewBarcodeModal, setPreviewBarcodeModal] = useState<any>(null);
   const [intakeActiveSubTab, setIntakeActiveSubTab] = useState<'RECEIVE_FORM' | 'IN_FLIGHT_LOG'>('RECEIVE_FORM');
@@ -3446,6 +3459,62 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     }
   };
 
+  const fetchTurkeyInventory = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/inventory/turkey`);
+      if (res.ok) {
+        const data = await res.json();
+        setTurkeyInventory(data);
+      }
+    } catch (e) {
+      console.warn('Failed to fetch Turkey inventory', e);
+    }
+  };
+
+  const fetchPendingTurkeyPurchases = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/inventory/turkey/pending`);
+      if (res.ok) {
+        const data = await res.json();
+        setPendingTurkeyPurchases(data);
+      }
+    } catch (e) {
+      console.warn('Failed to fetch pending Turkey purchases', e);
+    }
+  };
+
+  const handleTurkeyPurchase = async (serials: string[], unitPrice: number, notes: string): Promise<boolean> => {
+    try {
+      const res = await fetch(`${API_BASE}/inventory/turkey/purchase`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          serialNumbers: serials,
+          unitPricePerGram: unitPrice,
+          requestedBy: displayName,
+          notes: notes
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        alert(currentLang === 'en' 
+          ? `Turkey gold purchase initiated (${data.total_items} bars, ${data.total_weight_grams}g, ${data.total_cost} KWD)! Routed to Checker for 4-eyes approval.` 
+          : `تم إنشاء طلب شراء ذهب تركيا بنجاح (${data.total_items} سبيكة، ${data.total_weight_grams} جم، ${data.total_cost} د.ك) وتوجيهه للمراجع للاعتماد!`);
+        fetchTurkeyInventory();
+        fetchPendingTurkeyPurchases();
+        fetchWorkflows();
+        return true;
+      } else {
+        alert(await describeApiError(res, currentLang, 'Failed to initiate Turkey purchase', 'فشل إنشاء طلب شراء الذهب التركي'));
+        return false;
+      }
+    } catch (e) {
+      alert(currentLang === 'en' ? 'Network error submitting Turkey purchase.' : 'خطأ في الشبكة أثناء إرسال طلب الشراء.');
+      return false;
+    }
+  };
+
   const handleAddIntakeBar = () => {
     const nextIdx = intakeBars.length + 1;
     const defaultProduct = products.length > 0 ? products[0] : null;
@@ -3549,6 +3618,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
         lotNumber: intakeLotNum.trim(),
         locationId: intakeSelectedLocation || 1,
         receivedBy: displayName,
+        ownershipType: intakeOwnershipType,
         items: intakeBars.map(b => ({
           serial: b.serial.trim(),
           product_id: b.product_id,
@@ -4084,6 +4154,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     // 2. Core Vault & Physical Operations (Daily Operations - Highest Frequency)
     { type: 'section', key: 'section-operations', label: t('menu_operations') },
     { type: 'item', key: 'screen-intake', label: currentLang === 'en' ? 'Receive Shipment' : 'استلام الشحنات', icon: 'fa-solid fa-dolly', permission: 'intake', onClick: () => { setActiveTab('screen-intake'); fetchSuppliers(); fetchPendingIntakes(); fetchLocations(); fetchProducts(); } },
+    { type: 'item', key: 'screen-turkey-purchase', label: t('menu_turkey_purchase'), icon: 'fa-solid fa-handshake', permission: 'purchase_orders', onClick: () => { setActiveTab('screen-turkey-purchase'); fetchTurkeyInventory(); fetchPendingTurkeyPurchases(); } },
     { type: 'item', key: 'screen-spatial', label: t('menu_spatial'), icon: 'fa-solid fa-warehouse', permission: 'spatial_map', onClick: () => setActiveTab('screen-spatial') },
     { type: 'item', key: 'screen-transfers', label: t('menu_transfers'), icon: 'fa-solid fa-truck-arrow-right', permission: 'intake', onClick: () => { setActiveTab('screen-transfers'); fetchTransfers(); } },
     { type: 'item', key: 'screen-custody', label: t('menu_custody'), icon: 'fa-solid fa-vault', permission: 'custody', onClick: () => setActiveTab('screen-custody') },
@@ -5313,12 +5384,90 @@ const [migrationApproved, setMigrationApproved] = useState(false);
             {/* TAB 1: NEW SHIPMENT INTAKE WORKBENCH (UC03) */}
             {intakeActiveSubTab === 'RECEIVE_FORM' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                
-                {/* SECTION 1: SHIPMENT HEADER & MANIFEST */}
+
+                {/* TOP HEADER AGGREGATION BANNER */}
+                {(() => {
+                  const totalBarsCount = intakeBars.length;
+                  const totalGrossWeightG = intakeBars.reduce((sum, b) => sum + (b.weight_grams || 0), 0);
+                  const totalKg = (totalGrossWeightG / 1000).toFixed(3);
+                  const approxLandedKwd = Math.round(totalGrossWeightG * ((goldRate / 31.1035) * 0.308) * 100) / 100;
+
+                  return (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px' }}>
+                      <div className="glass-card" style={{ padding: '14px', borderLeft: `4px solid ${intakeOwnershipType === 'TURKEY_OWNED' ? '#E11D48' : 'var(--kfh-green)'}` }}>
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Shipment Ownership' : 'نوع ملكية الشحنة'}</div>
+                        <div style={{ fontSize: '16px', fontWeight: 'bold', marginTop: '4px', color: intakeOwnershipType === 'TURKEY_OWNED' ? '#E11D48' : 'var(--kfh-green)' }}>
+                          {intakeOwnershipType === 'TURKEY_OWNED' ? '🇹🇷 Turkey Consignment' : '🏦 KFH Direct Stock'}
+                        </div>
+                      </div>
+
+                      <div className="glass-card" style={{ padding: '14px', borderLeft: '4px solid var(--accent-gold)' }}>
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Total Manifest Bars' : 'إجمالي عدد السبائك'}</div>
+                        <div style={{ fontSize: '18px', fontWeight: 'bold', marginTop: '4px', color: 'var(--text-primary)' }}>
+                          {totalBarsCount} <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'pieces' : 'سبيكة'}</span>
+                        </div>
+                      </div>
+
+                      <div className="glass-card" style={{ padding: '14px', borderLeft: '4px solid var(--kfh-green)' }}>
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Total Gross Weight' : 'إجمالي الوزن القائم'}</div>
+                        <div style={{ fontSize: '18px', fontWeight: 'bold', marginTop: '4px', color: 'var(--kfh-green)' }}>
+                          {totalKg} KG <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>({totalGrossWeightG.toLocaleString()} g)</span>
+                        </div>
+                      </div>
+
+                      <div className="glass-card" style={{ padding: '14px', borderLeft: '4px solid #3B82F6' }}>
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Estimated Total Value' : 'القيمة التقديرية للشحنة'}</div>
+                        <div style={{ fontSize: '18px', fontWeight: 'bold', marginTop: '4px', color: '#3B82F6' }}>
+                          {approxLandedKwd.toLocaleString()} <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>KWD</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* SECTION 1: SHIPMENT HEADER, OWNERSHIP & MANIFEST */}
                 <div style={{ backgroundColor: 'rgba(255,255,255,0.02)', padding: '16px', borderRadius: '8px', border: '1px solid var(--surface-border)' }}>
-                  <h4 style={{ margin: '0 0 14px 0', fontSize: '14px', color: 'var(--kfh-green)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <i className="fa-solid fa-file-invoice"></i> {currentLang === 'en' ? '1. Shipment Manifest & Supplier Details' : '1. بيان الشحنة وتفاصيل المورد'}
-                  </h4>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
+                    <h4 style={{ margin: 0, fontSize: '14px', color: 'var(--kfh-green)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <i className="fa-solid fa-file-invoice"></i> {currentLang === 'en' ? '1. Shipment Manifest & Ownership Type' : '1. بيان الشحنة وتحديد جهة الملكية'}
+                    </h4>
+
+                    {/* Ownership Selection Pills */}
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button
+                        type="button"
+                        className={`btn ${intakeOwnershipType === 'TURKEY_OWNED' ? 'btn-primary' : 'btn-secondary'}`}
+                        style={{
+                          fontSize: '12px',
+                          padding: '6px 14px',
+                          fontWeight: 'bold',
+                          backgroundColor: intakeOwnershipType === 'TURKEY_OWNED' ? '#E11D48' : 'var(--bg-secondary)',
+                          borderColor: intakeOwnershipType === 'TURKEY_OWNED' ? '#E11D48' : 'var(--surface-border)',
+                          color: '#fff'
+                        }}
+                        onClick={() => setIntakeOwnershipType('TURKEY_OWNED')}
+                      >
+                        🇹🇷 {currentLang === 'en' ? 'Turkey Consignment (TURKEY_OWNED)' : 'أمانة تركيا (TURKEY_OWNED)'}
+                      </button>
+
+                      <button
+                        type="button"
+                        className={`btn ${intakeOwnershipType === 'KFH_OWNED' ? 'btn-primary' : 'btn-secondary'}`}
+                        style={{
+                          fontSize: '12px',
+                          padding: '6px 14px',
+                          fontWeight: 'bold',
+                          backgroundColor: intakeOwnershipType === 'KFH_OWNED' ? 'var(--kfh-green)' : 'var(--bg-secondary)',
+                          borderColor: intakeOwnershipType === 'KFH_OWNED' ? 'var(--kfh-green)' : 'var(--surface-border)',
+                          color: '#fff'
+                        }}
+                        onClick={() => setIntakeOwnershipType('KFH_OWNED')}
+                      >
+                        🏦 {currentLang === 'en' ? 'KFH Direct (KFH_OWNED)' : 'ملك لـ بيتك (KFH_OWNED)'}
+                      </button>
+                    </div>
+                  </div>
+
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
                     <div className="form-group" style={{ marginBottom: 0 }}>
                       <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Supplier / Vendor' : 'المورد'}</label>
@@ -5334,9 +5483,11 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                           ))
                         ) : (
                           <>
-                            <option value={1}>Valcambi Suisse (Switzerland)</option>
-                            <option value={2}>PAMP SA (Switzerland)</option>
-                            <option value={3}>Emirates Gold (UAE)</option>
+                            <option value={1}>Nadir Gold Refinery (Turkey)</option>
+                            <option value={2}>Istanbul Gold Refinery (Turkey)</option>
+                            <option value={3}>Valcambi Suisse (Switzerland)</option>
+                            <option value={4}>PAMP SA (Switzerland)</option>
+                            <option value={5}>Emirates Gold (UAE)</option>
                           </>
                         )}
                       </select>
@@ -5459,13 +5610,30 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       </p>
                     </div>
 
-                    <div style={{ display: 'flex', gap: '8px' }}>
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        style={{ fontSize: '12px', padding: '6px 14px', fontWeight: 'bold', background: 'linear-gradient(135deg, #D4AF37 0%, #AA771C 100%)', color: '#070b14', border: 'none' }}
+                        onClick={() => setShowSerialToolsModal(true)}
+                      >
+                        <i className="fa-solid fa-wand-magic-sparkles"></i> {currentLang === 'en' ? 'Smart Tools (Range / Paste / OCR)' : 'أدوات الأرقام الذكية (نطاق / لصق / OCR)'}
+                      </button>
                       <button className="btn btn-secondary" style={{ fontSize: '11px', padding: '6px 10px' }} onClick={handleAddIntakeBar}>
                         <i className="fa-solid fa-plus"></i> {currentLang === 'en' ? 'Add Bar' : 'إضافة سبيكة'}
                       </button>
                       <button className="btn btn-secondary" style={{ fontSize: '11px', padding: '6px 10px', backgroundColor: 'rgba(212, 160, 23, 0.15)', color: 'var(--accent-gold)' }} onClick={handleAdd5BatchDemo}>
                         <i className="fa-solid fa-layer-group"></i> {currentLang === 'en' ? '+5 Batch Demo' : '+5 سبائك تجريبية'}
                       </button>
+                      {intakeBars.length > 1 && (
+                        <button className="btn btn-danger" style={{ fontSize: '11px', padding: '6px 10px' }} onClick={() => {
+                          if (window.confirm(currentLang === 'en' ? 'Clear all bars in manifest?' : 'مسح جميع السبائك في الكشف؟')) {
+                            setIntakeBars([]);
+                          }
+                        }}>
+                          <i className="fa-solid fa-trash-can"></i> {currentLang === 'en' ? 'Clear All' : 'مسح الكل'}
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -5756,6 +5924,24 @@ const [migrationApproved, setMigrationApproved] = useState(false);
             )}
 
           </div>
+        </section>
+
+        {/* SCREEN VIEWPORT: KFH PURCHASE FROM TURKEY */}
+        <section className={`screen-viewport ${activeTab === 'screen-turkey-purchase' ? 'active' : ''}`}>
+          <TurkeyPurchaseScreen
+            turkeyInventory={turkeyInventory}
+            pendingPurchases={pendingTurkeyPurchases}
+            onRefresh={() => {
+              fetchTurkeyInventory();
+              fetchPendingTurkeyPurchases();
+            }}
+            onSubmitPurchase={handleTurkeyPurchase}
+            goldRate={goldRate}
+            currentLang={currentLang}
+            canModify={canModify('purchase_orders')}
+            userRole={userRole}
+            displayName={displayName}
+          />
         </section>
 
         {/* SCREEN VIEWPORT: RECEIVE FROM CUSTOMER -- moved out of the Receive Shipment screen
@@ -10427,6 +10613,38 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                           <div><strong>{currentLang === 'en' ? 'Courier:' : 'الناقل:'}</strong> {selectedWfInstance.details.courier_info}</div>
                           <div><strong>{currentLang === 'en' ? 'Status Code:' : 'حالة النقل:'}</strong> {selectedWfInstance.details.status_code}</div>
                         </div>
+                      ) : selectedWfInstance.workflow_type === "TURKEY_PURCHASE" ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                          <div className="split-grid-2" style={{ gap: '10px 20px' }}>
+                            <div><strong>{currentLang === 'en' ? 'Batch Reference:' : 'مرجع الدفعة:'}</strong> {selectedWfInstance.details.batch_reference}</div>
+                            <div><strong>{currentLang === 'en' ? 'Total Bars:' : 'إجمالي عدد السبائك:'}</strong> {selectedWfInstance.details.total_items} {currentLang === 'en' ? 'bars' : 'سبيكة'}</div>
+                            <div><strong>{currentLang === 'en' ? 'Total Weight:' : 'الوزن الإجمالي:'}</strong> {selectedWfInstance.details.total_weight_grams}g ({(selectedWfInstance.details.total_weight_grams / 1000).toFixed(3)} KG)</div>
+                            <div><strong>{currentLang === 'en' ? 'Unit Price:' : 'سعر الجرام:'}</strong> {selectedWfInstance.details.unit_price} KWD/g</div>
+                            <div><strong>{currentLang === 'en' ? 'Total Settlement Cost:' : 'إجمالي قيمة الشراء:'}</strong> <span style={{ color: 'var(--kfh-green)', fontWeight: 'bold' }}>{(selectedWfInstance.details.total_cost || 0).toLocaleString()} KWD</span></div>
+                            <div><strong>{currentLang === 'en' ? 'Requested By (Maker):' : 'المنشئ:'}</strong> {selectedWfInstance.details.requested_by}</div>
+                            {selectedWfInstance.details.notes && (
+                              <div style={{ gridColumn: '1 / -1' }}><strong>{currentLang === 'en' ? 'Notes:' : 'الملاحظات:'}</strong> {selectedWfInstance.details.notes}</div>
+                            )}
+                          </div>
+                          {(() => {
+                            let serialsList: string[] = [];
+                            try {
+                              serialsList = JSON.parse(selectedWfInstance.details.serials_json || '[]');
+                            } catch (_) {}
+                            return serialsList.length > 0 ? (
+                              <div style={{ marginTop: '8px' }}>
+                                <strong style={{ fontSize: '12px' }}>{currentLang === 'en' ? 'Serials Included for Purchase:' : 'الأرقام التسلسلية المشمولة بالشراء:'}</strong>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', maxHeight: '120px', overflowY: 'auto', padding: '8px', background: 'rgba(255,255,255,0.03)', borderRadius: '6px', border: '1px solid var(--surface-border)', marginTop: '4px' }}>
+                                  {serialsList.map((s, sIdx) => (
+                                    <span key={sIdx} style={{ fontSize: '11px', padding: '3px 7px', background: 'rgba(0, 155, 78, 0.15)', border: '1px solid var(--kfh-green)', borderRadius: '4px', fontWeight: 'bold' }}>
+                                      {s}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : null;
+                          })()}
+                        </div>
                       ) : (
                         <div className="split-grid-2" style={{ gap: '10px 20px' }}>
                           <div><strong>{currentLang === 'en' ? 'P.O. Number:' : 'رقم طلب الشراء:'}</strong> {selectedWfInstance.details.po_number}</div>
@@ -11709,6 +11927,29 @@ const [migrationApproved, setMigrationApproved] = useState(false);
             </div>
           </div>
         )}
+
+        {/* SMART SERIAL TOOLS MODAL (RANGE, BULK PASTE, OCR CAMERA) */}
+        <SerialToolsModal
+          isOpen={showSerialToolsModal}
+          onClose={() => setShowSerialToolsModal(false)}
+          onAddSerials={(items: GeneratedSerialItem[]) => {
+            const newBars = items.map((item, idx) => ({
+              id: `bar-${Date.now()}-${idx}`,
+              serial: item.serial,
+              product_id: item.product_id,
+              weight_grams: item.weight_grams,
+              purity: item.purity,
+              is_damaged: false,
+              damage_reason: '',
+              refiner_name: item.refiner_name,
+              assay_certificate_number: `ASSAY-${item.refiner_name.slice(0, 3).toUpperCase()}-${item.serial}`
+            }));
+            setIntakeBars(prev => [...prev, ...newBars]);
+          }}
+          products={products}
+          brands={brandsList}
+          currentLang={currentLang}
+        />
 
       </main>
     </div>
