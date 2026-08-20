@@ -24,12 +24,19 @@ services:
       - backend
     labels:
       - "traefik.enable=true"
+      - "traefik.docker.network=traefik-proxy"
       - "traefik.http.routers.goldsilver.rule=Host(`aisoftwares.cloud`) || Host(`www.aisoftwares.cloud`)"
       - "traefik.http.routers.goldsilver.entrypoints=websecure"
       - "traefik.http.routers.goldsilver.tls=true"
       - "traefik.http.routers.goldsilver.tls.certresolver=letsencrypt"
       - "traefik.http.services.goldsilver.loadbalancer.server.port=80"
+    networks:
+      - traefik-proxy
 
 volumes:
   backend-data:
   backend-logs:
+
+networks:
+  traefik-proxy:
+    external: true
