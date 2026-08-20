@@ -5612,8 +5612,8 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       </h4>
                       <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: '4px 0 0 0' }}>
                         {currentLang === 'en' 
-                          ? 'Enter each bar serial number, product denomination, fineness, and flag damaged bars for quarantine.' 
-                          : 'أدخل الرقم التسلسلي لكل سبيكة، الفئة، النقاوة، وحدد السبائك التالفة للعزل.'}
+                          ? 'Enter each bar serial number, select product denomination (auto-assigns weight & purity), and flag damaged bars for quarantine.' 
+                          : 'أدخل الرقم التسلسلي لكل سبيكة، حدد الفئة (يحدد الوزن والنقاوة تلقائياً)، وحدد السبائك التالفة للعزل.'}
                       </p>
                     </div>
 
@@ -5649,11 +5649,9 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       <thead>
                         <tr>
                           <th style={{ width: '40px' }}>#</th>
-                          <th style={{ minWidth: '160px' }}>{currentLang === 'en' ? 'Serial Number (UC03 E1)' : 'الرقم التسلسلي'}</th>
-                          <th style={{ minWidth: '160px' }}>{currentLang === 'en' ? 'Product / Denomination' : 'نوع المنتج / الفئة'}</th>
-                          <th style={{ minWidth: '100px' }}>{currentLang === 'en' ? 'Gross Wt (g)' : 'الوزن القائم (جرام)'}</th>
-                          <th style={{ minWidth: '100px' }}>{currentLang === 'en' ? 'Purity (PPT)' : 'النقاوة'}</th>
-                          <th style={{ minWidth: '140px' }}>{currentLang === 'en' ? 'Refiner / Brand' : 'المصفاة / الماركة'}</th>
+                          <th style={{ minWidth: '180px' }}>{currentLang === 'en' ? 'Serial Number (UC03 E1)' : 'الرقم التسلسلي'}</th>
+                          <th style={{ minWidth: '220px' }}>{currentLang === 'en' ? 'Product / Denomination' : 'نوع المنتج / الفئة'}</th>
+                          <th style={{ minWidth: '160px' }}>{currentLang === 'en' ? 'Refiner / Brand' : 'المصفاة / الماركة'}</th>
                           <th style={{ minWidth: '180px' }}>{currentLang === 'en' ? 'Damaged / Inspection' : 'حالة التلف / الفحص'}</th>
                           <th style={{ width: '90px' }}>{currentLang === 'en' ? 'GS1 Tag' : 'الباركود'}</th>
                           <th style={{ width: '50px' }}></th>
@@ -5694,29 +5692,10 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                                 >
                                   {products.map((p: any) => (
                                     <option key={p.product_id} value={p.product_id}>
-                                      {p.metal_name} {p.denomination_label} ({p.weight_grams}g)
+                                      {p.metal_name} {p.denomination_label} ({p.weight_grams}g - {p.purity_value || '999.9'} PPT)
                                     </option>
                                   ))}
                                 </select>
-                              </td>
-                              <td>
-                                <input
-                                  type="number"
-                                  className="form-control"
-                                  value={bar.weight_grams}
-                                  onChange={e => handleUpdateIntakeBar(bar.id, 'weight_grams', parseFloat(e.target.value) || 0)}
-                                  style={{ fontSize: '12px', padding: '4px 8px' }}
-                                />
-                              </td>
-                              <td>
-                                <input
-                                  type="number"
-                                  step="0.1"
-                                  className="form-control"
-                                  value={bar.purity}
-                                  onChange={e => handleUpdateIntakeBar(bar.id, 'purity', parseFloat(e.target.value) || 0)}
-                                  style={{ fontSize: '12px', padding: '4px 8px' }}
-                                />
                               </td>
                               <td>
                                 <select
