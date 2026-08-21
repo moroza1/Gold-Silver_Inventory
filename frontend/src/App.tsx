@@ -4379,8 +4379,8 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     { type: 'item', key: 'screen-home-delivery', label: currentLang === 'en' ? 'Home Delivery' : 'توصيل المنازل', icon: 'fa-solid fa-house-chimney-user', permission: 'intake', onClick: () => { setActiveTab('screen-home-delivery'); fetchHomeDeliveries(); } },
     { type: 'item', key: 'screen-damaged-bars', label: currentLang === 'en' ? 'Damaged Bar Approvals' : 'اعتماد السبائك التالفة', icon: 'fa-solid fa-triangle-exclamation', permission: 'custody', onClick: () => { setActiveTab('screen-damaged-bars'); fetchDamagedBars(); } },
 
-    // 3. Stock Cut-Off Thresholds (BRD UC09 & UC10)
-    { type: 'item', key: 'screen-stock-thresholds', label: currentLang === 'en' ? 'Stock Cut-Off Thresholds' : 'حدود المخزون', icon: 'fa-solid fa-calculator', permission: 'master_data', onClick: () => { setActiveTab('screen-stock-thresholds'); fetchStockThresholds(); fetchEnterpriseStockAlerts(); fetchProducts(); } },
+    // 3. Stock Limits & Enterprise Thresholds
+    { type: 'item', key: 'screen-stock-thresholds', label: currentLang === 'en' ? 'Stock Limits & Thresholds' : 'حدود المخزون وإعادة الطلب', icon: 'fa-solid fa-gauge-high', permission: 'master_data', onClick: () => { setActiveTab('screen-admin'); setSettingsTab('stocklimits'); fetchReorderThresholds(); fetchProducts(); } },
 
     // 4. Audit, Controls & Compliance (Periodic / Weekly / Regulatory Frequency)
     { type: 'section', key: 'section-controls', label: t('menu_controls') },
@@ -9662,10 +9662,20 @@ const [migrationApproved, setMigrationApproved] = useState(false);
 
             {settingsTab === 'stocklimits' && (
               <div className="settings-tab-pane active">
-                <h4>{currentLang === 'ar' ? 'حدود إعادة الطلب' : 'Reorder Thresholds'}</h4>
-                <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>
-                  {currentLang === 'ar' ? 'عندما يصل المخزون إلى هذا الحد، يتم إنشاء تنبيه وطلب شراء تلقائي.' : 'When stock reaches this limit, an alarm is triggered and a draft P.O. can be auto-generated.'}
-                </p>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                  <div>
+                    <h4 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <i className="fa-solid fa-gauge-high" style={{ color: 'var(--accent-gold)' }}></i>
+                      {currentLang === 'ar' ? 'حدود المخزون وإعادة الطلب للمؤسسة' : 'Stock Limits & Enterprise Thresholds'}
+                    </h4>
+                    <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: '4px 0 0 0' }}>
+                      {currentLang === 'ar'
+                        ? 'تهيئة الحد الأدنى للمخزون (نقطة إعادة الطلب) وكميات الشراء التلقائية بالقطع والكيلوجرام لجميع فئات الذهب.'
+                        : 'Configure Enterprise minimum stock limits (reorder points) and purchase order triggers in pieces and KG equivalent.'}
+                    </p>
+                  </div>
+                </div>
+
                 {!canModify('master_data') && (
                   <div style={{ padding: '10px', background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.25)', borderRadius: '8px', color: 'var(--accent-red)', fontSize: '12px', marginBottom: '15px' }}>
                     <i className="fa-solid fa-circle-exclamation"></i> {currentLang === 'en' ? 'Read-Only Mode: You cannot manage stock limits (requires the Master Data module).' : 'وضع القراءة فقط: لا يمكنك إدارة حدود المخزون (تتطلب وحدة البيانات الرئيسية).'}
@@ -9676,41 +9686,69 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                   <table>
                     <thead>
                       <tr>
-                        <th>{currentLang === 'ar' ? 'المنتج' : 'Product'}</th>
+                        <th>{currentLang === 'ar' ? 'المنتج والفئة' : 'Product & Metal'}</th>
                         <th>{currentLang === 'ar' ? 'المورد المفضل' : 'Preferred Vendor'}</th>
-                        <th>{currentLang === 'ar' ? 'الحد الأدنى' : 'Min Stock'}</th>
+                        <th>{currentLang === 'ar' ? 'الحد الأدنى للمخزون' : 'Min Stock Limit'}</th>
                         <th>{currentLang === 'ar' ? 'كمية إعادة الطلب' : 'Reorder Qty'}</th>
+                        <th>{currentLang === 'ar' ? 'المتوفر حالياً' : 'Current In-Stock'}</th>
                         <th>{currentLang === 'ar' ? 'الحالة' : 'Status'}</th>
                         {canModify('master_data') && <th style={{ width: '80px', textAlign: 'center' }}>{currentLang === 'ar' ? 'إجراء' : 'Action'}</th>}
                       </tr>
                     </thead>
                     <tbody>
                       {reorderThresholds.length === 0 ? (
-                        <tr><td colSpan={canModify('master_data') ? 6 : 5} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '30px' }}>
+                        <tr><td colSpan={canModify('master_data') ? 7 : 6} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '30px' }}>
                           <i className="fa-solid fa-inbox" style={{ fontSize: '24px', marginBottom: '8px', display: 'block' }}></i>
                           {currentLang === 'ar' ? 'لم يتم تعيين حدود بعد' : 'No thresholds configured yet'}
                         </td></tr>
-                      ) : reorderThresholds.map((th: any) => (
-                        <tr key={th.threshold_id}>
-                          <td><strong>{th.product_name || th.product_code}</strong></td>
-                          <td>{th.vendor_name}</td>
-                          <td><span className="badge badge-reserved">{th.min_stock_qty}</span></td>
-                          <td><span className="badge badge-ready">{th.reorder_qty}</span></td>
-                          <td>
-                            <span className={`badge ${th.is_active ? 'badge-ready' : 'badge-sold'}`}>
-                              {th.is_active ? (currentLang === 'ar' ? 'نشط' : 'Active') : (currentLang === 'ar' ? 'معطل' : 'Disabled')}
-                            </span>
-                          </td>
-                          {canModify('master_data') && (
-                            <td style={{ textAlign: 'center' }}>
-                              <button className="btn" style={{ padding: '4px 8px', fontSize: '12px', color: 'var(--accent-red)', borderColor: '#FECACA' }}
-                                onClick={() => handleDeleteThreshold(th.threshold_id)} title="Delete">
-                                <i className="fa-solid fa-trash"></i>
-                              </button>
+                      ) : reorderThresholds.map((th: any) => {
+                        const matchingProd = products.find((p: any) => p.product_id === th.product_id);
+                        const weightGrams = matchingProd?.weight_grams || 1000;
+                        const minKg = ((th.min_stock_qty * weightGrams) / 1000).toFixed(2);
+                        const reorderKg = ((th.reorder_qty * weightGrams) / 1000).toFixed(2);
+                        const currentItemStock = inventoryList.filter((i: any) => i.product_id === th.product_id && i.status === 'READY').length;
+                        const currentKg = ((currentItemStock * weightGrams) / 1000).toFixed(2);
+                        const isLow = currentItemStock <= th.min_stock_qty;
+
+                        return (
+                          <tr key={th.threshold_id}>
+                            <td>
+                              <strong>{th.product_name || th.product_code}</strong>
+                              <span style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)' }}>{weightGrams}g / bar</span>
                             </td>
-                          )}
-                        </tr>
-                      ))}
+                            <td>{th.vendor_name || '—'}</td>
+                            <td>
+                              <span className="badge badge-reserved" style={{ fontSize: '12px' }}>{th.min_stock_qty} pcs</span>
+                              <span style={{ display: 'block', fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>({minKg} KG)</span>
+                            </td>
+                            <td>
+                              <span className="badge badge-ready" style={{ fontSize: '12px' }}>{th.reorder_qty} pcs</span>
+                              <span style={{ display: 'block', fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>({reorderKg} KG)</span>
+                            </td>
+                            <td>
+                              <span className={`badge ${isLow ? 'badge-quarantined' : 'badge-ready'}`} style={{ fontSize: '12px' }}>
+                                {currentItemStock} pcs
+                              </span>
+                              <span style={{ display: 'block', fontSize: '10px', color: isLow ? '#DC2626' : 'var(--text-muted)', marginTop: '2px' }}>
+                                ({currentKg} KG) {isLow ? '⚠️ Low Stock' : ''}
+                              </span>
+                            </td>
+                            <td>
+                              <span className={`badge ${th.is_active ? 'badge-ready' : 'badge-sold'}`}>
+                                {th.is_active ? (currentLang === 'ar' ? 'نشط' : 'Active') : (currentLang === 'ar' ? 'معطل' : 'Disabled')}
+                              </span>
+                            </td>
+                            {canModify('master_data') && (
+                              <td style={{ textAlign: 'center' }}>
+                                <button className="btn" style={{ padding: '4px 8px', fontSize: '12px', color: 'var(--accent-red)', borderColor: '#FECACA' }}
+                                  onClick={() => handleDeleteThreshold(th.threshold_id)} title="Delete">
+                                  <i className="fa-solid fa-trash"></i>
+                                </button>
+                              </td>
+                            )}
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -9720,15 +9758,15 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                 <div className="glass-card" style={{ marginTop: '24px' }}>
                   <h4 style={{ marginBottom: '16px', fontSize: '15px' }}>
                     <i className="fa-solid fa-plus-circle" style={{ color: 'var(--kfh-green)', marginRight: '8px' }}></i>
-                    {currentLang === 'ar' ? 'إضافة حد مخزون جديد' : 'Add New Stock Limit'}
+                    {currentLang === 'ar' ? 'إضافة حد مخزون جديد للمؤسسة' : 'Add Enterprise Stock Limit & Reorder Trigger'}
                   </h4>
                   <div className="split-grid-2" style={{ gap: '16px' }}>
                     <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label>{currentLang === 'ar' ? 'المنتج' : 'Product'}</label>
+                      <label>{currentLang === 'ar' ? 'المنتج والفئة' : 'Product & Denomination'}</label>
                       <select value={newThresholdProductId} onChange={e => setNewThresholdProductId(e.target.value)} style={{ color: '#000' }}>
                         <option value="">{currentLang === 'ar' ? '-- اختر المنتج --' : '-- Select Product --'}</option>
                         {products.map((p: any) => (
-                          <option key={p.product_id} value={p.product_id}>{p.metal_name} {p.denomination_label} ({p.product_code})</option>
+                          <option key={p.product_id} value={p.product_id}>{p.metal_name || p.metal} {p.denomination_label || p.denomination} ({p.weight_grams || 1000}g) - {p.product_code}</option>
                         ))}
                       </select>
                     </div>
@@ -9742,17 +9780,31 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       </select>
                     </div>
                     <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label>{currentLang === 'ar' ? 'الحد الأدنى للمخزون' : 'Minimum Stock Qty'}</label>
+                      <label>
+                        {currentLang === 'ar' ? 'الحد الأدنى للمخزون (بالقطع)' : 'Minimum Stock Floor (Pieces)'}
+                        {newThresholdProductId && (
+                          <span style={{ fontSize: '11px', color: 'var(--accent-gold)', marginLeft: '6px' }}>
+                            ≈ {(((parseInt(newThresholdMinQty) || 0) * (products.find((p: any) => p.product_id === parseInt(newThresholdProductId))?.weight_grams || 1000)) / 1000).toFixed(2)} KG
+                          </span>
+                        )}
+                      </label>
                       <input type="number" className="form-control" value={newThresholdMinQty} onChange={e => setNewThresholdMinQty(e.target.value)} min="1" />
                     </div>
                     <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label>{currentLang === 'ar' ? 'كمية إعادة الطلب' : 'Reorder Qty'}</label>
+                      <label>
+                        {currentLang === 'ar' ? 'كمية إعادة الطلب (بالقطع)' : 'Reorder Trigger Quantity (Pieces)'}
+                        {newThresholdProductId && (
+                          <span style={{ fontSize: '11px', color: 'var(--accent-green)', marginLeft: '6px' }}>
+                            ≈ {(((parseInt(newThresholdReorderQty) || 0) * (products.find((p: any) => p.product_id === parseInt(newThresholdProductId))?.weight_grams || 1000)) / 1000).toFixed(2)} KG
+                          </span>
+                        )}
+                      </label>
                       <input type="number" className="form-control" value={newThresholdReorderQty} onChange={e => setNewThresholdReorderQty(e.target.value)} min="1" />
                     </div>
                   </div>
                   <button className="btn btn-primary" style={{ marginTop: '16px' }} onClick={handleAddThreshold}
                     disabled={!newThresholdProductId || !newThresholdVendorId}>
-                    <i className="fa-solid fa-plus"></i> {currentLang === 'ar' ? 'إضافة حد المخزون' : 'Add Stock Limit'}
+                    <i className="fa-solid fa-plus"></i> {currentLang === 'ar' ? 'حفظ حد المخزون' : 'Save Enterprise Stock Limit'}
                   </button>
                 </div>
                 )}
