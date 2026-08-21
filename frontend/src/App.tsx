@@ -8630,109 +8630,44 @@ const [migrationApproved, setMigrationApproved] = useState(false);
             </div>
 
             {settingsTab === 'ttl' && (
-              <div className="settings-tab-pane active">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                  <h4>
-                    <i className="fa-solid fa-hourglass-half" style={{ color: 'var(--accent-orange)', marginRight: '8px' }}></i>
-                    {currentLang === 'en' ? 'Pessimistic Reservation Lock TTL Configuration' : 'إعداد مدة صلاحية حجز المخزون (Pessimistic Lock TTL)'}
-                  </h4>
-                  <button className="btn btn-outline" style={{ fontSize: '12px', padding: '4px 10px' }} onClick={fetchReservationTtl}>
-                    <i className="fa-solid fa-rotate"></i> {currentLang === 'en' ? 'Refresh' : 'تحديث'}
-                  </button>
-                </div>
+              <div className="settings-tab-pane active" style={{ maxWidth: '520px' }}>
+                <h4>
+                  <i className="fa-solid fa-clock-rotate-left" style={{ color: 'var(--accent-gold)', marginRight: '8px' }}></i>
+                  {currentLang === 'en' ? 'Checkout Lock TTL' : 'مدة حجز المخزون (TTL)'}
+                </h4>
                 <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>
                   {currentLang === 'en'
-                    ? 'Configure how long physical serialized gold bars remain locked in checkout sessions (via branches or GFS digital banking) before the system automatically releases them back to Ready for Sale.'
-                    : 'تحديد المدة الزمنية التي تظل فيها سبائك الذهب محجوزة أثناء عمليات الشراء والسداد (عبر الفروع أو منصة بيتك المصرفية) قبل إلغاء الحجز وإعادتها للمخزون تلقائياً.'}
+                    ? 'Enter the duration in seconds for gold checkout reservation locks.'
+                    : 'أدخل مدة حجز سبائك الذهب أثناء عملية الشراء بالثواني.'}
                 </p>
 
                 {ttlSuccessMsg && (
-                  <div style={{ padding: '12px 16px', borderRadius: '8px', background: 'rgba(16, 185, 129, 0.15)', border: '1px solid #10B981', color: '#065F46', marginBottom: '20px', fontSize: '13px', fontWeight: 'bold' }}>
+                  <div style={{ padding: '10px 14px', borderRadius: '6px', background: 'rgba(16, 185, 129, 0.15)', border: '1px solid #10B981', color: '#065F46', marginBottom: '16px', fontSize: '13px', fontWeight: 'bold' }}>
                     {ttlSuccessMsg}
                   </div>
                 )}
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px', marginBottom: '24px' }}>
-                  {/* Current Active Setting Card */}
-                  <div className="glass-card" style={{ padding: '20px', borderLeft: '4px solid var(--accent-orange)' }}>
-                    <span style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 'bold' }}>
-                      {currentLang === 'en' ? 'Current Active TTL' : 'المدة المفعلة حالياً'}
-                    </span>
-                    <div style={{ fontSize: '30px', fontWeight: 'bold', color: 'var(--accent-orange)', marginTop: '8px' }}>
-                      {reservationTtlSeconds} <span style={{ fontSize: '14px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'seconds' : 'ثانية'}</span>
-                    </div>
-                    <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                      = {(reservationTtlSeconds / 60).toFixed(1)} {currentLang === 'en' ? 'minutes checkout window' : 'دقيقة نافذة الحجز'}
-                    </div>
-                  </div>
-
-                  {/* Auto-Release Daemon Card */}
-                  <div className="glass-card" style={{ padding: '20px', borderLeft: '4px solid var(--kfh-green)' }}>
-                    <span style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 'bold' }}>
-                      {currentLang === 'en' ? 'Cleanup Daemon Poll' : 'دورة تنظيف الحجوزات المنتهية'}
-                    </span>
-                    <div style={{ fontSize: '30px', fontWeight: 'bold', color: 'var(--kfh-green)', marginTop: '8px' }}>
-                      10 <span style={{ fontSize: '14px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'seconds cycle' : 'ثوانٍ دورة الفحص'}</span>
-                    </div>
-                    <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                      {currentLang === 'en' ? 'ReservationCleanupService background worker' : 'خدمة التنظيف الآلي في الخلفية'}
-                    </div>
-                  </div>
-                </div>
-
                 {canModify('master_data') ? (
-                  <div style={{ maxWidth: '640px', background: 'rgba(255, 255, 255, 0.4)', padding: '20px', borderRadius: 'var(--radius-md)', border: '1px solid var(--surface-border)' }}>
-                    {/* Quick Presets */}
-                    <div style={{ marginBottom: '20px' }}>
-                      <label style={{ fontSize: '12px', fontWeight: 'bold', marginBottom: '8px', display: 'block' }}>
-                        {currentLang === 'en' ? 'Quick Preset Durations' : 'خيارات سريعة للمدة'}
+                  <div className="form-card" style={{ padding: '20px', background: 'var(--bg-secondary)', borderRadius: '8px', border: '1px solid var(--surface-border)' }}>
+                    <div className="form-group" style={{ marginBottom: '16px' }}>
+                      <label style={{ display: 'block', marginBottom: '8px', fontWeight: '600', fontSize: '13px' }}>
+                        {currentLang === 'en' ? 'Reservation Lock Duration (Seconds)' : 'مدة الحجز (بالثواني)'}
                       </label>
-                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                        {[
-                          { labelEn: '3 Mins (180s)', labelAr: '3 دقائق (180ث)', sec: 180 },
-                          { labelEn: '5 Mins (300s)', labelAr: '5 دقائق (300ث)', sec: 300 },
-                          { labelEn: '10 Mins (600s)', labelAr: '10 دقائق (600ث)', sec: 600 },
-                          { labelEn: '15 Mins (900s)', labelAr: '15 دقيقة (900ث)', sec: 900 },
-                          { labelEn: '30 Mins (1800s)', labelAr: '30 دقيقة (1800ث)', sec: 1800 },
-                        ].map(p => (
-                          <button
-                            key={p.sec}
-                            type="button"
-                            className="btn btn-outline"
-                            style={{
-                              fontSize: '12px',
-                              padding: '6px 12px',
-                              borderColor: ttlInputSeconds === p.sec ? 'var(--accent-orange)' : undefined,
-                              background: ttlInputSeconds === p.sec ? 'rgba(245, 158, 11, 0.15)' : undefined,
-                              color: ttlInputSeconds === p.sec ? 'var(--accent-orange)' : undefined,
-                              fontWeight: ttlInputSeconds === p.sec ? 'bold' : 'normal'
-                            }}
-                            onClick={() => setTtlInputSeconds(p.sec)}
-                          >
-                            {currentLang === 'en' ? p.labelEn : p.labelAr}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Custom TTL Input */}
-                    <div className="form-group" style={{ marginBottom: '20px' }}>
-                      <label>{currentLang === 'en' ? 'Lock Duration (Seconds)' : 'مدة صلاحية الحجز (بالثواني)'}</label>
-                      <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-                        <input
-                          type="number"
-                          className="form-control"
-                          min="10"
-                          max="86400"
-                          step="10"
-                          value={ttlInputSeconds}
-                          onChange={e => setTtlInputSeconds(Number(e.target.value))}
-                          style={{ maxWidth: '220px' }}
-                        />
-                        <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-                          = {(ttlInputSeconds / 60).toFixed(1)} {currentLang === 'en' ? 'minutes' : 'دقيقة'}
-                        </span>
-                      </div>
+                      <input
+                        type="number"
+                        className="form-control"
+                        placeholder="e.g. 300"
+                        min="10"
+                        max="86400"
+                        value={ttlInputSeconds}
+                        onChange={e => setTtlInputSeconds(Number(e.target.value))}
+                        style={{ width: '100%', fontSize: '15px' }}
+                      />
+                      <small style={{ color: 'var(--text-muted)', display: 'block', marginTop: '6px', fontSize: '12px' }}>
+                        {currentLang === 'en'
+                          ? `Currently set to: ${reservationTtlSeconds} seconds (${(reservationTtlSeconds / 60).toFixed(1)} min)`
+                          : `القيمة الحالية: ${reservationTtlSeconds} ثانية (${(reservationTtlSeconds / 60).toFixed(1)} دقيقة)`}
+                      </small>
                     </div>
 
                     <button
@@ -8740,14 +8675,14 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       onClick={() => handleSaveReservationTtl()}
                       disabled={savingTtl}
                     >
-                      <i className="fa-solid fa-floppy-disk"></i> {savingTtl ? (currentLang === 'en' ? 'Saving...' : 'جاري الحفظ...') : (currentLang === 'en' ? 'Save TTL Configuration' : 'حفظ مدة الحجز')}
+                      <i className="fa-solid fa-floppy-disk"></i> {savingTtl ? (currentLang === 'en' ? 'Saving...' : 'جاري الحفظ...') : (currentLang === 'en' ? 'Save' : 'حفظ')}
                     </button>
                   </div>
                 ) : (
                   <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>
                     {currentLang === 'en'
-                      ? 'You do not have permission to modify system settings (requires Master Data write policy).'
-                      : 'ليس لديك صلاحية لتعديل إعدادات النظام (تتطلب صلاحية كتابة البيانات الرئيسية).'}
+                      ? 'You do not have permission to modify system settings.'
+                      : 'ليس لديك صلاحية لتعديل إعدادات النظام.'}
                   </p>
                 )}
               </div>
