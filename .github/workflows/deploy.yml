@@ -1,13 +1,22 @@
 name: Deploy Gold-Silver Inventory
 
 on:
-  push:
+  workflow_run:
+    workflows:
+      - Build and Publish Docker Images
+    types:
+      - completed
     branches:
       - FIM
+
   workflow_dispatch:
 
 jobs:
   deploy:
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+
     runs-on: ubuntu-latest
 
     steps:
