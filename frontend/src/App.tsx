@@ -1014,6 +1014,20 @@ const [migrationApproved, setMigrationApproved] = useState(false);
 
 
   // Business Rules Engine (rules_engine module)
+  const RULE_TYPE_OPTIONS = [
+    { value: 'TRANSFER_LIMIT', labelEn: 'Branch Transfer Limit', labelAr: 'حدود التحويل بين الفروع' },
+    { value: 'RECEIPT_VALIDATION', labelEn: 'Shipment Receipt Validation', labelAr: 'التحقق من استلام الشحنات' },
+    { value: 'CUSTOMER_ELIGIBILITY', labelEn: 'Customer Eligibility & Limits', labelAr: 'أهلية العميل والشراء' },
+    { value: 'RATE_THRESHOLD', labelEn: 'Market Rate Fluctuation Threshold', labelAr: 'حدود تقلبات أسعار الذهب' },
+    { value: 'INVENTORY_CHECK', labelEn: 'Inventory Balance Check', labelAr: 'فحص رصيد المخزون' }
+  ];
+
+  const getRuleTypeLabel = (val: string, lang: string) => {
+    const opt = RULE_TYPE_OPTIONS.find(o => o.value === val);
+    if (!opt) return val;
+    return lang === 'ar' ? opt.labelAr : opt.labelEn;
+  };
+
   const [businessRules, setBusinessRules] = useState<any[]>([]);
   const [editingRuleCode, setEditingRuleCode] = useState<string | null>(null);
   const [ruleFormCode, setRuleFormCode] = useState('');
@@ -3948,12 +3962,15 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   };
 
   const handleLogScan = () => {
-    if (!stocktakeScanInput) return;
-    if (stocktakeScanInput === 'TR-10293-02') {
+    if (!stocktakeScanInput || !stocktakeScanInput.trim()) return;
+    const scanned = stocktakeScanInput.trim();
+    if (!isFrozen) setIsFrozen(true);
+
+    if (scanned === 'TR-10293-02') {
       setDiscrepancyList([]);
-      alert("Discrepancy Resolved: Scanned Serial matched expected coordinates.");
+      alert(currentLang === 'en' ? "Discrepancy Resolved: Scanned Serial matched expected coordinates." : "تمت معالجة الفرق: تطابق الرقم التسلسلي الممسوح مع الإحداثيات المتوقعة.");
     } else {
-      alert("Scan logged: serial registered.");
+      alert(currentLang === 'en' ? `Scan logged: Serial ${scanned} verified in vault.` : `تم تسجيل المسح: تم التحقق من السبيكة ${scanned} في الخزينة.`);
     }
     setStocktakeScanInput('');
   };
@@ -4387,15 +4404,13 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     { type: 'section', key: 'section-controls', label: t('menu_controls') },
     { type: 'item', key: 'screen-stocktake', label: t('menu_stocktake'), icon: 'fa-solid fa-clipboard-check', permission: 'stocktake', onClick: () => setActiveTab('screen-stocktake') },
     { type: 'item', key: 'screen-reports', label: t('menu_reports'), icon: 'fa-solid fa-chart-pie', permission: 'reports', onClick: () => { setActiveTab('screen-reports'); loadReport(reportType); } },
-    { type: 'item', key: 'screen-compliance', label: t('menu_compliance'), icon: 'fa-solid fa-shield-halved', permission: 'dashboard', onClick: () => { setActiveTab('screen-compliance'); fetchComplianceDashboard(); } },
-    { type: 'item', key: 'screen-audit-trail', label: t('menu_audit_trail'), icon: 'fa-solid fa-magnifying-glass-chart', permission: 'reports', onClick: () => window.open('/pmims-audit-trail.html', '_blank') },
+    { type: 'item', key: 'screen-audit-trail', label: t('menu_audit_trail'), icon: 'fa-solid fa-magnifying-glass-chart', permission: 'reports', onClick: () => { setActiveTab('screen-reports'); setReportType('audit'); loadReport('audit'); } },
 
     // 5. Administration & Governance (Low Frequency / Setup & Maintenance)
     { type: 'section', key: 'section-admin', label: currentLang === 'en' ? 'Administration & Setup' : 'الإدارة والإعداد' },
     { type: 'item', key: 'screen-workflows', label: canAccess('workflow_design') ? t('menu_workflows') : t('menu_workflows_queue'), icon: 'fa-solid fa-diagram-project', permission: 'workflows', onClick: () => { setActiveTab('screen-workflows'); fetchWorkflows(); } },
     { type: 'item', key: 'screen-user-admin', label: t('menu_user_admin'), icon: 'fa-solid fa-users-gear', permission: 'user_admin', onClick: () => { setActiveTab('screen-user-admin'); fetchAdminData(); } },
     { type: 'item', key: 'screen-rules', label: currentLang === 'en' ? 'Business Rules Engine' : 'محرك قواعد الأعمال', icon: 'fa-solid fa-scale-balanced', permission: 'rules_engine', onClick: () => { setActiveTab('screen-rules'); fetchBusinessRules(); } },
-    { type: 'item', key: 'screen-monitoring', label: currentLang === 'en' ? 'Monitoring' : 'المراقبة والتنبيهات', icon: 'fa-solid fa-heart-pulse', permission: 'monitoring', onClick: () => { setActiveTab('screen-monitoring'); fetchSlaMetrics(); fetchMonitoringEvents(); fetchAlertRoutes(); } },
     { type: 'item', key: 'screen-migration', label: t('menu_migration'), icon: 'fa-solid fa-file-import', permission: 'migration', onClick: () => setActiveTab('screen-migration') },
     { type: 'item', key: 'screen-sql-admin', label: currentLang === 'en' ? 'SQL Query Tool' : 'أداة SQL', icon: 'fa-solid fa-database', permission: 'user_admin', onClick: () => setActiveTab('screen-sql-admin') },
     { type: 'item', key: 'screen-admin', label: t('menu_settings'), icon: 'fa-solid fa-gears', permission: 'settings', onClick: () => setActiveTab('screen-admin') },
@@ -4786,10 +4801,10 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       )}
                     </div>
 
-                    <div style={{ padding: '10px 14px', background: '#F9FAFB', borderTop: '1px solid #E5E7EB', display: 'flex', gap: '8px' }}>
+                    <div style={{ padding: '10px 14px', background: '#F9FAFB', borderTop: '1px solid #E5E7EB' }}>
                       <button
                         className="btn btn-outline"
-                        style={{ flex: 1, fontSize: '11px', padding: '6px 8px', textAlign: 'center', justifyContent: 'center' }}
+                        style={{ width: '100%', fontSize: '11px', padding: '6px 8px', textAlign: 'center', justifyContent: 'center' }}
                         onClick={() => {
                           setShowNotificationMenu(false);
                           setSettingsTab('stocklimits');
@@ -4797,17 +4812,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                           fetchReorderThresholds();
                         }}
                       >
-                        <i className="fa-solid fa-gauge-high"></i> {currentLang === 'en' ? 'Stock Limits' : 'حدود المخزون'}
-                      </button>
-                      <button
-                        className="btn btn-outline"
-                        style={{ flex: 1, fontSize: '11px', padding: '6px 8px', textAlign: 'center', justifyContent: 'center' }}
-                        onClick={() => {
-                          setShowNotificationMenu(false);
-                          setActiveTab('screen-monitoring');
-                        }}
-                      >
-                        <i className="fa-solid fa-tower-broadcast"></i> {currentLang === 'en' ? 'Monitoring' : 'المراقبة'}
+                        <i className="fa-solid fa-gauge-high"></i> {currentLang === 'en' ? 'Configure Stock Limits & Reorder Points' : 'إدارة وتعديل حدود المخزون وإعادة الطلب'}
                       </button>
                     </div>
                   </div>
@@ -5153,88 +5158,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
 
 
 
-        {/* SCREEN VIEWPORT: COMPLIANCE DASHBOARD (Reporting Requirements Gap Analysis, Item 6) --
-            Management gets Executive Board above; Compliance/Audit gets this curated summary of
-            the same exceptions feed the Reports screen's Exceptions Report exports, plus
-            audit-log tamper-check status, instead of only the raw audit-log search screen. */}
-        <section className={`screen-viewport ${activeTab === 'screen-compliance' ? 'active' : ''}`}>
-          <div className="kpi-row">
-            <div className="glass-card kpi-card">
-              <span className="kpi-title">{t('th_exception_type')} {currentLang === 'en' ? '(Total)' : '(الإجمالي)'}</span>
-              <span className="kpi-value" style={{ color: 'var(--accent-orange)' }}>{complianceDashboard?.exceptions_total ?? 0}</span>
-              <span className="kpi-sub">{currentLang === 'en' ? 'Open items needing attention' : 'بنود مفتوحة تحتاج للمتابعة'}</span>
-            </div>
-            <div className="glass-card kpi-card">
-              <span className="kpi-title">{currentLang === 'en' ? 'Tampered Audit Rows' : 'سجلات تدقيق متلاعب بها'}</span>
-              <span className="kpi-value" style={{ color: 'var(--accent-red)' }}>{complianceDashboard?.audit_tamper_check?.tampered_count ?? 0}</span>
-              <span className="kpi-sub"><i className="fa-solid fa-shield-halved"></i> {currentLang === 'en' ? 'Row-hash mismatch detected' : 'عدم تطابق البصمة (row-hash)'}</span>
-            </div>
-            <div className="glass-card kpi-card">
-              <span className="kpi-title">{currentLang === 'en' ? 'Unverified Audit Rows' : 'سجلات تدقيق غير موثقة'}</span>
-              <span className="kpi-value">{complianceDashboard?.audit_tamper_check?.unverified_count ?? 0}</span>
-              <span className="kpi-sub">{currentLang === 'en' ? 'Pre-date tamper hashing' : 'سابقة لتفعيل بصمة التحقق'}</span>
-            </div>
-          </div>
 
-          <div className="glass-card" style={{ marginBottom: '20px' }}>
-            <h3>{currentLang === 'en' ? 'Exceptions by Type' : 'الاستثناءات حسب النوع'}</h3>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginTop: '12px' }}>
-              {(complianceDashboard?.exceptions_by_type ?? []).map((row, idx) => (
-                <span key={idx} className="badge badge-reserved" style={{ fontSize: '13px', padding: '8px 14px' }}>
-                  {row.exception_type}: <strong>{row.count}</strong>
-                </span>
-              ))}
-              {(complianceDashboard?.exceptions_by_type ?? []).length === 0 && (
-                <span style={{ color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'No open exceptions.' : 'لا توجد استثناءات مفتوحة.'}</span>
-              )}
-            </div>
-          </div>
-
-          <div className="glass-card">
-            <h3>{t('rep_exceptions')}</h3>
-            {loadingCompliance ? (
-              <p style={{ color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Loading…' : 'جارٍ التحميل…'}</p>
-            ) : (
-              <div style={{ overflowX: 'auto' }}>
-                <table className="report-data-table">
-                  <thead>
-                    <tr>
-                      <th>{t('th_exception_type')}</th>
-                      <th>{t('th_reference')}</th>
-                      <th>{t('th_description')}</th>
-                      <th>{t('th_severity')}</th>
-                      <th>{t('th_raised_at')}</th>
-                      <th>{t('th_status')}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(complianceDashboard?.recent_exceptions ?? []).map((row, idx) => (
-                      <tr key={idx}>
-                        <td>{row.exception_type}</td>
-                        <td>{row.reference}</td>
-                        <td>{row.description}</td>
-                        <td>
-                          <span className={`badge ${row.severity === 'HIGH' || row.severity === 'BLOCK' ? 'badge-quarantined' : 'badge-reserved'}`}>
-                            {row.severity}
-                          </span>
-                        </td>
-                        <td>{row.raised_at ? new Date(row.raised_at).toLocaleString() : '—'}</td>
-                        <td>{row.status}</td>
-                      </tr>
-                    ))}
-                    {(complianceDashboard?.recent_exceptions ?? []).length === 0 && (
-                      <tr>
-                        <td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '20px' }}>
-                          {currentLang === 'en' ? 'No open exceptions.' : 'لا توجد استثناءات مفتوحة.'}
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        </section>
 
         {/* SCREEN VIEWPORT: MY ACTIVITY */}
         <section className={`screen-viewport ${activeTab === 'screen-my-activity' ? 'active' : ''}`}>
@@ -7483,9 +7407,17 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                 <p style={{ color: 'var(--text-muted)', fontSize: '12px', marginBottom: '15px' }}>{t('stocktake_scan_sub')}</p>
                 <div className="form-group">
                   <label>{t('form_scan_serial')}</label>
-                  <input type="text" className="form-control" placeholder={t('placeholder_scan')} value={stocktakeScanInput} onChange={e => setStocktakeScanInput(e.target.value)} disabled={!isFrozen} />
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder={currentLang === 'en' ? 'Scan or type bar serial (e.g. TR-10293-02) & press Enter…' : 'امسح أو اكتب الرقم التسلسلي للسبيكة واضغط Enter…'}
+                    value={stocktakeScanInput}
+                    onChange={e => setStocktakeScanInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') handleLogScan(); }}
+                    style={{ fontSize: '14px', letterSpacing: '0.5px' }}
+                  />
                 </div>
-                <button className="btn" onClick={handleLogScan} disabled={!isFrozen}>{t('btn_log_scan')}</button>
+                <button className="btn btn-primary" onClick={handleLogScan}>{t('btn_log_scan')}</button>
               </div>
 
               <div className="glass-card" style={{ marginBottom: 0 }}>
@@ -7732,66 +7664,66 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       else if (newType === 'RATE_THRESHOLD') setBuilderField('rate');
                       else if (newType === 'INVENTORY_CHECK') setBuilderField('availableQty');
                     }} disabled={editingRuleCode !== null} style={{ color: '#000' }}>
-                      <option value="TRANSFER_LIMIT">TRANSFER_LIMIT</option>
-                      <option value="RECEIPT_VALIDATION">RECEIPT_VALIDATION</option>
-                      <option value="CUSTOMER_ELIGIBILITY">CUSTOMER_ELIGIBILITY</option>
-                      <option value="RATE_THRESHOLD">RATE_THRESHOLD</option>
-                      <option value="INVENTORY_CHECK">INVENTORY_CHECK</option>
+                      {RULE_TYPE_OPTIONS.map(opt => (
+                        <option key={opt.value} value={opt.value}>
+                          {currentLang === 'ar' ? `${opt.labelAr} (${opt.value})` : `${opt.labelEn} (${opt.value})`}
+                        </option>
+                      ))}
                     </select>
                   </div>
                   <div className="form-group">
-                    <label>{currentLang === 'en' ? 'Severity' : 'الخطورة'}</label>
+                    <label>{currentLang === 'en' ? 'Severity' : 'مستوى الخطورة'}</label>
                     <select value={ruleFormSeverity} onChange={e => setRuleFormSeverity(e.target.value)} style={{ color: '#000' }}>
-                      <option value="BLOCK">BLOCK</option>
-                      <option value="WARN">WARN</option>
+                      <option value="BLOCK">{currentLang === 'ar' ? 'حظر إلزامي (BLOCK)' : 'BLOCK (Prevent Action)'}</option>
+                      <option value="WARN">{currentLang === 'ar' ? 'تحذير فقط (WARN)' : 'WARN (Allow with Warning)'}</option>
                     </select>
                   </div>
                   <div className="glass-card" style={{ gridColumn: '1 / -1', background: 'rgba(255, 255, 255, 0.05)', padding: '15px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
                     <h5 style={{ margin: '0 0 12px 0', fontSize: '13px', fontWeight: 600, color: 'var(--kfh-green)' }}>
-                      <i className="fa-solid fa-wand-magic-sparkles"></i> {currentLang === 'en' ? 'Visual Expression Builder' : 'منشئ التعبيرات المرئي'}
+                      <i className="fa-solid fa-wand-magic-sparkles"></i> {currentLang === 'en' ? 'Visual Expression Builder' : 'منشئ التعبيرات والقواعد المرئي'}
                     </h5>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '15px' }}>
                       <div className="form-group" style={{ marginBottom: 0 }}>
-                        <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Field' : 'الحقل'}</label>
+                        <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Field' : 'الحقل المستهدف'}</label>
                         <select value={builderField} onChange={e => setBuilderField(e.target.value)} style={{ color: '#000', fontSize: '12px', padding: '6px' }}>
                           {ruleFormType === 'TRANSFER_LIMIT' && (
                             <>
-                              <option value="weightGrams">weightGrams (Total Weight / Grams)</option>
-                              <option value="itemCount">itemCount (Number of Items)</option>
+                              <option value="weightGrams">{currentLang === 'ar' ? 'الوزن الإجمالي بالجرام (weightGrams)' : 'weightGrams (Total Weight / Grams)'}</option>
+                              <option value="itemCount">{currentLang === 'ar' ? 'عدد القطع والسبائك (itemCount)' : 'itemCount (Number of Items)'}</option>
                             </>
                           )}
                           {ruleFormType === 'RECEIPT_VALIDATION' && (
                             <>
-                              <option value="quantity">quantity (Shipment Quantity)</option>
-                              <option value="cost">cost (Unit or Total Cost)</option>
+                              <option value="quantity">{currentLang === 'ar' ? 'الكمية المستلمة (quantity)' : 'quantity (Shipment Quantity)'}</option>
+                              <option value="cost">{currentLang === 'ar' ? 'التكلفة الإجمالية (cost)' : 'cost (Unit or Total Cost)'}</option>
                             </>
                           )}
                           {ruleFormType === 'CUSTOMER_ELIGIBILITY' && (
                             <>
-                              <option value="customerId">customerId (Customer Identity ID)</option>
-                              <option value="isResident">isResident (Resident Status)</option>
+                              <option value="customerId">{currentLang === 'ar' ? 'رقم هوية العميل (customerId)' : 'customerId (Customer Identity ID)'}</option>
+                              <option value="isResident">{currentLang === 'ar' ? 'حالة الإقامة (isResident)' : 'isResident (Resident Status)'}</option>
                             </>
                           )}
                           {ruleFormType === 'RATE_THRESHOLD' && (
-                            <option value="rate">rate (Market Rate / Gram)</option>
+                            <option value="rate">{currentLang === 'ar' ? 'سعر الذهب بالسوق (rate)' : 'rate (Market Rate / Gram)'}</option>
                           )}
                           {ruleFormType === 'INVENTORY_CHECK' && (
                             <>
-                              <option value="availableQty">availableQty (Available In-Stock)</option>
-                              <option value="reorderPoint">reorderPoint (Reorder Threshold)</option>
+                              <option value="availableQty">{currentLang === 'ar' ? 'الرصيد المتاح بالمخزون (availableQty)' : 'availableQty (Available In-Stock)'}</option>
+                              <option value="reorderPoint">{currentLang === 'ar' ? 'حد إعادة الطلب (reorderPoint)' : 'reorderPoint (Reorder Threshold)'}</option>
                             </>
                           )}
                         </select>
                       </div>
                       <div className="form-group" style={{ marginBottom: 0 }}>
-                        <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Operator' : 'المعامل'}</label>
+                        <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Operator' : 'المعامل المنطقي'}</label>
                         <select value={builderOp} onChange={e => setBuilderOp(e.target.value)} style={{ color: '#000', fontSize: '12px', padding: '6px' }}>
-                          <option value="gt">is greater than (&gt;)</option>
-                          <option value="gte">is greater than or equal to (&gt;=)</option>
-                          <option value="lt">is less than (&lt;)</option>
-                          <option value="lte">is less than or equal to (&lt;=)</option>
-                          <option value="eq">equals (==)</option>
-                          <option value="neq">not equal (!=)</option>
+                          <option value="gt">{currentLang === 'ar' ? 'أكبر من (>)' : 'is greater than (>)'}</option>
+                          <option value="gte">{currentLang === 'ar' ? 'أكبر من أو يساوي (>=)' : 'is greater than or equal to (>=)'}</option>
+                          <option value="lt">{currentLang === 'ar' ? 'أصغر من (<)' : 'is less than (<)'}</option>
+                          <option value="lte">{currentLang === 'ar' ? 'أصغر من أو يساوي (<=)' : 'is less than or equal to (<=)'}</option>
+                          <option value="eq">{currentLang === 'ar' ? 'يساوي (==)' : 'equals (==)'}</option>
+                          <option value="neq">{currentLang === 'ar' ? 'لا يساوي (!=)' : 'not equal (!=)'}</option>
                         </select>
                       </div>
                       <div className="form-group" style={{ marginBottom: 0 }}>
@@ -7818,8 +7750,8 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                 <thead>
                   <tr>
                     <th>{currentLang === 'en' ? 'Code' : 'الرمز'}</th>
-                    <th>{currentLang === 'en' ? 'Name' : 'الاسم'}</th>
-                    <th>{currentLang === 'en' ? 'Type' : 'النوع'}</th>
+                    <th>{currentLang === 'en' ? 'Name' : 'اسم القاعدة'}</th>
+                    <th>{currentLang === 'en' ? 'Type' : 'نوع القاعدة'}</th>
                     <th>{currentLang === 'en' ? 'Severity' : 'الخطورة'}</th>
                     <th>{currentLang === 'en' ? 'Version' : 'الإصدار'}</th>
                     <th>{t('th_status')}</th>
@@ -7835,8 +7767,15 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     <tr key={r.rule_id}>
                       <td><strong>{r.rule_code}</strong></td>
                       <td>{r.rule_name}</td>
-                      <td>{r.rule_type}</td>
-                      <td><span className={`badge ${r.severity === 'BLOCK' ? 'badge-quarantined' : 'badge-reserved'}`}>{r.severity}</span></td>
+                      <td>
+                        <strong>{getRuleTypeLabel(r.rule_type, currentLang)}</strong>
+                        <span style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)' }}>{r.rule_type}</span>
+                      </td>
+                      <td>
+                        <span className={`badge ${r.severity === 'BLOCK' ? 'badge-quarantined' : 'badge-reserved'}`}>
+                          {r.severity === 'BLOCK' ? (currentLang === 'ar' ? 'حظر (BLOCK)' : 'BLOCK') : (currentLang === 'ar' ? 'تحذير (WARN)' : 'WARN')}
+                        </span>
+                      </td>
                       <td>v{r.version}</td>
                       <td>
                         <span className={`badge ${r.is_active ? 'badge-ready' : 'badge-sold'}`}>
@@ -7863,133 +7802,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
           </div>
         </section>
 
-        {/* SCREEN VIEWPORT: MONITORING (admin/governance tier -- monitoring module, RFP item 8) */}
-        <section className={`screen-viewport ${activeTab === 'screen-monitoring' ? 'active' : ''}`}>
-          <div className="glass-card">
-            <h3>{currentLang === 'en' ? 'Monitoring' : 'المراقبة والتنبيهات'}</h3>
-            <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>
-              {currentLang === 'en'
-                ? 'SLA metrics, recent monitoring events, and alert-route configuration for the KFH monitoring-tool integration.'
-                : 'مؤشرات اتفاقية مستوى الخدمة، أحدث أحداث المراقبة، وإعداد مسارات التنبيه لتكامل أداة المراقبة الخاصة ببيت التمويل الكويتي.'}
-            </p>
 
-            {slaMetrics && (
-              <div className="split-grid-3" style={{ marginBottom: '24px' }}>
-                <div className="glass-card">
-                  <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Overall Status' : 'الحالة العامة'}</div>
-                  <div style={{ fontSize: '20px', fontWeight: 700 }}>
-                    <span className={`badge ${slaMetrics.overallStatus === 'HEALTHY' ? 'badge-ready' : slaMetrics.overallStatus === 'DEGRADED' ? 'badge-reserved' : 'badge-quarantined'}`}>
-                      {slaMetrics.overallStatus}
-                    </span>
-                  </div>
-                </div>
-                <div className="glass-card">
-                  <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Pending Workflow Instances' : 'مسارات العمل المعلقة'}</div>
-                  <div style={{ fontSize: '20px', fontWeight: 700 }}>{slaMetrics.pendingWorkflowInstances}</div>
-                </div>
-                <div className="glass-card">
-                  <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Open Mismatch Cases' : 'حالات عدم التطابق المفتوحة'}</div>
-                  <div style={{ fontSize: '20px', fontWeight: 700 }}>{slaMetrics.openMismatchCases}</div>
-                </div>
-                <div className="glass-card">
-                  <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Reconciliation Breaks (24h)' : 'فروقات التسوية (24 ساعة)'}</div>
-                  <div style={{ fontSize: '20px', fontWeight: 700 }}>{slaMetrics.reconciliationBreaksLast24h}</div>
-                </div>
-                <div className="glass-card">
-                  <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Alert Events (24h)' : 'أحداث التنبيه (24 ساعة)'}</div>
-                  <div style={{ fontSize: '20px', fontWeight: 700 }}>{slaMetrics.alertEventsLast24h}</div>
-                </div>
-              </div>
-            )}
-
-            <h4 style={{ marginBottom: '12px' }}>{currentLang === 'en' ? 'Recent Events' : 'الأحداث الأخيرة'}</h4>
-            <div className="table-responsive" style={{ marginBottom: '24px' }}>
-              <table>
-                <thead>
-                  <tr>
-                    <th>{currentLang === 'en' ? 'Event Type' : 'نوع الحدث'}</th>
-                    <th>{currentLang === 'en' ? 'Service' : 'الخدمة'}</th>
-                    <th>{currentLang === 'en' ? 'Metric' : 'المؤشر'}</th>
-                    <th>{currentLang === 'en' ? 'Severity' : 'الخطورة'}</th>
-                    <th>{currentLang === 'en' ? 'Occurred At' : 'وقت الحدوث'}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {monitoringEvents.length === 0 ? (
-                    <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '20px' }}>
-                      {currentLang === 'en' ? 'No monitoring events in the last 24 hours.' : 'لا توجد أحداث مراقبة خلال آخر 24 ساعة.'}
-                    </td></tr>
-                  ) : monitoringEvents.map((e: any) => (
-                    <tr key={e.event_id}>
-                      <td>{e.event_type}</td>
-                      <td>{e.service_name}</td>
-                      <td>{e.metric_name}: {e.metric_value}</td>
-                      <td><span className={`badge ${e.severity === 'CRITICAL' ? 'badge-quarantined' : 'badge-reserved'}`}>{e.severity}</span></td>
-                      <td>{e.occurred_at ? new Date(e.occurred_at).toLocaleString() : '—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            <h4 style={{ marginBottom: '12px' }}>{currentLang === 'en' ? 'Alert Routing' : 'مسارات التنبيه'}</h4>
-            {canModify('monitoring') && (
-              <div className="glass-card" style={{ marginBottom: '16px' }}>
-                <div className="split-grid-2">
-                  <div className="form-group">
-                    <label>{currentLang === 'en' ? 'Event Type' : 'نوع الحدث'}</label>
-                    <input type="text" className="form-control" placeholder="INVENTORY_DISCREPANCY" value={routeFormEventType} onChange={e => setRouteFormEventType(e.target.value)} />
-                  </div>
-                  <div className="form-group">
-                    <label>{currentLang === 'en' ? 'Severity' : 'الخطورة'}</label>
-                    <select value={routeFormSeverity} onChange={e => setRouteFormSeverity(e.target.value)} style={{ color: '#000' }}>
-                      <option value="CRITICAL">CRITICAL</option>
-                      <option value="WARNING">WARNING</option>
-                      <option value="INFO">INFO</option>
-                    </select>
-                  </div>
-                  <div className="form-group" style={{ gridColumn: '1 / -1' }}>
-                    <label>{currentLang === 'en' ? 'Destination (webhook/email)' : 'الوجهة (رابط/بريد إلكتروني)'}</label>
-                    <input type="text" className="form-control" placeholder="https://monitoring.kfh.com.kw/webhook" value={routeFormDestination} onChange={e => setRouteFormDestination(e.target.value)} />
-                  </div>
-                </div>
-                <button className="btn btn-primary" style={{ marginTop: '10px' }} onClick={handleAddAlertRoute}>
-                  <i className="fa-solid fa-plus"></i> {currentLang === 'en' ? 'Add Alert Route' : 'إضافة مسار تنبيه'}
-                </button>
-              </div>
-            )}
-            <div className="table-responsive">
-              <table>
-                <thead>
-                  <tr>
-                    <th>{currentLang === 'en' ? 'Event Type' : 'نوع الحدث'}</th>
-                    <th>{currentLang === 'en' ? 'Severity' : 'الخطورة'}</th>
-                    <th>{currentLang === 'en' ? 'Destination' : 'الوجهة'}</th>
-                    <th>{t('th_status')}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {alertRoutes.length === 0 ? (
-                    <tr><td colSpan={4} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '20px' }}>
-                      {currentLang === 'en' ? 'No alert routes configured yet.' : 'لم يتم إعداد مسارات تنبيه بعد.'}
-                    </td></tr>
-                  ) : alertRoutes.map((r: any) => (
-                    <tr key={r.route_id}>
-                      <td>{r.event_type}</td>
-                      <td><span className={`badge ${r.severity === 'CRITICAL' ? 'badge-quarantined' : 'badge-reserved'}`}>{r.severity}</span></td>
-                      <td>{r.destination}</td>
-                      <td>
-                        <span className={`badge ${r.is_active ? 'badge-ready' : 'badge-sold'}`}>
-                          {r.is_active ? (currentLang === 'en' ? 'Active' : 'نشط') : (currentLang === 'en' ? 'Inactive' : 'غير نشط')}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </section>
 
         {/* SCREEN VIEWPORT: REPORTING & ANALYTICS */}
         <section className={`screen-viewport ${activeTab === 'screen-reports' ? 'active' : ''}`}>

@@ -3801,6 +3801,8 @@ public class InventoryRepository : IInventoryRepository
             // Fallback if workflow system fails
         }
 
+        await SaveAuditLogAsync(user, "SYSTEM", "DAMAGED_BAR", $"Reported damaged gold bar '{item.SerialNumber}' (Reason: {reason})", entityType: "InventoryItem", entityId: item.SerialNumber);
+
         return "SUCCESS";
     }
 
@@ -3833,6 +3835,7 @@ public class InventoryRepository : IInventoryRepository
         }
 
         await _dbContext.SaveChangesAsync();
+        await SaveAuditLogAsync(approvedBy, "SYSTEM", "DAMAGED_BAR", $"{action} damage report on bar '{item.SerialNumber}'", entityType: "InventoryItem", entityId: item.SerialNumber);
         return "SUCCESS";
     }
 
@@ -3863,6 +3866,7 @@ public class InventoryRepository : IInventoryRepository
         instance.StatusCode = "APPROVED";
 
         await _dbContext.SaveChangesAsync();
+        await SaveAuditLogAsync(approver, "SYSTEM", "DAMAGED_BAR", $"4-Eyes approved quarantine for damaged bar '{item.SerialNumber}'", entityType: "InventoryItem", entityId: item.SerialNumber);
         return "SUCCESS";
     }
 
