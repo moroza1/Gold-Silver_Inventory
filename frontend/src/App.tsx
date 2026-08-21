@@ -1065,6 +1065,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   // Stock Reorder Thresholds
   const [reorderThresholds, setReorderThresholds] = useState<any[]>([]);
   const [lowStockAlerts, setLowStockAlerts] = useState<any[]>([]);
+  const [showNotificationMenu, setShowNotificationMenu] = useState(false);
   const [products, setProducts] = useState<any[]>([]);
   const [newThresholdProductId, setNewThresholdProductId] = useState('');
   const [newThresholdVendorId, setNewThresholdVendorId] = useState('');
@@ -4595,7 +4596,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
             </div>
 
             {/* Quick Action Icons */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', position: 'relative' }}>
               <button
                 onClick={() => setActiveTab('screen-exec')}
                 style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '2px' }}
@@ -4605,14 +4606,140 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                 <span style={{ fontSize: '9px', color: '#6B7280' }}>Home</span>
               </button>
 
-              <button
-                onClick={() => setActiveTab('screen-monitoring')}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '2px' }}
-                title="Alerts & SLA"
-              >
-                <i className="fa-solid fa-envelope" style={{ fontSize: '15px', color: '#D97706' }}></i>
-                <span style={{ fontSize: '9px', color: '#6B7280' }}>Alerts</span>
-              </button>
+              {/* Top-Right Alerts & Stock Limits Notification Icon */}
+              <div style={{ position: 'relative' }}>
+                <button
+                  onClick={() => {
+                    fetchLowStockAlerts();
+                    setShowNotificationMenu(!showNotificationMenu);
+                  }}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    padding: '2px',
+                    position: 'relative'
+                  }}
+                  title={currentLang === 'en' ? 'Stock Limit Alerts & Notifications' : 'تنبيهات حدود المخزون والإشعارات'}
+                >
+                  <div style={{ position: 'relative' }}>
+                    <i
+                      className={`fa-solid ${lowStockAlerts.length > 0 ? 'fa-bell fa-shake' : 'fa-bell'}`}
+                      style={{ fontSize: '16px', color: lowStockAlerts.length > 0 ? '#DC2626' : '#D97706' }}
+                    ></i>
+                    {lowStockAlerts.length > 0 && (
+                      <span
+                        style={{
+                          position: 'absolute',
+                          top: '-6px',
+                          right: '-8px',
+                          background: '#DC2626',
+                          color: '#FFFFFF',
+                          fontSize: '10px',
+                          fontWeight: 'bold',
+                          borderRadius: '10px',
+                          minWidth: '16px',
+                          height: '16px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          padding: '0 3px',
+                          boxShadow: '0 0 8px rgba(220, 38, 38, 0.7)',
+                          lineHeight: '1'
+                        }}
+                      >
+                        {lowStockAlerts.length}
+                      </span>
+                    )}
+                  </div>
+                  <span style={{ fontSize: '9px', color: lowStockAlerts.length > 0 ? '#DC2626' : '#6B7280', fontWeight: lowStockAlerts.length > 0 ? 'bold' : 'normal', marginTop: '1px' }}>
+                    {currentLang === 'en' ? 'Alerts' : 'التنبيهات'}
+                  </span>
+                </button>
+
+                {/* Stock Limits & Low Stock Alerts Popover Dropdown */}
+                {showNotificationMenu && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: '42px',
+                      right: currentLang === 'ar' ? 'auto' : '-10px',
+                      left: currentLang === 'ar' ? '-10px' : 'auto',
+                      width: '340px',
+                      background: '#FFFFFF',
+                      borderRadius: '8px',
+                      boxShadow: '0 12px 28px -4px rgba(0,0,0,0.25), 0 8px 10px -6px rgba(0,0,0,0.1)',
+                      border: '1px solid #D1DCD4',
+                      zIndex: 9999,
+                      overflow: 'hidden'
+                    }}
+                  >
+                    <div style={{ padding: '12px 16px', background: lowStockAlerts.length > 0 ? 'rgba(220,38,38,0.08)' : 'rgba(0,90,62,0.06)', borderBottom: '1px solid #E5E7EB', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <strong style={{ fontSize: '13px', color: lowStockAlerts.length > 0 ? '#DC2626' : '#005A3E', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <i className={`fa-solid ${lowStockAlerts.length > 0 ? 'fa-triangle-exclamation' : 'fa-check-circle'}`}></i>
+                        {currentLang === 'en' ? 'Stock Limit Alerts' : 'تنبيهات حدود المخزون'}
+                      </strong>
+                      <span style={{ fontSize: '11px', background: lowStockAlerts.length > 0 ? '#DC2626' : '#009B4E', color: '#fff', padding: '2px 8px', borderRadius: '10px', fontWeight: 'bold' }}>
+                        {lowStockAlerts.length} {currentLang === 'en' ? 'Low Stock' : 'مخزون منخفض'}
+                      </span>
+                    </div>
+
+                    <div style={{ maxHeight: '280px', overflowY: 'auto', padding: '8px 0' }}>
+                      {lowStockAlerts.length === 0 ? (
+                        <div style={{ padding: '24px 16px', textAlign: 'center', color: '#6B7280', fontSize: '12px' }}>
+                          <i className="fa-solid fa-circle-check" style={{ fontSize: '26px', color: '#009B4E', marginBottom: '8px', display: 'block' }}></i>
+                          {currentLang === 'en' ? 'All products are above minimum stock limit thresholds.' : 'جميع أرصدة المنتجات ضمن حدود المخزون الآمنة.'}
+                        </div>
+                      ) : (
+                        lowStockAlerts.map((alert: any, idx: number) => (
+                          <div key={idx} style={{ padding: '10px 16px', borderBottom: '1px solid #F3F4F6', fontSize: '12px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '4px' }}>
+                              <strong style={{ color: '#111827' }}>{alert.product_name}</strong>
+                              <span style={{ color: '#DC2626', fontWeight: 'bold', background: '#FEE2E2', padding: '2px 6px', borderRadius: '4px', fontSize: '10px' }}>
+                                {currentLang === 'en' ? 'Below Min' : 'دون الحد الأدنى'}
+                              </span>
+                            </div>
+                            <div style={{ color: '#4B5563', fontSize: '11px', display: 'flex', justifyContent: 'space-between', marginTop: '2px' }}>
+                              <span>
+                                {currentLang === 'en' ? 'Available:' : 'المتوفر:'} <strong style={{ color: '#DC2626' }}>{alert.current_stock}</strong> / {currentLang === 'en' ? 'Min Limit:' : 'الحد الأدنى:'} <strong>{alert.min_stock_qty}</strong>
+                              </span>
+                              <span style={{ color: '#9CA3AF' }}>{alert.vendor_name}</span>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+
+                    <div style={{ padding: '10px 14px', background: '#F9FAFB', borderTop: '1px solid #E5E7EB', display: 'flex', gap: '8px' }}>
+                      <button
+                        className="btn btn-outline"
+                        style={{ flex: 1, fontSize: '11px', padding: '6px 8px', textAlign: 'center', justifyContent: 'center' }}
+                        onClick={() => {
+                          setShowNotificationMenu(false);
+                          setSettingsTab('stocklimits');
+                          setActiveTab('screen-admin');
+                          fetchReorderThresholds();
+                        }}
+                      >
+                        <i className="fa-solid fa-gauge-high"></i> {currentLang === 'en' ? 'Stock Limits' : 'حدود المخزون'}
+                      </button>
+                      <button
+                        className="btn btn-outline"
+                        style={{ flex: 1, fontSize: '11px', padding: '6px 8px', textAlign: 'center', justifyContent: 'center' }}
+                        onClick={() => {
+                          setShowNotificationMenu(false);
+                          setActiveTab('screen-monitoring');
+                        }}
+                      >
+                        <i className="fa-solid fa-tower-broadcast"></i> {currentLang === 'en' ? 'Monitoring' : 'المراقبة'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
 
               <button
                 onClick={() => setActiveTab('screen-admin')}
