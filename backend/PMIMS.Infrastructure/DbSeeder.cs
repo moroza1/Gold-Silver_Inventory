@@ -25,29 +25,72 @@ public static class DbSeeder
             {
                 if (context.Database.IsSqlite())
                 {
-                    // 1. Ensure pending_turkey_purchases table exists
+                    // 1. Ensure pending_turkey_purchases table exists with snake_case schema
                     using (var createTableCmd = connection.CreateCommand())
                     {
                         createTableCmd.CommandText = @"
-                            CREATE TABLE IF NOT EXISTS ""pending_turkey_purchases"" (
-                                ""PendingPurchaseId"" INTEGER NOT NULL CONSTRAINT ""PK_pending_turkey_purchases"" PRIMARY KEY AUTOINCREMENT,
-                                ""BatchReference"" TEXT NOT NULL,
-                                ""SerialsJsonList"" TEXT NOT NULL,
-                                ""TotalItems"" INTEGER NOT NULL,
-                                ""TotalWeightGrams"" TEXT NOT NULL,
-                                ""UnitPricePerGram"" TEXT NOT NULL,
-                                ""TotalCost"" TEXT NOT NULL,
-                                ""RequestedBy"" TEXT NOT NULL,
-                                ""Notes"" TEXT NULL,
-                                ""StatusCode"" TEXT NOT NULL DEFAULT 'PENDING_APPROVAL',
-                                ""CreatedAt"" TEXT NOT NULL,
-                                ""ApprovedBy"" TEXT NULL,
-                                ""ApprovedAt"" TEXT NULL
+                            CREATE TABLE IF NOT EXISTS pending_turkey_purchases (
+                                pending_purchase_id INTEGER NOT NULL CONSTRAINT PK_pending_turkey_purchases PRIMARY KEY AUTOINCREMENT,
+                                batch_reference TEXT NOT NULL,
+                                serials_json_list TEXT NOT NULL,
+                                total_items INTEGER NOT NULL,
+                                total_weight_grams TEXT NOT NULL,
+                                unit_price_per_gram TEXT NOT NULL,
+                                total_cost TEXT NOT NULL,
+                                requested_by TEXT NOT NULL,
+                                notes TEXT NULL,
+                                status_code TEXT NOT NULL DEFAULT 'PENDING_APPROVAL',
+                                created_at TEXT NOT NULL,
+                                approved_by TEXT NULL,
+                                approved_at TEXT NULL
                             );
-                            CREATE INDEX IF NOT EXISTS ""IX_pending_turkey_purchases_StatusCode"" ON ""pending_turkey_purchases"" (""StatusCode"");
-                            CREATE INDEX IF NOT EXISTS ""IX_pending_turkey_purchases_CreatedAt"" ON ""pending_turkey_purchases"" (""CreatedAt"");
+                            CREATE INDEX IF NOT EXISTS IX_pending_turkey_purchases_status_code ON pending_turkey_purchases (status_code);
+                            CREATE INDEX IF NOT EXISTS IX_pending_turkey_purchases_created_at ON pending_turkey_purchases (created_at);
                         ";
                         await createTableCmd.ExecuteNonQueryAsync();
+                    }
+
+                    // 1b. Check and ensure all columns exist on pending_turkey_purchases in case table was created earlier with missing columns
+                    using (var checkTurkeyCmd = connection.CreateCommand())
+                    {
+                        checkTurkeyCmd.CommandText = "PRAGMA table_info(pending_turkey_purchases);";
+                        var existingTurkeyCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                        using (var reader = await checkTurkeyCmd.ExecuteReaderAsync())
+                        {
+                            while (await reader.ReadAsync())
+                            {
+                                var colName = reader["name"]?.ToString();
+                                if (!string.IsNullOrEmpty(colName)) existingTurkeyCols.Add(colName);
+                            }
+                        }
+
+                        var turkeyColsToAdd = new List<(string Name, string Def)>
+                        {
+                            ("approved_at", "TEXT NULL"),
+                            ("approved_by", "TEXT NULL"),
+                            ("ApprovedAt", "TEXT NULL"),
+                            ("ApprovedBy", "TEXT NULL"),
+                            ("notes", "TEXT NULL"),
+                            ("Notes", "TEXT NULL")
+                        };
+
+                        foreach (var (col, def) in turkeyColsToAdd)
+                        {
+                            if (!existingTurkeyCols.Contains(col))
+                            {
+                                try
+                                {
+                                    using var alterCmd = connection.CreateCommand();
+                                    alterCmd.CommandText = $"ALTER TABLE pending_turkey_purchases ADD COLUMN {col} {def};";
+                                    await alterCmd.ExecuteNonQueryAsync();
+                                    existingTurkeyCols.Add(col);
+                                }
+                                catch
+                                {
+                                    // Ignore if already added
+                                }
+                            }
+                        }
                     }
 
                     // 2. Ensure columns on pending_intakes

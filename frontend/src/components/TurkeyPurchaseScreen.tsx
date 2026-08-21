@@ -65,6 +65,8 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
   const [unitPricePerGram, setUnitPricePerGram] = useState<string>('');
   const [purchaseNotes, setPurchaseNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isItemsListExpanded, setIsItemsListExpanded] = useState<boolean>(true);
+  const [searchSelectedQuery, setSearchSelectedQuery] = useState('');
 
   const availableItems = turkeyInventory?.items || [];
 
@@ -93,6 +95,18 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
       totalWeightKg
     };
   }, [availableItems, selectedSerials]);
+
+  // Search filter within selected items
+  const displayedSelectedItems = useMemo(() => {
+    if (!searchSelectedQuery.trim()) return selectedItemsData.items;
+    const q = searchSelectedQuery.toLowerCase();
+    return selectedItemsData.items.filter(item => {
+      return item.serial_number.toLowerCase().includes(q) ||
+        (item.refiner_name && item.refiner_name.toLowerCase().includes(q)) ||
+        (item.denomination && item.denomination.toLowerCase().includes(q)) ||
+        (item.location_code && item.location_code.toLowerCase().includes(q));
+    });
+  }, [selectedItemsData.items, searchSelectedQuery]);
 
   // OCR Preprocessing: converts image to high-contrast grayscale to extract laser-engraved serials on gold
   const preprocessImage = (imageSrc: string): Promise<string> => {
@@ -319,6 +333,23 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
     );
   };
 
+  // Add all bars of selected denomination
+  const handleAddByDenomination = () => {
+    if (!filterProduct) {
+      alert(currentLang === 'en' ? 'Please select a denomination first.' : 'يرجى اختيار الفئة أولاً.');
+      return;
+    }
+    const matched = availableItems
+      .filter(i => i.product_code === filterProduct)
+      .map(i => i.serial_number);
+    if (matched.length === 0) {
+      alert(currentLang === 'en' ? 'No available Turkey bars found for this denomination.' : 'لا توجد سبائك تركية متاحة لهذه الفئة.');
+      return;
+    }
+    const newSet = new Set([...selectedSerials, ...matched]);
+    setSelectedSerials(Array.from(newSet));
+  };
+
   // Select all filtered
   const handleSelectAllFiltered = () => {
     const filteredSerials = filteredItems.map(i => i.serial_number);
@@ -326,9 +357,16 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
     setSelectedSerials(Array.from(newSet));
   };
 
+  // Select all available in Turkey stock
+  const handleSelectAllAvailable = () => {
+    const allSerials = availableItems.map(i => i.serial_number);
+    setSelectedSerials(allSerials);
+  };
+
   // Clear selection
   const handleClearSelection = () => {
     setSelectedSerials([]);
+    setSearchSelectedQuery('');
   };
 
   // Submit Purchase
@@ -438,197 +476,242 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
       {activeSubTab === 'STOCK_PURCHASE' && (
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 340px', gap: '20px', alignItems: 'start' }}>
           
-          {/* LEFT: TURKEY STOCK TABLE & FILTERS */}
+          {/* LEFT: SELECTED TURKEY GOLD ITEMS TABLE & SELECTION TOOLS */}
           <div className="glass-card" style={{ padding: '20px' }}>
             
-            {/* Quick Tools & Range Selector */}
-            <div style={{ backgroundColor: 'rgba(255,255,255,0.02)', padding: '14px', borderRadius: '8px', border: '1px solid var(--surface-border)', marginBottom: '18px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
-                <div style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--kfh-green)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <i className="fa-solid fa-filter-circle-dollar"></i>
-                  {currentLang === 'en' ? 'Quick Selection & Range Filter:' : 'التحديد السريع واختيار النطاق:'}
-                </div>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={() => setShowSmartModal(true)}
-                  style={{ fontSize: '11px', padding: '5px 12px' }}
-                >
-                  <i className="fa-solid fa-wand-magic-sparkles"></i> {currentLang === 'en' ? 'Smart Scanner & Tools (OCR)' : 'الماسح الضوئي والأدوات الذكية'}
-                </button>
+            {/* Header with Title, Count Badge, and Collapse/Expand Toggle */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: isItemsListExpanded ? '18px' : 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <h4 style={{ margin: 0, fontSize: '15px', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <i className="fa-solid fa-cart-shopping" style={{ color: 'var(--kfh-green)' }}></i>
+                  {currentLang === 'en' ? 'Selected Items for Purchase' : 'السبائك المحددة للشراء'}
+                </h4>
+                <span className="badge" style={{ background: selectedItemsData.count > 0 ? 'rgba(0, 155, 78, 0.15)' : 'rgba(255,255,255,0.06)', color: selectedItemsData.count > 0 ? 'var(--kfh-green)' : 'var(--text-muted)', fontSize: '12px', fontWeight: 'bold', border: selectedItemsData.count > 0 ? '1px solid rgba(0, 155, 78, 0.3)' : 'none' }}>
+                  {selectedItemsData.count} {currentLang === 'en' ? 'selected' : 'محددة'} ({selectedItemsData.totalWeightKg} KG)
+                </span>
               </div>
 
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'flex-end' }}>
-                <div className="form-group" style={{ marginBottom: 0, flex: 1, minWidth: '130px' }}>
-                  <label style={{ fontSize: '11px' }}>{currentLang === 'en' ? 'Start Serial' : 'من الرقم التسلسلي'}</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    placeholder="e.g. TR-2026-0001"
-                    value={rangeStart}
-                    onChange={e => setRangeStart(e.target.value)}
-                    style={{ fontSize: '12px', padding: '6px 8px' }}
-                  />
-                </div>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setIsItemsListExpanded(!isItemsListExpanded)}
+                style={{ fontSize: '12px', padding: '5px 12px', display: 'flex', alignItems: 'center', gap: '6px' }}
+              >
+                <i className={`fa-solid ${isItemsListExpanded ? 'fa-chevron-up' : 'fa-chevron-down'}`}></i>
+                <span>{isItemsListExpanded ? (currentLang === 'en' ? 'Collapse' : 'طي القائمة') : (currentLang === 'en' ? 'Expand' : 'توسيع القائمة')}</span>
+              </button>
+            </div>
 
-                <div className="form-group" style={{ marginBottom: 0, flex: 1, minWidth: '130px' }}>
-                  <label style={{ fontSize: '11px' }}>{currentLang === 'en' ? 'End Serial' : 'إلى الرقم التسلسلي'}</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    placeholder="e.g. TR-2026-0050"
-                    value={rangeEnd}
-                    onChange={e => setRangeEnd(e.target.value)}
-                    style={{ fontSize: '12px', padding: '6px 8px' }}
-                  />
-                </div>
-
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={handleApplyRangeSelect}
-                  style={{ fontSize: '12px', padding: '6px 14px' }}
-                >
-                  <i className="fa-solid fa-check-double"></i> {currentLang === 'en' ? 'Select Range' : 'تحديد النطاق'}
-                </button>
-
-                <div style={{ display: 'flex', gap: '6px', marginLeft: 'auto' }}>
-                  <button
-                    type="button"
-                    className="btn"
-                    onClick={handleSelectAllFiltered}
-                    style={{ fontSize: '11px', padding: '6px 10px', background: 'rgba(255,255,255,0.05)' }}
-                  >
-                    {currentLang === 'en' ? 'Select All' : 'تحديد الكل'}
-                  </button>
-
-                  {selectedSerials.length > 0 && (
+            {isItemsListExpanded && (
+              <>
+                {/* Selection Tools & Range Selector */}
+                <div style={{ backgroundColor: 'rgba(255,255,255,0.02)', padding: '14px', borderRadius: '8px', border: '1px solid var(--surface-border)', marginBottom: '18px' }}>
+                  
+                  {/* Row 1: Range Selector & Smart OCR */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
+                    <div style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--kfh-green)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <i className="fa-solid fa-filter-circle-dollar"></i>
+                      {currentLang === 'en' ? 'Quick Selection Tools (Range & Batch):' : 'أدوات التحديد السريع واختيار النطاق:'}
+                    </div>
                     <button
                       type="button"
-                      className="btn btn-danger"
-                      onClick={handleClearSelection}
-                      style={{ fontSize: '11px', padding: '6px 10px' }}
+                      className="btn btn-primary"
+                      onClick={() => setShowSmartModal(true)}
+                      style={{ fontSize: '11px', padding: '5px 12px' }}
                     >
-                      {currentLang === 'en' ? 'Clear' : 'إلغاء'}
+                      <i className="fa-solid fa-wand-magic-sparkles"></i> {currentLang === 'en' ? 'Smart Scanner & Tools (OCR)' : 'الماسح الضوئي والأدوات الذكية'}
                     </button>
-                  )}
-                </div>
-              </div>
-            </div>
+                  </div>
 
-            {/* Search & Denomination Filters */}
-            <div style={{ display: 'flex', gap: '12px', marginBottom: '14px', flexWrap: 'wrap' }}>
-              <div style={{ flex: 1, minWidth: '180px' }}>
-                <input
-                  type="text"
-                  className="form-control"
-                  placeholder={currentLang === 'en' ? 'Search by Serial Number / Refiner...' : 'بحث بالرقم التسلسلي أو المصفاة...'}
-                  value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
-                  style={{ fontSize: '12px', padding: '6px 10px' }}
-                />
-              </div>
-
-              <select
-                className="form-control"
-                value={filterProduct}
-                onChange={e => setFilterProduct(e.target.value)}
-                style={{ width: '180px', fontSize: '12px', padding: '6px 8px' }}
-              >
-                <option value="">{currentLang === 'en' ? 'All Denominations' : 'جميع الفئات'}</option>
-                {turkeyInventory?.summary?.by_product?.map(p => (
-                  <option key={p.product_code} value={p.product_code}>
-                    {p.denomination} ({p.count})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Inventory Data Grid */}
-            <div className="table-responsive" style={{ maxHeight: '520px', overflowY: 'auto' }}>
-              <table>
-                <thead>
-                  <tr>
-                    <th style={{ width: '40px', textAlign: 'center' }}>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'flex-end', marginBottom: '12px' }}>
+                    <div className="form-group" style={{ marginBottom: 0, flex: 1, minWidth: '130px' }}>
+                      <label style={{ fontSize: '11px' }}>{currentLang === 'en' ? 'Start Serial' : 'من الرقم التسلسلي'}</label>
                       <input
-                        type="checkbox"
-                        checked={filteredItems.length > 0 && filteredItems.every(i => selectedSerials.includes(i.serial_number))}
-                        onChange={e => {
-                          if (e.target.checked) handleSelectAllFiltered();
-                          else {
-                            const filteredSet = new Set(filteredItems.map(i => i.serial_number));
-                            setSelectedSerials(selectedSerials.filter(s => !filteredSet.has(s)));
-                          }
-                        }}
+                        type="text"
+                        className="form-control"
+                        placeholder="e.g. TR-2026-0001"
+                        value={rangeStart}
+                        onChange={e => setRangeStart(e.target.value)}
+                        style={{ fontSize: '12px', padding: '6px 8px' }}
                       />
-                    </th>
-                    <th>{currentLang === 'en' ? 'Serial Number' : 'الرقم التسلسلي'}</th>
-                    <th>{currentLang === 'en' ? 'Denomination & Weight' : 'الفئة والوزن'}</th>
-                    <th>{currentLang === 'en' ? 'Refiner / Brand' : 'المصفاة'}</th>
-                    <th>{currentLang === 'en' ? 'Vault Location' : 'موقع الخزينة'}</th>
-                    <th>{currentLang === 'en' ? 'Ownership' : 'الملكية'}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredItems.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
-                        {currentLang === 'en' ? 'No Turkey consignment gold bars found in inventory.' : 'لا توجد سبائك تركية مطابقة في المخزون.'}
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredItems.map(item => {
-                      const isSelected = selectedSerials.includes(item.serial_number);
-                      return (
-                        <tr
-                          key={item.item_id}
-                          style={{
-                            backgroundColor: isSelected ? 'rgba(0, 155, 78, 0.08)' : 'transparent',
-                            cursor: 'pointer'
-                          }}
-                          onClick={() => handleToggleItem(item.serial_number)}
+                    </div>
+
+                    <div className="form-group" style={{ marginBottom: 0, flex: 1, minWidth: '130px' }}>
+                      <label style={{ fontSize: '11px' }}>{currentLang === 'en' ? 'End Serial' : 'إلى الرقم التسلسلي'}</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="e.g. TR-2026-0050"
+                        value={rangeEnd}
+                        onChange={e => setRangeEnd(e.target.value)}
+                        style={{ fontSize: '12px', padding: '6px 8px' }}
+                      />
+                    </div>
+
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={handleApplyRangeSelect}
+                      style={{ fontSize: '12px', padding: '6px 14px' }}
+                    >
+                      <i className="fa-solid fa-plus"></i> {currentLang === 'en' ? 'Add Range' : 'إضافة النطاق'}
+                    </button>
+                  </div>
+
+                  {/* Row 2: Denomination Select & Bulk Actions */}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center', paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                    <div style={{ display: 'flex', gap: '6px', flex: 1, minWidth: '220px' }}>
+                      <select
+                        className="form-control"
+                        value={filterProduct}
+                        onChange={e => setFilterProduct(e.target.value)}
+                        style={{ fontSize: '12px', padding: '6px 8px' }}
+                      >
+                        <option value="">{currentLang === 'en' ? '-- Select Denomination to Add --' : '-- اختر الفئة للإضافة --'}</option>
+                        {turkeyInventory?.summary?.by_product?.map(p => (
+                          <option key={p.product_code} value={p.product_code}>
+                            {p.denomination} ({p.count} {currentLang === 'en' ? 'bars' : 'سبيكة'})
+                          </option>
+                        ))}
+                      </select>
+
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={handleAddByDenomination}
+                        disabled={!filterProduct}
+                        style={{ fontSize: '11px', padding: '6px 10px', whiteSpace: 'nowrap' }}
+                      >
+                        <i className="fa-solid fa-plus"></i> {currentLang === 'en' ? 'Add Denomination' : 'إضافة الفئة'}
+                      </button>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '6px', marginLeft: 'auto' }}>
+                      <button
+                        type="button"
+                        className="btn"
+                        onClick={handleSelectAllAvailable}
+                        style={{ fontSize: '11px', padding: '6px 12px', background: 'rgba(255,255,255,0.05)' }}
+                      >
+                        <i className="fa-solid fa-check-double"></i> {currentLang === 'en' ? `Select All Available (${availableItems.length})` : `تحديد الكل المتاح (${availableItems.length})`}
+                      </button>
+
+                      {selectedSerials.length > 0 && (
+                        <button
+                          type="button"
+                          className="btn btn-danger"
+                          onClick={handleClearSelection}
+                          style={{ fontSize: '11px', padding: '6px 12px' }}
                         >
-                          <td style={{ textAlign: 'center' }} onClick={e => e.stopPropagation()}>
-                            <input
-                              type="checkbox"
-                              checked={isSelected}
-                              onChange={() => handleToggleItem(item.serial_number)}
-                            />
-                          </td>
-                          <td>
-                            <strong style={{ color: isSelected ? 'var(--kfh-green)' : 'inherit' }}>
-                              {item.serial_number}
+                          <i className="fa-solid fa-trash-can"></i> {currentLang === 'en' ? 'Clear Selection' : 'إلغاء التحديد'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                </div>
+
+                {/* Filter within selected items */}
+                {selectedItemsData.items.length > 0 && (
+                  <div style={{ marginBottom: '14px' }}>
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder={currentLang === 'en' ? 'Search within selected bars by serial, refiner, denomination...' : 'بحث ضمن السبائك المحددة بالرقم أو المصفاة أو الفئة...'}
+                      value={searchSelectedQuery}
+                      onChange={e => setSearchSelectedQuery(e.target.value)}
+                      style={{ fontSize: '12px', padding: '7px 12px' }}
+                    />
+                  </div>
+                )}
+
+                {/* Selected Items Data Grid */}
+                <div className="table-responsive" style={{ maxHeight: '520px', overflowY: 'auto' }}>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th style={{ width: '45px', textAlign: 'center' }}>#</th>
+                        <th>{currentLang === 'en' ? 'Serial Number' : 'الرقم التسلسلي'}</th>
+                        <th>{currentLang === 'en' ? 'Denomination & Weight' : 'الفئة والوزن'}</th>
+                        <th>{currentLang === 'en' ? 'Refiner / Brand' : 'المصفاة'}</th>
+                        <th>{currentLang === 'en' ? 'Vault Location' : 'موقع الخزينة'}</th>
+                        <th>{currentLang === 'en' ? 'Ownership' : 'الملكية'}</th>
+                        <th style={{ width: '70px', textAlign: 'center' }}>{currentLang === 'en' ? 'Action' : 'إجراء'}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {displayedSelectedItems.length === 0 ? (
+                        <tr>
+                          <td colSpan={7} style={{ textAlign: 'center', padding: '36px 20px', color: 'var(--text-muted)' }}>
+                            <i className="fa-solid fa-cart-arrow-down" style={{ fontSize: '32px', marginBottom: '12px', color: 'var(--accent-gold)', opacity: 0.6, display: 'block' }}></i>
+                            <strong style={{ fontSize: '14px', color: 'var(--text-primary)', display: 'block', marginBottom: '6px' }}>
+                              {selectedItemsData.items.length === 0 
+                                ? (currentLang === 'en' ? 'No Bars Selected Yet' : 'لم يتم تحديد أي سبائك بعد')
+                                : (currentLang === 'en' ? 'No matching bars found in current search' : 'لا توجد سبائك مطابقة للبحث المحدد')}
                             </strong>
-                          </td>
-                          <td>
-                            {item.denomination || `${item.weight_grams}g Bar`}
-                            <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: '4px' }}>
-                              ({item.weight_grams}g)
-                            </span>
-                          </td>
-                          <td>{item.refiner_name || item.brand_name || 'Nadir Gold'}</td>
-                          <td>
-                            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                              {item.location_code}
-                            </span>
-                          </td>
-                          <td>
-                            <span className="badge" style={{ background: 'rgba(225, 29, 72, 0.12)', color: '#E11D48', border: '1px solid rgba(225, 29, 72, 0.3)' }}>
-                              🇹🇷 TURKEY_OWNED
+                            <span style={{ fontSize: '12px' }}>
+                              {selectedItemsData.items.length === 0
+                                ? (currentLang === 'en' 
+                                    ? 'Use the Range Selector (Start - End Serial), Denomination selector, or Smart OCR above to add Turkey consignment bars to this purchase order.' 
+                                    : 'استخدم اختيار النطاق (من - إلى الرقم التسلسلي)، أو تحديد الفئة، أو الماسح الذكي أعلاه لإضافة السبائك التركية لأمر الشراء.')
+                                : (currentLang === 'en' ? 'Try changing your search keywords.' : 'جرب تغيير كلمات البحث.')}
                             </span>
                           </td>
                         </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
+                      ) : (
+                        displayedSelectedItems.map((item, index) => {
+                          return (
+                            <tr key={item.item_id || item.serial_number}>
+                              <td style={{ textAlign: 'center', fontSize: '11px', color: 'var(--text-muted)' }}>
+                                {index + 1}
+                              </td>
+                              <td>
+                                <strong style={{ color: 'var(--kfh-green)' }}>
+                                  {item.serial_number}
+                                </strong>
+                              </td>
+                              <td>
+                                {item.denomination || `${item.weight_grams}g Bar`}
+                                <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: '4px' }}>
+                                  ({item.weight_grams}g)
+                                </span>
+                              </td>
+                              <td>{item.refiner_name || item.brand_name || 'Nadir Gold'}</td>
+                              <td>
+                                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                                  {item.location_code}
+                                </span>
+                              </td>
+                              <td>
+                                <span className="badge" style={{ background: 'rgba(225, 29, 72, 0.12)', color: '#E11D48', border: '1px solid rgba(225, 29, 72, 0.3)' }}>
+                                  🇹🇷 TURKEY_OWNED
+                                </span>
+                              </td>
+                              <td style={{ textAlign: 'center' }}>
+                                <button
+                                  type="button"
+                                  className="btn btn-danger"
+                                  onClick={() => handleToggleItem(item.serial_number)}
+                                  title={currentLang === 'en' ? 'Remove from selection' : 'إزالة من التحديد'}
+                                  style={{ padding: '3px 8px', fontSize: '11px' }}
+                                >
+                                  <i className="fa-solid fa-xmark"></i>
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
 
-            <div style={{ marginTop: '10px', fontSize: '12px', color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between' }}>
-              <span>{filteredItems.length} {currentLang === 'en' ? 'bars displayed' : 'سبيكة معروضة'}</span>
-              <span>{selectedSerials.length} {currentLang === 'en' ? 'bars selected' : 'سبيكة محددة'}</span>
-            </div>
+                <div style={{ marginTop: '10px', fontSize: '12px', color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between' }}>
+                  <span>{displayedSelectedItems.length} {currentLang === 'en' ? 'bars displayed' : 'سبيكة معروضة'}</span>
+                  <span><strong>{selectedItemsData.count}</strong> {currentLang === 'en' ? 'total bars selected' : 'إجمالي السبائك المحددة'} ({selectedItemsData.totalWeightKg} KG)</span>
+                </div>
+              </>
+            )}
 
           </div>
 
@@ -643,7 +726,7 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', borderBottom: '1px solid var(--surface-border)', paddingBottom: '14px', marginBottom: '14px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
                 <span style={{ color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Total Bars:' : 'عدد السبائك:'}</span>
-                <strong>{selectedItemsData.count} {currentLang === 'en' ? 'units' : 'قطعة'}</strong>
+                <strong style={{ color: 'var(--kfh-green)', fontSize: '14px' }}>{selectedItemsData.count} {currentLang === 'en' ? 'units' : 'قطعة'}</strong>
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
@@ -664,13 +747,17 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
                 <span style={{ color: 'var(--accent-red)' }}>*</span>
               </label>
               <input
-                type="number"
-                step="0.001"
-                min="0.001"
+                type="text"
+                inputMode="decimal"
                 className="form-control"
                 placeholder={currentLang === 'en' ? 'Enter rate e.g. 24.500' : 'أدخل السعر مثلاً 24.500'}
                 value={unitPricePerGram}
-                onChange={e => setUnitPricePerGram(e.target.value)}
+                onChange={e => {
+                  const val = e.target.value;
+                  if (val === '' || /^\d*\.?\d*$/.test(val)) {
+                    setUnitPricePerGram(val);
+                  }
+                }}
                 disabled={!canModify}
                 style={{ fontSize: '14px', fontWeight: 'bold' }}
                 required
@@ -696,40 +783,6 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
                 style={{ fontSize: '12px' }}
               />
             </div>
-
-            {/* Selected Serials Badge Preview */}
-            {selectedItemsData.items.length > 0 && (
-              <div style={{ marginBottom: '16px' }}>
-                <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '6px' }}>
-                  {currentLang === 'en' ? 'Selected Serials Preview:' : 'معاينة الأرقام المحددة:'}
-                </label>
-                <div style={{ maxHeight: '110px', overflowY: 'auto', display: 'flex', flexWrap: 'wrap', gap: '4px', padding: '6px', background: 'rgba(255,255,255,0.02)', borderRadius: '6px', border: '1px solid var(--surface-border)' }}>
-                  {selectedItemsData.items.map(i => (
-                    <span
-                      key={i.serial_number}
-                      style={{
-                        fontSize: '10px',
-                        padding: '2px 6px',
-                        background: 'rgba(0, 155, 78, 0.15)',
-                        border: '1px solid var(--kfh-green)',
-                        borderRadius: '4px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '4px'
-                      }}
-                    >
-                      {i.serial_number}
-                      <span
-                        onClick={() => handleToggleItem(i.serial_number)}
-                        style={{ cursor: 'pointer', color: 'var(--accent-red)' }}
-                      >
-                        &times;
-                      </span>
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
 
             {/* Submit Button */}
             {canModify ? (
