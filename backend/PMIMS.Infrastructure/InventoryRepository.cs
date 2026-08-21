@@ -4444,17 +4444,28 @@ public class InventoryRepository : IInventoryRepository
             if (!wasOpen) await connection.OpenAsync();
             try
             {
-                var alterCols = new[] { "approved_at", "approved_by", "notes" };
-                foreach (var c in alterCols)
-                {
-                    try
-                    {
-                        using var alterCmd = connection.CreateCommand();
-                        alterCmd.CommandText = $"ALTER TABLE pending_turkey_purchases ADD COLUMN {c} TEXT;";
-                        await alterCmd.ExecuteNonQueryAsync();
-                    }
-                    catch { }
-                }
+                using var fixCmd = connection.CreateCommand();
+                fixCmd.CommandText = @"
+                    DROP TABLE IF EXISTS pending_turkey_purchases;
+                    CREATE TABLE IF NOT EXISTS pending_turkey_purchases (
+                        pending_purchase_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                        batch_reference TEXT NOT NULL,
+                        serials_json_list TEXT NOT NULL,
+                        total_items INTEGER NOT NULL,
+                        total_weight_grams TEXT NOT NULL,
+                        unit_price_per_gram TEXT NOT NULL,
+                        total_cost TEXT NOT NULL,
+                        requested_by TEXT NOT NULL,
+                        notes TEXT,
+                        status_code TEXT NOT NULL DEFAULT 'PENDING_APPROVAL',
+                        created_at TEXT NOT NULL,
+                        approved_by TEXT,
+                        approved_at TEXT
+                    );
+                    CREATE INDEX IF NOT EXISTS IX_pending_turkey_purchases_status_code ON pending_turkey_purchases (status_code);
+                    CREATE INDEX IF NOT EXISTS IX_pending_turkey_purchases_created_at ON pending_turkey_purchases (created_at);
+                ";
+                await fixCmd.ExecuteNonQueryAsync();
             }
             finally
             {

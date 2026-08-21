@@ -25,7 +25,29 @@ public static class DbSeeder
             {
                 if (context.Database.IsSqlite())
                 {
-                    // 1. Ensure pending_turkey_purchases table exists with snake_case schema
+                    // 1. Ensure pending_turkey_purchases has exact snake_case schema
+                    using (var checkCmd = connection.CreateCommand())
+                    {
+                        checkCmd.CommandText = "PRAGMA table_info(pending_turkey_purchases);";
+                        var rawCols = new HashSet<string>();
+                        using (var reader = await checkCmd.ExecuteReaderAsync())
+                        {
+                            while (await reader.ReadAsync())
+                            {
+                                var n = reader["name"]?.ToString();
+                                if (!string.IsNullOrEmpty(n)) rawCols.Add(n);
+                            }
+                        }
+
+                        // If table exists but lacks required snake_case columns, drop and recreate cleanly
+                        if (rawCols.Count > 0 && (!rawCols.Contains("batch_reference") || !rawCols.Contains("approved_at") || !rawCols.Contains("approved_by")))
+                        {
+                            using var dropCmd = connection.CreateCommand();
+                            dropCmd.CommandText = "DROP TABLE IF EXISTS pending_turkey_purchases;";
+                            await dropCmd.ExecuteNonQueryAsync();
+                        }
+                    }
+
                     using (var createTableCmd = connection.CreateCommand())
                     {
                         createTableCmd.CommandText = @"
@@ -38,56 +60,16 @@ public static class DbSeeder
                                 unit_price_per_gram TEXT NOT NULL,
                                 total_cost TEXT NOT NULL,
                                 requested_by TEXT NOT NULL,
-                                notes TEXT NULL,
+                                notes TEXT,
                                 status_code TEXT NOT NULL DEFAULT 'PENDING_APPROVAL',
                                 created_at TEXT NOT NULL,
-                                approved_by TEXT NULL,
-                                approved_at TEXT NULL
+                                approved_by TEXT,
+                                approved_at TEXT
                             );
                             CREATE INDEX IF NOT EXISTS IX_pending_turkey_purchases_status_code ON pending_turkey_purchases (status_code);
                             CREATE INDEX IF NOT EXISTS IX_pending_turkey_purchases_created_at ON pending_turkey_purchases (created_at);
                         ";
                         await createTableCmd.ExecuteNonQueryAsync();
-                    }
-
-                    // 1b. Check and ensure all columns exist on pending_turkey_purchases in case table was created earlier with missing columns
-                    using (var checkTurkeyCmd = connection.CreateCommand())
-                    {
-                        checkTurkeyCmd.CommandText = "PRAGMA table_info(pending_turkey_purchases);";
-                        var existingTurkeyCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                        using (var reader = await checkTurkeyCmd.ExecuteReaderAsync())
-                        {
-                            while (await reader.ReadAsync())
-                            {
-                                var colName = reader["name"]?.ToString();
-                                if (!string.IsNullOrEmpty(colName)) existingTurkeyCols.Add(colName);
-                            }
-                        }
-
-                        var turkeyColsToAdd = new List<(string Name, string Def)>
-                        {
-                            ("approved_at", "TEXT"),
-                            ("approved_by", "TEXT"),
-                            ("notes", "TEXT")
-                        };
-
-                        foreach (var (col, def) in turkeyColsToAdd)
-                        {
-                            if (!existingTurkeyCols.Contains(col))
-                            {
-                                try
-                                {
-                                    using var alterCmd = connection.CreateCommand();
-                                    alterCmd.CommandText = $"ALTER TABLE pending_turkey_purchases ADD COLUMN {col} {def};";
-                                    await alterCmd.ExecuteNonQueryAsync();
-                                    existingTurkeyCols.Add(col);
-                                }
-                                catch (Exception alterEx)
-                                {
-                                    Console.WriteLine($"⚠️ SQLite alter column {col} warning: {alterEx.Message}");
-                                }
-                            }
-                        }
                     }
 
                     // 2. Ensure columns on pending_intakes
