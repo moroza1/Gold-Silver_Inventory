@@ -941,7 +941,6 @@ export default function App() {
   } | null>(null);
   const [pendingTurkeyPurchases, setPendingTurkeyPurchases] = useState<any[]>([]);
   const [pendingIntakesList, setPendingIntakesList] = useState<any[]>([]);
-  const [previewBarcodeModal, setPreviewBarcodeModal] = useState<any>(null);
   const [intakeActiveSubTab, setIntakeActiveSubTab] = useState<'RECEIVE_FORM' | 'IN_FLIGHT_LOG'>('RECEIVE_FORM');
   const [collapsedSections, setCollapsedSections] = useState<{ [key: string]: boolean }>({
     'section-operations': true,
@@ -5605,7 +5604,6 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                           <th style={{ minWidth: '220px' }}>{currentLang === 'en' ? 'Product / Denomination' : 'نوع المنتج / الفئة'}</th>
                           <th style={{ minWidth: '160px' }}>{currentLang === 'en' ? 'Refiner / Brand' : 'المصفاة / الماركة'}</th>
                           <th style={{ minWidth: '180px' }}>{currentLang === 'en' ? 'Damaged / Inspection' : 'حالة التلف / الفحص'}</th>
-                          <th style={{ width: '90px' }}>{currentLang === 'en' ? 'GS1 Tag' : 'الباركود'}</th>
                           <th style={{ width: '50px' }}></th>
                         </tr>
                       </thead>
@@ -5674,24 +5672,6 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                                     />
                                   )}
                                 </div>
-                              </td>
-                              <td>
-                                <button
-                                  className="btn"
-                                  style={{ padding: '4px 8px', fontSize: '11px', backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--surface-border)' }}
-                                  title={currentLang === 'en' ? 'Preview & Print GS1 Barcode Tag' : 'معاينة وطباعة ملصق الباركود'}
-                                  onClick={() => setPreviewBarcodeModal({
-                                    serial: bar.serial,
-                                    lot: intakeLotNum,
-                                    product: (products.find((p: any) => p.product_id === bar.product_id)?.denomination_label) || '1 KG Gold Bar',
-                                    weight: bar.weight_grams,
-                                    purity: bar.purity,
-                                    refiner: bar.refiner_name,
-                                    isDamaged: bar.is_damaged
-                                  })}
-                                >
-                                  <i className="fa-solid fa-qrcode" style={{ color: 'var(--kfh-green)' }}></i> Tag
-                                </button>
                               </td>
                               <td>
                                 <button
@@ -11670,103 +11650,6 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                 </div>
               </div>
 
-            </div>
-          </div>
-        )}
-
-        {/* GS1 BARCODE & QR LABEL PRINT MODAL (UC03 BR-009) */}
-        {previewBarcodeModal && (
-          <div className="modal-overlay active" onClick={() => setPreviewBarcodeModal(null)}>
-            <div className="glass-card modal-content-box" style={{ width: '460px', padding: '24px' }} onClick={e => e.stopPropagation()}>
-              <div className="modal-header" style={{ marginBottom: '16px' }}>
-                <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}>
-                  <i className="fa-solid fa-qrcode" style={{ color: 'var(--kfh-green)' }}></i>
-                  {currentLang === 'en' ? 'Precious Metal Bar GS1 Tag' : 'ملصق الباركود المعتمد للسبيكة (GS1)'}
-                </h3>
-                <span className="modal-close-btn" onClick={() => setPreviewBarcodeModal(null)}>&times;</span>
-              </div>
-
-              {/* Printable Barcode Card */}
-              <div style={{
-                background: '#ffffff',
-                color: '#111827',
-                padding: '20px',
-                borderRadius: '8px',
-                border: '2px solid #e5e7eb',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '14px',
-                textAlign: 'center'
-              }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #009B4E', paddingBottom: '8px' }}>
-                  <div style={{ fontWeight: '900', color: '#009B4E', fontSize: '15px', letterSpacing: '1px' }}>KFH PMIMS</div>
-                  <div style={{ fontSize: '10px', color: '#6b7280', fontWeight: 'bold' }}>SHARIA VERIFIED</div>
-                </div>
-
-                {/* 2D DataMatrix / QR Simulation */}
-                <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '16px' }}>
-                  <div style={{
-                    width: '100px',
-                    height: '100px',
-                    backgroundColor: '#f3f4f6',
-                    border: '1px solid #d1d5db',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                    padding: '6px'
-                  }}>
-                    <i className="fa-solid fa-qrcode" style={{ fontSize: '72px', color: '#111827' }}></i>
-                  </div>
-                  <div style={{ textAlign: 'left', fontSize: '12px', flex: 1 }}>
-                    <div style={{ fontWeight: 'bold', fontSize: '14px', color: '#111827' }}>{previewBarcodeModal.serial}</div>
-                    <div style={{ color: '#4b5563', fontSize: '11px', marginTop: '2px' }}>{previewBarcodeModal.product}</div>
-                    <div style={{ color: '#009B4E', fontWeight: 'bold', marginTop: '4px' }}>
-                      {previewBarcodeModal.weight}g
-                    </div>
-                    <div style={{ color: '#6b7280', fontSize: '11px', marginTop: '2px' }}>
-                      Refiner: {previewBarcodeModal.refiner || 'Valcambi Suisse'}
-                    </div>
-                    <div style={{ color: '#6b7280', fontSize: '10px', marginTop: '2px' }}>
-                      Lot: {previewBarcodeModal.lot}
-                    </div>
-                  </div>
-                </div>
-
-                {/* 1D Barcode Simulation */}
-                <div style={{ borderTop: '1px dashed #d1d5db', paddingTop: '10px' }}>
-                  <div style={{
-                    fontFamily: 'monospace',
-                    letterSpacing: '5px',
-                    fontSize: '22px',
-                    fontWeight: '900',
-                    lineHeight: '1',
-                    color: '#000000',
-                    userSelect: 'none'
-                  }}>
-                    ||| | |||| | || ||| || ||| | |||
-                  </div>
-                  <div style={{ fontFamily: 'monospace', fontSize: '11px', color: '#4b5563', marginTop: '4px' }}>
-                    (21){previewBarcodeModal.serial}(10){previewBarcodeModal.lot}
-                  </div>
-                </div>
-
-                {previewBarcodeModal.isDamaged && (
-                  <div style={{ backgroundColor: '#fee2e2', color: '#dc2626', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold' }}>
-                    QUARANTINE / DAMAGED UPON INTAKE
-                  </div>
-                )}
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px' }}>
-                <button className="btn btn-secondary" onClick={() => setPreviewBarcodeModal(null)}>
-                  {currentLang === 'en' ? 'Close' : 'إغلاق'}
-                </button>
-                <button className="btn btn-primary" onClick={() => window.print()}>
-                  <i className="fa-solid fa-print"></i> {currentLang === 'en' ? 'Print Tag' : 'طباعة الملصق'}
-                </button>
-              </div>
             </div>
           </div>
         )}

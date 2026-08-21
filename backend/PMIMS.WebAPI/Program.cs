@@ -300,6 +300,11 @@ try
             await DbSeeder.SeedAsync(context);
             Console.WriteLine("✅ Database seeded successfully");
 
+            // Ensure table schema and columns are up to date on existing databases
+            Console.WriteLine("🔄 Ensuring database schema is up to date...");
+            await DbSeeder.EnsureSchemaUpToDateAsync(context);
+            Console.WriteLine("✅ Database schema verified");
+
             // Top up module permissions on already-seeded databases so a newly-added
             // admin module (e.g. gl_config) becomes visible after a restart without a
             // full reseed. Idempotent; no-op on a fresh DB just seeded above.

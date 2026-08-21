@@ -1,12 +1,111 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.EntityFrameworkCore;
 using PMIMS.Domain;
 
 namespace PMIMS.Infrastructure;
 
 public static class DbSeeder
 {
+    /// <summary>
+    /// Idempotently ensures all table columns required by domain entities exist on existing databases
+    /// (e.g. SQLite databases created before certain columns were added, avoiding missing column exceptions).
+    /// </summary>
+    public static async Task EnsureSchemaUpToDateAsync(AppDbContext context)
+    {
+        try
+        {
+            var connection = context.Database.GetDbConnection();
+            bool wasOpen = connection.State == System.Data.ConnectionState.Open;
+            if (!wasOpen) await connection.OpenAsync();
+
+            try
+            {
+                if (context.Database.IsSqlite())
+                {
+                    using var cmd = connection.CreateCommand();
+                    cmd.CommandText = "PRAGMA table_info(pending_intakes);";
+                    var existingCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    using (var reader = await cmd.ExecuteReaderAsync())
+                    {
+                        while (await reader.ReadAsync())
+                        {
+                            var colName = reader["name"]?.ToString();
+                            if (!string.IsNullOrEmpty(colName)) existingCols.Add(colName);
+                        }
+                    }
+
+                    if (existingCols.Count > 0)
+                    {
+                        var colsToAdd = new List<(string Name, string Def)>
+                        {
+                            ("ownership_type", "TEXT NOT NULL DEFAULT 'KFH_OWNED'"),
+                            ("OwnershipType", "TEXT NOT NULL DEFAULT 'KFH_OWNED'"),
+                            ("source_type", "TEXT NOT NULL DEFAULT 'SUPPLIER'"),
+                            ("SourceType", "TEXT NOT NULL DEFAULT 'SUPPLIER'"),
+                            ("receipt_reason", "TEXT NULL"),
+                            ("ReceiptReason", "TEXT NULL"),
+                            ("vendor_id", "INTEGER NULL"),
+                            ("VendorId", "INTEGER NULL"),
+                            ("shipment_reference", "TEXT NULL"),
+                            ("ShipmentReference", "TEXT NULL"),
+                            ("delivery_note_number", "TEXT NULL"),
+                            ("DeliveryNoteNumber", "TEXT NULL"),
+                            ("airway_bill_number", "TEXT NULL"),
+                            ("AirwayBillNumber", "TEXT NULL"),
+                            ("supporting_document_url", "TEXT NULL"),
+                            ("SupportingDocumentUrl", "TEXT NULL"),
+                            ("discrepancy_notes", "TEXT NULL"),
+                            ("DiscrepancyNotes", "TEXT NULL"),
+                            ("receiving_date", "TEXT NULL"),
+                            ("ReceivingDate", "TEXT NULL"),
+                            ("customer_id", "INTEGER NULL"),
+                            ("CustomerId", "INTEGER NULL"),
+                            ("account_id", "INTEGER NULL"),
+                            ("AccountId", "INTEGER NULL")
+                        };
+
+                        foreach (var (col, def) in colsToAdd)
+                        {
+                            if (!existingCols.Contains(col))
+                            {
+                                try
+                                {
+                                    using var alterCmd = connection.CreateCommand();
+                                    alterCmd.CommandText = $"ALTER TABLE pending_intakes ADD COLUMN {col} {def};";
+                                    await alterCmd.ExecuteNonQueryAsync();
+                                    existingCols.Add(col);
+                                }
+                                catch
+                                {
+                                    // Ignore if already added with different casing
+                                }
+                            }
+                        }
+                    }
+                }
+                else if (context.Database.IsSqlServer())
+                {
+                    await context.Database.ExecuteSqlRawAsync(@"
+                        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('pending_intakes') AND name = 'ownership_type')
+                        BEGIN
+                            ALTER TABLE pending_intakes ADD ownership_type VARCHAR(30) NOT NULL CONSTRAINT DF_pending_intakes_ownership_type DEFAULT 'KFH_OWNED';
+                        END
+                    ");
+                }
+            }
+            finally
+            {
+                if (!wasOpen) await connection.CloseAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"⚠️ Schema update check warning: {ex.Message}");
+        }
+    }
     // Single source of truth for system-group module permissions, shared by the fresh
     // seed (SeedAsync) and the top-up (EnsureModulePermissionsAsync). Keyed by group
     // NAME so both paths can resolve the right PrivilegeGroup. When you add a new module,
