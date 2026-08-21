@@ -3518,8 +3518,8 @@ const [migrationApproved, setMigrationApproved] = useState(false);
       if (res.ok) {
         const data = await res.json();
         alert(currentLang === 'en' 
-          ? `Turkey gold purchase initiated (${data.total_items} bars, ${data.total_weight_grams}g, ${data.total_cost} KWD)! Routed to Checker for 4-eyes approval.` 
-          : `تم إنشاء طلب شراء ذهب تركيا بنجاح (${data.total_items} سبيكة، ${data.total_weight_grams} جم، ${data.total_cost} د.ك) وتوجيهه للمراجع للاعتماد!`);
+          ? `Turkey gold purchase initiated (${data.total_items} bars, ${data.total_weight_grams}g, Buy Rate: ${unitPrice} KWD/g)! Routed to Checker for 4-eyes approval.` 
+          : `تم إنشاء طلب شراء ذهب تركيا بنجاح (${data.total_items} سبيكة، ${data.total_weight_grams} جم، سعر الشراء: ${unitPrice} د.ك/جم) وتوجيهه للمراجع للاعتماد!`);
         fetchTurkeyInventory();
         fetchPendingTurkeyPurchases();
         fetchWorkflows();
@@ -10461,8 +10461,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                             <div><strong>{currentLang === 'en' ? 'Batch Reference:' : 'مرجع الدفعة:'}</strong> {selectedWfInstance.details.batch_reference}</div>
                             <div><strong>{currentLang === 'en' ? 'Total Bars:' : 'إجمالي عدد السبائك:'}</strong> {selectedWfInstance.details.total_items} {currentLang === 'en' ? 'bars' : 'سبيكة'}</div>
                             <div><strong>{currentLang === 'en' ? 'Total Weight:' : 'الوزن الإجمالي:'}</strong> {selectedWfInstance.details.total_weight_grams}g ({(selectedWfInstance.details.total_weight_grams / 1000).toFixed(3)} KG)</div>
-                            <div><strong>{currentLang === 'en' ? 'Unit Price:' : 'سعر الجرام:'}</strong> {selectedWfInstance.details.unit_price} KWD/g</div>
-                            <div><strong>{currentLang === 'en' ? 'Total Settlement Cost:' : 'إجمالي قيمة الشراء:'}</strong> <span style={{ color: 'var(--kfh-green)', fontWeight: 'bold' }}>{(selectedWfInstance.details.total_cost || 0).toLocaleString()} KWD</span></div>
+                            <div><strong>{currentLang === 'en' ? 'Agreed Buy Rate:' : 'سعر الشراء المتفق عليه:'}</strong> <span style={{ color: 'var(--kfh-green)', fontWeight: 'bold' }}>{selectedWfInstance.details.unit_price} KWD/g</span></div>
                             <div><strong>{currentLang === 'en' ? 'Requested By (Maker):' : 'المنشئ:'}</strong> {selectedWfInstance.details.requested_by}</div>
                             {selectedWfInstance.details.notes && (
                               <div style={{ gridColumn: '1 / -1' }}><strong>{currentLang === 'en' ? 'Notes:' : 'الملاحظات:'}</strong> {selectedWfInstance.details.notes}</div>

@@ -833,8 +833,7 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
                   <th>{currentLang === 'en' ? 'Batch Reference' : 'مرجع الدفعة'}</th>
                   <th>{currentLang === 'en' ? 'Items Count' : 'عدد السبائك'}</th>
                   <th>{currentLang === 'en' ? 'Total Weight' : 'الوزن الإجمالي'}</th>
-                  <th>{currentLang === 'en' ? 'Unit Price' : 'سعر الجرام'}</th>
-                  <th>{currentLang === 'en' ? 'Total Cost (KWD)' : 'إجمالي القيمة'}</th>
+                  <th>{currentLang === 'en' ? 'Agreed Buy Rate' : 'سعر الشراء المتفق عليه'}</th>
                   <th>{currentLang === 'en' ? 'Requested By' : 'مقدم الطلب'}</th>
                   <th>{currentLang === 'en' ? 'Status' : 'الحالة'}</th>
                   <th>{currentLang === 'en' ? 'Created At' : 'تاريخ الإنشاء'}</th>
@@ -844,7 +843,7 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
               <tbody>
                 {pendingPurchases.length === 0 ? (
                   <tr>
-                    <td colSpan={9} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
+                    <td colSpan={8} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
                       {currentLang === 'en' ? 'No purchase requests recorded yet.' : 'لا توجد طلبات شراء مسجلة بعد.'}
                     </td>
                   </tr>
@@ -865,8 +864,7 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
                             ({(p.total_weight_grams / 1000).toFixed(3)} KG)
                           </span>
                         </td>
-                        <td>{p.unit_price} KWD</td>
-                        <td><strong style={{ color: 'var(--kfh-green)' }}>{(p.total_cost || 0).toLocaleString()} KWD</strong></td>
+                        <td><strong style={{ color: 'var(--kfh-green)' }}>{p.unit_price} KWD / g</strong></td>
                         <td>{p.requested_by}</td>
                         <td>
                           <span className={`badge ${p.status_code === 'APPROVED' ? 'badge-ready' : p.status_code === 'REJECTED' ? 'badge-sold' : 'badge-reserved'}`}>
@@ -1131,84 +1129,6 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
               </div>
             )}
 
-          </div>
-        </div>
-      )}
-
-      {/* 4. SUBTAB 2: PENDING PURCHASES & TRACKER */}
-      {activeSubTab === 'PENDING_BATCHES' && (
-        <div className="glass-card" style={{ padding: '20px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-            <h4 style={{ margin: 0, fontSize: '15px', color: 'var(--kfh-green)' }}>
-              <i className="fa-solid fa-list-check"></i> {currentLang === 'en' ? 'Turkey Purchase Requests & Maker-Checker Log' : 'طلبات شراء ذهب تركيا وسجل تدقيق الأعين الأربعة'}
-            </h4>
-          </div>
-
-          <div className="table-responsive">
-            <table>
-              <thead>
-                <tr>
-                  <th>{currentLang === 'en' ? 'Batch Reference' : 'مرجع الدفعة'}</th>
-                  <th>{currentLang === 'en' ? 'Items Count' : 'عدد السبائك'}</th>
-                  <th>{currentLang === 'en' ? 'Total Weight' : 'الوزن الإجمالي'}</th>
-                  <th>{currentLang === 'en' ? 'Unit Price' : 'سعر الجرام'}</th>
-                  <th>{currentLang === 'en' ? 'Total Cost (KWD)' : 'إجمالي القيمة'}</th>
-                  <th>{currentLang === 'en' ? 'Requested By' : 'مقدم الطلب'}</th>
-                  <th>{currentLang === 'en' ? 'Status' : 'الحالة'}</th>
-                  <th>{currentLang === 'en' ? 'Created At' : 'تاريخ الإنشاء'}</th>
-                  <th>{currentLang === 'en' ? 'Serials Preview' : 'الأرقام التسلسلية'}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pendingPurchases.length === 0 ? (
-                  <tr>
-                    <td colSpan={9} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
-                      {currentLang === 'en' ? 'No purchase requests recorded yet.' : 'لا توجد طلبات شراء مسجلة بعد.'}
-                    </td>
-                  </tr>
-                ) : (
-                  pendingPurchases.map(p => {
-                    let serialsList: string[] = [];
-                    try {
-                      serialsList = JSON.parse(p.serials_json || '[]');
-                    } catch (_) {}
-
-                    return (
-                      <tr key={p.pending_purchase_id}>
-                        <td><strong>{p.batch_reference}</strong></td>
-                        <td>{p.total_items} {currentLang === 'en' ? 'bars' : 'سبيكة'}</td>
-                        <td>
-                          {p.total_weight_grams} g
-                          <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: '4px' }}>
-                            ({(p.total_weight_grams / 1000).toFixed(3)} KG)
-                          </span>
-                        </td>
-                        <td>{p.unit_price} KWD</td>
-                        <td><strong style={{ color: 'var(--kfh-green)' }}>{(p.total_cost || 0).toLocaleString()} KWD</strong></td>
-                        <td>{p.requested_by}</td>
-                        <td>
-                          <span className={`badge ${p.status_code === 'APPROVED' ? 'badge-ready' : p.status_code === 'REJECTED' ? 'badge-sold' : 'badge-reserved'}`}>
-                            {p.status_code === 'APPROVED' ? (currentLang === 'en' ? 'Approved & Converted' : 'معتمد ومحول') :
-                             p.status_code === 'REJECTED' ? (currentLang === 'en' ? 'Rejected' : 'مرفوض') :
-                             (currentLang === 'en' ? 'Pending Checker Approval' : 'بانتظار اعتماد المراجع')}
-                          </span>
-                        </td>
-                        <td>{new Date(p.created_at).toLocaleString()}</td>
-                        <td>
-                          <div style={{ maxWidth: '240px', overflowX: 'auto', whiteSpace: 'nowrap', display: 'flex', gap: '4px' }}>
-                            {serialsList.map((s, idx) => (
-                              <span key={idx} style={{ fontSize: '10px', padding: '2px 5px', background: 'rgba(255,255,255,0.05)', borderRadius: '3px' }}>
-                                {s}
-                              </span>
-                            ))}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
           </div>
         </div>
       )}
