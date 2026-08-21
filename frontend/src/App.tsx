@@ -4972,9 +4972,6 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       </span>
                       <span className="alarm-detail">{currentLang === 'ar' ? 'المورد' : 'Supplier'}: {alert.vendor_name}</span>
                     </div>
-                    <button className="btn btn-primary alarm-action" onClick={() => handleGenerateDraftPO(alert.threshold_id)}>
-                      <i className="fa-solid fa-file-invoice"></i> {currentLang === 'ar' ? 'إنشاء طلب شراء' : 'Generate Draft P.O.'}
-                    </button>
                   </div>
                 ))}
               </div>
