@@ -727,9 +727,75 @@ public class InventoryRepository : IInventoryRepository
         }
     }
 
+    // =========================================================================
+    // System Settings & Dynamic Reservation Lock TTL
+    // =========================================================================
+    public async Task<int> GetReservationTtlSecondsAsync()
+    {
+        try
+        {
+            var setting = await _dbContext.SystemSettings
+                .AsNoTracking()
+                .FirstOrDefaultAsync(s => s.SettingKey == "ReservationTTLSeconds");
+
+            if (setting != null && int.TryParse(setting.SettingValue, out int ttl) && ttl > 0)
+            {
+                return ttl;
+            }
+        }
+        catch
+        {
+            // fallback if table uninitialized
+        }
+        return 300; // default 5 minutes
+    }
+
+    public async Task<IEnumerable<SystemSetting>> GetSystemSettingsAsync(string? category = null)
+    {
+        var query = _dbContext.SystemSettings.AsNoTracking().AsQueryable();
+        if (!string.IsNullOrEmpty(category))
+        {
+            query = query.Where(s => s.Category == category);
+        }
+        return await query.OrderBy(s => s.SettingKey).ToListAsync();
+    }
+
+    public async Task<SystemSetting> SetSystemSettingAsync(string key, string value, string? description = null, string? category = null, string updatedBy = "SYSTEM")
+    {
+        var existing = await _dbContext.SystemSettings.FirstOrDefaultAsync(s => s.SettingKey == key);
+        if (existing != null)
+        {
+            existing.SettingValue = value;
+            if (!string.IsNullOrEmpty(description)) existing.Description = description;
+            if (!string.IsNullOrEmpty(category)) existing.Category = category;
+            existing.UpdatedAt = DateTime.UtcNow;
+            existing.UpdatedBy = updatedBy;
+        }
+        else
+        {
+            existing = new SystemSetting
+            {
+                SettingKey = key,
+                SettingValue = value,
+                Description = description,
+                Category = category,
+                UpdatedAt = DateTime.UtcNow,
+                UpdatedBy = updatedBy
+            };
+            _dbContext.SystemSettings.Add(existing);
+        }
+
+        await _dbContext.SaveChangesAsync();
+        return existing;
+    }
+
     // sp_ReserveStock execution / emulation
     public async Task<Guid?> ReserveStockAsync(int customerId, int productId, int branchId, int channelId, string idempotencyKey, int ttlSeconds)
     {
+        if (ttlSeconds <= 0)
+        {
+            ttlSeconds = await GetReservationTtlSecondsAsync();
+        }
         if (IsSqlServer)
         {
             var tokenParam = new SqlParameter("@ReservationToken", SqlDbType.UniqueIdentifier) { Direction = ParameterDirection.Output };

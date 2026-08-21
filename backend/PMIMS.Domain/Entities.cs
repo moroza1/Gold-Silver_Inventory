@@ -1279,3 +1279,18 @@ public class GfsSyncLog
     public string? SyncDetails { get; set; } // logs old vs new values, etc.
 }
 
+// ============================================================
+// System Configuration & Settings (e.g. Reservation TTL)
+// ============================================================
+public class SystemSetting
+{
+    public string SettingKey { get; set; } = null!;
+    public string SettingValue { get; set; } = null!;
+    public string? Description { get; set; }
+    public string? Category { get; set; }
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    public string? UpdatedBy { get; set; }
+}
+
+
+

@@ -120,6 +120,7 @@ public class AppDbContext : DbContext
     public DbSet<BranchTransfer> BranchTransfers { get; set; } = null!;
     public DbSet<PendingIntake> PendingIntakes { get; set; } = null!;
     public DbSet<PendingTurkeyPurchase> PendingTurkeyPurchases { get; set; } = null!;
+    public DbSet<SystemSetting> SystemSettings { get; set; } = null!;
 
     // FIM Integration Module
     public DbSet<FimUserAttribute> FimUserAttributes { get; set; } = null!;
@@ -886,6 +887,13 @@ public class AppDbContext : DbContext
         {
             entity.HasKey(e => e.SyncLogId);
             entity.ToTable("gfs_sync_logs");
+        });
+
+        // SystemSetting Configuration
+        modelBuilder.Entity<SystemSetting>(entity =>
+        {
+            entity.HasKey(e => e.SettingKey);
+            entity.ToTable("system_settings");
         });
     }
 

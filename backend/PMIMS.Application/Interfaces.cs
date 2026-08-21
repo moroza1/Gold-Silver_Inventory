@@ -52,6 +52,9 @@ public interface IInventoryRepository
     Task<IEnumerable<ReconciliationRun>> GetReconciliationRunsAsync();
 
     // Standard CRUD helpers for configs & Master Data Brands
+    Task<int> GetReservationTtlSecondsAsync();
+    Task<IEnumerable<SystemSetting>> GetSystemSettingsAsync(string? category = null);
+    Task<SystemSetting> SetSystemSettingAsync(string key, string value, string? description = null, string? category = null, string updatedBy = "SYSTEM");
     Task<IEnumerable<MetalBrand>> GetBrandsAsync();
     Task<MetalBrand?> GetBrandByIdAsync(int brandId);
     Task<MetalBrand> CreateBrandAsync(string brandCode, string brandName, string countryOfOrigin, string? lbmaRefinerId = null, bool isLbmaCertified = true, string? description = null);

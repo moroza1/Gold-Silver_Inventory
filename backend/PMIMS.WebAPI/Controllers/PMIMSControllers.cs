@@ -762,10 +762,11 @@ public partial class PMIMSControllers : ControllerBase
     {
         if (string.IsNullOrEmpty(idempotencyKey)) return BadRequest("X-Idempotency-Key header is mandatory.");
 
-        var token = await _repository.ReserveStockAsync(req.CustomerId, req.ProductId, req.BranchId, req.ChannelId, idempotencyKey, 300);
+        int ttlSeconds = await _repository.GetReservationTtlSecondsAsync();
+        var token = await _repository.ReserveStockAsync(req.CustomerId, req.ProductId, req.BranchId, req.ChannelId, idempotencyKey, ttlSeconds);
         if (token == null) return Conflict(new { error_code = "OUT_OF_STOCK", message = "Requested metal denomination is out of stock in this branch vault." });
 
-        return StatusCode(201, new { reservation_token = token.Value, expires_at = DateTime.UtcNow.AddMinutes(5) });
+        return StatusCode(201, new { reservation_token = token.Value, expires_at = DateTime.UtcNow.AddSeconds(ttlSeconds), ttl_seconds = ttlSeconds });
     }
 
     [Authorize(Policy = "custody.write")]

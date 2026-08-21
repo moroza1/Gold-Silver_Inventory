@@ -780,6 +780,19 @@ public static class DbSeeder
             new CostBudget { MetalTypeId = silver.MetalTypeId, Period = currentPeriod, BudgetedUnitCostPerGram = 0.30m, Currency = "KWD", CreatedBy = "SYSTEM" }
         );
 
+        // 26. System Settings & Configuration (e.g. Reservation Checkout Lock TTL)
+        context.SystemSettings.AddRange(
+            new SystemSetting 
+            { 
+                SettingKey = "ReservationTTLSeconds", 
+                SettingValue = "300", 
+                Category = "RESERVATIONS", 
+                Description = "Duration (in seconds) that physical gold bars remain locked in pessimistic reservation during checkout before auto-release",
+                UpdatedBy = "SYSTEM",
+                UpdatedAt = DateTime.UtcNow
+            }
+        );
+
         await context.SaveChangesAsync();
     }
 

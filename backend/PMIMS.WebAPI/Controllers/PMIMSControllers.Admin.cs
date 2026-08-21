@@ -452,7 +452,58 @@ public partial class PMIMSControllers
         string message = req?.Message ?? "Test exception generated for support team verification";
         throw new InvalidOperationException(message);
     }
+
+    // =========================================================================
+    // 17. SYSTEM CONFIGURATION & RESERVATION TTL
+    // =========================================================================
+    [Authorize(Policy = "master_data.read")]
+    [HttpGet("settings/reservation-ttl")]
+    public async Task<IActionResult> GetReservationTtlSetting()
+    {
+        int ttlSeconds = await _repository.GetReservationTtlSecondsAsync();
+        return Ok(new {
+            setting_key = "ReservationTTLSeconds",
+            ttl_seconds = ttlSeconds,
+            ttl_minutes = Math.Round((double)ttlSeconds / 60, 2),
+            description = "Duration in seconds that physical gold bars remain locked in checkout before auto-release"
+        });
+    }
+
+    [Authorize(Policy = "master_data.write")]
+    [HttpPost("settings/reservation-ttl")]
+    public async Task<IActionResult> SaveReservationTtlSetting([FromBody] SaveTtlRequest req)
+    {
+        int seconds = req.TtlSeconds;
+        if (seconds <= 0 && req.TtlMinutes.HasValue && req.TtlMinutes.Value > 0)
+        {
+            seconds = (int)Math.Round(req.TtlMinutes.Value * 60);
+        }
+
+        if (seconds < 10 || seconds > 86400)
+        {
+            return BadRequest(new { error = "Reservation TTL must be between 10 seconds and 86400 seconds (24 hours)." });
+        }
+
+        string username = User?.Identity?.Name ?? "SYSTEM";
+        var setting = await _repository.SetSystemSettingAsync(
+            "ReservationTTLSeconds",
+            seconds.ToString(),
+            description: "Duration in seconds that physical gold bars remain locked in checkout before auto-release",
+            category: "RESERVATIONS",
+            updatedBy: username
+        );
+
+        return Ok(new {
+            setting_key = setting.SettingKey,
+            ttl_seconds = seconds,
+            ttl_minutes = Math.Round((double)seconds / 60, 2),
+            updated_at = setting.UpdatedAt,
+            updated_by = setting.UpdatedBy,
+            message = "Reservation TTL updated successfully."
+        });
+    }
 }
 
+public class SaveTtlRequest { public int TtlSeconds { get; set; } public double? TtlMinutes { get; set; } }
 public class TestErrorRequest { public string? Message { get; set; } }
 public class SqlQueryRequest { public string Query { get; set; } = null!; }
