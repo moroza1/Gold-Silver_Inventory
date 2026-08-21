@@ -1,17 +1,4 @@
-import { useState, useEffect } from 'react';
-
-const rawApiUrl = (import.meta as any).env?.VITE_API_URL;
-const normalizeApiBase = (url?: string) => {
-  if (!url) return null;
-  const clean = url.replace(/\/+$/, '');
-  return clean.endsWith('/api') ? clean : `${clean}/api`;
-};
-
-const API_BASE = normalizeApiBase(rawApiUrl) || (
-  typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
-    ? (window.location.port === '80' || window.location.port === '8080' ? `http://${window.location.hostname}:8080/api` : 'http://localhost:5000/api')
-    : 'https://api.aisoftwares.cloud/api'
-);
+import { useState } from 'react';
 
 interface Customer {
   customerId: number;
@@ -89,13 +76,253 @@ export default function GfsApp({ onBackToPmims, initialLang = 'en' }: GfsAppProp
     setOpenAccordions(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
-  // State
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
-  const [loadingCustomers, setLoadingCustomers] = useState(false);
-  const [priceFeed, setPriceFeed] = useState<LivePrice | null>(null);
-  const [availableDenoms, setAvailableDenoms] = useState<AvailableDenomination[]>([]);
-  const [loadingInventory, setLoadingInventory] = useState(false);
+  // =========================================================================
+  // GFS INITIAL MOCK DATASETS (Pure Demo Mode — No Backend Actions)
+  // =========================================================================
+  const INITIAL_MOCK_CUSTOMERS: Customer[] = [
+    {
+      customerId: 101,
+      civilId: "289101204928",
+      customerName: "Abdullah Fahad Al-Sabah",
+      mobileNumber: "+965 9988 7766",
+      email: "a.alsabah@kfh.com.kw",
+      isActive: true,
+      accountNumber: "KFH-GLD-882190",
+      currency: "KWD",
+      cashBalance: 48500.00,
+      totalGoldGrams: 2216.64,
+      holdingsCount: 4,
+      bars: [
+        {
+          holdingId: 1001,
+          itemId: 501,
+          serialNumber: "AU-KFH-2026-0081",
+          weightGrams: 1000,
+          denomination: "1 KG Cast Bar (999.9)",
+          purity: "999.9",
+          status: "HELD_IN_CUSTODY",
+          vaultLocation: "Main Vault - Zone A [Sh-01, Slot 4]",
+          allocationDate: "2026-02-10"
+        },
+        {
+          holdingId: 1002,
+          itemId: 502,
+          serialNumber: "AU-KFH-2026-0082",
+          weightGrams: 1000,
+          denomination: "1 KG Cast Bar (999.9)",
+          purity: "999.9",
+          status: "HELD_IN_CUSTODY",
+          vaultLocation: "Main Vault - Zone A [Sh-01, Slot 5]",
+          allocationDate: "2026-02-10"
+        },
+        {
+          holdingId: 1003,
+          itemId: 503,
+          serialNumber: "AU-100G-2026-0192",
+          weightGrams: 100,
+          denomination: "100g Minted Bar (999.9)",
+          purity: "999.9",
+          status: "HELD_IN_CUSTODY",
+          vaultLocation: "Main Vault - Zone B [Sh-02, Slot 1]",
+          allocationDate: "2026-03-01"
+        },
+        {
+          holdingId: 1004,
+          itemId: 504,
+          serialNumber: "AU-10TOLA-2026-0045",
+          weightGrams: 116.64,
+          denomination: "10 Tola TT Bar (999.0)",
+          purity: "999.0",
+          status: "HELD_IN_CUSTODY",
+          vaultLocation: "Main Vault - Zone C [Sh-01, Slot 8]",
+          allocationDate: "2026-04-12"
+        }
+      ]
+    },
+    {
+      customerId: 102,
+      civilId: "294051103819",
+      customerName: "Fatima Nasser Al-Mutawa",
+      mobileNumber: "+965 6655 4433",
+      email: "f.almutawa@gmail.com",
+      isActive: true,
+      accountNumber: "KFH-GLD-991044",
+      currency: "KWD",
+      cashBalance: 24750.50,
+      totalGoldGrams: 300,
+      holdingsCount: 3,
+      bars: [
+        {
+          holdingId: 2001,
+          itemId: 601,
+          serialNumber: "AU-100G-2026-0511",
+          weightGrams: 100,
+          denomination: "100g Minted Bar (999.9)",
+          purity: "999.9",
+          status: "HELD_IN_CUSTODY",
+          vaultLocation: "Main Vault - Zone B [Sh-03, Slot 4]",
+          allocationDate: "2026-05-18"
+        },
+        {
+          holdingId: 2002,
+          itemId: 602,
+          serialNumber: "AU-100G-2026-0512",
+          weightGrams: 100,
+          denomination: "100g Minted Bar (999.9)",
+          purity: "999.9",
+          status: "HELD_IN_CUSTODY",
+          vaultLocation: "Main Vault - Zone B [Sh-03, Slot 5]",
+          allocationDate: "2026-05-18"
+        },
+        {
+          holdingId: 2003,
+          itemId: 603,
+          serialNumber: "AU-100G-2026-0513",
+          weightGrams: 100,
+          denomination: "100g Minted Bar (999.9)",
+          purity: "999.9",
+          status: "HELD_IN_CUSTODY",
+          vaultLocation: "Main Vault - Zone B [Sh-03, Slot 6]",
+          allocationDate: "2026-05-18"
+        }
+      ]
+    },
+    {
+      customerId: 103,
+      civilId: "285091402741",
+      customerName: "Jassem Mohammed Al-Kandari",
+      mobileNumber: "+965 5544 3322",
+      email: "j.kandari@kfh.com.kw",
+      isActive: true,
+      accountNumber: "KFH-GLD-773412",
+      currency: "KWD",
+      cashBalance: 92000.00,
+      totalGoldGrams: 5000,
+      holdingsCount: 5,
+      bars: [
+        {
+          holdingId: 3001,
+          itemId: 701,
+          serialNumber: "AU-1KG-2026-0901",
+          weightGrams: 1000,
+          denomination: "1 KG Cast Bar (999.9)",
+          purity: "999.9",
+          status: "HELD_IN_CUSTODY",
+          vaultLocation: "Main Vault - Zone A [Sh-04, Slot 1]",
+          allocationDate: "2026-06-01"
+        },
+        {
+          holdingId: 3002,
+          itemId: 702,
+          serialNumber: "AU-1KG-2026-0902",
+          weightGrams: 1000,
+          denomination: "1 KG Cast Bar (999.9)",
+          purity: "999.9",
+          status: "HELD_IN_CUSTODY",
+          vaultLocation: "Main Vault - Zone A [Sh-04, Slot 2]",
+          allocationDate: "2026-06-01"
+        }
+      ]
+    }
+  ];
+
+  const INITIAL_MOCK_INVENTORY: AvailableDenomination[] = [
+    {
+      denomination: "100g Minted Bar (999.9)",
+      weightGrams: 100,
+      availableQuantity: 45,
+      totalWeightAvailable: 4500,
+      bars: Array.from({ length: 45 }, (_, i) => ({
+        serialNumber: `AU-100G-MOCK-${1000 + i}`,
+        vaultLocation: `Main Vault - Zone B [Sh-01, Slot ${i + 1}]`,
+        pmims_reference: `PMIMS-REF-100G-${i + 1}`,
+        weight: 100
+      }))
+    },
+    {
+      denomination: "1 KG Cast Bar (999.9)",
+      weightGrams: 1000,
+      availableQuantity: 28,
+      totalWeightAvailable: 28000,
+      bars: Array.from({ length: 28 }, (_, i) => ({
+        serialNumber: `AU-1KG-MOCK-${2000 + i}`,
+        vaultLocation: `Main Vault - Zone A [Sh-02, Slot ${i + 1}]`,
+        pmims_reference: `PMIMS-REF-1KG-${i + 1}`,
+        weight: 1000
+      }))
+    },
+    {
+      denomination: "10 Tola TT Bar (999.0)",
+      weightGrams: 116.64,
+      availableQuantity: 30,
+      totalWeightAvailable: 3499.2,
+      bars: Array.from({ length: 30 }, (_, i) => ({
+        serialNumber: `AU-10TOLA-MOCK-${3000 + i}`,
+        vaultLocation: `Main Vault - Zone C [Sh-01, Slot ${i + 1}]`,
+        pmims_reference: `PMIMS-REF-10T-${i + 1}`,
+        weight: 116.64
+      }))
+    },
+    {
+      denomination: "1 oz Fine Gold Bar (999.9)",
+      weightGrams: 31.1035,
+      availableQuantity: 50,
+      totalWeightAvailable: 1555.175,
+      bars: Array.from({ length: 50 }, (_, i) => ({
+        serialNumber: `AU-1OZ-MOCK-${4000 + i}`,
+        vaultLocation: `Main Vault - Zone D [Sh-01, Slot ${i + 1}]`,
+        pmims_reference: `PMIMS-REF-1OZ-${i + 1}`,
+        weight: 31.1035
+      }))
+    }
+  ];
+
+  const INITIAL_MOCK_PRICE: LivePrice = {
+    metal: "Gold (XAU)",
+    pricePerGram: 24.850,
+    bidPrice: 24.750,
+    askPrice: 24.950,
+    source: "360T Treasury Feed / LBMA Spot",
+    currency: "KWD",
+    lastUpdated: new Date().toLocaleTimeString()
+  };
+
+  const INITIAL_MOCK_BRANCH_DELIVERIES: any[] = [
+    {
+      transferId: 901,
+      transferCode: "TRF-BR-8812",
+      customerId: 101,
+      customerName: "Abdullah Fahad Al-Sabah",
+      serialNumber: "AU-1KG-2026-0044",
+      destinationBranch: "Shuwaikh Corporate Branch (#102)",
+      weightGrams: 1000,
+      status: "IN_TRANSIT_ARMORED",
+      dispatchedAt: "2026-08-20 10:30",
+      courierName: "KFH Armored Fleet - Van #04"
+    }
+  ];
+
+  const INITIAL_MOCK_HOME_DELIVERIES: any[] = [
+    {
+      deliveryId: "HD-9821",
+      customerId: 102,
+      customerName: "Fatima Nasser Al-Mutawa",
+      serialNumber: "AU-100G-2026-0511",
+      weightGrams: 100,
+      status: "DISPATCHED",
+      address: "Al-Shaab Al-Bahri, Block 8, St 14, Bld 22",
+      dispatchedAt: "2026-08-21 14:15",
+      otp: "592810"
+    }
+  ];
+
+  // State (Initialized with Mock Data)
+  const [customers, setCustomers] = useState<Customer[]>(INITIAL_MOCK_CUSTOMERS);
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(INITIAL_MOCK_CUSTOMERS[0]);
+  const [loadingCustomers] = useState(false);
+  const [priceFeed] = useState<LivePrice>(INITIAL_MOCK_PRICE);
+  const [availableDenoms] = useState<AvailableDenomination[]>(INITIAL_MOCK_INVENTORY);
+  const [loadingInventory] = useState(false);
 
   // Telemetry HUD / PMIMS Impact
   const [pmimsImpact, setPmimsImpact] = useState<{
@@ -106,7 +333,7 @@ export default function GfsApp({ onBackToPmims, initialLang = 'en' }: GfsAppProp
   } | null>(null);
 
   // Buy State
-  const [selectedDenom, setSelectedDenom] = useState<AvailableDenomination | null>(null);
+  const [selectedDenom, setSelectedDenom] = useState<AvailableDenomination | null>(INITIAL_MOCK_INVENTORY[0]);
   const [buyQuantity, setBuyQuantity] = useState<number>(1);
   const [buying, setBuying] = useState(false);
   const [buySuccessModal, setBuySuccessModal] = useState<any>(null);
@@ -128,7 +355,7 @@ export default function GfsApp({ onBackToPmims, initialLang = 'en' }: GfsAppProp
   const [selectedBarForBranchDelivery, setSelectedBarForBranchDelivery] = useState<number | null>(null);
   const [destBranchId, setDestBranchId] = useState<number>(2);
   const [routeNotes, setRouteNotes] = useState<string>('Standard armored transit via Secure Transport Co.');
-  const [branchDeliveryRequests, setBranchDeliveryRequests] = useState<any[]>([]);
+  const [branchDeliveryRequests, setBranchDeliveryRequests] = useState<any[]>(INITIAL_MOCK_BRANCH_DELIVERIES);
   const [submittingBranchDelivery, setSubmittingBranchDelivery] = useState(false);
 
   // Home Delivery State
@@ -140,7 +367,7 @@ export default function GfsApp({ onBackToPmims, initialLang = 'en' }: GfsAppProp
   const [hdBuilding, setHdBuilding] = useState('KFH Headquarters Tower');
   const [hdFloor, setHdFloor] = useState('14');
   const [hdInstructions, setHdInstructions] = useState('Call 10 mins prior to arrival. PACI biometric ID verification required.');
-  const [homeDeliveryRequests, setHomeDeliveryRequests] = useState<any[]>([]);
+  const [homeDeliveryRequests, setHomeDeliveryRequests] = useState<any[]>(INITIAL_MOCK_HOME_DELIVERIES);
   const [submittingHomeDelivery, setSubmittingHomeDelivery] = useState(false);
   const [hdSuccessModal, setHdSuccessModal] = useState<any>(null);
 
@@ -150,7 +377,17 @@ export default function GfsApp({ onBackToPmims, initialLang = 'en' }: GfsAppProp
   const [scanning, setScanning] = useState(false);
 
   // Sync State
-  const [syncLogs, setSyncLogs] = useState<any[]>([]);
+  const [syncLogs, setSyncLogs] = useState<any[]>([
+    {
+      syncId: 101,
+      timestamp: "2026-08-21 18:00:00",
+      status: "SUCCESS_RECONCILED",
+      itemsProcessed: 128,
+      discrepancies: 0,
+      totalGoldGrams: 42516.64,
+      authorizedBy: "KFH_TREASURY_EOD_ENGINE"
+    }
+  ]);
   const [syncing, setSyncing] = useState(false);
 
   // Notification modal state
@@ -322,74 +559,6 @@ export default function GfsApp({ onBackToPmims, initialLang = 'en' }: GfsAppProp
     }
   }[lang];
 
-  // Load Data on Mount
-  useEffect(() => {
-    fetchCustomers();
-    fetchPriceFeed();
-    fetchAvailableInventory();
-    fetchDeliveries();
-  }, []);
-
-  const fetchCustomers = async () => {
-    setLoadingCustomers(true);
-    try {
-      const res = await fetch(`${API_BASE}/gfs/customers`);
-      if (res.ok) {
-        const data = await res.json();
-        setCustomers(data);
-        if (data.length > 0) {
-          setSelectedCustomer(data[0]);
-        }
-      }
-    } catch (e) {
-      console.error('Failed to load customers', e);
-    } finally {
-      setLoadingCustomers(false);
-    }
-  };
-
-  const fetchPriceFeed = async () => {
-    try {
-      const res = await fetch(`${API_BASE}/gfs/rates/live`);
-      if (res.ok) {
-        setPriceFeed(await res.json());
-      }
-    } catch (e) {
-      console.error('Failed to load live price feed', e);
-    }
-  };
-
-  const fetchAvailableInventory = async () => {
-    setLoadingInventory(true);
-    try {
-      const res = await fetch(`${API_BASE}/gfs/inventory/available`);
-      if (res.ok) {
-        const data = await res.json();
-        setAvailableDenoms(data);
-        if (data.length > 0) {
-          setSelectedDenom(data[0]);
-        }
-      }
-    } catch (e) {
-      console.error('Failed to load available gold bars', e);
-    } finally {
-      setLoadingInventory(false);
-    }
-  };
-
-  const fetchDeliveries = async () => {
-    try {
-      const [bRes, hRes] = await Promise.all([
-        fetch(`${API_BASE}/gfs/deliveries/branch`),
-        fetch(`${API_BASE}/gfs/deliveries/home`)
-      ]);
-      if (bRes.ok) setBranchDeliveryRequests(await bRes.json());
-      if (hRes.ok) setHomeDeliveryRequests(await hRes.json());
-    } catch (e) {
-      console.error('Failed to load delivery logs', e);
-    }
-  };
-
   const triggerImpact = (action: string, impactText: string, details: string) => {
     setPmimsImpact({
       action,
@@ -402,250 +571,295 @@ export default function GfsApp({ onBackToPmims, initialLang = 'en' }: GfsAppProp
     }, 12000);
   };
 
-  // 1. Buy Gold Handler
-  const handleBuyGold = async () => {
+  // 1. Mock Buy Gold Handler
+  const handleBuyGold = () => {
     if (!selectedCustomer || !selectedDenom) return;
-    if (buyQuantity < 1) return alert('Please enter a valid quantity');
+    if (buyQuantity < 1) {
+      alert(lang === 'en' ? 'Please enter a valid quantity' : 'يرجى إدخال كمية صحيحة');
+      return;
+    }
 
     setBuying(true);
-    try {
-      const res = await fetch(`${API_BASE}/gfs/buy`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          customerId: selectedCustomer.customerId,
-          denomination: selectedDenom.denomination,
-          quantity: buyQuantity
-        })
+    setTimeout(() => {
+      const totalWeight = selectedDenom.weightGrams * buyQuantity;
+      const totalCost = totalWeight * (priceFeed?.askPrice || 24.950);
+
+      if (selectedCustomer.cashBalance < totalCost) {
+        alert(lang === 'en' 
+          ? `Insufficient cash balance. Required: ${totalCost.toLocaleString()} KWD, Available: ${selectedCustomer.cashBalance.toLocaleString()} KWD`
+          : `رصيد الحساب غير كافٍ. المطلوب: ${totalCost.toLocaleString()} د.ك، المتوفر: ${selectedCustomer.cashBalance.toLocaleString()} د.ك`);
+        setBuying(false);
+        return;
+      }
+
+      const newBars: CustomerBar[] = Array.from({ length: buyQuantity }, (_, i) => ({
+        holdingId: Date.now() + i,
+        itemId: Math.floor(1000 + Math.random() * 9000),
+        serialNumber: `AU-${selectedDenom.weightGrams >= 1000 ? '1KG' : selectedDenom.weightGrams + 'G'}-2026-${Math.floor(1000 + Math.random() * 9000)}`,
+        weightGrams: selectedDenom.weightGrams,
+        denomination: selectedDenom.denomination,
+        purity: '999.9',
+        status: 'HELD_IN_CUSTODY',
+        vaultLocation: `Main Vault - Zone ${selectedDenom.weightGrams >= 1000 ? 'A' : 'B'} [Sh-0${(i % 5) + 1}, Slot ${Math.floor(1 + Math.random() * 10)}]`,
+        allocationDate: new Date().toISOString().split('T')[0]
+      }));
+
+      const updatedCustomer: Customer = {
+        ...selectedCustomer,
+        cashBalance: selectedCustomer.cashBalance - totalCost,
+        totalGoldGrams: selectedCustomer.totalGoldGrams + totalWeight,
+        holdingsCount: selectedCustomer.holdingsCount + buyQuantity,
+        bars: [...newBars, ...selectedCustomer.bars]
+      };
+
+      setCustomers(prev => prev.map(c => c.customerId === updatedCustomer.customerId ? updatedCustomer : c));
+      setSelectedCustomer(updatedCustomer);
+
+      setBuySuccessModal({
+        purchasedBars: newBars,
+        totalCost,
+        totalWeight,
+        transactionId: `TX-BUY-${Date.now().toString().slice(-6)}`,
+        timestamp: new Date().toLocaleString()
       });
 
-      const data = await res.json();
-      if (res.ok) {
-        setBuySuccessModal(data);
-        triggerImpact(
-          'GFS_BUY_ALLOCATE',
-          `Allocated ${data.purchasedBars?.length || buyQuantity} Gold Bar(s) (${selectedDenom.denomination}) to Customer Account #${selectedCustomer.accountNumber}`,
-          `Pessimistic reservation lock transferred bar serial(s) from PMIMS unallocated pool to client sub-ledger custody coordinate.`
-        );
-        fetchCustomers();
-        fetchAvailableInventory();
-      } else {
-        alert(data.error || 'Failed to complete purchase');
-      }
-    } catch (e: any) {
-      alert(e.message);
-    } finally {
+      triggerImpact(
+        'GFS_BUY_ALLOCATE',
+        `Allocated ${buyQuantity} Gold Bar(s) (${selectedDenom.denomination}) to Customer Account #${selectedCustomer.accountNumber}`,
+        `Pessimistic reservation lock transferred bar serial(s) from PMIMS unallocated pool to client sub-ledger custody coordinate.`
+      );
+
       setBuying(false);
-    }
+    }, 400);
   };
 
-  // 2. Sell Gold Handler
-  const handleSellGold = async () => {
+  // 2. Mock Sell Gold Handler
+  const handleSellGold = () => {
     if (!selectedCustomer || selectedBarsToSell.length === 0) return;
 
     setSelling(true);
-    try {
-      const res = await fetch(`${API_BASE}/gfs/sell`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          customerId: selectedCustomer.customerId,
-          barIds: selectedBarsToSell
-        })
+    setTimeout(() => {
+      const barsToSell = selectedCustomer.bars.filter(b => selectedBarsToSell.includes(b.holdingId));
+      const totalSoldWeight = barsToSell.reduce((sum, b) => sum + b.weightGrams, 0);
+      const totalPayout = totalSoldWeight * (priceFeed?.bidPrice || 24.750);
+
+      const remainingBars = selectedCustomer.bars.filter(b => !selectedBarsToSell.includes(b.holdingId));
+      const updatedCustomer: Customer = {
+        ...selectedCustomer,
+        cashBalance: selectedCustomer.cashBalance + totalPayout,
+        totalGoldGrams: selectedCustomer.totalGoldGrams - totalSoldWeight,
+        holdingsCount: remainingBars.length,
+        bars: remainingBars
+      };
+
+      setCustomers(prev => prev.map(c => c.customerId === updatedCustomer.customerId ? updatedCustomer : c));
+      setSelectedCustomer(updatedCustomer);
+
+      setSellSuccessModal({
+        soldBars: barsToSell,
+        totalPayout,
+        totalSoldWeight,
+        transactionId: `TX-SELL-${Date.now().toString().slice(-6)}`,
+        timestamp: new Date().toLocaleString()
       });
 
-      const data = await res.json();
-      if (res.ok) {
-        setSellSuccessModal(data);
-        triggerImpact(
-          'GFS_SELL_DEALLOCATE',
-          `Deallocated ${selectedBarsToSell.length} bar(s). Liquidated and credited ${(data.totalPayout || 0).toLocaleString()} KWD to customer cash account.`,
-          `PMIMS GL Ledger credited Account #${selectedCustomer.accountNumber} and returned serial(s) to Treasury unencumbered physical stock.`
-        );
-        setSelectedBarsToSell([]);
-        fetchCustomers();
-        fetchAvailableInventory();
-      } else {
-        alert(data.error || 'Failed to sell bars');
-      }
-    } catch (e: any) {
-      alert(e.message);
-    } finally {
+      triggerImpact(
+        'GFS_SELL_DEALLOCATE',
+        `Deallocated ${selectedBarsToSell.length} bar(s). Liquidated and credited ${totalPayout.toLocaleString()} KWD to customer cash account.`,
+        `PMIMS GL Ledger credited Account #${selectedCustomer.accountNumber} and returned serial(s) to Treasury unencumbered physical stock.`
+      );
+
+      setSelectedBarsToSell([]);
       setSelling(false);
-    }
+    }, 400);
   };
 
-  // 3. Gift Gold Handler
-  const handleGiftGold = async () => {
-    if (!selectedCustomer || selectedBarsToGift.length === 0 || !recipientCustomerId) {
-      return alert('Please select bar(s) and enter a recipient customer ID / Civil ID.');
+  // 3. Mock Gift Gold Handler
+  const handleGiftGold = () => {
+    if (!selectedCustomer || selectedBarsToGift.length === 0 || !recipientCustomerId.trim()) {
+      alert(lang === 'en' 
+        ? 'Please select bar(s) and enter a recipient customer ID / Civil ID.'
+        : 'يرجى تحديد السبيكة وإدخال رقم العميل أو الرقم المدني للمستلم.');
+      return;
     }
 
     setGifting(true);
-    try {
-      const res = await fetch(`${API_BASE}/gfs/gift`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          senderCustomerId: selectedCustomer.customerId,
-          recipientCivilOrCustId: recipientCustomerId,
-          barIds: selectedBarsToGift,
-          occasion: giftOccasion,
-          message: giftMessage
-        })
+    setTimeout(() => {
+      const giftedBars = selectedCustomer.bars.filter(b => selectedBarsToGift.includes(b.holdingId));
+      const totalGiftedWeight = giftedBars.reduce((sum, b) => sum + b.weightGrams, 0);
+      const remainingBars = selectedCustomer.bars.filter(b => !selectedBarsToGift.includes(b.holdingId));
+
+      const updatedSender: Customer = {
+        ...selectedCustomer,
+        totalGoldGrams: selectedCustomer.totalGoldGrams - totalGiftedWeight,
+        holdingsCount: remainingBars.length,
+        bars: remainingBars
+      };
+
+      setCustomers(prev => prev.map(c => c.customerId === updatedSender.customerId ? updatedSender : c));
+      setSelectedCustomer(updatedSender);
+
+      setGiftSuccessModal({
+        giftedBars,
+        recipientId: recipientCustomerId,
+        occasion: giftOccasion,
+        message: giftMessage,
+        certificateId: `GIFT-CERT-${Date.now().toString().slice(-6)}`,
+        timestamp: new Date().toLocaleString()
       });
 
-      const data = await res.json();
-      if (res.ok) {
-        setGiftSuccessModal(data);
-        triggerImpact(
-          'GFS_GIFT_TRANSFER',
-          `Transferred ${selectedBarsToGift.length} gold bar(s) from ${selectedCustomer.customerName} to Recipient #${recipientCustomerId}`,
-          `Custody ownership record re-assigned instantly in PMIMS database ledger without physical vault movement.`
-        );
-        setSelectedBarsToGift([]);
-        setRecipientCustomerId('');
-        fetchCustomers();
-      } else {
-        alert(data.error || 'Gift transfer failed');
-      }
-    } catch (e: any) {
-      alert(e.message);
-    } finally {
+      triggerImpact(
+        'GFS_GIFT_TRANSFER',
+        `Transferred ${selectedBarsToGift.length} gold bar(s) from ${selectedCustomer.customerName} to Recipient #${recipientCustomerId}`,
+        `Custody ownership record re-assigned instantly in PMIMS database ledger without physical vault movement.`
+      );
+
+      setSelectedBarsToGift([]);
+      setRecipientCustomerId('');
       setGifting(false);
-    }
+    }, 400);
   };
 
-  // 4. Branch Delivery Request
-  const handleBranchDelivery = async () => {
+  // 4. Mock Branch Delivery Request
+  const handleBranchDelivery = () => {
     if (!selectedCustomer || !selectedBarForBranchDelivery) return;
 
     setSubmittingBranchDelivery(true);
-    try {
-      const res = await fetch(`${API_BASE}/gfs/deliveries/branch/request`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          customerId: selectedCustomer.customerId,
-          holdingId: selectedBarForBranchDelivery,
-          destinationBranchId: destBranchId,
-          notes: routeNotes
-        })
-      });
+    setTimeout(() => {
+      const bar = selectedCustomer.bars.find(b => b.holdingId === selectedBarForBranchDelivery);
+      const transferCode = `TRF-BR-${Math.floor(1000 + Math.random() * 9000)}`;
 
-      const data = await res.json();
-      if (res.ok) {
-        alert(`✓ Branch Delivery Dispatched! Tracking Code: ${data.transferCode || 'TRF-BR-9901'}`);
-        triggerImpact(
-          'GFS_BRANCH_DISPATCH',
-          `Generated secure armored transfer order for bar serial ${data.serialNumber || ''} to Branch #${destBranchId}`,
-          `PMIMS transit log created with Maker-Checker dual authorization and GPS custody tracking.`
-        );
-        setSelectedBarForBranchDelivery(null);
-        fetchCustomers();
-        fetchDeliveries();
-      } else {
-        alert(data.error || 'Failed to dispatch branch delivery');
-      }
-    } catch (e: any) {
-      alert(e.message);
-    } finally {
+      const newRequest = {
+        transferId: Date.now(),
+        transferCode,
+        customerId: selectedCustomer.customerId,
+        customerName: selectedCustomer.customerName,
+        serialNumber: bar?.serialNumber || 'AU-BAR-001',
+        destinationBranch: destBranchId === 1 ? 'Mubarakiya Historical Branch (#101)' : destBranchId === 2 ? 'Shuwaikh Corporate Branch (#102)' : 'Salmiya Commercial Branch (#103)',
+        weightGrams: bar?.weightGrams || 100,
+        status: 'IN_TRANSIT_ARMORED',
+        dispatchedAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
+        courierName: 'KFH Armored Fleet - Van #04'
+      };
+
+      setBranchDeliveryRequests(prev => [newRequest, ...prev]);
+
+      alert(lang === 'en' 
+        ? `✓ Branch Delivery Dispatched! Tracking Code: ${transferCode}`
+        : `✓ تم إرسال طلب تحويل الفرع بنجاح! كود التتبع: ${transferCode}`);
+
+      triggerImpact(
+        'GFS_BRANCH_DISPATCH',
+        `Generated secure armored transfer order for bar serial ${bar?.serialNumber || ''} to Destination Branch`,
+        `PMIMS transit log created with Maker-Checker dual authorization and GPS custody tracking.`
+      );
+
+      setSelectedBarForBranchDelivery(null);
       setSubmittingBranchDelivery(false);
-    }
+    }, 400);
   };
 
-  // 5. Home Delivery Request
-  const handleHomeDelivery = async () => {
+  // 5. Mock Home Delivery Request
+  const handleHomeDelivery = () => {
     if (!selectedCustomer || !selectedBarForHomeDelivery) return;
 
     setSubmittingHomeDelivery(true);
-    try {
-      const res = await fetch(`${API_BASE}/gfs/deliveries/home/request`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          customerId: selectedCustomer.customerId,
-          holdingId: selectedBarForHomeDelivery,
-          address: {
-            governorate: hdGovernorate,
-            area: hdArea,
-            block: hdBlock,
-            street: hdStreet,
-            building: hdBuilding,
-            floor: hdFloor,
-            instructions: hdInstructions
-          }
-        })
+    setTimeout(() => {
+      const bar = selectedCustomer.bars.find(b => b.holdingId === selectedBarForHomeDelivery);
+      const otp = String(Math.floor(100000 + Math.random() * 900000));
+      const deliveryId = `HD-${Math.floor(1000 + Math.random() * 9000)}`;
+
+      const newRequest = {
+        deliveryId,
+        customerId: selectedCustomer.customerId,
+        customerName: selectedCustomer.customerName,
+        serialNumber: bar?.serialNumber || 'AU-BAR-001',
+        weightGrams: bar?.weightGrams || 100,
+        status: 'DISPATCHED',
+        address: `${hdArea}, Block ${hdBlock}, St ${hdStreet}, ${hdBuilding}`,
+        dispatchedAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
+        otp
+      };
+
+      setHomeDeliveryRequests(prev => [newRequest, ...prev]);
+
+      setHdSuccessModal({
+        deliveryId,
+        otp,
+        bar,
+        address: newRequest.address,
+        timestamp: new Date().toLocaleString()
       });
 
-      const data = await res.json();
-      if (res.ok) {
-        setHdSuccessModal(data);
-        triggerImpact(
-          'GFS_HOME_DELIVERY_DISPATCH',
-          `Dispatched Home Delivery Order #${data.deliveryId || 'HD-9821'} via KFH Armored Logistics`,
-          `Generated 6-digit PACI Handover OTP [${data.otp || '592810'}] for client identity verification.`
-        );
-        setSelectedBarForHomeDelivery(null);
-        fetchCustomers();
-        fetchDeliveries();
-      } else {
-        alert(data.error || 'Home delivery request failed');
-      }
-    } catch (e: any) {
-      alert(e.message);
-    } finally {
+      triggerImpact(
+        'GFS_HOME_DELIVERY_DISPATCH',
+        `Dispatched Home Delivery Order #${deliveryId} via KFH Armored Logistics`,
+        `Generated 6-digit PACI Handover OTP [${otp}] for client identity verification.`
+      );
+
+      setSelectedBarForHomeDelivery(null);
       setSubmittingHomeDelivery(false);
-    }
+    }, 400);
   };
 
-  // 6. Live Bar Scanner
-  const handleScanQr = async () => {
+  // 6. Mock Live Bar Scanner
+  const handleScanQr = () => {
     if (!scanQuery.trim()) return;
     setScanning(true);
-    try {
-      const res = await fetch(`${API_BASE}/gfs/scanner/verify?serial=${encodeURIComponent(scanQuery.trim())}`);
-      const data = await res.json();
-      if (res.ok) {
-        setScanResult(data);
-        triggerImpact(
-          'GFS_BAR_VERIFICATION',
-          `Scanned Serial ${data.serialNumber || scanQuery} — Verified LBMA Refiner Origin & Coordinate: ${data.vaultLocation || 'Main Vault'}`,
-          `Cryptographic signature verified against PMIMS ledger timestamp and audit trail.`
-        );
-      } else {
-        setScanResult({ error: data.error || 'Bar serial not found in verified registry.' });
-      }
-    } catch (e: any) {
-      setScanResult({ error: e.message });
-    } finally {
+    setTimeout(() => {
+      const q = scanQuery.trim();
+      setScanResult({
+        serialNumber: q,
+        refinerName: 'Valcambi Suisse / Argor-Heraeus SA',
+        purity: '999.9 Fine Gold',
+        fineness: '0.9999',
+        weightGrams: q.includes('1KG') ? 1000 : q.includes('100') ? 100 : q.includes('TOLA') ? 116.64 : 100,
+        vaultLocation: 'Main Vault - Zone A [Sh-01, Slot 4]',
+        status: 'AUTHENTICATED_LBMA',
+        tamperSeal: 'VERIFIED_INTACT',
+        shariaCompliant: true,
+        blockchainHash: '0x7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069',
+        certifiedDate: new Date().toLocaleDateString()
+      });
+
+      triggerImpact(
+        'GFS_BAR_VERIFICATION',
+        `Scanned Serial ${q} — Verified LBMA Refiner Origin & Coordinate: Main Vault`,
+        `Cryptographic signature verified against PMIMS ledger timestamp and audit trail.`
+      );
       setScanning(false);
-    }
+    }, 300);
   };
 
-  // 7. EOD Sync
-  const handleEodSync = async () => {
+  // 7. Mock EOD Sync
+  const handleEodSync = () => {
     setSyncing(true);
-    try {
-      const res = await fetch(`${API_BASE}/gfs/sync-eod`, { method: 'POST' });
-      const data = await res.json();
-      if (res.ok) {
-        alert(`✓ GFS EOD Sync Completed! Total items synced: ${data.totalItemsSynced}`);
-        triggerImpact(
-          'GFS_EOD_SYNC',
-          `Synced ${data.totalItemsSynced} inventory items across GFS & PMIMS`,
-          `Reconciled all customer account balances, average costs, and physical bar coordinates.`
-        );
-        const logRes = await fetch(`${API_BASE}/gfs/sync-logs`);
-        if (logRes.ok) setSyncLogs(await logRes.json());
-      } else {
-        alert(data.error || 'Sync failed');
-      }
-    } catch (e: any) {
-      alert(e.message);
-    } finally {
+    setTimeout(() => {
+      const syncTime = new Date().toLocaleTimeString();
+      alert(lang === 'en' 
+        ? `✓ GFS EOD Sync Completed! Total items reconciled: 128`
+        : `✓ تمت مطابقة نهاية اليوم بنجاح! إجمالي الأصول المطابقة: 128`);
+
+      triggerImpact(
+        'GFS_EOD_SYNC',
+        `Synced 128 inventory items across GFS & PMIMS`,
+        `Reconciled all customer account balances, average costs, and physical bar coordinates.`
+      );
+
+      setSyncLogs(prev => [
+        {
+          syncId: Date.now(),
+          timestamp: syncTime,
+          status: 'SUCCESS_RECONCILED',
+          itemsProcessed: 128,
+          discrepancies: 0,
+          totalGoldGrams: 42516.64,
+          authorizedBy: 'KFH_TREASURY_EOD_ENGINE'
+        },
+        ...prev
+      ]);
       setSyncing(false);
-    }
+    }, 500);
   };
 
   const kwdRate = priceFeed ? (priceFeed.bidPrice * 0.308) : 68.50;
