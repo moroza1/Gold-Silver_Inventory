@@ -3,16 +3,16 @@ FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
 
 # Copy project files
-COPY backend/PMIMS.WebAPI/*.csproj ./PMIMS.WebAPI/
-COPY backend/PMIMS.Application/*.csproj ./PMIMS.Application/
-COPY backend/PMIMS.Domain/*.csproj ./PMIMS.Domain/
-COPY backend/PMIMS.Infrastructure/*.csproj ./PMIMS.Infrastructure/
+COPY PMIMS.WebAPI/*.csproj ./PMIMS.WebAPI/
+COPY PMIMS.Application/*.csproj ./PMIMS.Application/
+COPY PMIMS.Domain/*.csproj ./PMIMS.Domain/
+COPY PMIMS.Infrastructure/*.csproj ./PMIMS.Infrastructure/
 
 # Restore dependencies
 RUN dotnet restore PMIMS.WebAPI/PMIMS.WebAPI.csproj
 
 # Copy all source files
-COPY backend/ ./
+COPY . ./
 
 # Build the application
 RUN dotnet build PMIMS.WebAPI/PMIMS.WebAPI.csproj -c Release -o /app/build
