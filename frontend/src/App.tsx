@@ -91,6 +91,7 @@ export const parseGs1Barcode = (rawInput: string): { serial: string; gtin: strin
 // each need editing. setAuthToken() is called from the login handler.
 let authToken: string | null = null;
 export const setAuthToken = (token: string | null) => { authToken = token; };
+export const getAuthHeaders = (): Record<string, string> => (authToken ? { 'Authorization': `Bearer ${authToken}` } : {});
 
 if (typeof window !== 'undefined' && !(window as any).__pmimsFetchPatched) {
   const originalFetch = window.fetch.bind(window);
