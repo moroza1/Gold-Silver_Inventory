@@ -1340,12 +1340,11 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   // Workflow engine state declarations
   const [workflowTemplates, setWorkflowTemplates] = useState<any[]>([]);
   const [activeWorkflowInstances, setActiveWorkflowInstances] = useState<any[]>([]);
-  const [selectedWfType, setSelectedWfType] = useState('PURCHASE_ORDER');
-  const [wfName, setWfName] = useState('Default PO Approval Workflow');
-  const [wfDesc, setWfDesc] = useState('Standard 2-step verification process for purchase orders.');
+  const [selectedWfType, setSelectedWfType] = useState('TURKEY_PURCHASE');
+  const [wfName, setWfName] = useState('Default Turkey Gold Purchase Workflow');
+  const [wfDesc, setWfDesc] = useState('Maker-Checker verification for purchasing consignment gold from Turkey.');
   const [wfSteps, setWfSteps] = useState<any[]>([
-    { step_name: 'Risk & Treasury Review', required_role: 'Operations Checker', description: 'Initial review of cost and provider accreditation.' },
-    { step_name: 'Reconciliation Double Check', required_role: 'Reconciliation Officer', description: 'Validation against system ledger balances.' }
+    { step_name: 'Turkey Purchase Checker Approval', required_role: 'Treasury Operations (Checker)', description: 'Checker verifies serials and agreed buy rate, approving ownership transfer to KFH.' }
   ]);
   const [actionComments, setActionComments] = useState<Record<number, string>>({});
   const [loadingWF, setLoadingWF] = useState(false);
@@ -10317,10 +10316,11 @@ const [migrationApproved, setMigrationApproved] = useState(false);
               <div className="form-group" style={{ marginBottom: 0, flex: 1, minWidth: '200px' }}>
                 <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', fontWeight: '600' }}>{t('wf_type')}</label>
                 <select value={selectedWfType} onChange={e => setSelectedWfType(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '8px', background: 'var(--bg-secondary)', border: '1px solid var(--surface-border)', color: '#000' }}>
-                  <option value="PURCHASE_ORDER">{currentLang === 'en' ? 'Purchase Order (P.O.)' : 'طلب شراء (P.O.)'}</option>
-                  <option value="INTAKE_SHIPMENT">{currentLang === 'en' ? 'Intake Shipment' : 'استلام شحنة جديدة'}</option>
-                  <option value="BRANCH_TRANSFER">{currentLang === 'en' ? 'Branch Transfer' : 'حركة تحويل فرعي'}</option>
-                  <option value="CUSTODY_WITHDRAWAL">{currentLang === 'en' ? 'Custody Withdrawal' : 'سحب أمانات عميل'}</option>
+                  <option value="TURKEY_PURCHASE">{currentLang === 'en' ? '🇹🇷 Buy Gold from Turkey (TURKEY_PURCHASE)' : '🇹🇷 شراء الذهب من تركيا (TURKEY_PURCHASE)'}</option>
+                  <option value="DAMAGE_BAR">{currentLang === 'en' ? '⚠️ Damaged Bar Quarantine (DAMAGE_BAR)' : '⚠️ إثبات وإحالة السبائك التالفة (DAMAGE_BAR)'}</option>
+                  <option value="INTAKE_SHIPMENT">{currentLang === 'en' ? '📦 Intake Shipment Receipt (INTAKE_SHIPMENT)' : '📦 استلام وتوثيق الشحنات (INTAKE_SHIPMENT)'}</option>
+                  <option value="BRANCH_TRANSFER">{currentLang === 'en' ? '🚚 Branch & Vault Transfer (BRANCH_TRANSFER)' : '🚚 التحويل بين الفروع والخزائن (BRANCH_TRANSFER)'}</option>
+                  <option value="CUSTODY_WITHDRAWAL">{currentLang === 'en' ? '🔒 Custody Withdrawal & Handover (CUSTODY_WITHDRAWAL)' : '🔒 سحب أمانات عميل وتسليم (CUSTODY_WITHDRAWAL)'}</option>
                 </select>
               </div>
 
@@ -10486,18 +10486,46 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                           </td>
                           <td>
                             {inst.details ? (
-                              inst.workflow_type === 'INTAKE_SHIPMENT' && inst.details.source_type === 'CUSTOMER' ? (
+                              inst.workflow_type === 'TURKEY_PURCHASE' ? (
+                                <div style={{ fontSize: '12px' }}>
+                                  <strong>{inst.details.batch_reference || `#${inst.entity_id}`}</strong><br/>
+                                  <span style={{ color: 'var(--accent-gold)' }}>
+                                    {inst.details.total_items} {currentLang === 'en' ? 'Bars' : 'سبائك'} | {inst.details.total_weight_grams}g | {currentLang === 'en' ? 'Buy Rate:' : 'سعر الشراء:'} {inst.details.unit_price} KWD/g
+                                  </span>
+                                </div>
+                              ) : inst.workflow_type === 'DAMAGE_BAR' ? (
+                                <div style={{ fontSize: '12px' }}>
+                                  <strong>{currentLang === 'en' ? 'Serial:' : 'الرقم التسلسلي:'} {inst.details.serial_number}</strong><br/>
+                                  <span style={{ color: 'var(--accent-gold)' }}>
+                                    {inst.details.product_name} ({inst.details.weight_grams}g) | {currentLang === 'en' ? 'Reason:' : 'السبب:'} {inst.details.damage_reason}
+                                  </span>
+                                </div>
+                              ) : inst.workflow_type === 'BRANCH_TRANSFER' ? (
+                                <div style={{ fontSize: '12px' }}>
+                                  <strong>{currentLang === 'en' ? 'Serial:' : 'الرقم التسلسلي:'} {inst.details.serial_number}</strong><br/>
+                                  <span style={{ color: 'var(--accent-gold)' }}>
+                                    {inst.details.source_branch} ➔ {inst.details.destination_branch} ({inst.details.courier_info || 'Courier'})
+                                  </span>
+                                </div>
+                              ) : inst.workflow_type === 'INTAKE_SHIPMENT' && inst.details.source_type === 'CUSTOMER' ? (
                                 <div style={{ fontSize: '12px' }}>
                                   <strong>{currentLang === 'en' ? 'Customer:' : 'العميل:'} {inst.details.customer_name || `#${inst.details.customer_id}`}</strong><br/>
                                   <span style={{ color: 'var(--accent-gold)' }}>
                                     {inst.details.receipt_reason} | {currentLang === 'en' ? 'Lot' : 'اللوت'} {inst.details.lot_number}
                                   </span>
                                 </div>
+                              ) : inst.workflow_type === 'INTAKE_SHIPMENT' ? (
+                                <div style={{ fontSize: '12px' }}>
+                                  <strong>{inst.details.shipment_reference || `Shipment #${inst.details.pending_intake_id}`}</strong><br/>
+                                  <span style={{ color: 'var(--accent-gold)' }}>
+                                    {inst.details.vendor_name} | {inst.details.delivery_note || inst.details.airway_bill || 'Direct Intake'}
+                                  </span>
+                                </div>
                               ) : (
                                 <div style={{ fontSize: '12px' }}>
-                                  <strong>{inst.details.po_number}</strong><br/>
+                                  <strong>{inst.details.po_number || `Request #${inst.entity_id}`}</strong><br/>
                                   <span style={{ color: 'var(--accent-gold)' }}>
-                                    {inst.details.vendor_name} | {inst.details.total_weight}g | ${inst.details.total_cost?.toLocaleString()} {inst.details.currency}
+                                    {inst.details.vendor_name || 'Direct'} {inst.details.total_weight ? `| ${inst.details.total_weight}g` : ''} {inst.details.total_cost ? `| ${inst.details.total_cost} ${inst.details.currency || 'KWD'}` : ''}
                                   </span>
                                 </div>
                               )

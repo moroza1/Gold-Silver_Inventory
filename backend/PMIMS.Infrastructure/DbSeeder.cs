@@ -489,73 +489,30 @@ public static class DbSeeder
 
         // 17. (No simulated reconciliation break — starting from zero stock.)
 
-        // 18. Default Workflow Templates Seeding
-        var poWorkflow = new WorkflowTemplate
+        // 18. Default Active Workflow Templates Seeding
+        // 1. TURKEY_PURCHASE (Consignment Gold Purchase from Turkey)
+        var turkeyPurchaseWorkflow = new WorkflowTemplate
         {
-            WorkflowType = "PURCHASE_ORDER",
-            Name = "Default PO Approval Workflow",
-            Description = "Standard Maker-Checker verification for purchase orders.",
+            WorkflowType = "TURKEY_PURCHASE",
+            Name = "Default Turkey Gold Purchase Workflow",
+            Description = "Maker-Checker verification for purchasing consignment gold from Turkey.",
             IsActive = true
         };
-        context.WorkflowTemplates.Add(poWorkflow);
+        context.WorkflowTemplates.Add(turkeyPurchaseWorkflow);
         await context.SaveChangesAsync();
 
-        var poStep1 = new WorkflowStep
+        var turkeyPurchaseStep1 = new WorkflowStep
         {
-            TemplateId = poWorkflow.TemplateId,
+            TemplateId = turkeyPurchaseWorkflow.TemplateId,
             StepOrder = 1,
-            StepName = "Treasury Checker Approval",
+            StepName = "Turkey Purchase Checker Approval",
             RequiredRole = "Treasury Operations (Checker)",
-            Description = "Checker reviews and approves the purchase order."
+            Description = "Checker verifies serials and agreed buy rate, approving ownership transfer to KFH."
         };
-        context.WorkflowSteps.Add(poStep1);
+        context.WorkflowSteps.Add(turkeyPurchaseStep1);
         await context.SaveChangesAsync();
 
-        // Seed INTAKE_SHIPMENT workflow template
-        var intakeWorkflow = new WorkflowTemplate
-        {
-            WorkflowType = "INTAKE_SHIPMENT",
-            Name = "Default Intake Shipment Workflow",
-            Description = "Standard Maker-Checker verification for incoming shipments.",
-            IsActive = true
-        };
-        context.WorkflowTemplates.Add(intakeWorkflow);
-        await context.SaveChangesAsync();
-
-        var intakeStep1 = new WorkflowStep
-        {
-            TemplateId = intakeWorkflow.TemplateId,
-            StepOrder = 1,
-            StepName = "Intake Checker Verification",
-            RequiredRole = "Treasury Operations (Checker)",
-            Description = "Checker verifies weight, serials and approves shelf placement."
-        };
-        context.WorkflowSteps.Add(intakeStep1);
-        await context.SaveChangesAsync();
-
-        // Seed BRANCH_TRANSFER workflow template
-        var transferWorkflow = new WorkflowTemplate
-        {
-            WorkflowType = "BRANCH_TRANSFER",
-            Name = "Default Branch Transfer Workflow",
-            Description = "Standard Maker-Checker verification for branch transfers.",
-            IsActive = true
-        };
-        context.WorkflowTemplates.Add(transferWorkflow);
-        await context.SaveChangesAsync();
-
-        var transferStep1 = new WorkflowStep
-        {
-            TemplateId = transferWorkflow.TemplateId,
-            StepOrder = 1,
-            StepName = "Branch Transfer Checker Approval",
-            RequiredRole = "Treasury Operations (Checker)",
-            Description = "Checker reviews and approves the branch transfer."
-        };
-        context.WorkflowSteps.Add(transferStep1);
-        await context.SaveChangesAsync();
-
-        // Seed DAMAGE_BAR workflow template
+        // 2. DAMAGE_BAR (Damaged Gold Bar Quarantine)
         var damageWorkflow = new WorkflowTemplate
         {
             WorkflowType = "DAMAGE_BAR",
@@ -577,26 +534,70 @@ public static class DbSeeder
         context.WorkflowSteps.Add(damageStep1);
         await context.SaveChangesAsync();
 
-        // Seed TURKEY_PURCHASE workflow template
-        var turkeyPurchaseWorkflow = new WorkflowTemplate
+        // 3. INTAKE_SHIPMENT (Incoming Shipment Receipt & Weighing)
+        var intakeWorkflow = new WorkflowTemplate
         {
-            WorkflowType = "TURKEY_PURCHASE",
-            Name = "Default Turkey Gold Purchase Workflow",
-            Description = "Maker-Checker verification for purchasing consignment gold from Turkey.",
+            WorkflowType = "INTAKE_SHIPMENT",
+            Name = "Default Intake Shipment Workflow",
+            Description = "Standard Maker-Checker verification for incoming shipments.",
             IsActive = true
         };
-        context.WorkflowTemplates.Add(turkeyPurchaseWorkflow);
+        context.WorkflowTemplates.Add(intakeWorkflow);
         await context.SaveChangesAsync();
 
-        var turkeyPurchaseStep1 = new WorkflowStep
+        var intakeStep1 = new WorkflowStep
         {
-            TemplateId = turkeyPurchaseWorkflow.TemplateId,
+            TemplateId = intakeWorkflow.TemplateId,
             StepOrder = 1,
-            StepName = "Turkey Purchase Checker Approval",
+            StepName = "Intake Checker Verification",
             RequiredRole = "Treasury Operations (Checker)",
-            Description = "Checker verifies serials and purchase price, approving ownership transfer to KFH."
+            Description = "Checker verifies weight, serials and approves shelf placement."
         };
-        context.WorkflowSteps.Add(turkeyPurchaseStep1);
+        context.WorkflowSteps.Add(intakeStep1);
+        await context.SaveChangesAsync();
+
+        // 4. BRANCH_TRANSFER (Inter-Branch & Vault Transfer)
+        var transferWorkflow = new WorkflowTemplate
+        {
+            WorkflowType = "BRANCH_TRANSFER",
+            Name = "Default Branch Transfer Workflow",
+            Description = "Standard Maker-Checker verification for branch transfers.",
+            IsActive = true
+        };
+        context.WorkflowTemplates.Add(transferWorkflow);
+        await context.SaveChangesAsync();
+
+        var transferStep1 = new WorkflowStep
+        {
+            TemplateId = transferWorkflow.TemplateId,
+            StepOrder = 1,
+            StepName = "Branch Transfer Checker Approval",
+            RequiredRole = "Treasury Operations (Checker)",
+            Description = "Checker reviews and approves the branch transfer."
+        };
+        context.WorkflowSteps.Add(transferStep1);
+        await context.SaveChangesAsync();
+
+        // 5. CUSTODY_WITHDRAWAL (Client Custody Withdrawal & Handover)
+        var custodyWithdrawalWorkflow = new WorkflowTemplate
+        {
+            WorkflowType = "CUSTODY_WITHDRAWAL",
+            Name = "Default Customer Gold Custody Withdrawal Workflow",
+            Description = "Maker-Checker verification for client physical gold withdrawal and delivery handover.",
+            IsActive = true
+        };
+        context.WorkflowTemplates.Add(custodyWithdrawalWorkflow);
+        await context.SaveChangesAsync();
+
+        var custodyWithdrawalStep1 = new WorkflowStep
+        {
+            TemplateId = custodyWithdrawalWorkflow.TemplateId,
+            StepOrder = 1,
+            StepName = "Custody Checker Handover Authorization",
+            RequiredRole = "Treasury Operations (Checker)",
+            Description = "Checker validates customer civil ID, PACI handover OTP, and authorizes vault dispatch."
+        };
+        context.WorkflowSteps.Add(custodyWithdrawalStep1);
         await context.SaveChangesAsync();
 
 

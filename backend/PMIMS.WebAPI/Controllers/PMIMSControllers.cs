@@ -1234,6 +1234,26 @@ public partial class PMIMSControllers : ControllerBase
                     };
                 }
             }
+            else if (inst.WorkflowType == "DAMAGE_BAR")
+            {
+                var items = await _repository.GetItemsAsync();
+                var item = items.FirstOrDefault(i => i.ItemId == inst.EntityId);
+                if (item != null)
+                {
+                    entityDetails = new
+                    {
+                        item_id = item.ItemId,
+                        serial_number = item.SerialNumber,
+                        product_name = item.Product?.ProductCode ?? "Gold Bar",
+                        weight_grams = item.Product?.Denomination?.WeightGrams ?? 0,
+                        damage_reason = item.DamageReason,
+                        damage_description = item.DamageDescription,
+                        damage_doc_id = item.DamageEvidenceDocId,
+                        status_code = item.StatusCode,
+                        created_by = item.DamageReportedBy ?? "SYSTEM"
+                    };
+                }
+            }
 
             var lastAction = approvalActions.OrderByDescending(a => a.ActionTimestamp).ThenByDescending(a => a.ActionId).FirstOrDefault();
             string? stepName = currentStep?.StepName;
