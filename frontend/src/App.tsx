@@ -943,10 +943,17 @@ export default function App() {
   const [pendingIntakesList, setPendingIntakesList] = useState<any[]>([]);
   const [previewBarcodeModal, setPreviewBarcodeModal] = useState<any>(null);
   const [intakeActiveSubTab, setIntakeActiveSubTab] = useState<'RECEIVE_FORM' | 'IN_FLIGHT_LOG'>('RECEIVE_FORM');
-  const [collapsedSections, setCollapsedSections] = useState<{ [key: string]: boolean }>({});
+  const [collapsedSections, setCollapsedSections] = useState<{ [key: string]: boolean }>({
+    'section-operations': true,
+    'section-controls': true,
+    'section-admin': true,
+  });
 
   const toggleSectionCollapse = (sectionKey: string) => {
-    setCollapsedSections(prev => ({ ...prev, [sectionKey]: !prev[sectionKey] }));
+    setCollapsedSections(prev => {
+      const isCurrentlyCollapsed = sectionKey in prev ? !!prev[sectionKey] : sectionKey !== 'section-dashboards';
+      return { ...prev, [sectionKey]: !isCurrentlyCollapsed };
+    });
   };
 
   // Track which P.O. is expanded to show its line items in Receive Shipments
@@ -4272,7 +4279,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
 
               if (node.type === 'section') {
                 activeSectionKey = node.key;
-                const isCollapsed = !!collapsedSections[node.key];
+                const isCollapsed = node.key in collapsedSections ? !!collapsedSections[node.key] : node.key !== 'section-dashboards';
 
                 const dragProps = menuEditMode ? {
                   draggable: true,
@@ -4341,7 +4348,8 @@ const [migrationApproved, setMigrationApproved] = useState(false);
               }
 
               // Hide child items if parent section is collapsed (unless in menuEditMode)
-              if (activeSectionKey && collapsedSections[activeSectionKey] && !menuEditMode) {
+              const isParentCollapsed = activeSectionKey in collapsedSections ? !!collapsedSections[activeSectionKey] : activeSectionKey !== 'section-dashboards';
+              if (activeSectionKey && isParentCollapsed && !menuEditMode) {
                 return null;
               }
 

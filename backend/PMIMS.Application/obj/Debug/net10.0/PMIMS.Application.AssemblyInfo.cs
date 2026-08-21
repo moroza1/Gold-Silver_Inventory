@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("PMIMS.Application")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+cb5a30f6289b36ee7fdf4d5b76b67998a6c4464f")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+50f7be7425cd0c2b8ac42c0d0b1ffa855f37ce5f")]
 [assembly: System.Reflection.AssemblyProductAttribute("PMIMS.Application")]
 [assembly: System.Reflection.AssemblyTitleAttribute("PMIMS.Application")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
