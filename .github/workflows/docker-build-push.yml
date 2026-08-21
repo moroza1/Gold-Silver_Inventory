@@ -47,6 +47,15 @@ jobs:
           tags: |
             ghcr.io/${{ env.OWNER_LC }}/pmims-backend:latest
 
+      - name: Calculate and Inject App Version
+        run: |
+          COUNT=$(git rev-list --count HEAD)
+          BUILD_NUM=$((COUNT - 44))
+          if [ $BUILD_NUM -lt 0 ]; then BUILD_NUM=0; fi
+          VERSION_STR=$(printf "1.%03d" $BUILD_NUM)
+          echo "Building frontend with Version: $VERSION_STR (Total commits: $COUNT)"
+          echo "export const APP_VERSION = \"$VERSION_STR\";" > frontend/src/version.ts
+
       - name: Build and push Frontend Image
         uses: docker/build-push-action@v5
         with:
@@ -55,6 +64,7 @@ jobs:
           platforms: linux/amd64
           push: true
           pull: true
+          no-cache: true
           tags: |
             ghcr.io/${{ env.OWNER_LC }}/pmims-frontend:latest
           cache-from: type=registry,ref=ghcr.io/${{ env.OWNER_LC }}/pmims-frontend:buildcache

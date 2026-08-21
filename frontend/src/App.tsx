@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import GfsApp from './GfsApp';
 import { SerialToolsModal, type GeneratedSerialItem } from './components/SerialToolsModal';
 import { TurkeyPurchaseScreen } from './components/TurkeyPurchaseScreen';
+import { APP_VERSION } from './version';
 const rawApiUrl = (import.meta as any).env?.VITE_API_URL;
 const normalizeApiBase = (url?: string) => {
   if (!url) return null;
@@ -4134,6 +4135,24 @@ const [migrationApproved, setMigrationApproved] = useState(false);
             >
               <i className="fa-solid fa-coins"></i> Open GFS Customer Portal
             </button>
+          </div>
+
+          <div style={{ marginTop: '18px', textAlign: 'center' }}>
+            <span style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              fontSize: '11px',
+              fontWeight: 600,
+              padding: '3px 10px',
+              borderRadius: '20px',
+              background: 'rgba(0, 155, 78, 0.08)',
+              color: 'var(--kfh-green)',
+              border: '1px solid rgba(0, 155, 78, 0.2)'
+            }}>
+              <i className="fa-solid fa-code-branch" style={{ fontSize: '10px' }}></i>
+              Version {APP_VERSION}
+            </span>
           </div>
         </form>
       </div>
