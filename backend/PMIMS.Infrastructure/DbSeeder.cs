@@ -25,6 +25,32 @@ public static class DbSeeder
             {
                 if (context.Database.IsSqlite())
                 {
+                    // 1. Ensure pending_turkey_purchases table exists
+                    using (var createTableCmd = connection.CreateCommand())
+                    {
+                        createTableCmd.CommandText = @"
+                            CREATE TABLE IF NOT EXISTS ""pending_turkey_purchases"" (
+                                ""PendingPurchaseId"" INTEGER NOT NULL CONSTRAINT ""PK_pending_turkey_purchases"" PRIMARY KEY AUTOINCREMENT,
+                                ""BatchReference"" TEXT NOT NULL,
+                                ""SerialsJsonList"" TEXT NOT NULL,
+                                ""TotalItems"" INTEGER NOT NULL,
+                                ""TotalWeightGrams"" TEXT NOT NULL,
+                                ""UnitPricePerGram"" TEXT NOT NULL,
+                                ""TotalCost"" TEXT NOT NULL,
+                                ""RequestedBy"" TEXT NOT NULL,
+                                ""Notes"" TEXT NULL,
+                                ""StatusCode"" TEXT NOT NULL DEFAULT 'PENDING_APPROVAL',
+                                ""CreatedAt"" TEXT NOT NULL,
+                                ""ApprovedBy"" TEXT NULL,
+                                ""ApprovedAt"" TEXT NULL
+                            );
+                            CREATE INDEX IF NOT EXISTS ""IX_pending_turkey_purchases_StatusCode"" ON ""pending_turkey_purchases"" (""StatusCode"");
+                            CREATE INDEX IF NOT EXISTS ""IX_pending_turkey_purchases_CreatedAt"" ON ""pending_turkey_purchases"" (""CreatedAt"");
+                        ";
+                        await createTableCmd.ExecuteNonQueryAsync();
+                    }
+
+                    // 2. Ensure columns on pending_intakes
                     using var cmd = connection.CreateCommand();
                     cmd.CommandText = "PRAGMA table_info(pending_intakes);";
                     var existingCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -89,11 +115,58 @@ public static class DbSeeder
                 else if (context.Database.IsSqlServer())
                 {
                     await context.Database.ExecuteSqlRawAsync(@"
+                        IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'pending_turkey_purchases')
+                        BEGIN
+                            CREATE TABLE pending_turkey_purchases (
+                                PendingPurchaseId INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_pending_turkey_purchases PRIMARY KEY,
+                                BatchReference NVARCHAR(MAX) NOT NULL,
+                                SerialsJsonList NVARCHAR(MAX) NOT NULL,
+                                TotalItems INT NOT NULL,
+                                TotalWeightGrams DECIMAL(18,3) NOT NULL,
+                                UnitPricePerGram DECIMAL(18,4) NOT NULL,
+                                TotalCost DECIMAL(18,4) NOT NULL,
+                                RequestedBy NVARCHAR(MAX) NOT NULL,
+                                Notes NVARCHAR(MAX) NULL,
+                                StatusCode NVARCHAR(50) NOT NULL CONSTRAINT DF_pending_turkey_purchases_StatusCode DEFAULT 'PENDING_APPROVAL',
+                                CreatedAt DATETIME2 NOT NULL,
+                                ApprovedBy NVARCHAR(MAX) NULL,
+                                ApprovedAt DATETIME2 NULL
+                            );
+                            CREATE NONCLUSTERED INDEX IX_pending_turkey_purchases_StatusCode ON pending_turkey_purchases(StatusCode);
+                            CREATE NONCLUSTERED INDEX IX_pending_turkey_purchases_CreatedAt ON pending_turkey_purchases(CreatedAt);
+                        END
+
                         IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('pending_intakes') AND name = 'ownership_type')
                         BEGIN
                             ALTER TABLE pending_intakes ADD ownership_type VARCHAR(30) NOT NULL CONSTRAINT DF_pending_intakes_ownership_type DEFAULT 'KFH_OWNED';
                         END
                     ");
+                }
+
+                // 3. Ensure TURKEY_PURCHASE workflow template exists
+                var hasTurkeyWf = await context.WorkflowTemplates.AnyAsync(t => t.WorkflowType == "TURKEY_PURCHASE");
+                if (!hasTurkeyWf)
+                {
+                    var turkeyPurchaseWorkflow = new WorkflowTemplate
+                    {
+                        WorkflowType = "TURKEY_PURCHASE",
+                        Name = "Default Turkey Gold Purchase Workflow",
+                        Description = "Maker-Checker verification for purchasing consignment gold from Turkey.",
+                        IsActive = true
+                    };
+                    context.WorkflowTemplates.Add(turkeyPurchaseWorkflow);
+                    await context.SaveChangesAsync();
+
+                    var turkeyPurchaseStep1 = new WorkflowStep
+                    {
+                        TemplateId = turkeyPurchaseWorkflow.TemplateId,
+                        StepOrder = 1,
+                        StepName = "Turkey Purchase Checker Approval",
+                        RequiredRole = "Treasury Operations (Checker)",
+                        Description = "Checker verifies serials and purchase price, approving ownership transfer to KFH."
+                    };
+                    context.WorkflowSteps.Add(turkeyPurchaseStep1);
+                    await context.SaveChangesAsync();
                 }
             }
             finally

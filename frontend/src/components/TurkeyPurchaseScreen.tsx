@@ -61,8 +61,8 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
-  // Manual Exchange / Purchase Rate (KWD per Gram) — User manually enters the rate, live price is guidance only
-  const [unitPricePerGram, setUnitPricePerGram] = useState<number>(24.50);
+  // Manual Purchase Rate (KWD per Gram) — User manually enters the negotiated rate (Mandatory)
+  const [unitPricePerGram, setUnitPricePerGram] = useState<string>('');
   const [purchaseNotes, setPurchaseNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -86,15 +86,13 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
     const items = availableItems.filter(i => selectedSet.has(i.serial_number));
     const totalWeightGrams = items.reduce((sum, i) => sum + (i.weight_grams || 0), 0);
     const totalWeightKg = Math.round((totalWeightGrams / 1000) * 1000) / 1000;
-    const totalCostKwd = Math.round(totalWeightGrams * unitPricePerGram * 100) / 100;
     return {
       items,
       count: items.length,
       totalWeightGrams,
-      totalWeightKg,
-      totalCostKwd
+      totalWeightKg
     };
-  }, [availableItems, selectedSerials, unitPricePerGram]);
+  }, [availableItems, selectedSerials]);
 
   // OCR Preprocessing: converts image to high-contrast grayscale to extract laser-engraved serials on gold
   const preprocessImage = (imageSrc: string): Promise<string> => {
@@ -339,17 +337,19 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
       alert(currentLang === 'en' ? 'Please select at least one Turkey bar to purchase.' : 'يرجى تحديد سبيكة تركية واحدة على الأقل للشراء.');
       return;
     }
-    if (unitPricePerGram <= 0) {
-      alert(currentLang === 'en' ? 'Please enter the agreed exchange/purchase rate (KWD/gram).' : 'يرجى إدخال سعر تسوية الشراء (دينار/جرام).');
+    const rateNum = parseFloat(unitPricePerGram);
+    if (isNaN(rateNum) || rateNum <= 0) {
+      alert(currentLang === 'en' ? 'Please enter the agreed purchase rate (KWD/gram).' : 'يرجى إدخال سعر الشراء المتفق عليه للجرام (دينار/جرام).');
       return;
     }
 
     setIsSubmitting(true);
-    const success = await onSubmitPurchase(selectedSerials, unitPricePerGram, purchaseNotes);
+    const success = await onSubmitPurchase(selectedSerials, rateNum, purchaseNotes);
     setIsSubmitting(false);
 
     if (success) {
       setSelectedSerials([]);
+      setUnitPricePerGram('');
       setPurchaseNotes('');
       setActiveSubTab('PENDING_BATCHES');
       onRefresh();
@@ -359,8 +359,8 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
       
-      {/* 1. TOP HEADER SUMMARY & KPIS (Clean counts & manual rate, without total amount card) */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
+      {/* 1. TOP HEADER SUMMARY & KPIS (Stock & Selection only) */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px' }}>
         
         {/* KPI 1: Turkey Stock Available */}
         <div className="glass-card" style={{ padding: '18px', borderLeft: '4px solid #E11D48' }}>
@@ -398,26 +398,6 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
             </div>
             <div style={{ width: '42px', height: '42px', borderRadius: '8px', background: 'rgba(0, 155, 78, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', color: 'var(--kfh-green)' }}>
               <i className="fa-solid fa-cart-shopping"></i>
-            </div>
-          </div>
-        </div>
-
-        {/* KPI 3: Agreed Settlement Rate */}
-        <div className="glass-card" style={{ padding: '18px', borderLeft: '4px solid var(--accent-gold)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                {currentLang === 'en' ? 'Settlement Exchange Rate' : 'سعر تسوية الشراء/جرام'}
-              </div>
-              <div style={{ fontSize: '22px', fontWeight: 'bold', marginTop: '6px', color: 'var(--accent-gold)' }}>
-                {unitPricePerGram.toFixed(2)} <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>KWD / g</span>
-              </div>
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                {currentLang === 'en' ? `360T Reference: $${goldRate.toFixed(2)}/oz (Guidance only)` : `تسعير 360T الإرشادي: $${goldRate.toFixed(2)} للأونصة`}
-              </div>
-            </div>
-            <div style={{ width: '42px', height: '42px', borderRadius: '8px', background: 'rgba(212, 160, 23, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', color: 'var(--accent-gold)' }}>
-              <i className="fa-solid fa-scale-unbalanced-flip"></i>
             </div>
           </div>
         </div>
@@ -677,39 +657,29 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
               </div>
             </div>
 
-            {/* Agreed Unit Price per gram input */}
-            <div className="form-group" style={{ marginBottom: '14px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                <label style={{ fontSize: '12px', fontWeight: 600, margin: 0 }}>
-                  {currentLang === 'en' ? 'Agreed Purchase Rate (KWD / gram)' : 'سعر تسوية الشراء المتفق عليه (دينار / جرام)'}
-                </label>
-                <span style={{ fontSize: '10px', color: 'var(--kfh-green)', fontWeight: 600 }}>
-                  {currentLang === 'en' ? 'USD/KWD + Markup' : 'سعر التحويل + الهامش'}
-                </span>
-              </div>
+            {/* Agreed Unit Price per gram input (Mandatory) */}
+            <div className="form-group" style={{ marginBottom: '16px' }}>
+              <label style={{ fontSize: '12px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '6px' }}>
+                <span>{currentLang === 'en' ? 'Agreed Purchase Rate (KWD / gram)' : 'سعر شراء الجرام المتفق عليه (دينار / جرام)'}</span>
+                <span style={{ color: 'var(--accent-red)' }}>*</span>
+              </label>
               <input
                 type="number"
-                step="0.01"
-                min="0.01"
+                step="0.001"
+                min="0.001"
                 className="form-control"
+                placeholder={currentLang === 'en' ? 'Enter rate e.g. 24.500' : 'أدخل السعر مثلاً 24.500'}
                 value={unitPricePerGram}
-                onChange={e => setUnitPricePerGram(parseFloat(e.target.value) || 0)}
+                onChange={e => setUnitPricePerGram(e.target.value)}
                 disabled={!canModify}
                 style={{ fontSize: '14px', fontWeight: 'bold' }}
+                required
               />
               <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                <i className="fa-solid fa-floppy-disk" style={{ color: 'var(--kfh-green)' }}></i>{' '}
+                <i className="fa-solid fa-asterisk" style={{ color: 'var(--accent-red)', fontSize: '8px' }}></i>{' '}
                 {currentLang === 'en' 
-                  ? 'This exact negotiated rate is permanently saved with this request and logged in the custody ledger.' 
-                  : 'يتم حفظ هذا السعر تلقائياً وبشكل دائم مع كل طلب شراء في سجلات الخزينة وتدقيق العهدة.'}
-              </div>
-            </div>
-
-            {/* Total Cost Display */}
-            <div style={{ backgroundColor: 'rgba(0, 155, 78, 0.08)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(0, 155, 78, 0.25)', marginBottom: '16px' }}>
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Calculated Settlement Value:' : 'قيمة التسوية المحتسبة:'}</div>
-              <div style={{ fontSize: '20px', fontWeight: 'bold', color: 'var(--kfh-green)', marginTop: '4px' }}>
-                {selectedItemsData.totalCostKwd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} KWD
+                  ? 'Mandatory: Enter the exact agreed purchase rate per gram.' 
+                  : 'إلزامي: أدخل سعر الشراء المتفق عليه للجرام.'}
               </div>
             </div>
 
