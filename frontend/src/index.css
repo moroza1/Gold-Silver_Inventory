@@ -7,29 +7,31 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Tajawal:wght@400;500;700;800&display=swap');
 
 :root {
-  /* ── KFH Official Color Palette ── */
-  --kfh-green:        #00934C;   /* Primary Brand Color */
-  --kfh-green-dark:   #007D40;   /* Darker hover green */
-  --kfh-green-light:  #EBF4EE;   /* Table Header Fill / subtle bg green tint */
-  --kfh-green-muted:  rgba(0, 147, 76, 0.12);
+  /* ── KFH Official Color Palette (Authentic KFH Online Banking) ── */
+  --kfh-green:        #005A3E;   /* Deep KFH Corporate Green */
+  --kfh-green-dark:   #00402C;   /* Darker Forest Green */
+  --kfh-green-bright: #009B4E;   /* Vibrant KFH Green Accent */
+  --kfh-green-light:  #ECEEEB;   /* Submenu / container tint */
+  --kfh-green-muted:  rgba(0, 90, 62, 0.08);
   --kfh-gold:         #D97706;   /* Warning / Pending gold accent */
   --kfh-gold-light:   #FEF3C7;
 
   /* ── Backgrounds ── */
-  --bg-primary:       #F4F6F5;   /* Main Dashboard Surface */
+  --bg-primary:       #EAEAEA;   /* Authentic KFH Light Silver Surface */
   --bg-secondary:     #FFFFFF;   /* Data Grid / Card Background */
   --bg-topbar:        #FFFFFF;   /* Sticky Header Fill */
-  --bg-sidebar:       #FFFFFF;   /* Left-side Navigation Rail Fill */
+  --bg-sidebar:       #EAEAEA;   /* Left-side Navigation Rail Fill */
 
   /* ── Surfaces ── */
-  --surface-glass:    rgba(255, 255, 255, 0.95);
-  --surface-border:   #E5E7EB;   /* Borders & Dividers */
+  --surface-glass:    #FFFFFF;
+  --surface-border:   #D1DCD4;   /* Fine Banking Borders */
+  --surface-border-dark:#00402C;
 
   /* ── Semantic Colors (Status Colors) ── */
   --accent-gold:      #D97706;   /* Low-Stock / Warning / Pending (Warm amber) */
   --accent-gold-hover:#B45309;
-  --accent-green:     #00934C;   /* In-Stock / Success / Approved (KFH Green) */
-  --accent-green-muted: rgba(0, 147, 76, 0.12);
+  --accent-green:     #009B4E;   /* In-Stock / Success / Approved (KFH Green) */
+  --accent-green-muted: rgba(0, 155, 78, 0.12);
   --accent-red:       #DC2626;   /* Out-of-Stock / Danger / Rejected (Clean crimson) */
   --accent-red-muted: rgba(220, 38, 38, 0.10);
   --accent-blue:      #0284C7;
@@ -37,26 +39,26 @@
   --accent-purple:    #7C3AED;
 
   /* ── Text ── */
-  --text-primary:     #1A2A22;   /* KFH Slate/Charcoal for structural text/headings */
+  --text-primary:     #111827;   /* Sharp Dark Charcoal */
   --text-secondary:   #374151;   /* Medium gray for body/labels */
   --text-muted:       #6B7280;   /* Muted gray */
   --text-on-green:    #FFFFFF;   /* White on green bg */
-  --text-dark:        #1A2A22;
+  --text-dark:        #111827;
 
   /* ── Typography ── */
-  --font-headers: 'Tajawal', 'Inter', sans-serif;
-  --font-body:    'Inter', 'Tajawal', sans-serif;
+  --font-headers: 'Segoe UI', 'Tajawal', 'Inter', sans-serif;
+  --font-body:    'Segoe UI', 'Tajawal', 'Inter', sans-serif;
 
   /* ── Layout & Radii (Enterprise Standard) ── */
-  --sidebar-width: 270px;
-  --transition-smooth: all 0.2s ease-in-out;
+  --sidebar-width: 250px;
+  --transition-smooth: all 0.15s ease-in-out;
   --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 8px;
+  --radius-md: 5px;
+  --radius-lg: 6px;
   
-  --shadow-card:   0 1px 2px 0 rgba(0, 0, 0, 0.05);
-  --shadow-premium:0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-  --shadow-green:  0 4px 12px rgba(0, 147, 76, 0.15);
+  --shadow-card:   0 1px 3px 0 rgba(0, 0, 0, 0.04);
+  --shadow-premium:0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  --shadow-green:  0 2px 8px rgba(0, 90, 62, 0.2);
 }
 
 /* ============================================================================
@@ -115,105 +117,117 @@ a:hover {
 /* ── Sidebar ── */
 #sidebar {
   width: var(--sidebar-width);
-  background-color: var(--bg-sidebar);
+  background-color: #EAEAEA;
   border-right: 1px solid var(--surface-border);
   display: flex;
   flex-direction: column;
   height: 100%;
   flex-shrink: 0;
   z-index: 100;
-  box-shadow: 2px 0 8px rgba(0,0,0,0.04);
+  box-shadow: 1px 0 4px rgba(0,0,0,0.05);
 }
 
 .sidebar-logo {
-  padding: 22px 20px;
+  padding: 14px 18px;
   display: flex;
   align-items: center;
   gap: 12px;
   border-bottom: 1px solid var(--surface-border);
-  background: var(--bg-topbar);
+  background: #FFFFFF;
 }
 
 .logo-icon {
-  width: 40px;
-  height: 40px;
-  background: linear-gradient(135deg, var(--kfh-green), #C9963D);
-  border-radius: var(--radius-lg);
+  width: 36px;
+  height: 36px;
+  background: #005A3E;
+  border-radius: var(--radius-md);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-weight: 900;
+  font-weight: 800;
   color: #fff;
-  font-size: 20px;
+  font-size: 18px;
   font-family: var(--font-headers);
   box-shadow: var(--shadow-green);
   flex-shrink: 0;
 }
 
 .logo-text h2 {
-  font-size: 16px;
-  color: var(--text-primary);
-  font-weight: 700;
+  font-size: 15px;
+  color: #005A3E;
+  font-weight: 800;
 }
 
 .logo-text span {
   font-size: 9px;
   color: var(--text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.15em;
+  letter-spacing: 0.12em;
   font-weight: 600;
 }
 
 .sidebar-menu {
   flex: 1;
   overflow-y: auto;
-  padding: 16px 10px;
+  padding: 10px 8px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  background: var(--bg-sidebar);
+  gap: 3px;
+  background: #EAEAEA;
 }
 
 .menu-section-header {
   font-family: var(--font-headers);
-  font-size: 10px;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  letter-spacing: 0.12em;
-  padding: 14px 12px 5px;
+  font-size: 12px;
+  text-transform: none;
+  color: #FFFFFF;
+  letter-spacing: 0.02em;
+  padding: 8px 12px;
   font-weight: 700;
+  background: linear-gradient(to bottom, #005A3E 0%, #00402C 100%);
+  border-radius: var(--radius-sm);
+  margin: 6px 0 2px 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.1);
 }
 
 .menu-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border-radius: var(--radius-lg);
+  gap: 8px;
+  padding: 7px 12px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  color: var(--text-secondary);
+  color: #1F2937;
   font-weight: 500;
-  font-size: 13px;
+  font-size: 12px;
+  background-color: transparent;
   transition: var(--transition-smooth);
 }
 
+.menu-item::before {
+  content: '●';
+  color: #009B4E;
+  font-size: 10px;
+  line-height: 1;
+}
+
 .menu-item:hover {
-  color: var(--kfh-green);
-  background-color: var(--kfh-green-light);
+  color: #005A3E;
+  background-color: #D8E2DC;
 }
 
 .menu-item.active {
-  color: var(--kfh-green);
-  background: var(--kfh-green-light);
-  border-left: 3px solid var(--kfh-green);
-  font-weight: 600;
+  color: #005A3E;
+  background: #D8E2DC;
+  font-weight: 700;
+  border-left: 3px solid #005A3E;
 }
 
 .menu-item-icon {
-  font-size: 16px;
-  color: inherit;
-  width: 20px;
-  text-align: center;
+  display: none;
 }
 
 /* ── Main Panel ── */
@@ -416,8 +430,9 @@ a:hover {
 .table-responsive {
   width: 100%;
   overflow-x: auto;
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   border: 1px solid var(--surface-border);
+  background-color: #FFFFFF;
 }
 
 table {
@@ -427,21 +442,25 @@ table {
 }
 
 th {
-  background-color: var(--kfh-green-light); /* #EBF4EE light green tint */
-  color: var(--text-primary); /* KFH Slate/Charcoal */
+  background-color: #005A3E !important;
+  color: #FFFFFF !important;
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   padding: 8px 12px;
   font-weight: 700;
-  border-bottom: 1px solid var(--surface-border);
+  border-bottom: 1px solid var(--surface-border-dark);
 }
 
 td {
   padding: 8px 12px;
-  font-size: 13px;
+  font-size: 12px;
   border-bottom: 1px solid var(--surface-border);
   color: var(--text-primary);
+}
+
+tr:nth-child(even) td {
+  background-color: #F9FAF9;
 }
 
 tr:last-child td {
@@ -449,7 +468,7 @@ tr:last-child td {
 }
 
 tr:hover td {
-  background-color: #F0F6F2; /* Soft row hover background shift */
+  background-color: #F0F6F2;
 }
 
 /* ── Badges ── */

@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
+import Tesseract from 'tesseract.js';
 
 interface TurkeyPurchaseScreenProps {
   turkeyInventory: {
@@ -13,7 +14,7 @@ interface TurkeyPurchaseScreenProps {
   pendingPurchases: any[];
   onRefresh: () => void;
   onSubmitPurchase: (serials: string[], unitPrice: number, notes: string) => Promise<boolean>;
-  goldRate: number; // USD per oz
+  goldRate: number; // USD per oz (Guidance only)
   currentLang: string;
   canModify: boolean;
   userRole: string;
@@ -28,8 +29,8 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
   goldRate,
   currentLang,
   canModify,
-  userRole,
-  displayName
+  userRole: _userRole,
+  displayName: _displayName
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<'STOCK_PURCHASE' | 'PENDING_BATCHES'>('STOCK_PURCHASE');
   const [searchQuery, setSearchQuery] = useState('');
@@ -39,17 +40,29 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
   // Selection state
   const [selectedSerials, setSelectedSerials] = useState<string[]>([]);
   
-  // Range selection tool state
+  // Smart Tools Modal state (Range, Paste, OCR Scanner)
+  const [showSmartModal, setShowSmartModal] = useState(false);
+  const [smartTab, setSmartTab] = useState<'RANGE' | 'PASTE' | 'OCR'>('RANGE');
+
+  // Range tool state
   const [rangeStart, setRangeStart] = useState('');
   const [rangeEnd, setRangeEnd] = useState('');
 
-  // Purchase Order parameters
-  // Convert goldRate (USD/oz) to KWD/gram approximate default: (goldRate / 31.1035) * 0.308
-  const defaultKwdPerGram = useMemo(() => {
-    return Math.round(((goldRate / 31.1035) * 0.308) * 100) / 100 || 22.50;
-  }, [goldRate]);
+  // Bulk paste state
+  const [pasteText, setPasteText] = useState('');
 
-  const [unitPricePerGram, setUnitPricePerGram] = useState<number>(defaultKwdPerGram);
+  // OCR state
+  const [ocrImage, setOcrImage] = useState<string | null>(null);
+  const [ocrLoading, setOcrLoading] = useState(false);
+  const [ocrProgress, setOcrProgress] = useState(0);
+  const [ocrStatusText, setOcrStatusText] = useState('');
+  const [extractedSerials, setExtractedSerials] = useState<{ serial: string; selected: boolean }[]>([]);
+  const [cameraActive, setCameraActive] = useState(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+
+  // Manual Exchange / Purchase Rate (KWD per Gram) — User manually enters the rate, live price is guidance only
+  const [unitPricePerGram, setUnitPricePerGram] = useState<number>(24.50);
   const [purchaseNotes, setPurchaseNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -83,6 +96,199 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
     };
   }, [availableItems, selectedSerials, unitPricePerGram]);
 
+  // OCR Preprocessing: converts image to high-contrast grayscale to extract laser-engraved serials on gold
+  const preprocessImage = (imageSrc: string): Promise<string> => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(imageSrc);
+          return;
+        }
+
+        canvas.width = img.width;
+        canvas.height = img.height;
+        ctx.drawImage(img, 0, 0);
+
+        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imgData.data;
+
+        // Grayscale + High-Contrast curves
+        for (let i = 0; i < data.length; i += 4) {
+          const r = data[i];
+          const g = data[i + 1];
+          const b = data[i + 2];
+          const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+          const contrast = (gray - 128) * 1.8 + 128;
+          const finalVal = Math.min(255, Math.max(0, contrast));
+          data[i] = finalVal;
+          data[i + 1] = finalVal;
+          data[i + 2] = finalVal;
+        }
+
+        ctx.putImageData(imgData, 0, 0);
+        resolve(canvas.toDataURL('image/png'));
+      };
+      img.onerror = () => resolve(imageSrc);
+      img.src = imageSrc;
+    });
+  };
+
+  // Run OCR
+  const processOcrImage = async (imageSrc: string) => {
+    setOcrLoading(true);
+    setOcrProgress(0);
+    setOcrStatusText(currentLang === 'en' ? 'Preprocessing gold bar image...' : 'معالجة صورة السبيكة...');
+
+    try {
+      const processedSrc = await preprocessImage(imageSrc);
+      setOcrStatusText(currentLang === 'en' ? 'Scanning laser-engraved serial number...' : 'قراءة الرقم التسلسلي المحفور بالليزر...');
+
+      const result = await Tesseract.recognize(
+        processedSrc,
+        'eng',
+        {
+          logger: m => {
+            if (m.status === 'recognizing text') {
+              setOcrProgress(Math.round(m.progress * 100));
+            }
+          }
+        }
+      );
+
+      const rawText = result.data.text || '';
+      const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean);
+      const candidates: { serial: string; selected: boolean }[] = [];
+      const seen = new Set<string>();
+
+      const goldNoisePattern = /^(100\s*G|1000\s*G|1\s*KG|500\s*G|50\s*G|20\s*G|10\s*G|5\s*G|1\s*G|999\.?9?|995|GOLD|SILVER|FINE|PURITY|ESSAYEUR|FONDEUR|MELTER|ASSAYER|NADIR|VALCAMBI|SUISSE|TURKEY|REFINERY|NET|WEIGHT|BAR|AU|AG|ISO|CERTIFICATE)/i;
+
+      // Extract alphanumeric tokens matching gold bar serial format (e.g. B00570, TR-2026-001, etc.)
+      const words = (result.data as any).words || [];
+      const sortedTokens: { text: string; y: number }[] = [];
+
+      words.forEach((w: any) => {
+        const txt = (w.text || '').trim().replace(/[^a-zA-Z0-9-]/g, '').toUpperCase();
+        if (txt.length >= 4 && !goldNoisePattern.test(txt)) {
+          sortedTokens.push({ text: txt, y: w.bbox ? w.bbox.y0 : 0 });
+        }
+      });
+
+      // Sort by vertical position (bottom-first)
+      sortedTokens.sort((a, b) => b.y - a.y);
+
+      sortedTokens.forEach(token => {
+        let clean = token.text;
+        // Fix OCR confusion: letter 'O' in numeric suffix -> '0'
+        if (/^[A-Z][O0-9]{4,8}$/.test(clean)) {
+          clean = clean[0] + clean.slice(1).replace(/O/g, '0');
+        }
+        if (!seen.has(clean) && clean.length >= 4) {
+          seen.add(clean);
+          candidates.push({ serial: clean, selected: true });
+        }
+      });
+
+      // Fallback lines
+      lines.forEach(line => {
+        const tokens = line.split(/[\s,;|]+/).map(t => t.trim().replace(/[^a-zA-Z0-9-]/g, '').toUpperCase());
+        tokens.forEach(t => {
+          let clean = t;
+          if (/^[A-Z][O0-9]{4,8}$/.test(clean)) {
+            clean = clean[0] + clean.slice(1).replace(/O/g, '0');
+          }
+          if (clean.length >= 4 && !seen.has(clean) && !goldNoisePattern.test(clean)) {
+            seen.add(clean);
+            candidates.push({ serial: clean, selected: true });
+          }
+        });
+      });
+
+      setExtractedSerials(candidates);
+      setOcrStatusText(
+        candidates.length > 0
+          ? (currentLang === 'en' ? `Identified ${candidates.length} serial token(s)` : `تم التعرف على ${candidates.length} رقم تسلسلي`)
+          : (currentLang === 'en' ? 'No clear serial detected. Try adjusting camera angle.' : 'لم يتم التعرف على الرقم. حاول تعديل زاوية الكاميرا.')
+      );
+    } catch (err: any) {
+      setOcrStatusText(currentLang === 'en' ? 'OCR scanning failed.' : 'فشلت عملية القراءة الضوئية.');
+    } finally {
+      setOcrLoading(false);
+    }
+  };
+
+  const startCamera = async () => {
+    try {
+      setCameraActive(true);
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+      });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+    } catch (err) {
+      alert(currentLang === 'en' ? 'Cannot access camera. Please check browser permissions.' : 'تعذر تشغيل الكاميرا. يرجى مراجعة الصلاحيات.');
+      setCameraActive(false);
+    }
+  };
+
+  const stopCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    setCameraActive(false);
+  };
+
+  const captureCameraFrame = () => {
+    if (!videoRef.current) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = videoRef.current.videoWidth || 640;
+    canvas.height = videoRef.current.videoHeight || 480;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+      const dataUrl = canvas.toDataURL('image/png');
+      setOcrImage(dataUrl);
+      stopCamera();
+      processOcrImage(dataUrl);
+    }
+  };
+
+  // Apply OCR or Paste Matches to Selected Serials in Turkey Inventory
+  const handleApplyExtractedMatches = (serialsToSelect: string[]) => {
+    const availableSet = new Set(availableItems.map(i => i.serial_number.toUpperCase()));
+    const matched = serialsToSelect
+      .map(s => s.trim().toUpperCase())
+      .filter(s => availableSet.has(s));
+
+    if (matched.length === 0) {
+      alert(currentLang === 'en' 
+        ? `None of the scanned serials (${serialsToSelect.join(', ')}) were found in active Turkey inventory.` 
+        : `لم يتم العثور على الأرقام (${serialsToSelect.join(', ')}) في مخزون تركيا الحالي.`);
+      return;
+    }
+
+    const newSet = new Set([...selectedSerials, ...matched]);
+    setSelectedSerials(Array.from(newSet));
+    setShowSmartModal(false);
+    alert(currentLang === 'en' ? `Selected ${matched.length} matching Turkey bar(s).` : `تم تحديد ${matched.length} سبيكة تركية مطابقة.`);
+  };
+
+  // Handle Bulk Paste Select
+  const handleApplyPasteSelect = () => {
+    if (!pasteText.trim()) {
+      alert(currentLang === 'en' ? 'Please paste serial numbers.' : 'يرجى لصق الأرقام التسلسلية.');
+      return;
+    }
+    const lines = pasteText.split(/[\n,;|\s]+/).map(s => s.trim()).filter(Boolean);
+    handleApplyExtractedMatches(lines);
+  };
+
   // Handle Range Selection
   const handleApplyRangeSelect = () => {
     if (!rangeStart.trim() || !rangeEnd.trim()) {
@@ -93,7 +299,6 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
     const start = rangeStart.trim().toUpperCase();
     const end = rangeEnd.trim().toUpperCase();
 
-    // Match all available items whose serial falls lexicographically or sequentially within range
     const matched = availableItems.filter(i => {
       const s = i.serial_number.toUpperCase();
       return s >= start && s <= end;
@@ -106,6 +311,7 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
 
     const newSet = new Set([...selectedSerials, ...matched]);
     setSelectedSerials(Array.from(newSet));
+    setShowSmartModal(false);
   };
 
   // Toggle single item
@@ -134,7 +340,7 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
       return;
     }
     if (unitPricePerGram <= 0) {
-      alert(currentLang === 'en' ? 'Please specify a valid unit price per gram.' : 'يرجى إدخال سعر جرام صالح.');
+      alert(currentLang === 'en' ? 'Please enter the agreed exchange/purchase rate (KWD/gram).' : 'يرجى إدخال سعر تسوية الشراء (دينار/جرام).');
       return;
     }
 
@@ -153,7 +359,7 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
       
-      {/* 1. TOP HEADER SUMMARY & KPIS */}
+      {/* 1. TOP HEADER SUMMARY & KPIS (Clean counts & manual rate, without total amount card) */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
         
         {/* KPI 1: Turkey Stock Available */}
@@ -196,42 +402,22 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
           </div>
         </div>
 
-        {/* KPI 3: Unit Price per gram */}
+        {/* KPI 3: Agreed Settlement Rate */}
         <div className="glass-card" style={{ padding: '18px', borderLeft: '4px solid var(--accent-gold)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
               <div style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                {currentLang === 'en' ? 'Settlement Unit Price' : 'سعر تسوية الشراء/جرام'}
+                {currentLang === 'en' ? 'Settlement Exchange Rate' : 'سعر تسوية الشراء/جرام'}
               </div>
               <div style={{ fontSize: '22px', fontWeight: 'bold', marginTop: '6px', color: 'var(--accent-gold)' }}>
                 {unitPricePerGram.toFixed(2)} <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>KWD / g</span>
               </div>
               <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                {currentLang === 'en' ? `Based on $${goldRate.toFixed(2)} / oz rate` : `بناءً على تسعير $${goldRate.toFixed(2)} للأونصة`}
+                {currentLang === 'en' ? `360T Reference: $${goldRate.toFixed(2)}/oz (Guidance only)` : `تسعير 360T الإرشادي: $${goldRate.toFixed(2)} للأونصة`}
               </div>
             </div>
             <div style={{ width: '42px', height: '42px', borderRadius: '8px', background: 'rgba(212, 160, 23, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', color: 'var(--accent-gold)' }}>
-              <i className="fa-solid fa-coins"></i>
-            </div>
-          </div>
-        </div>
-
-        {/* KPI 4: Total Purchase Settlement */}
-        <div className="glass-card" style={{ padding: '18px', borderLeft: '4px solid #3B82F6' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                {currentLang === 'en' ? 'Total Settlement Cost' : 'إجمالي قيمة صفقة الشراء'}
-              </div>
-              <div style={{ fontSize: '22px', fontWeight: 'bold', marginTop: '6px', color: '#3B82F6' }}>
-                {selectedItemsData.totalCostKwd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>KWD</span>
-              </div>
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                {currentLang === 'en' ? 'Requires Checker 4-Eyes Approval' : 'يتطلب اعتماد مراجع الخزينة'}
-              </div>
-            </div>
-            <div style={{ width: '42px', height: '42px', borderRadius: '8px', background: 'rgba(59, 130, 246, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', color: '#3B82F6' }}>
-              <i className="fa-solid fa-receipt"></i>
+              <i className="fa-solid fa-scale-unbalanced-flip"></i>
             </div>
           </div>
         </div>
@@ -277,9 +463,19 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
             
             {/* Quick Tools & Range Selector */}
             <div style={{ backgroundColor: 'rgba(255,255,255,0.02)', padding: '14px', borderRadius: '8px', border: '1px solid var(--surface-border)', marginBottom: '18px' }}>
-              <div style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--kfh-green)', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <i className="fa-solid fa-filter-circle-dollar"></i>
-                {currentLang === 'en' ? 'Quick Selection & Range Filter:' : 'التحديد السريع واختيار النطاق:'}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
+                <div style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--kfh-green)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <i className="fa-solid fa-filter-circle-dollar"></i>
+                  {currentLang === 'en' ? 'Quick Selection & Range Filter:' : 'التحديد السريع واختيار النطاق:'}
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => setShowSmartModal(true)}
+                  style={{ fontSize: '11px', padding: '5px 12px' }}
+                >
+                  <i className="fa-solid fa-wand-magic-sparkles"></i> {currentLang === 'en' ? 'Smart Scanner & Tools (OCR)' : 'الماسح الضوئي والأدوات الذكية'}
+                </button>
               </div>
 
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'flex-end' }}>
@@ -323,7 +519,7 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
                     onClick={handleSelectAllFiltered}
                     style={{ fontSize: '11px', padding: '6px 10px', background: 'rgba(255,255,255,0.05)' }}
                   >
-                    {currentLang === 'en' ? 'Select All Filtered' : 'تحديد كل المفلتر'}
+                    {currentLang === 'en' ? 'Select All' : 'تحديد الكل'}
                   </button>
 
                   {selectedSerials.length > 0 && (
@@ -388,7 +584,6 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
                     </th>
                     <th>{currentLang === 'en' ? 'Serial Number' : 'الرقم التسلسلي'}</th>
                     <th>{currentLang === 'en' ? 'Denomination & Weight' : 'الفئة والوزن'}</th>
-                    <th>{currentLang === 'en' ? 'Purity' : 'النقاوة'}</th>
                     <th>{currentLang === 'en' ? 'Refiner / Brand' : 'المصفاة'}</th>
                     <th>{currentLang === 'en' ? 'Vault Location' : 'موقع الخزينة'}</th>
                     <th>{currentLang === 'en' ? 'Ownership' : 'الملكية'}</th>
@@ -397,7 +592,7 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
                 <tbody>
                   {filteredItems.length === 0 ? (
                     <tr>
-                      <td colSpan={7} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
+                      <td colSpan={6} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
                         {currentLang === 'en' ? 'No Turkey consignment gold bars found in inventory.' : 'لا توجد سبائك تركية مطابقة في المخزون.'}
                       </td>
                     </tr>
@@ -431,7 +626,6 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
                               ({item.weight_grams}g)
                             </span>
                           </td>
-                          <td>{item.fineness_ppt || item.purity || '999.9'}</td>
                           <td>{item.refiner_name || item.brand_name || 'Nadir Gold'}</td>
                           <td>
                             <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
@@ -483,11 +677,16 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
               </div>
             </div>
 
-            {/* Unit Price per gram input */}
+            {/* Agreed Unit Price per gram input */}
             <div className="form-group" style={{ marginBottom: '14px' }}>
-              <label style={{ fontSize: '12px', fontWeight: 600 }}>
-                {currentLang === 'en' ? 'Purchase Price (KWD / gram)' : 'سعر الشراء (دينار / جرام)'}
-              </label>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                <label style={{ fontSize: '12px', fontWeight: 600, margin: 0 }}>
+                  {currentLang === 'en' ? 'Agreed Purchase Rate (KWD / gram)' : 'سعر تسوية الشراء المتفق عليه (دينار / جرام)'}
+                </label>
+                <span style={{ fontSize: '10px', color: 'var(--kfh-green)', fontWeight: 600 }}>
+                  {currentLang === 'en' ? 'USD/KWD + Markup' : 'سعر التحويل + الهامش'}
+                </span>
+              </div>
               <input
                 type="number"
                 step="0.01"
@@ -498,11 +697,17 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
                 disabled={!canModify}
                 style={{ fontSize: '14px', fontWeight: 'bold' }}
               />
+              <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                <i className="fa-solid fa-floppy-disk" style={{ color: 'var(--kfh-green)' }}></i>{' '}
+                {currentLang === 'en' 
+                  ? 'This exact negotiated rate is permanently saved with this request and logged in the custody ledger.' 
+                  : 'يتم حفظ هذا السعر تلقائياً وبشكل دائم مع كل طلب شراء في سجلات الخزينة وتدقيق العهدة.'}
+              </div>
             </div>
 
             {/* Total Cost Display */}
             <div style={{ backgroundColor: 'rgba(0, 155, 78, 0.08)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(0, 155, 78, 0.25)', marginBottom: '16px' }}>
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Total Settlement Amount:' : 'إجمالي مبلغ الشراء المطلوب:'}</div>
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Calculated Settlement Value:' : 'قيمة التسوية المحتسبة:'}</div>
               <div style={{ fontSize: '20px', fontWeight: 'bold', color: 'var(--kfh-green)', marginTop: '4px' }}>
                 {selectedItemsData.totalCostKwd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} KWD
               </div>
@@ -586,6 +791,324 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
 
           </div>
 
+        </div>
+      )}
+
+      {/* 4. SUBTAB 2: PENDING PURCHASES & TRACKER */}
+      {activeSubTab === 'PENDING_BATCHES' && (
+        <div className="glass-card" style={{ padding: '20px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+            <h4 style={{ margin: 0, fontSize: '15px', color: 'var(--kfh-green)' }}>
+              <i className="fa-solid fa-list-check"></i> {currentLang === 'en' ? 'Turkey Purchase Requests & Maker-Checker Log' : 'طلبات شراء ذهب تركيا وسجل تدقيق الأعين الأربعة'}
+            </h4>
+          </div>
+
+          <div className="table-responsive">
+            <table>
+              <thead>
+                <tr>
+                  <th>{currentLang === 'en' ? 'Batch Reference' : 'مرجع الدفعة'}</th>
+                  <th>{currentLang === 'en' ? 'Items Count' : 'عدد السبائك'}</th>
+                  <th>{currentLang === 'en' ? 'Total Weight' : 'الوزن الإجمالي'}</th>
+                  <th>{currentLang === 'en' ? 'Unit Price' : 'سعر الجرام'}</th>
+                  <th>{currentLang === 'en' ? 'Total Cost (KWD)' : 'إجمالي القيمة'}</th>
+                  <th>{currentLang === 'en' ? 'Requested By' : 'مقدم الطلب'}</th>
+                  <th>{currentLang === 'en' ? 'Status' : 'الحالة'}</th>
+                  <th>{currentLang === 'en' ? 'Created At' : 'تاريخ الإنشاء'}</th>
+                  <th>{currentLang === 'en' ? 'Serials Preview' : 'الأرقام التسلسلية'}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pendingPurchases.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
+                      {currentLang === 'en' ? 'No purchase requests recorded yet.' : 'لا توجد طلبات شراء مسجلة بعد.'}
+                    </td>
+                  </tr>
+                ) : (
+                  pendingPurchases.map(p => {
+                    let serialsList: string[] = [];
+                    try {
+                      serialsList = JSON.parse(p.serials_json || '[]');
+                    } catch (_) {}
+
+                    return (
+                      <tr key={p.pending_purchase_id}>
+                        <td><strong>{p.batch_reference}</strong></td>
+                        <td>{p.total_items} {currentLang === 'en' ? 'bars' : 'سبيكة'}</td>
+                        <td>
+                          {p.total_weight_grams} g
+                          <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: '4px' }}>
+                            ({(p.total_weight_grams / 1000).toFixed(3)} KG)
+                          </span>
+                        </td>
+                        <td>{p.unit_price} KWD</td>
+                        <td><strong style={{ color: 'var(--kfh-green)' }}>{(p.total_cost || 0).toLocaleString()} KWD</strong></td>
+                        <td>{p.requested_by}</td>
+                        <td>
+                          <span className={`badge ${p.status_code === 'APPROVED' ? 'badge-ready' : p.status_code === 'REJECTED' ? 'badge-sold' : 'badge-reserved'}`}>
+                            {p.status_code === 'APPROVED' ? (currentLang === 'en' ? 'Approved & Converted' : 'معتمد ومحول') :
+                             p.status_code === 'REJECTED' ? (currentLang === 'en' ? 'Rejected' : 'مرفوض') :
+                             (currentLang === 'en' ? 'Pending Checker Approval' : 'بانتظار اعتماد المراجع')}
+                          </span>
+                        </td>
+                        <td>{new Date(p.created_at).toLocaleString()}</td>
+                        <td>
+                          <div style={{ maxWidth: '240px', overflowX: 'auto', whiteSpace: 'nowrap', display: 'flex', gap: '4px' }}>
+                            {serialsList.map((s, idx) => (
+                              <span key={idx} style={{ fontSize: '10px', padding: '2px 5px', background: 'rgba(255,255,255,0.05)', borderRadius: '3px' }}>
+                                {s}
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* SMART SELECTION & SCANNER MODAL (RANGE, BULK PASTE, OCR) */}
+      {showSmartModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100vw',
+          height: '100vh',
+          backgroundColor: 'rgba(0, 0, 0, 0.65)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999,
+          padding: '20px'
+        }}>
+          <div className="glass-card" style={{ width: '100%', maxWidth: '650px', maxHeight: '90vh', overflowY: 'auto', padding: '24px', position: 'relative' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--surface-border)', paddingBottom: '12px', marginBottom: '16px' }}>
+              <h3 style={{ margin: 0, color: 'var(--kfh-green)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <i className="fa-solid fa-wand-magic-sparkles"></i>
+                {currentLang === 'en' ? 'Turkey Stock Smart Tools & Scanner' : 'أدوات تحديد مخزون تركيا والماسح الضوئي'}
+              </h3>
+              <button
+                onClick={() => {
+                  stopCamera();
+                  setShowSmartModal(false);
+                }}
+                style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: 'var(--text-muted)' }}
+              >
+                &times;
+              </button>
+            </div>
+
+            {/* Navigation Tabs */}
+            <div style={{ display: 'flex', gap: '8px', borderBottom: '1px solid var(--surface-border)', paddingBottom: '10px', marginBottom: '16px' }}>
+              <button
+                type="button"
+                className={`btn ${smartTab === 'RANGE' ? 'btn-primary' : ''}`}
+                style={smartTab !== 'RANGE' ? { background: 'transparent' } : {}}
+                onClick={() => setSmartTab('RANGE')}
+              >
+                <i className="fa-solid fa-arrow-down-1-9"></i> {currentLang === 'en' ? 'Range Selection' : 'تحديد نطاق متسلسل'}
+              </button>
+              <button
+                type="button"
+                className={`btn ${smartTab === 'PASTE' ? 'btn-primary' : ''}`}
+                style={smartTab !== 'PASTE' ? { background: 'transparent' } : {}}
+                onClick={() => setSmartTab('PASTE')}
+              >
+                <i className="fa-solid fa-paste"></i> {currentLang === 'en' ? 'Bulk Paste List' : 'لصق قائمة أرقام'}
+              </button>
+              <button
+                type="button"
+                className={`btn ${smartTab === 'OCR' ? 'btn-primary' : ''}`}
+                style={smartTab !== 'OCR' ? { background: 'transparent' } : {}}
+                onClick={() => setSmartTab('OCR')}
+              >
+                <i className="fa-solid fa-camera"></i> {currentLang === 'en' ? 'OCR Camera & Image' : 'الماسح الضوئي والكاميرا (OCR)'}
+              </button>
+            </div>
+
+            {/* TAB 1: RANGE */}
+            {smartTab === 'RANGE' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: 0 }}>
+                  {currentLang === 'en' ? 'Select all available Turkey inventory bars between Start and End serial numbers.' : 'تحديد جميع السبائك المتاحة بمخزون تركيا بين رقم البداية والنهاية.'}
+                </p>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Start Serial Number' : 'رقم البداية'}</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder="e.g. TR-2026-0001"
+                      value={rangeStart}
+                      onChange={e => setRangeStart(e.target.value)}
+                    />
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'End Serial Number' : 'رقم النهاية'}</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder="e.g. TR-2026-0050"
+                      value={rangeEnd}
+                      onChange={e => setRangeEnd(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '10px' }}>
+                  <button type="button" className="btn" onClick={() => setShowSmartModal(false)}>
+                    {currentLang === 'en' ? 'Cancel' : 'إلغاء'}
+                  </button>
+                  <button type="button" className="btn btn-primary" onClick={handleApplyRangeSelect}>
+                    <i className="fa-solid fa-check-double"></i> {currentLang === 'en' ? 'Select Range from Inventory' : 'تحديد النطاق من المخزون'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* TAB 2: PASTE */}
+            {smartTab === 'PASTE' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: 0 }}>
+                  {currentLang === 'en' ? 'Paste a list of serial numbers (separated by commas, lines, or spaces) to auto-match and select them in Turkey stock.' : 'الصق قائمة من الأرقام التسلسلية لمطابقتها وتحديدها تلقائياً من مخزون تركيا.'}
+                </p>
+                <textarea
+                  rows={6}
+                  className="form-control"
+                  placeholder={currentLang === 'en' ? 'e.g.\nB00570\nTR-2026-0001\nTR-2026-0002' : 'مثال:\nB00570\nTR-2026-0001\nTR-2026-0002'}
+                  value={pasteText}
+                  onChange={e => setPasteText(e.target.value)}
+                  style={{ fontFamily: 'monospace', fontSize: '12px' }}
+                />
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                  <button type="button" className="btn" onClick={() => setShowSmartModal(false)}>
+                    {currentLang === 'en' ? 'Cancel' : 'إلغاء'}
+                  </button>
+                  <button type="button" className="btn btn-primary" onClick={handleApplyPasteSelect}>
+                    <i className="fa-solid fa-check"></i> {currentLang === 'en' ? 'Match & Select Bars' : 'مطابقة وتحديد السبائك'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* TAB 3: OCR */}
+            {smartTab === 'OCR' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: 0 }}>
+                  {currentLang === 'en' 
+                    ? 'Scan physical gold bar serial engraving (e.g. B00570) using device camera or by uploading a photo.' 
+                    : 'مسح وقراءة الرقم التسلسلي المحفور على السبيكة (مثل B00570) بالكاميرا أو بتحميل صورة.'}
+                </p>
+
+                {/* Camera / File options */}
+                <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                  <label className="btn btn-secondary" style={{ cursor: 'pointer', margin: 0 }}>
+                    <i className="fa-solid fa-image"></i> {currentLang === 'en' ? 'Upload Photo' : 'تحميل صورة'}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      style={{ display: 'none' }}
+                      onChange={e => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          const reader = new FileReader();
+                          reader.onload = ev => {
+                            const dataUrl = ev.target?.result as string;
+                            setOcrImage(dataUrl);
+                            processOcrImage(dataUrl);
+                          };
+                          reader.readAsDataURL(file);
+                        }
+                      }}
+                    />
+                  </label>
+
+                  {!cameraActive ? (
+                    <button type="button" className="btn btn-secondary" onClick={startCamera}>
+                      <i className="fa-solid fa-camera"></i> {currentLang === 'en' ? 'Open Camera' : 'تشغيل الكاميرا'}
+                    </button>
+                  ) : (
+                    <>
+                      <button type="button" className="btn btn-primary" onClick={captureCameraFrame}>
+                        <i className="fa-solid fa-camera-retro"></i> {currentLang === 'en' ? 'Capture Frame' : 'التقاط الصورة'}
+                      </button>
+                      <button type="button" className="btn btn-danger" onClick={stopCamera}>
+                        {currentLang === 'en' ? 'Stop Camera' : 'إيقاف الكاميرا'}
+                      </button>
+                    </>
+                  )}
+                </div>
+
+                {/* Video Stream Preview */}
+                {cameraActive && (
+                  <div style={{ width: '100%', maxHeight: '240px', overflow: 'hidden', borderRadius: '8px', background: '#000', display: 'flex', justifyContent: 'center' }}>
+                    <video ref={videoRef} autoPlay playsInline style={{ maxHeight: '240px', width: 'auto' }} />
+                  </div>
+                )}
+
+                {/* OCR Progress Indicator */}
+                {ocrLoading && (
+                  <div style={{ textAlign: 'center', padding: '12px' }}>
+                    <div style={{ fontSize: '12px', color: 'var(--kfh-green)', marginBottom: '6px' }}>{ocrStatusText} ({ocrProgress}%)</div>
+                    <div style={{ width: '100%', height: '6px', background: 'var(--surface-border)', borderRadius: '3px', overflow: 'hidden' }}>
+                      <div style={{ width: `${ocrProgress}%`, height: '100%', background: 'var(--kfh-green)', transition: 'width 0.2s' }}></div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Extracted Tokens Candidate List */}
+                {!ocrLoading && extractedSerials.length > 0 && (
+                  <div style={{ border: '1px solid var(--surface-border)', borderRadius: '6px', padding: '12px', background: 'rgba(255,255,255,0.02)' }}>
+                    <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--kfh-green)', display: 'block', marginBottom: '8px' }}>
+                      {currentLang === 'en' ? 'Recognized Serials (Click to toggle):' : 'الأرقام المقروءة (انقر للتحديد):'}
+                    </label>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                      {extractedSerials.map((cand, idx) => (
+                        <span
+                          key={idx}
+                          onClick={() => {
+                            setExtractedSerials(prev => prev.map((c, i) => i === idx ? { ...c, selected: !c.selected } : c));
+                          }}
+                          style={{
+                            fontSize: '12px',
+                            fontWeight: 'bold',
+                            padding: '4px 10px',
+                            borderRadius: '4px',
+                            cursor: 'pointer',
+                            background: cand.selected ? 'rgba(0, 155, 78, 0.2)' : 'rgba(255,255,255,0.05)',
+                            border: `1px solid ${cand.selected ? 'var(--kfh-green)' : 'var(--surface-border)'}`,
+                            color: cand.selected ? 'var(--kfh-green)' : 'inherit'
+                          }}
+                        >
+                          {cand.serial} {cand.selected ? '✓' : ''}
+                        </span>
+                      ))}
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '12px' }}>
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        onClick={() => {
+                          const selected = extractedSerials.filter(c => c.selected).map(c => c.serial);
+                          handleApplyExtractedMatches(selected);
+                        }}
+                      >
+                        <i className="fa-solid fa-check"></i> {currentLang === 'en' ? 'Select Scanned Bars in Turkey Stock' : 'تحديد السبائك المقروءة من مخزون تركيا'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+          </div>
         </div>
       )}
 

@@ -170,10 +170,10 @@ const Translations: Record<string, Record<string, string>> = {
     ticker_feed: "360T Feed",
     ticker_silver: "XAG (Silver/oz):",
     header_timezone: "GMT+3 (Kuwait)",
-    kpi_prop_gold: "Proprietary Gold Stock",
-    kpi_sync: "Balances match Core Banking",
-    kpi_ready: "Ready for Sale (Prop)",
-    kpi_ready_sub: "KFH-owned bars ready in slots",
+    kpi_prop_gold: "Proprietary Gold Stock (Pre-Transfer)",
+    kpi_sync: "Turkey / Inbound Consignment",
+    kpi_ready: "Ready for Sale (Transferred to KFH)",
+    kpi_ready_sub: "Transferred to KFH & cleared in vault",
     kpi_reserved: "Reserved Checkout Locks",
     kpi_reserved_sub: "active checkout sessions",
     kpi_custody: "Client Custody Stock",
@@ -484,10 +484,10 @@ const Translations: Record<string, Record<string, string>> = {
     ticker_feed: "تسعير 360T",
     ticker_silver: "الفضة (أونصة):",
     header_timezone: "توقيت الكويت (GMT+3)",
-    kpi_prop_gold: "مخزون الذهب للبنك",
-    kpi_sync: "الأرصدة متطابقة مع النظام المصرفي",
-    kpi_ready: "جاهز للبيع (مخزون البنك)",
-    kpi_ready_sub: "سبائك بيتك جاهزة في أماكنها",
+    kpi_prop_gold: "مخزون الذهب المملوك (قبل النقل)",
+    kpi_sync: "مخزون تركيا قبل الشراء والنقل",
+    kpi_ready: "جاهز للبيع (تم النقل لـ KFH)",
+    kpi_ready_sub: "تم نقله لملكية بيتك وجاهز بالخزينة",
     kpi_reserved: "حجوزات شراء معلقة",
     kpi_reserved_sub: "جلسات شراء نشطة حالياً",
     kpi_custody: "مخزون أمانات العملاء",
@@ -943,6 +943,11 @@ export default function App() {
   const [pendingIntakesList, setPendingIntakesList] = useState<any[]>([]);
   const [previewBarcodeModal, setPreviewBarcodeModal] = useState<any>(null);
   const [intakeActiveSubTab, setIntakeActiveSubTab] = useState<'RECEIVE_FORM' | 'IN_FLIGHT_LOG'>('RECEIVE_FORM');
+  const [collapsedSections, setCollapsedSections] = useState<{ [key: string]: boolean }>({});
+
+  const toggleSectionCollapse = (sectionKey: string) => {
+    setCollapsedSections(prev => ({ ...prev, [sectionKey]: !prev[sectionKey] }));
+  };
 
   // Track which P.O. is expanded to show its line items in Receive Shipments
   const [expandedPOId, setExpandedPOId] = useState<number | null>(null);
@@ -1683,7 +1688,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     p.is_active !== false && p.origin_country === poOrigin
   );
   const poProductLabel = (p: any) =>
-    `${p.metal_name} ${p.denomination_label}${p.purity_value ? ` — ${p.purity_value}` : ''}${p.weight_grams ? ` (${p.weight_grams}g)` : ''}`;
+    `${p.metal_name} ${p.denomination_label}${p.weight_grams ? ` (${p.weight_grams}g)` : ''}`;
   const poComboSelected = poActiveProducts.find((p: any) => String(p.product_id) === String(poEntryProduct));
   const poComboMatches = poActiveProducts.filter((p: any) => {
     const q = poComboQuery.trim().toLowerCase();
@@ -3591,10 +3596,6 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   };
 
   const handleSubmitUC03Intake = async () => {
-    if (!intakeLotNum.trim()) {
-      alert(currentLang === 'en' ? 'Please enter a Lot / Batch Number.' : 'يرجى إدخال رقم اللوت / التشغيلة.');
-      return;
-    }
     if (intakeBars.length === 0) {
       alert(currentLang === 'en' ? 'Please add at least one bar to the shipment.' : 'يرجى إضافة سبيكة واحدة على الأقل للشحنة.');
       return;
@@ -3608,8 +3609,8 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     const duplicates = serials.filter((item, index) => serials.indexOf(item) !== index);
     if (duplicates.length > 0) {
       alert(currentLang === 'en' 
-        ? `Duplicate serial detected in shipment: ${duplicates[0]}. (UC03 E1: Duplicate serials rejected)` 
-        : `تم اكتشاف رقم تسلسلي مكرر في الشحنة: ${duplicates[0]}. (قاعدة UC03 E1: رفض الأرقام المكررة)`);
+        ? `Duplicate serial detected in shipment: ${duplicates[0]}.` 
+        : `تم اكتشاف رقم تسلسلي مكرر في الشحنة: ${duplicates[0]}.`);
       return;
     }
 
@@ -3622,7 +3623,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
         receivingDate: intakeReceivingDate ? new Date(intakeReceivingDate).toISOString() : new Date().toISOString(),
         supportingDocumentUrl: intakeDocUrl || null,
         discrepancyNotes: intakeDiscrepancyNotes || null,
-        lotNumber: intakeLotNum.trim(),
+        lotNumber: intakeLotNum.trim() || `LOT-SUP-${Date.now()}`,
         locationId: intakeSelectedLocation || 1,
         receivedBy: displayName,
         ownershipType: intakeOwnershipType,
@@ -3754,7 +3755,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
           civil_id: h.civil_id,
           name: h.customer_name,
           serial: h.serial_number,
-          details: `${h.metal_name} / ${h.weight_grams}g Bar (${h.purity_value}%)`,
+          details: `${h.metal_name} / ${h.weight_grams}g Bar`,
           coords: h.location_description || 'N/A',
           status: h.status_code
         })));
@@ -4167,8 +4168,8 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     { type: 'item', key: 'screen-custody', label: t('menu_custody'), icon: 'fa-solid fa-vault', permission: 'custody', onClick: () => setActiveTab('screen-custody') },
     { type: 'item', key: 'screen-customer-receipt', label: t('menu_customer_receipt'), icon: 'fa-solid fa-hand-holding-dollar', permission: 'intake', onClick: () => { setActiveTab('screen-customer-receipt'); resetCustomerReceiptForm(); } },
     { type: 'item', key: 'screen-gfs-delivery', label: currentLang === 'en' ? 'GFS Branch Delivery' : 'طلبات فروع GFS', icon: 'fa-solid fa-truck-fast', permission: 'intake', onClick: () => { setActiveTab('screen-gfs-delivery'); fetchGfsDeliveryRequests(); fetchGfsSyncLogs(); } },
-    { type: 'item', key: 'screen-home-delivery', label: currentLang === 'en' ? 'Home Delivery (UC07)' : 'توصيل المنازل (UC07)', icon: 'fa-solid fa-house-chimney-user', permission: 'intake', onClick: () => { setActiveTab('screen-home-delivery'); fetchHomeDeliveries(); } },
-    { type: 'item', key: 'screen-damaged-bars', label: currentLang === 'en' ? 'Damaged Bar Approvals (UC12)' : 'اعتماد السبائك التالفة (UC12)', icon: 'fa-solid fa-triangle-exclamation', permission: 'custody', onClick: () => { setActiveTab('screen-damaged-bars'); fetchDamagedBars(); } },
+    { type: 'item', key: 'screen-home-delivery', label: currentLang === 'en' ? 'Home Delivery' : 'توصيل المنازل', icon: 'fa-solid fa-house-chimney-user', permission: 'intake', onClick: () => { setActiveTab('screen-home-delivery'); fetchHomeDeliveries(); } },
+    { type: 'item', key: 'screen-damaged-bars', label: currentLang === 'en' ? 'Damaged Bar Approvals' : 'اعتماد السبائك التالفة', icon: 'fa-solid fa-triangle-exclamation', permission: 'custody', onClick: () => { setActiveTab('screen-damaged-bars'); fetchDamagedBars(); } },
 
     // 3. Stock Cut-Off Thresholds (BRD UC09 & UC10)
     { type: 'item', key: 'screen-stock-thresholds', label: currentLang === 'en' ? 'Stock Cut-Off Thresholds' : 'حدود المخزون', icon: 'fa-solid fa-calculator', permission: 'master_data', onClick: () => { setActiveTab('screen-stock-thresholds'); fetchStockThresholds(); fetchEnterpriseStockAlerts(); fetchProducts(); } },
@@ -4264,87 +4265,148 @@ const [migrationApproved, setMigrationApproved] = useState(false);
         )}
 
         <nav className="sidebar-menu">
-          {orderedMenuNodes.map((node, i) => {
-            if (!menuVisibleFlags[i]) return null;
+          {(() => {
+            let activeSectionKey = '';
+            return orderedMenuNodes.map((node, i) => {
+              if (!menuVisibleFlags[i]) return null;
 
-            // Drag-and-drop: the whole row is draggable while editing. Drop position
-            // is resolved to "insert immediately before the row you release over"
-            // (see reorderMenuByDrag), anywhere in the flat list, sections included.
-            const dragProps = menuEditMode ? {
-              draggable: true,
-              onDragStart: (e: React.DragEvent) => {
-                setDraggedMenuKey(node.key);
-                e.dataTransfer.effectAllowed = 'move';
-              },
-              onDragOver: (e: React.DragEvent) => {
-                e.preventDefault();
-                e.dataTransfer.dropEffect = 'move';
-                if (dragOverMenuKey !== node.key) setDragOverMenuKey(node.key);
-              },
-              onDragLeave: () => {
-                setDragOverMenuKey(prev => (prev === node.key ? null : prev));
-              },
-              onDrop: (e: React.DragEvent) => {
-                e.preventDefault();
-                if (draggedMenuKey) reorderMenuByDrag(draggedMenuKey, node.key);
-                setDraggedMenuKey(null);
-                setDragOverMenuKey(null);
-              },
-              onDragEnd: () => {
-                setDraggedMenuKey(null);
-                setDragOverMenuKey(null);
+              if (node.type === 'section') {
+                activeSectionKey = node.key;
+                const isCollapsed = !!collapsedSections[node.key];
+
+                const dragProps = menuEditMode ? {
+                  draggable: true,
+                  onDragStart: (e: React.DragEvent) => {
+                    setDraggedMenuKey(node.key);
+                    e.dataTransfer.effectAllowed = 'move';
+                  },
+                  onDragOver: (e: React.DragEvent) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    if (dragOverMenuKey !== node.key) setDragOverMenuKey(node.key);
+                  },
+                  onDragLeave: () => {
+                    setDragOverMenuKey(prev => (prev === node.key ? null : prev));
+                  },
+                  onDrop: (e: React.DragEvent) => {
+                    e.preventDefault();
+                    if (draggedMenuKey) reorderMenuByDrag(draggedMenuKey, node.key);
+                    setDraggedMenuKey(null);
+                    setDragOverMenuKey(null);
+                  },
+                  onDragEnd: () => {
+                    setDraggedMenuKey(null);
+                    setDragOverMenuKey(null);
+                  }
+                } : {};
+
+                const isBeingDragged = menuEditMode && draggedMenuKey === node.key;
+                const isDropTarget = menuEditMode && dragOverMenuKey === node.key && draggedMenuKey !== node.key;
+                const dragHandle = menuEditMode && (
+                  <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', color: 'var(--text-muted)' }}>
+                    <i className="fa-solid fa-grip-vertical" style={{ fontSize: '13px', cursor: 'grab', opacity: 0.7 }} title={currentLang === 'en' ? 'Drag to reorder' : 'اسحب لإعادة الترتيب'}></i>
+                  </span>
+                );
+
+                const rowStyleExtra: React.CSSProperties = menuEditMode ? {
+                  opacity: isBeingDragged ? 0.4 : 1,
+                  boxShadow: isDropTarget ? 'inset 0 2px 0 0 var(--kfh-green)' : undefined,
+                  cursor: 'grab'
+                } : {};
+
+                return (
+                  <div
+                    key={node.key}
+                    className="menu-section-header"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      cursor: menuEditMode ? 'grab' : 'pointer',
+                      userSelect: 'none',
+                      ...rowStyleExtra
+                    }}
+                    onClick={menuEditMode ? undefined : () => toggleSectionCollapse(node.key)}
+                    {...dragProps}
+                  >
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ fontSize: '10px', width: '12px', display: 'inline-block' }}>
+                        {isCollapsed ? (currentLang === 'ar' ? '◀' : '▶') : '▼'}
+                      </span>
+                      <span>{node.label}</span>
+                    </span>
+                    {dragHandle}
+                  </div>
+                );
               }
-            } : {};
 
-            const isBeingDragged = menuEditMode && draggedMenuKey === node.key;
-            const isDropTarget = menuEditMode && dragOverMenuKey === node.key && draggedMenuKey !== node.key;
-            const dragHandle = menuEditMode && (
-              <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', color: 'var(--text-muted)' }}>
-                <i className="fa-solid fa-grip-vertical" style={{ fontSize: '13px', cursor: 'grab', opacity: 0.7 }} title={currentLang === 'en' ? 'Drag to reorder' : 'اسحب لإعادة الترتيب'}></i>
-              </span>
-            );
+              // Hide child items if parent section is collapsed (unless in menuEditMode)
+              if (activeSectionKey && collapsedSections[activeSectionKey] && !menuEditMode) {
+                return null;
+              }
 
-            const rowStyleExtra: React.CSSProperties = menuEditMode ? {
-              opacity: isBeingDragged ? 0.4 : 1,
-              boxShadow: isDropTarget ? 'inset 0 2px 0 0 var(--kfh-green)' : undefined,
-              cursor: 'grab'
-            } : {};
+              const dragProps = menuEditMode ? {
+                draggable: true,
+                onDragStart: (e: React.DragEvent) => {
+                  setDraggedMenuKey(node.key);
+                  e.dataTransfer.effectAllowed = 'move';
+                },
+                onDragOver: (e: React.DragEvent) => {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = 'move';
+                  if (dragOverMenuKey !== node.key) setDragOverMenuKey(node.key);
+                },
+                onDragLeave: () => {
+                  setDragOverMenuKey(prev => (prev === node.key ? null : prev));
+                },
+                onDrop: (e: React.DragEvent) => {
+                  e.preventDefault();
+                  if (draggedMenuKey) reorderMenuByDrag(draggedMenuKey, node.key);
+                  setDraggedMenuKey(null);
+                  setDragOverMenuKey(null);
+                },
+                onDragEnd: () => {
+                  setDraggedMenuKey(null);
+                  setDragOverMenuKey(null);
+                }
+              } : {};
 
-            if (node.type === 'section') {
+              const isBeingDragged = menuEditMode && draggedMenuKey === node.key;
+              const isDropTarget = menuEditMode && dragOverMenuKey === node.key && draggedMenuKey !== node.key;
+              const dragHandle = menuEditMode && (
+                <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', color: 'var(--text-muted)' }}>
+                  <i className="fa-solid fa-grip-vertical" style={{ fontSize: '13px', cursor: 'grab', opacity: 0.7 }} title={currentLang === 'en' ? 'Drag to reorder' : 'اسحب لإعادة الترتيب'}></i>
+                </span>
+              );
+
+              const rowStyleExtra: React.CSSProperties = menuEditMode ? {
+                opacity: isBeingDragged ? 0.4 : 1,
+                boxShadow: isDropTarget ? 'inset 0 2px 0 0 var(--kfh-green)' : undefined,
+                cursor: 'grab'
+              } : {};
+
               return (
                 <div
                   key={node.key}
-                  className="menu-section-header"
-                  style={{ display: 'flex', alignItems: 'center', ...rowStyleExtra }}
+                  className={`menu-item ${activeTab === node.key ? 'active' : ''}`}
+                  style={{ display: 'flex', alignItems: 'center', cursor: menuEditMode ? 'grab' : 'pointer', ...rowStyleExtra }}
+                  onClick={menuEditMode ? undefined : node.onClick}
                   {...dragProps}
                 >
+                  <i className={`${node.icon} menu-item-icon`}></i>
                   <span>{node.label}</span>
+                  {node.showLiveDot && (
+                    <span style={{
+                      marginLeft: menuEditMode ? '8px' : 'auto', width: '8px', height: '8px', borderRadius: '50%',
+                      background: hubStatus === 'live' ? '#22C55E' : hubStatus === 'connecting' ? '#F59E0B' : '#9CA3AF',
+                      boxShadow: hubStatus === 'live' ? '0 0 0 3px rgba(34,197,94,0.2)' : 'none'
+                    }}></span>
+                  )}
                   {dragHandle}
                 </div>
               );
-            }
-
-            return (
-              <div
-                key={node.key}
-                className={`menu-item ${activeTab === node.key ? 'active' : ''}`}
-                style={{ display: 'flex', alignItems: 'center', cursor: menuEditMode ? 'grab' : 'pointer', ...rowStyleExtra }}
-                onClick={menuEditMode ? undefined : node.onClick}
-                {...dragProps}
-              >
-                <i className={`${node.icon} menu-item-icon`}></i>
-                <span>{node.label}</span>
-                {node.showLiveDot && (
-                  <span style={{
-                    marginLeft: menuEditMode ? '8px' : 'auto', width: '8px', height: '8px', borderRadius: '50%',
-                    background: hubStatus === 'live' ? '#22C55E' : hubStatus === 'connecting' ? '#F59E0B' : '#9CA3AF',
-                    boxShadow: hubStatus === 'live' ? '0 0 0 3px rgba(34,197,94,0.2)' : 'none'
-                  }}></span>
-                )}
-                {dragHandle}
-              </div>
-            );
-          })}
+            });
+          })()}
         </nav>
 
         {/* User Info Footer */}
@@ -4364,9 +4426,9 @@ const [migrationApproved, setMigrationApproved] = useState(false);
 
       {/* 2. CORE WORKSPACE AREA */}
       <main id="main-panel">
-        <header id="main-header">
+        <header id="main-header" style={{ height: 'auto', minHeight: '60px', padding: '10px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
           <div className="header-title-box">
-            <h1>{t(
+            <h1 style={{ margin: 0, fontSize: '17px', color: '#005A3E', fontWeight: 'bold' }}>{t(
               activeTab === 'screen-exec' ? 'title_exec' :
               activeTab === 'screen-my-activity' ? 'title_my_activity' :
               activeTab === 'screen-active-deals' ? 'title_active_deals' :
@@ -4375,44 +4437,72 @@ const [migrationApproved, setMigrationApproved] = useState(false);
             )}</h1>
           </div>
 
-          <div className="header-controls">
-            <div className="rate-ticker-live">
+          <div className="header-controls" style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+            <div className="rate-ticker-live" style={{ backgroundColor: '#F3F4F6', border: '1px solid #D1DCD4', padding: '4px 12px', borderRadius: '4px' }}>
               <div className="ticker-item">
-                <span className="gold-lbl">{t('ticker_gold')}</span>
+                <span className="gold-lbl" style={{ color: '#D97706', fontWeight: 'bold' }}>{t('ticker_gold')}</span>
                 <span className="val">${goldRate.toFixed(2)}</span>
-                <span className="green-arrow"><i className="fa-solid fa-circle-arrow-up"></i></span>
-                <span style={{ color: 'var(--text-muted)', fontSize: '10px' }}>{t('ticker_feed')}</span>
+                <span className="green-arrow" style={{ color: '#009B4E' }}><i className="fa-solid fa-arrow-trend-up"></i></span>
               </div>
-              <div className="ticker-item">
-                <span className="silver-lbl">{t('ticker_silver')}</span>
+              <div className="ticker-item" style={{ borderLeft: '1px solid #D1D5DB', paddingLeft: '8px' }}>
+                <span className="silver-lbl" style={{ color: '#6B7280', fontWeight: 'bold' }}>{t('ticker_silver')}</span>
                 <span className="val">${silverRate.toFixed(2)}</span>
-                <span className="green-arrow"><i className="fa-solid fa-circle-arrow-up"></i></span>
+                <span className="green-arrow" style={{ color: '#009B4E' }}><i className="fa-solid fa-arrow-trend-up"></i></span>
               </div>
             </div>
-            <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-              <i className="fa-regular fa-clock"></i> {t('header_timezone')}
-            </span>
-            <button
-              className="btn"
-              onClick={() => setActiveApp('GFS')}
-              style={{
-                padding: '6px 14px',
-                fontSize: '13px',
-                background: 'linear-gradient(135deg, #D4AF37 0%, #AA771C 100%)',
-                color: '#070b14',
-                border: 'none',
-                fontWeight: '700',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                boxShadow: '0 2px 8px rgba(212, 175, 55, 0.4)'
-              }}
-            >
-              <i className="fa-solid fa-coins"></i> {currentLang === 'en' ? 'GFS Customer Portal' : 'بوابة عملاء الذهب (GFS)'}
-            </button>
-            <button className="btn" onClick={toggleLanguage} style={{ padding: '6px 12px', fontSize: '13px', borderColor: 'var(--accent-gold)', color: 'var(--accent-gold)', fontWeight: '600' }}>
+
+            {/* User Greeting & Status Indicator */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#111827', fontWeight: 'bold' }}>
+              <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#009B4E' }}></span>
+              <span>{displayName?.toUpperCase() || username?.toUpperCase()}</span>
+              <span style={{ backgroundColor: '#E0EAE4', color: '#005A3E', padding: '2px 6px', borderRadius: '3px', fontSize: '10px' }}>{userRole}</span>
+            </div>
+
+            {/* Quick Action Icons */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <button
+                onClick={() => setActiveTab('screen-exec')}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '2px' }}
+                title="Home"
+              >
+                <i className="fa-solid fa-house" style={{ fontSize: '15px', color: '#D97706' }}></i>
+                <span style={{ fontSize: '9px', color: '#6B7280' }}>Home</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('screen-monitoring')}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '2px' }}
+                title="Alerts & SLA"
+              >
+                <i className="fa-solid fa-envelope" style={{ fontSize: '15px', color: '#D97706' }}></i>
+                <span style={{ fontSize: '9px', color: '#6B7280' }}>Alerts</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('screen-admin')}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '2px' }}
+                title="Settings"
+              >
+                <i className="fa-solid fa-gears" style={{ fontSize: '15px', color: '#6B7280' }}></i>
+                <span style={{ fontSize: '9px', color: '#6B7280' }}>Settings</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  disconnectMonitoringHub();
+                  setIsLoggedIn(false);
+                  setUsername('');
+                  setPassword('');
+                }}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '2px' }}
+                title="Logout"
+              >
+                <i className="fa-solid fa-arrow-right-from-bracket" style={{ fontSize: '15px', color: '#DC2626' }}></i>
+                <span style={{ fontSize: '9px', color: '#6B7280' }}>Logout</span>
+              </button>
+            </div>
+
+            <button className="btn" onClick={toggleLanguage} style={{ padding: '4px 10px', fontSize: '12px', backgroundColor: '#005A3E', color: '#FFFFFF', border: 'none', borderRadius: '4px', fontWeight: 'bold' }}>
               <i className="fa-solid fa-globe"></i> {currentLang === 'en' ? 'العربية' : 'English'}
             </button>
           </div>
@@ -5306,7 +5396,6 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                                           <div>
                                             <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>{currentLang === 'en' ? 'Product' : 'المنتج'}</div>
                                             <strong style={{ color: 'var(--accent-blue)' }}>{prodName}</strong>
-                                            {prod && prod.purity_value && <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>Purity: {prod.purity_value}</div>}
                                           </div>
                                           <div>
                                             <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>{currentLang === 'en' ? 'Quantity' : 'الكمية'}</div>
@@ -5349,36 +5438,13 @@ const [migrationApproved, setMigrationApproved] = useState(false);
               <div>
                 <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <i className="fa-solid fa-truck-ramp-box" style={{ color: 'var(--kfh-green)' }}></i>
-                  {currentLang === 'en' ? 'UC-03: Receipt of Precious Metals from Supplier' : 'UC-03: استلام المعادن الثمينة من المورد'}
+                  {currentLang === 'en' ? 'Receipt of Precious Metals from Supplier' : 'استلام المعادن الثمينة من المورد'}
                 </h3>
                 <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: '4px 0 0 0' }}>
                   {currentLang === 'en' 
-                    ? 'Verify shipment manifest, record individual bar serials, purity, and gross weight, flag physical condition/damage, and submit to Vault Maker-Checker approval.' 
-                    : 'التحقق من بيان الشحنة، تسجيل الأرقام التسلسلي والنقاوة والوزن، توثيق حالة السبائك والتلفيات، وإرسالها لاعتماد مراجع الخزينة.'}
+                    ? 'Verify shipment manifest, record individual bar serials and gross weight, flag physical condition/damage, and submit to Vault Maker-Checker approval.' 
+                    : 'التحقق من بيان الشحنة، تسجيل الأرقام التسلسلي والوزن، توثيق حالة السبائك والتلفيات، وإرسالها لاعتماد مراجع الخزينة.'}
                 </p>
-              </div>
-
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <button
-                  className={`btn ${intakeActiveSubTab === 'RECEIVE_FORM' ? 'btn-primary' : ''}`}
-                  style={intakeActiveSubTab !== 'RECEIVE_FORM' ? { backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--surface-border)' } : {}}
-                  onClick={() => setIntakeActiveSubTab('RECEIVE_FORM')}
-                >
-                  <i className="fa-solid fa-plus-circle"></i> {currentLang === 'en' ? 'New Shipment Intake' : 'استلام شحنة جديدة'}
-                </button>
-                <button
-                  className={`btn ${intakeActiveSubTab === 'IN_FLIGHT_LOG' ? 'btn-primary' : ''}`}
-                  style={intakeActiveSubTab !== 'IN_FLIGHT_LOG' ? { backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--surface-border)' } : {}}
-                  onClick={() => {
-                    setIntakeActiveSubTab('IN_FLIGHT_LOG');
-                    fetchPendingIntakes();
-                  }}
-                >
-                  <i className="fa-solid fa-clock-rotate-left"></i> {currentLang === 'en' ? 'In-Flight & Pending Receipts' : 'الشحنات قيد الاعتماد والتدقيق'}
-                  {pendingIntakesList.length > 0 && (
-                    <span className="badge badge-reserved" style={{ marginLeft: '6px', fontSize: '10px' }}>{pendingIntakesList.length}</span>
-                  )}
-                </button>
               </div>
             </div>
 
@@ -5388,96 +5454,51 @@ const [migrationApproved, setMigrationApproved] = useState(false);
               </div>
             )}
 
-            {/* TAB 1: NEW SHIPMENT INTAKE WORKBENCH (UC03) */}
-            {intakeActiveSubTab === 'RECEIVE_FORM' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
 
                 {/* TOP HEADER AGGREGATION BANNER */}
                 {(() => {
                   const totalBarsCount = intakeBars.length;
                   const totalGrossWeightG = intakeBars.reduce((sum, b) => sum + (b.weight_grams || 0), 0);
                   const totalKg = (totalGrossWeightG / 1000).toFixed(3);
-                  const approxLandedKwd = Math.round(totalGrossWeightG * ((goldRate / 31.1035) * 0.308) * 100) / 100;
 
                   return (
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px' }}>
                       <div className="glass-card" style={{ padding: '14px', borderLeft: `4px solid ${intakeOwnershipType === 'TURKEY_OWNED' ? '#E11D48' : 'var(--kfh-green)'}` }}>
-                        <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Shipment Ownership' : 'نوع ملكية الشحنة'}</div>
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Shipment Owner' : 'جهة ملكية الشحنة'}</div>
                         <div style={{ fontSize: '16px', fontWeight: 'bold', marginTop: '4px', color: intakeOwnershipType === 'TURKEY_OWNED' ? '#E11D48' : 'var(--kfh-green)' }}>
-                          {intakeOwnershipType === 'TURKEY_OWNED' ? '🇹🇷 Turkey Consignment' : '🏦 KFH Direct Stock'}
+                          {intakeOwnershipType === 'TURKEY_OWNED' ? '🇹🇷 Turkey' : '🇰🇼 Kuwait'}
                         </div>
                       </div>
 
                       <div className="glass-card" style={{ padding: '14px', borderLeft: '4px solid var(--accent-gold)' }}>
-                        <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Total Manifest Bars' : 'إجمالي عدد السبائك'}</div>
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Draft Manifest (Staged)' : 'كشف الشحنة المسودة'}</div>
                         <div style={{ fontSize: '18px', fontWeight: 'bold', marginTop: '4px', color: 'var(--text-primary)' }}>
-                          {totalBarsCount} <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'pieces' : 'سبيكة'}</span>
+                          {totalBarsCount} <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'bars staged' : 'سبيكة قيد الإدخال'}</span>
+                        </div>
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                          {currentLang === 'en' ? `Manifest Total: ${totalKg} KG (${totalGrossWeightG.toLocaleString()} g)` : `إجمالي الكشف: ${totalKg} كجم`}
                         </div>
                       </div>
 
-                      <div className="glass-card" style={{ padding: '14px', borderLeft: '4px solid var(--kfh-green)' }}>
-                        <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Total Gross Weight' : 'إجمالي الوزن القائم'}</div>
-                        <div style={{ fontSize: '18px', fontWeight: 'bold', marginTop: '4px', color: 'var(--kfh-green)' }}>
-                          {totalKg} KG <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>({totalGrossWeightG.toLocaleString()} g)</span>
+                      <div className="glass-card" style={{ padding: '14px', borderLeft: '4px solid var(--accent-blue)' }}>
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Vault Balance Addition' : 'إضافة رصيد الخزينة'}</div>
+                        <div style={{ fontSize: '15px', fontWeight: 'bold', marginTop: '4px', color: 'var(--accent-orange)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <i className="fa-solid fa-hourglass-half"></i> 0.000 KG
                         </div>
-                      </div>
-
-                      <div className="glass-card" style={{ padding: '14px', borderLeft: '4px solid #3B82F6' }}>
-                        <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Estimated Total Value' : 'القيمة التقديرية للشحنة'}</div>
-                        <div style={{ fontSize: '18px', fontWeight: 'bold', marginTop: '4px', color: '#3B82F6' }}>
-                          {approxLandedKwd.toLocaleString()} <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>KWD</span>
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                          {currentLang === 'en' ? 'Pending Maker-Checker sign-off' : 'بانتظار اعتماد المراجع قبل الإيداع'}
                         </div>
                       </div>
                     </div>
                   );
                 })()}
 
-                {/* SECTION 1: SHIPMENT HEADER, OWNERSHIP & MANIFEST */}
+                {/* SECTION 1: SHIPMENT HEADER */}
                 <div style={{ backgroundColor: 'rgba(255,255,255,0.02)', padding: '16px', borderRadius: '8px', border: '1px solid var(--surface-border)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
-                    <h4 style={{ margin: 0, fontSize: '14px', color: 'var(--kfh-green)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <i className="fa-solid fa-file-invoice"></i> {currentLang === 'en' ? '1. Shipment Manifest & Ownership Type' : '1. بيان الشحنة وتحديد جهة الملكية'}
-                    </h4>
-
-                    {/* Ownership Selection Pills */}
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <button
-                        type="button"
-                        className={`btn ${intakeOwnershipType === 'TURKEY_OWNED' ? 'btn-primary' : 'btn-secondary'}`}
-                        style={{
-                          fontSize: '12px',
-                          padding: '6px 14px',
-                          fontWeight: 'bold',
-                          backgroundColor: intakeOwnershipType === 'TURKEY_OWNED' ? '#E11D48' : 'var(--bg-secondary)',
-                          borderColor: intakeOwnershipType === 'TURKEY_OWNED' ? '#E11D48' : 'var(--surface-border)',
-                          color: '#fff'
-                        }}
-                        onClick={() => setIntakeOwnershipType('TURKEY_OWNED')}
-                      >
-                        🇹🇷 {currentLang === 'en' ? 'Turkey Consignment (TURKEY_OWNED)' : 'أمانة تركيا (TURKEY_OWNED)'}
-                      </button>
-
-                      <button
-                        type="button"
-                        className={`btn ${intakeOwnershipType === 'KFH_OWNED' ? 'btn-primary' : 'btn-secondary'}`}
-                        style={{
-                          fontSize: '12px',
-                          padding: '6px 14px',
-                          fontWeight: 'bold',
-                          backgroundColor: intakeOwnershipType === 'KFH_OWNED' ? 'var(--kfh-green)' : 'var(--bg-secondary)',
-                          borderColor: intakeOwnershipType === 'KFH_OWNED' ? 'var(--kfh-green)' : 'var(--surface-border)',
-                          color: '#fff'
-                        }}
-                        onClick={() => setIntakeOwnershipType('KFH_OWNED')}
-                      >
-                        🏦 {currentLang === 'en' ? 'KFH Direct (KFH_OWNED)' : 'ملك لـ بيتك (KFH_OWNED)'}
-                      </button>
-                    </div>
-                  </div>
-
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
                     <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Supplier / Vendor' : 'المورد'}</label>
+                      <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Supplier' : 'المورد'}</label>
                       <select 
                         className="form-control" 
                         value={intakeVendorId} 
@@ -5486,42 +5507,28 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       >
                         {suppliersList.length > 0 ? (
                           suppliersList.map((v: any) => (
-                            <option key={v.vendor_id} value={v.vendor_id}>{v.name} ({v.country || 'Global'})</option>
+                            <option key={v.vendor_id} value={v.vendor_id}>{v.name}</option>
                           ))
                         ) : (
                           <>
-                            <option value={1}>Nadir Gold Refinery (Turkey)</option>
-                            <option value={2}>Istanbul Gold Refinery (Turkey)</option>
-                            <option value={3}>Valcambi Suisse (Switzerland)</option>
-                            <option value={4}>PAMP SA (Switzerland)</option>
-                            <option value={5}>Emirates Gold (UAE)</option>
+                            <option value={1}>Nadir Gold Refinery</option>
+                            <option value={2}>Valcambi Suisse</option>
                           </>
                         )}
                       </select>
                     </div>
 
                     <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Airway Bill / Waybill #' : 'رقم بوليصة الشحن (Airway Bill)'}</label>
-                      <input 
-                        type="text" 
+                      <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Owner' : 'جهة الملكية'}</label>
+                      <select 
                         className="form-control" 
-                        placeholder="e.g., AWB-8849201" 
-                        value={intakeAirwayBill} 
-                        onChange={e => setIntakeAirwayBill(e.target.value)}
-                        style={{ fontSize: '12px', padding: '6px 8px' }}
-                      />
-                    </div>
-
-                    <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Delivery Note #' : 'رقم إشعار التسليم (Delivery Note)'}</label>
-                      <input 
-                        type="text" 
-                        className="form-control" 
-                        placeholder="e.g., DN-2026-091" 
-                        value={intakeDeliveryNote} 
-                        onChange={e => setIntakeDeliveryNote(e.target.value)}
-                        style={{ fontSize: '12px', padding: '6px 8px' }}
-                      />
+                        value={intakeOwnershipType} 
+                        onChange={e => setIntakeOwnershipType(e.target.value as 'TURKEY_OWNED' | 'KFH_OWNED')}
+                        style={{ fontSize: '12px', padding: '6px 8px', fontWeight: 'bold' }}
+                      >
+                        <option value="TURKEY_OWNED">🇹🇷 {currentLang === 'en' ? 'Turkey' : 'تركيا'}</option>
+                        <option value="KFH_OWNED">🇰🇼 {currentLang === 'en' ? 'Kuwait' : 'الكويت'}</option>
+                      </select>
                     </div>
 
                     <div className="form-group" style={{ marginBottom: 0 }}>
@@ -5537,28 +5544,6 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     </div>
 
                     <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Receiving Date' : 'تاريخ الاستلام الفعلي'}</label>
-                      <input 
-                        type="date" 
-                        className="form-control" 
-                        value={intakeReceivingDate} 
-                        onChange={e => setIntakeReceivingDate(e.target.value)}
-                        style={{ fontSize: '12px', padding: '6px 8px' }}
-                      />
-                    </div>
-
-                    <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Lot / Batch Number' : 'رقم اللوت / التشغيلة'}</label>
-                      <input 
-                        type="text" 
-                        className="form-control" 
-                        value={intakeLotNum} 
-                        onChange={e => setIntakeLotNum(e.target.value)}
-                        style={{ fontSize: '12px', padding: '6px 8px' }}
-                      />
-                    </div>
-
-                    <div className="form-group" style={{ marginBottom: 0 }}>
                       <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Vault Target Slot' : 'موقع التخزين الإحداثي بالخزينة'}</label>
                       <select 
                         className="form-control" 
@@ -5569,78 +5554,37 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                         {locations.flatMap(loc =>
                           loc.slots ? loc.slots.map((s: any) => ({
                             id: s.location_id,
-                            label: `${loc.vault_name || 'Main Vault'} - ${loc.zone_room} - Row ${s.shelf_row} - Slot ${s.slot_bin}`
+                            label: `${loc.vault_name || 'Main Vault'} - ${loc.zone_room} - Slot ${s.slot_bin}`
                           })) : []
                         ).map(item => (
                           <option key={item.id} value={item.id}>{item.label}</option>
                         ))}
                       </select>
                     </div>
-
-                    <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Supporting Documents Ref / URL' : 'مرجع / رابط المستندات المرفقة (Assay/Cert)'}</label>
-                      <input 
-                        type="text" 
-                        className="form-control" 
-                        placeholder="e.g., https://kfh-docs/shipment-88492.pdf" 
-                        value={intakeDocUrl} 
-                        onChange={e => setIntakeDocUrl(e.target.value)}
-                        style={{ fontSize: '12px', padding: '6px 8px' }}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="form-group" style={{ marginTop: '12px', marginBottom: 0 }}>
-                    <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Discrepancy / Partial Shipment Notes' : 'ملاحظات الفروقات أو الاستلام الجزئي'}</label>
-                    <input 
-                      type="text" 
-                      className="form-control" 
-                      placeholder={currentLang === 'en' ? 'e.g. Shipment delivered in 2 containers, assay certificates matched.' : 'مثال: تم تسليم الشحنة في حاويتين، وشهادات الفحص مطابقة.'}
-                      value={intakeDiscrepancyNotes} 
-                      onChange={e => setIntakeDiscrepancyNotes(e.target.value)}
-                      style={{ fontSize: '12px', padding: '6px 8px' }}
-                    />
                   </div>
                 </div>
 
-                {/* SECTION 2: BARS ENTRY & VERIFICATION TABLE */}
+                {/* SECTION 2: PHYSICAL BARS REGISTRY */}
                 <div style={{ backgroundColor: 'rgba(255,255,255,0.02)', padding: '16px', borderRadius: '8px', border: '1px solid var(--surface-border)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
                     <div>
                       <h4 style={{ margin: 0, fontSize: '14px', color: 'var(--kfh-green)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <i className="fa-solid fa-bars"></i> {currentLang === 'en' ? '2. Precious Metal Bars Manifest (Serials & Physical Quality)' : '2. كشف السبائك المستلمة (الأرقام التسلسلية وفحص الجودة)'}
+                        <i className="fa-solid fa-cubes-stacked"></i> {currentLang === 'en' ? '2. Physical Gold Bars Manifest' : '2. كشف السبائك المستلمة'}
                       </h4>
                       <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: '4px 0 0 0' }}>
                         {currentLang === 'en' 
-                          ? 'Enter each bar serial number, select product denomination (auto-assigns weight & purity), and flag damaged bars for quarantine.' 
-                          : 'أدخل الرقم التسلسلي لكل سبيكة، حدد الفئة (يحدد الوزن والنقاوة تلقائياً)، وحدد السبائك التالفة للعزل.'}
+                          ? 'Enter each bar serial number, select product denomination (auto-assigns weight), and flag damaged bars for quarantine.' 
+                          : 'أدخل الرقم التسلسلي لكل سبيكة، حدد الفئة (يحدد الوزن تلقائياً)، وحدد السبائك التالفة للعزل.'}
                       </p>
                     </div>
 
                     <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                      <button
-                        type="button"
-                        className="btn btn-primary"
-                        style={{ fontSize: '12px', padding: '6px 14px', fontWeight: 'bold', background: 'linear-gradient(135deg, #D4AF37 0%, #AA771C 100%)', color: '#070b14', border: 'none' }}
-                        onClick={() => setShowSerialToolsModal(true)}
-                      >
-                        <i className="fa-solid fa-wand-magic-sparkles"></i> {currentLang === 'en' ? 'Smart Tools (Range / Paste / OCR)' : 'أدوات الأرقام الذكية (نطاق / لصق / OCR)'}
+                      <button className="btn btn-primary" style={{ fontSize: '11px', padding: '6px 12px' }} onClick={() => setShowSerialToolsModal(true)}>
+                        <i className="fa-solid fa-arrow-down-1-9"></i> {currentLang === 'en' ? 'Add Serial Range' : 'إضافة نطاق تسلسلي'}
                       </button>
                       <button className="btn btn-secondary" style={{ fontSize: '11px', padding: '6px 10px' }} onClick={handleAddIntakeBar}>
                         <i className="fa-solid fa-plus"></i> {currentLang === 'en' ? 'Add Bar' : 'إضافة سبيكة'}
                       </button>
-                      <button className="btn btn-secondary" style={{ fontSize: '11px', padding: '6px 10px', backgroundColor: 'rgba(212, 160, 23, 0.15)', color: 'var(--accent-gold)' }} onClick={handleAdd5BatchDemo}>
-                        <i className="fa-solid fa-layer-group"></i> {currentLang === 'en' ? '+5 Batch Demo' : '+5 سبائك تجريبية'}
-                      </button>
-                      {intakeBars.length > 1 && (
-                        <button className="btn btn-danger" style={{ fontSize: '11px', padding: '6px 10px' }} onClick={() => {
-                          if (window.confirm(currentLang === 'en' ? 'Clear all bars in manifest?' : 'مسح جميع السبائك في الكشف؟')) {
-                            setIntakeBars([]);
-                          }
-                        }}>
-                          <i className="fa-solid fa-trash-can"></i> {currentLang === 'en' ? 'Clear All' : 'مسح الكل'}
-                        </button>
-                      )}
                     </div>
                   </div>
 
@@ -5649,7 +5593,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       <thead>
                         <tr>
                           <th style={{ width: '40px' }}>#</th>
-                          <th style={{ minWidth: '180px' }}>{currentLang === 'en' ? 'Serial Number (UC03 E1)' : 'الرقم التسلسلي'}</th>
+                          <th style={{ minWidth: '180px' }}>{currentLang === 'en' ? 'Serial Number' : 'الرقم التسلسلي'}</th>
                           <th style={{ minWidth: '220px' }}>{currentLang === 'en' ? 'Product / Denomination' : 'نوع المنتج / الفئة'}</th>
                           <th style={{ minWidth: '160px' }}>{currentLang === 'en' ? 'Refiner / Brand' : 'المصفاة / الماركة'}</th>
                           <th style={{ minWidth: '180px' }}>{currentLang === 'en' ? 'Damaged / Inspection' : 'حالة التلف / الفحص'}</th>
@@ -5659,9 +5603,8 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       </thead>
                       <tbody>
                         {intakeBars.map((bar, idx) => {
-                          const isDuplicate = intakeBars.filter(b => b.serial.trim() && b.serial.trim().toUpperCase() === bar.serial.trim().toUpperCase()).length > 1;
                           return (
-                            <tr key={bar.id} style={{ backgroundColor: bar.is_damaged ? 'rgba(239, 68, 68, 0.04)' : isDuplicate ? 'rgba(245, 158, 11, 0.08)' : 'transparent' }}>
+                            <tr key={bar.id} style={{ backgroundColor: bar.is_damaged ? 'rgba(239, 68, 68, 0.04)' : 'transparent' }}>
                               <td><span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{idx + 1}</span></td>
                               <td>
                                 <input
@@ -5669,19 +5612,8 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                                   className="form-control"
                                   value={bar.serial}
                                   onChange={e => handleUpdateIntakeBar(bar.id, 'serial', e.target.value)}
-                                  placeholder="e.g. BAR-10001"
-                                  style={{
-                                    fontSize: '12px',
-                                    padding: '4px 8px',
-                                    borderColor: isDuplicate ? 'var(--accent-orange)' : 'var(--surface-border)',
-                                    fontWeight: 'bold'
-                                  }}
+                                  style={{ fontSize: '12px', padding: '4px 8px', fontWeight: 'bold' }}
                                 />
-                                {isDuplicate && (
-                                  <div style={{ color: 'var(--accent-orange)', fontSize: '10px', marginTop: '2px' }}>
-                                    <i className="fa-solid fa-triangle-exclamation"></i> Duplicate serial in batch
-                                  </div>
-                                )}
                               </td>
                               <td>
                                 <select
@@ -5692,7 +5624,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                                 >
                                   {products.map((p: any) => (
                                     <option key={p.product_id} value={p.product_id}>
-                                      {p.metal_name} {p.denomination_label} ({p.weight_grams}g - {p.purity_value || '999.9'} PPT)
+                                      {p.metal_name} {p.denomination_label} ({p.weight_grams}g)
                                     </option>
                                   ))}
                                 </select>
@@ -5709,16 +5641,6 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                                       {b.brand_name} {b.is_lbma_certified ? '★ LBMA' : ''}
                                     </option>
                                   ))}
-                                  {brandsList.length === 0 && (
-                                    <>
-                                      <option value="Valcambi Suisse">Valcambi Suisse ★ LBMA</option>
-                                      <option value="PAMP Suisse">PAMP Suisse ★ LBMA</option>
-                                      <option value="Argor-Heraeus">Argor-Heraeus ★ LBMA</option>
-                                      <option value="Nadir Gold Refinery">Nadir Gold Refinery ★ LBMA</option>
-                                      <option value="Emirates Gold">Emirates Gold</option>
-                                      <option value="KFH Custom Mint Gold">KFH Custom Mint Gold</option>
-                                    </>
-                                  )}
                                 </select>
                               </td>
                               <td>
@@ -5838,77 +5760,6 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                 })()}
 
               </div>
-            )}
-
-            {/* TAB 2: IN-FLIGHT & PENDING RECEIPTS LOG */}
-            {intakeActiveSubTab === 'IN_FLIGHT_LOG' && (
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                  <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: 0 }}>
-                    {currentLang === 'en' 
-                      ? 'Live list of all supplier receipts awaiting 4-eyes Maker-Checker verification or recently completed.' 
-                      : 'سجل شحنات الموردين التي تنتظر اعتماد وتدقيق مبدأ الأعين الأربعة أو المكتملة حديثاً.'}
-                  </p>
-                  <button className="btn btn-secondary" style={{ fontSize: '11px', padding: '4px 10px' }} onClick={fetchPendingIntakes}>
-                    <i className="fa-solid fa-arrows-rotate"></i> {currentLang === 'en' ? 'Refresh' : 'تحديث'}
-                  </button>
-                </div>
-
-                <div className="table-responsive">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>{currentLang === 'en' ? 'Lot Number' : 'رقم اللوت'}</th>
-                        <th>{currentLang === 'en' ? 'Supplier' : 'المورد'}</th>
-                        <th>{currentLang === 'en' ? 'Airway Bill / Ref' : 'بوليصة الشحن / المرجع'}</th>
-                        <th>{currentLang === 'en' ? 'Delivery Note' : 'إشعار التسليم'}</th>
-                        <th>{currentLang === 'en' ? 'Receiving Date' : 'تاريخ الاستلام'}</th>
-                        <th>{currentLang === 'en' ? 'Maker (Received By)' : 'المنشئ'}</th>
-                        <th>{currentLang === 'en' ? 'Target Location' : 'موقع الوجهة'}</th>
-                        <th>{currentLang === 'en' ? 'Status' : 'الحالة'}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {pendingIntakesList.length === 0 ? (
-                        <tr>
-                          <td colSpan={8} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '24px' }}>
-                            {currentLang === 'en' ? 'No pending supplier shipment receipts found.' : 'لا توجد شحنات موردين قيد التدقيق حالياً.'}
-                          </td>
-                        </tr>
-                      ) : (
-                        pendingIntakesList.map((pi: any, idx: number) => {
-                          let itemCount = 0;
-                          try {
-                            if (pi.serials_json) itemCount = JSON.parse(pi.serials_json).length;
-                          } catch (_) {}
-
-                          return (
-                            <tr key={idx}>
-                              <td>
-                                <strong>{pi.lot_number}</strong>
-                                {itemCount > 0 && <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: '6px' }}>({itemCount} bars)</span>}
-                              </td>
-                              <td>{pi.vendor_name || 'Direct Supplier'}</td>
-                              <td>{pi.airway_bill || pi.shipment_reference || 'N/A'}</td>
-                              <td>{pi.delivery_note || 'N/A'}</td>
-                              <td>{new Date(pi.receiving_date || pi.created_at).toLocaleDateString()}</td>
-                              <td>{pi.received_by}</td>
-                              <td><span style={{ fontSize: '11px' }}>{pi.location_desc}</span></td>
-                              <td>
-                                <span className={`badge ${pi.status_code === 'APPROVED' ? 'badge-ready' : 'badge-reserved'}`}>
-                                  {translateDb(pi.status_code)}
-                                </span>
-                              </td>
-                            </tr>
-                          );
-                        })
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-
           </div>
         </section>
 
@@ -6377,7 +6228,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
           <div className="glass-card">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '15px' }}>
               <div>
-                <h3>{currentLang === 'en' ? 'Home Delivery Door-to-Door Fulfillment (UC07)' : 'خدمة التوصيل المنزلي لسبائك الذهب (UC07)'}</h3>
+                <h3>{currentLang === 'en' ? 'Home Delivery Door-to-Door Fulfillment' : 'خدمة التوصيل المنزلي لسبائك الذهب'}</h3>
                 <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>
                   {currentLang === 'en'
                     ? 'Manage residential deliveries across Kuwait with PACI Civil ID validation, courier logistics tracking, and secure 6-digit OTP customer handover confirmation.'
@@ -6521,7 +6372,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
           <div className="glass-card">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '15px' }}>
               <div>
-                <h3>{currentLang === 'en' ? 'Damaged Bar Governance & Maker-Checker Approvals (UC12)' : 'حوكمة واعتماد السبائك التالفة (UC12)'}</h3>
+                <h3>{currentLang === 'en' ? 'Damaged Bar Governance & Maker-Checker Approvals' : 'حوكمة واعتماد السبائك التالفة'}</h3>
                 <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>
                   {currentLang === 'en'
                     ? '4-Eyes verification for damaged gold bars. Maker reports physical defects/MOCI assay deviations; Checker independently approves or rejects quarantine.'
@@ -10558,7 +10409,6 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                                         <th>#</th>
                                         <th>{currentLang === 'en' ? 'Serial Number' : 'الرقم التسلسلي'}</th>
                                         <th>{currentLang === 'en' ? 'Gross Wt' : 'الوزن'}</th>
-                                        <th>{currentLang === 'en' ? 'Purity' : 'النقاوة'}</th>
                                         <th>{currentLang === 'en' ? 'Refiner' : 'المصفاة'}</th>
                                         <th>{currentLang === 'en' ? 'Condition' : 'الحالة'}</th>
                                       </tr>
@@ -10569,7 +10419,6 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                                           <td>{iIdx + 1}</td>
                                           <td><strong>{it.serial}</strong></td>
                                           <td>{it.weight_grams ? `${it.weight_grams}g` : '1000g'}</td>
-                                          <td>{it.purity || it.fineness_ppt || '999.9'} PPT</td>
                                           <td>{it.refiner_name || 'Valcambi Suisse'}</td>
                                           <td>
                                             {it.is_damaged ? (
@@ -11344,7 +11193,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
           <div className="modal-overlay active" onClick={() => setShowDamageModal(false)}>
             <div className="glass-card modal-content-box" onClick={e => e.stopPropagation()} style={{ maxWidth: '480px' }}>
               <div className="modal-header">
-                <h3>{currentLang === 'ar' ? 'إبلاغ عن سبيكة تالفة (Maker-Checker)' : 'Report Damaged Gold Bar (UC12)'}</h3>
+                <h3>{currentLang === 'ar' ? 'إبلاغ عن سبيكة تالفة (Maker-Checker)' : 'Report Damaged Gold Bar'}</h3>
                 <span className="modal-close-btn" onClick={() => setShowDamageModal(false)}>&times;</span>
               </div>
               <div style={{ padding: '15px 0' }}>
@@ -11866,7 +11715,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     <div style={{ fontWeight: 'bold', fontSize: '14px', color: '#111827' }}>{previewBarcodeModal.serial}</div>
                     <div style={{ color: '#4b5563', fontSize: '11px', marginTop: '2px' }}>{previewBarcodeModal.product}</div>
                     <div style={{ color: '#009B4E', fontWeight: 'bold', marginTop: '4px' }}>
-                      {previewBarcodeModal.weight}g • {previewBarcodeModal.purity} PPT
+                      {previewBarcodeModal.weight}g
                     </div>
                     <div style={{ color: '#6b7280', fontSize: '11px', marginTop: '2px' }}>
                       Refiner: {previewBarcodeModal.refiner || 'Valcambi Suisse'}

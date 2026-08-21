@@ -1426,20 +1426,14 @@ public partial class PMIMSControllers : ControllerBase
             items = items.Where(i => i.Lot == null || i.Lot.AcquisitionDate < rangeEndExclusive.Value);
         var scopedItems = items.ToList();
 
-        var goldWeightGrams = scopedItems
-            .Where(i => i.Product?.MetalType?.MetalName == "Gold" && i.OwnershipType == "KFH_OWNED")
+        // Proprietary Gold Stock: gold before transfer to KFH (Turkey Consignment / Inbound)
+        var proprietaryBeforeTransferWeightGrams = scopedItems
+            .Where(i => i.Product?.MetalType?.MetalName == "Gold" && i.OwnershipType == "TURKEY_OWNED")
             .Sum(i => i.Product?.Denomination?.WeightGrams ?? 0m);
 
         // ============================================================
         // Main Vault / Sold / Available-for-Customers cards.
-        // "Available for customers" must additionally require OwnershipType ==
-        // KFH_OWNED: ConfirmPurchaseWithCustodyAsync flips a sold item's
-        // OwnershipType to CUSTOMER_OWNED but leaves StatusCode = "READY" (the
-        // bar physically stays put under custody), so a bare StatusCode ==
-        // "READY" filter -- what ready_qty below used to do -- silently counted
-        // already-sold bars as available stock. Sold is tracked by ownership,
-        // not by a "SOLD" StatusCode, since nothing in this codebase's sale
-        // path ever sets that status value.
+        // "Available for customers / Ready for Sale": gold AFTER transfer from Turkey to KFH (KFH-owned, READY status)
         // ============================================================
         var mainVaultItems = scopedItems.Where(i => i.Location?.Vault?.VaultName == "Main Vault").ToList();
         var soldItems = scopedItems.Where(i => i.OwnershipType == "CUSTOMER_OWNED").ToList();
@@ -1458,12 +1452,6 @@ public partial class PMIMSControllers : ControllerBase
 
         // ============================================================
         // PURCHASE ORDER RECEIPT TRACKING
-        // Include P.O. status metrics on the Executive Board:
-        // - Total P.O.s in the date range
-        // - Fully received (RECEIVED status)
-        // - Partially received (PARTIAL_RECEIPT status)
-        // - Pending approval (PENDING_APPROVAL)
-        // - Approved but not yet received (APPROVED)
         // ============================================================
         var purchaseOrders = (await _repository.GetPurchaseOrdersAsync())
             .AsEnumerable();
@@ -1473,22 +1461,9 @@ public partial class PMIMSControllers : ControllerBase
             purchaseOrders = purchaseOrders.Where(p => p.CreatedAt < rangeEndExclusive.Value);
         var scopedPOs = purchaseOrders.ToList();
 
-        // DEBUG: Log inventory items for diagnosis
-        var allItemsCount = scopedItems.Count;
-        var goldItemsCount = scopedItems.Count(i => i.Product?.MetalType?.MetalName == "Gold");
-        var kfhOwnedGoldCount = scopedItems.Count(i => i.Product?.MetalType?.MetalName == "Gold" && i.OwnershipType == "KFH_OWNED");
-
-        Console.WriteLine($"[Executive Board] Total items: {allItemsCount}, Gold items: {goldItemsCount}, KFH-owned Gold: {kfhOwnedGoldCount}, Gold weight grams: {goldWeightGrams}");
-
         return Ok(new
         {
-            total_gold_weight_kg = Math.Round(goldWeightGrams / 1000m, 3),
-            _debug = new {
-                total_items = allItemsCount,
-                gold_items = goldItemsCount,
-                kfh_owned_gold_items = kfhOwnedGoldCount,
-                gold_weight_grams = goldWeightGrams
-            },
+            total_gold_weight_kg = Math.Round(proprietaryBeforeTransferWeightGrams / 1000m, 3),
             // Dropped the old `ready_qty` field: it used to be `i.StatusCode == "READY"` with
             // no ownership check, which double-counted sold-but-still-custodied bars as
             // available stock. Fixing that filter to require OwnershipType == KFH_OWNED made
