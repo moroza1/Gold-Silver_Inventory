@@ -66,12 +66,9 @@ public static class DbSeeder
 
                         var turkeyColsToAdd = new List<(string Name, string Def)>
                         {
-                            ("approved_at", "TEXT NULL"),
-                            ("approved_by", "TEXT NULL"),
-                            ("ApprovedAt", "TEXT NULL"),
-                            ("ApprovedBy", "TEXT NULL"),
-                            ("notes", "TEXT NULL"),
-                            ("Notes", "TEXT NULL")
+                            ("approved_at", "TEXT"),
+                            ("approved_by", "TEXT"),
+                            ("notes", "TEXT")
                         };
 
                         foreach (var (col, def) in turkeyColsToAdd)
@@ -85,9 +82,9 @@ public static class DbSeeder
                                     await alterCmd.ExecuteNonQueryAsync();
                                     existingTurkeyCols.Add(col);
                                 }
-                                catch
+                                catch (Exception alterEx)
                                 {
-                                    // Ignore if already added
+                                    Console.WriteLine($"⚠️ SQLite alter column {col} warning: {alterEx.Message}");
                                 }
                             }
                         }
@@ -111,29 +108,17 @@ public static class DbSeeder
                         var colsToAdd = new List<(string Name, string Def)>
                         {
                             ("ownership_type", "TEXT NOT NULL DEFAULT 'KFH_OWNED'"),
-                            ("OwnershipType", "TEXT NOT NULL DEFAULT 'KFH_OWNED'"),
                             ("source_type", "TEXT NOT NULL DEFAULT 'SUPPLIER'"),
-                            ("SourceType", "TEXT NOT NULL DEFAULT 'SUPPLIER'"),
-                            ("receipt_reason", "TEXT NULL"),
-                            ("ReceiptReason", "TEXT NULL"),
-                            ("vendor_id", "INTEGER NULL"),
-                            ("VendorId", "INTEGER NULL"),
-                            ("shipment_reference", "TEXT NULL"),
-                            ("ShipmentReference", "TEXT NULL"),
-                            ("delivery_note_number", "TEXT NULL"),
-                            ("DeliveryNoteNumber", "TEXT NULL"),
-                            ("airway_bill_number", "TEXT NULL"),
-                            ("AirwayBillNumber", "TEXT NULL"),
-                            ("supporting_document_url", "TEXT NULL"),
-                            ("SupportingDocumentUrl", "TEXT NULL"),
-                            ("discrepancy_notes", "TEXT NULL"),
-                            ("DiscrepancyNotes", "TEXT NULL"),
-                            ("receiving_date", "TEXT NULL"),
-                            ("ReceivingDate", "TEXT NULL"),
-                            ("customer_id", "INTEGER NULL"),
-                            ("CustomerId", "INTEGER NULL"),
-                            ("account_id", "INTEGER NULL"),
-                            ("AccountId", "INTEGER NULL")
+                            ("receipt_reason", "TEXT"),
+                            ("vendor_id", "INTEGER"),
+                            ("shipment_reference", "TEXT"),
+                            ("delivery_note_number", "TEXT"),
+                            ("airway_bill_number", "TEXT"),
+                            ("supporting_document_url", "TEXT"),
+                            ("discrepancy_notes", "TEXT"),
+                            ("receiving_date", "TEXT"),
+                            ("customer_id", "INTEGER"),
+                            ("account_id", "INTEGER")
                         };
 
                         foreach (var (col, def) in colsToAdd)

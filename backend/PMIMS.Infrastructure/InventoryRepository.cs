@@ -4432,7 +4432,37 @@ public class InventoryRepository : IInventoryRepository
         };
 
         _dbContext.PendingTurkeyPurchases.Add(pending);
-        await _dbContext.SaveChangesAsync();
+        try
+        {
+            await _dbContext.SaveChangesAsync();
+        }
+        catch (Exception ex) when (ex.Message.Contains("no column named") || ex.InnerException?.Message.Contains("no column named") == true)
+        {
+            // Auto-heal table columns in SQLite
+            var connection = _dbContext.Database.GetDbConnection();
+            bool wasOpen = connection.State == System.Data.ConnectionState.Open;
+            if (!wasOpen) await connection.OpenAsync();
+            try
+            {
+                var alterCols = new[] { "approved_at", "approved_by", "notes" };
+                foreach (var c in alterCols)
+                {
+                    try
+                    {
+                        using var alterCmd = connection.CreateCommand();
+                        alterCmd.CommandText = $"ALTER TABLE pending_turkey_purchases ADD COLUMN {c} TEXT;";
+                        await alterCmd.ExecuteNonQueryAsync();
+                    }
+                    catch { }
+                }
+            }
+            finally
+            {
+                if (!wasOpen) await connection.CloseAsync();
+            }
+
+            await _dbContext.SaveChangesAsync();
+        }
 
         var template = await _dbContext.WorkflowTemplates.Include(t => t.Steps)
             .FirstOrDefaultAsync(t => t.WorkflowType == "TURKEY_PURCHASE" && t.IsActive);

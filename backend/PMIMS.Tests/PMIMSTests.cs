@@ -1399,5 +1399,54 @@ public class PMIMSTests
         var txs = await setup.Context.InventoryTransactions.Where(t => t.TransactionType == "PURCHASE" && t.DestinationOwnership == "KFH_OWNED").ToListAsync();
         Assert.True(txs.Count >= 2);
     }
+
+    [Fact]
+    public async Task EnsureSchemaUpToDateAsync_Successfully_Adds_ApprovedAt_Column_To_Existing_Table()
+    {
+        using var setup = CreateContext();
+        var conn = setup.Connection;
+
+        // Drop and recreate table without approved_at
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = @"
+                DROP TABLE IF EXISTS pending_turkey_purchases;
+                CREATE TABLE pending_turkey_purchases (
+                    pending_purchase_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                    batch_reference TEXT NOT NULL,
+                    serials_json_list TEXT NOT NULL,
+                    total_items INTEGER NOT NULL,
+                    total_weight_grams TEXT NOT NULL,
+                    unit_price_per_gram TEXT NOT NULL,
+                    total_cost TEXT NOT NULL,
+                    requested_by TEXT NOT NULL,
+                    status_code TEXT NOT NULL DEFAULT 'PENDING_APPROVAL',
+                    created_at TEXT NOT NULL
+                );
+            ";
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        // Run schema migration
+        await DbSeeder.EnsureSchemaUpToDateAsync(setup.Context);
+
+        // Verify column approved_at exists
+        using (var checkCmd = conn.CreateCommand())
+        {
+            checkCmd.CommandText = "PRAGMA table_info(pending_turkey_purchases);";
+            var cols = new List<string>();
+            using (var reader = await checkCmd.ExecuteReaderAsync())
+            {
+                while (await reader.ReadAsync())
+                {
+                    cols.Add(reader["name"]?.ToString() ?? "");
+                }
+            }
+
+            Assert.Contains("approved_at", cols, StringComparer.OrdinalIgnoreCase);
+            Assert.Contains("approved_by", cols, StringComparer.OrdinalIgnoreCase);
+            Assert.Contains("notes", cols, StringComparer.OrdinalIgnoreCase);
+        }
+    }
 }
 
