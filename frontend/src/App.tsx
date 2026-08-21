@@ -1642,18 +1642,11 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     }
   };
 
-  // "Executive Board" -- fetches the date-scoped KPIs + inventory table (see backend
-  // GetExecutiveBoard). Defaults to whatever's currently in execStartDate/execEndDate,
-  // but accepts explicit dates so onChange handlers can refetch immediately.
-  const fetchExecutiveBoard = async (startDate?: string, endDate?: string) => {
+  // "Executive Board" -- fetches all inventory KPIs + inventory table without date range constraints
+  const fetchExecutiveBoard = async () => {
     try {
       setLoadingExecBoard(true);
-      const params = new URLSearchParams();
-      const start = startDate ?? execStartDate;
-      const end = endDate ?? execEndDate;
-      if (start) params.set('startDate', start);
-      if (end) params.set('endDate', end);
-      const res = await fetch(`${API_BASE}/dashboard/executive-board?${params.toString()}`, { cache: 'no-store' });
+      const res = await fetch(`${API_BASE}/dashboard/executive-board`, { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         setExecBoard(data);
@@ -2219,18 +2212,22 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     try {
       const res = await fetch(`${API_BASE}/inventory/low-stock-alerts/${thresholdId}/draft-po`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({ createdBy: username || 'SYSTEM' })
       });
       if (res.ok) {
         const data = await res.json();
         alert(data.already_exists
-          ? `A draft P.O. already exists (PO #${data.po_id}).`
-          : `Draft P.O. #${data.po_id} created successfully!`);
+          ? (currentLang === 'en' ? `A draft P.O. already exists (PO #${data.po_id}).` : `يوجد طلب شراء مسودة مسبقاً (طلب #${data.po_id}).`)
+          : (currentLang === 'en' ? `Draft P.O. #${data.po_id} created successfully!` : `تم إنشاء طلب الشراء المسودة #${data.po_id} بنجاح!`));
         fetchPOs();
         fetchLowStockAlerts();
+      } else {
+        alert(await describeApiError(res, currentLang, 'Failed to generate draft P.O.', 'فشل إنشاء طلب الشراء المسودة'));
       }
-    } catch (_) { alert('Failed to generate draft P.O.'); }
+    } catch (_) {
+      alert(currentLang === 'en' ? 'Failed to generate draft P.O.' : 'فشل إنشاء طلب الشراء المسودة.');
+    }
   };
 
   const fetchBranches = async () => {
@@ -4851,49 +4848,6 @@ const [migrationApproved, setMigrationApproved] = useState(false);
 
         {/* SCREEN VIEWPORT: EXECUTIVE BOARD */}
         <section className={`screen-viewport ${activeTab === 'screen-exec' ? 'active' : ''}`}>
-          <div className="glass-card" style={{ marginBottom: '20px', display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', gap: '16px' }}>
-            <div>
-              <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '4px' }}>{t('date_range_from')}</label>
-              <input
-                type="date"
-                className="form-control"
-                value={execStartDate}
-                max={execEndDate}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setExecStartDate(val);
-                  fetchExecutiveBoard(val, execEndDate);
-                }}
-              />
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '4px' }}>{t('date_range_to')}</label>
-              <input
-                type="date"
-                className="form-control"
-                value={execEndDate}
-                min={execStartDate}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setExecEndDate(val);
-                  fetchExecutiveBoard(execStartDate, val);
-                }}
-              />
-            </div>
-            <button
-              className="btn"
-              style={{ padding: '8px 14px', fontSize: '12px' }}
-              onClick={() => {
-                const { start, end } = getCurrentMonthRange();
-                setExecStartDate(start);
-                setExecEndDate(end);
-                fetchExecutiveBoard(start, end);
-              }}
-            >
-              {t('date_range_reset')}
-            </button>
-          </div>
-
           <div className="kpi-row">
             <div
               className="glass-card kpi-card"

@@ -280,6 +280,27 @@ public partial class PMIMSControllers
         return Ok(alerts);
     }
 
+    [Authorize(Policy = "purchase_orders.write")]
+    [HttpPost("inventory/low-stock-alerts/{thresholdId:int}/draft-po")]
+    public async Task<IActionResult> CreateDraftPO(int thresholdId, [FromBody] DraftPORequest req)
+    {
+        try
+        {
+            var user = req?.CreatedBy ?? User.Identity?.Name ?? "system-admin";
+            var (poId, result) = await _repository.CreateDraftPurchaseOrderAsync(thresholdId, user);
+            return Ok(new
+            {
+                po_id = poId,
+                status = result,
+                already_exists = result == "DRAFT_EXISTS"
+            });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
     // =========================================================================
     // COST BUDGETS -- Reporting Requirements Gap Analysis, Item 8 (Cost Analysis
     // & Variance). Same master_data tier as reorder thresholds above: a
