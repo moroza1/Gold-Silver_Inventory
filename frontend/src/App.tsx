@@ -843,6 +843,7 @@ export default function App() {
     items: any[];
   } | null>(null);
   const [loadingExecBoard, setLoadingExecBoard] = useState(false);
+  const [selectedExecKpi, setSelectedExecKpi] = useState<'PROPRIETARY_GOLD' | 'READY_SALE' | 'RESERVED' | 'CUSTODY'>('PROPRIETARY_GOLD');
 
   // Compliance Dashboard (Reporting Requirements Gap Analysis, Item 6) -- summarizes the
   // same exceptions feed the Reports screen's Exceptions Report exports, plus audit-log
@@ -4080,6 +4081,65 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     return Translations[currentLang]?.[key] || key;
   };
 
+  // Executive Board: aggregated quantity breakdown by bar type (without individual serial numbers)
+  const execKpiBreakdown = useMemo(() => {
+    if (!execBoard?.items) return [];
+    let filtered: any[] = [];
+    if (selectedExecKpi === 'PROPRIETARY_GOLD') {
+      filtered = execBoard.items.filter((i: any) => i.metal === 'Gold' && (i.ownership === 'TURKEY_OWNED' || i.ownership === 'PROPRIETARY'));
+    } else if (selectedExecKpi === 'READY_SALE') {
+      filtered = execBoard.items.filter((i: any) => i.status === 'READY' && i.ownership === 'KFH_OWNED');
+    } else if (selectedExecKpi === 'RESERVED') {
+      filtered = execBoard.items.filter((i: any) => i.status === 'RESERVED');
+    } else if (selectedExecKpi === 'CUSTODY') {
+      filtered = execBoard.items.filter((i: any) => i.ownership === 'CUSTOMER_OWNED' || i.status === 'HELD_IN_CUSTODY');
+    }
+
+    const map = new Map<string, {
+      denomination: string;
+      metal: string;
+      unitWeightGrams: number;
+      count: number;
+      totalWeightGrams: number;
+      totalWeightKg: number;
+    }>();
+
+    for (const item of filtered) {
+      const key = item.denomination || 'Standard Bar';
+      const unitWeight = (item.weight_grams && item.weight_grams > 0) ? item.weight_grams :
+        (key.includes('1 KG') || key.includes('1000g') ? 1000 :
+         key.includes('100g') ? 100 :
+         key.includes('500g') ? 500 :
+         key.includes('10 Tola') ? 116.64 :
+         key.includes('1 oz') ? 31.1035 :
+         key.includes('50g') ? 50 : 1000);
+
+      if (!map.has(key)) {
+        map.set(key, {
+          denomination: key,
+          metal: item.metal || 'Gold',
+          unitWeightGrams: unitWeight,
+          count: 0,
+          totalWeightGrams: 0,
+          totalWeightKg: 0,
+        });
+      }
+      const entry = map.get(key)!;
+      entry.count += 1;
+      entry.totalWeightGrams += unitWeight;
+      entry.totalWeightKg = Math.round((entry.totalWeightGrams / 1000) * 1000) / 1000;
+    }
+
+    return Array.from(map.values()).sort((a, b) => b.totalWeightGrams - a.totalWeightGrams);
+  }, [execBoard?.items, selectedExecKpi]);
+
+  const execBreakdownTotals = useMemo(() => {
+    const totalBars = execKpiBreakdown.reduce((s, x) => s + x.count, 0);
+    const totalGrams = execKpiBreakdown.reduce((s, x) => s + x.totalWeightGrams, 0);
+    const totalKg = Math.round((totalGrams / 1000) * 1000) / 1000;
+    return { totalBars, totalGrams, totalKg };
+  }, [execKpiBreakdown]);
+
   if (activeApp === 'GFS') {
     return <GfsApp onBackToPmims={() => setActiveApp('PMIMS')} initialLang={currentLang} />;
   }
@@ -4580,27 +4640,108 @@ const [migrationApproved, setMigrationApproved] = useState(false);
           </div>
 
           <div className="kpi-row">
-            <div className="glass-card kpi-card">
-              <span className="kpi-title">{t('kpi_prop_gold')}</span>
+            <div
+              className="glass-card kpi-card"
+              onClick={() => setSelectedExecKpi('PROPRIETARY_GOLD')}
+              style={{
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                border: selectedExecKpi === 'PROPRIETARY_GOLD' ? '2px solid #D4AF37' : '1px solid var(--surface-border)',
+                background: selectedExecKpi === 'PROPRIETARY_GOLD' ? 'rgba(212, 175, 55, 0.08)' : undefined,
+                boxShadow: selectedExecKpi === 'PROPRIETARY_GOLD' ? '0 0 16px rgba(212, 175, 55, 0.25)' : undefined,
+                transform: selectedExecKpi === 'PROPRIETARY_GOLD' ? 'translateY(-2px)' : undefined
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span className="kpi-title">{t('kpi_prop_gold')}</span>
+                {selectedExecKpi === 'PROPRIETARY_GOLD' && (
+                  <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: '#D4AF37', color: '#000', fontWeight: 'bold' }}>
+                    <i className="fa-solid fa-chart-pie"></i> {currentLang === 'en' ? 'Active' : 'نشط'}
+                  </span>
+                )}
+              </div>
               <span className="kpi-value gold-txt">{(execBoard?.total_gold_weight_kg ?? 0).toFixed(3)} KG</span>
               <span className="kpi-sub" style={{ color: 'var(--accent-green)' }}>
-                <i className="fa-solid fa-scale-balanced"></i> {((execBoard?.total_gold_weight_kg ?? 0) * 1000).toLocaleString()} g • <i className="fa-solid fa-circle-check"></i> {t('kpi_sync')}
+                <i className="fa-solid fa-scale-balanced"></i> {((execBoard?.total_gold_weight_kg ?? 0) * 1000).toLocaleString()} g • <i className="fa-solid fa-hand-pointer"></i> {currentLang === 'en' ? 'Click to view bar quantities' : 'انقر لعرض كميات السبائك'}
               </span>
             </div>
-            <div className="glass-card kpi-card">
-              <span className="kpi-title">{t('kpi_ready')}</span>
+
+            <div
+              className="glass-card kpi-card"
+              onClick={() => setSelectedExecKpi('READY_SALE')}
+              style={{
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                border: selectedExecKpi === 'READY_SALE' ? '2px solid var(--kfh-green)' : '1px solid var(--surface-border)',
+                background: selectedExecKpi === 'READY_SALE' ? 'rgba(0, 155, 78, 0.08)' : undefined,
+                boxShadow: selectedExecKpi === 'READY_SALE' ? '0 0 16px rgba(0, 155, 78, 0.25)' : undefined,
+                transform: selectedExecKpi === 'READY_SALE' ? 'translateY(-2px)' : undefined
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span className="kpi-title">{t('kpi_ready')}</span>
+                {selectedExecKpi === 'READY_SALE' && (
+                  <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: 'var(--kfh-green)', color: '#fff', fontWeight: 'bold' }}>
+                    <i className="fa-solid fa-chart-pie"></i> {currentLang === 'en' ? 'Active' : 'نشط'}
+                  </span>
+                )}
+              </div>
               <span className="kpi-value">{(execBoard?.available_weight_kg ?? 0).toFixed(3)} KG</span>
-              <span className="kpi-sub">{((execBoard?.available_weight_kg ?? 0) * 1000).toLocaleString()} g • {t('kpi_ready_sub')}</span>
+              <span className="kpi-sub">
+                {((execBoard?.available_weight_kg ?? 0) * 1000).toLocaleString()} g • <i className="fa-solid fa-hand-pointer"></i> {currentLang === 'en' ? 'Click to view bar quantities' : 'انقر لعرض كميات السبائك'}
+              </span>
             </div>
-            <div className="glass-card kpi-card">
-              <span className="kpi-title">{t('kpi_reserved')}</span>
+
+            <div
+              className="glass-card kpi-card"
+              onClick={() => setSelectedExecKpi('RESERVED')}
+              style={{
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                border: selectedExecKpi === 'RESERVED' ? '2px solid var(--accent-orange)' : '1px solid var(--surface-border)',
+                background: selectedExecKpi === 'RESERVED' ? 'rgba(245, 158, 11, 0.08)' : undefined,
+                boxShadow: selectedExecKpi === 'RESERVED' ? '0 0 16px rgba(245, 158, 11, 0.25)' : undefined,
+                transform: selectedExecKpi === 'RESERVED' ? 'translateY(-2px)' : undefined
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span className="kpi-title">{t('kpi_reserved')}</span>
+                {selectedExecKpi === 'RESERVED' && (
+                  <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: 'var(--accent-orange)', color: '#fff', fontWeight: 'bold' }}>
+                    <i className="fa-solid fa-chart-pie"></i> {currentLang === 'en' ? 'Active' : 'نشط'}
+                  </span>
+                )}
+              </div>
               <span className="kpi-value" style={{ color: 'var(--accent-orange)' }}>{(execBoard?.reserved_weight_kg ?? 0).toFixed(3)} KG</span>
-              <span className="kpi-sub"><i className="fa-solid fa-hourglass-start"></i> {((execBoard?.reserved_weight_kg ?? 0) * 1000).toLocaleString()} g • {t('kpi_reserved_sub')}</span>
+              <span className="kpi-sub">
+                <i className="fa-solid fa-hourglass-start"></i> {((execBoard?.reserved_weight_kg ?? 0) * 1000).toLocaleString()} g • <i className="fa-solid fa-hand-pointer"></i> {currentLang === 'en' ? 'Click to view' : 'انقر للعرض'}
+              </span>
             </div>
-            <div className="glass-card kpi-card">
-              <span className="kpi-title">{t('kpi_custody')}</span>
+
+            <div
+              className="glass-card kpi-card"
+              onClick={() => setSelectedExecKpi('CUSTODY')}
+              style={{
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                border: selectedExecKpi === 'CUSTODY' ? '2px solid var(--accent-blue)' : '1px solid var(--surface-border)',
+                background: selectedExecKpi === 'CUSTODY' ? 'rgba(59, 130, 246, 0.08)' : undefined,
+                boxShadow: selectedExecKpi === 'CUSTODY' ? '0 0 16px rgba(59, 130, 246, 0.25)' : undefined,
+                transform: selectedExecKpi === 'CUSTODY' ? 'translateY(-2px)' : undefined
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span className="kpi-title">{t('kpi_custody')}</span>
+                {selectedExecKpi === 'CUSTODY' && (
+                  <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: 'var(--accent-blue)', color: '#fff', fontWeight: 'bold' }}>
+                    <i className="fa-solid fa-chart-pie"></i> {currentLang === 'en' ? 'Active' : 'نشط'}
+                  </span>
+                )}
+              </div>
               <span className="kpi-value" style={{ color: 'var(--accent-blue)' }}>{(execBoard?.custody_weight_kg ?? 0).toFixed(3)} KG</span>
-              <span className="kpi-sub">{((execBoard?.custody_weight_kg ?? 0) * 1000).toLocaleString()} g • {t('kpi_custody_sub')}</span>
+              <span className="kpi-sub">
+                {((execBoard?.custody_weight_kg ?? 0) * 1000).toLocaleString()} g • <i className="fa-solid fa-hand-pointer"></i> {currentLang === 'en' ? 'Click to view' : 'انقر للعرض'}
+              </span>
             </div>
           </div>
 
@@ -4631,81 +4772,129 @@ const [migrationApproved, setMigrationApproved] = useState(false);
             </div>
           )}
 
-          <div className="glass-card">
-            <h3>{t('exec_table_title')}</h3>
-            <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>{t('exec_table_subtitle')}</p>
+          {/* EXECUTIVE AGGREGATED QUANTITIES BREAKDOWN (WITHOUT SERIAL NUMBERS) */}
+          <div className="glass-card" style={{ marginTop: '20px', padding: '24px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '18px', color: 'var(--kfh-green)', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <i className="fa-solid fa-layer-group"></i>
+                  {selectedExecKpi === 'PROPRIETARY_GOLD'
+                    ? (currentLang === 'en' ? 'Proprietary Gold Stock — Quantity Breakdown by Bar Type' : 'مخزون الذهب الخاص — تفصيل الكميات المتاحة حسب نوع السبيكة')
+                    : selectedExecKpi === 'READY_SALE'
+                    ? (currentLang === 'en' ? 'Ready for Sale (KFH Owned) — Quantity Breakdown by Bar Type' : 'جاهز للبيع (ملك بيتك) — تفصيل الكميات المتاحة حسب نوع السبيكة')
+                    : selectedExecKpi === 'RESERVED'
+                    ? (currentLang === 'en' ? 'Reserved Stock — Quantity Breakdown by Bar Type' : 'الطلبات المحجوزة — تفصيل الكميات حسب نوع السبيكة')
+                    : (currentLang === 'en' ? 'Customer Custody — Quantity Breakdown by Bar Type' : 'أمانات العملاء — تفصيل الكميات حسب نوع السبيكة')}
+                </h3>
+                <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: '6px 0 0 0' }}>
+                  <i className="fa-solid fa-shield-halved" style={{ color: 'var(--kfh-green)' }}></i>{' '}
+                  {currentLang === 'en'
+                    ? 'Aggregated quantities by bar specification & weight (without individual serial numbers)'
+                    : 'عرض الكميات الإجمالية المجمعة والأوزان حسب مواصفات وفئات السبائك (بدون عرض أرقام تسلسلية)'}
+                </p>
+              </div>
+
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '12px', padding: '6px 14px', borderRadius: '6px', background: 'rgba(0,155,78,0.1)', color: 'var(--kfh-green)', fontWeight: 700, border: '1px solid rgba(0,155,78,0.2)' }}>
+                  <i className="fa-solid fa-boxes-stacked"></i> {currentLang === 'en' ? 'Total Bars:' : 'إجمالي عدد السبائك:'} {execBreakdownTotals.totalBars} {currentLang === 'en' ? 'bars' : 'سبيكة'}
+                </span>
+                <span style={{ fontSize: '12px', padding: '6px 14px', borderRadius: '6px', background: 'rgba(212,175,55,0.12)', color: '#D4AF37', fontWeight: 700, border: '1px solid rgba(212,175,55,0.25)' }}>
+                  <i className="fa-solid fa-scale-balanced"></i> {currentLang === 'en' ? 'Total Weight:' : 'الوزن الإجمالي:'} {execBreakdownTotals.totalKg.toFixed(3)} KG ({execBreakdownTotals.totalGrams.toLocaleString()} g)
+                </span>
+              </div>
+            </div>
+
             {loadingExecBoard ? (
-              <div style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)' }}>
-                <i className="fa-solid fa-spinner fa-spin"></i>
+              <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
+                <i className="fa-solid fa-spinner fa-spin fa-2x"></i>
+              </div>
+            ) : execKpiBreakdown.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '36px', color: 'var(--text-muted)', background: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px dashed var(--surface-border)' }}>
+                <i className="fa-solid fa-inbox" style={{ fontSize: '32px', marginBottom: '10px', display: 'block', color: 'var(--text-muted)' }}></i>
+                <strong>{currentLang === 'en' ? 'No bars found for the selected category in this date range.' : 'لا توجد سبائك مسجلة لهذه الفئة ضمن الفترة المحددة.'}</strong>
               </div>
             ) : (
               <div className="table-responsive">
                 <table>
                   <thead>
                     <tr>
-                      <th>{t('th_serial')}</th>
-                      <th>{t('th_metal')}</th>
-                      <th>{t('th_denom')}</th>
-                      <th>{t('th_origin')}</th>
-                      <th>{t('th_coords')}</th>
-                      <th>{t('th_status')}</th>
-                      <th style={{ width: '120px', textAlign: 'center' }}>{currentLang === 'ar' ? 'العمليات' : 'Actions'}</th>
+                      <th>{currentLang === 'en' ? 'Bar Specification / Denomination' : 'نوع وفئة السبيكة'}</th>
+                      <th>{currentLang === 'en' ? 'Metal' : 'المعدن'}</th>
+                      <th>{currentLang === 'en' ? 'Unit Weight' : 'وزن السبيكة الواحدة'}</th>
+                      <th style={{ textAlign: 'center' }}>{currentLang === 'en' ? 'Available Quantity' : 'الكمية المتاحة (عدد السبائك)'}</th>
+                      <th style={{ textAlign: 'right' }}>{currentLang === 'en' ? 'Total Weight (KG)' : 'الوزن الإجمالي (كيلوجرام)'}</th>
+                      <th style={{ textAlign: 'right' }}>{currentLang === 'en' ? 'Total Weight (Grams)' : 'الوزن الإجمالي (جرام)'}</th>
+                      <th style={{ textAlign: 'center' }}>{currentLang === 'en' ? 'Share' : 'النسبة من الإجمالي'}</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {(execBoard?.items ?? []).map((item: any, idx: number) => (
-                      <tr key={idx}>
-                        <td><strong>{item.serial_number}</strong></td>
-                        <td>{translateDb(item.metal)}</td>
-                        <td>{translateDb(item.denomination)}</td>
-                        <td>{translateDb(item.origin)}</td>
-                        <td>{translateDb(item.location)}</td>
-                        <td>
-                          <span className={`badge badge-${item.status.toLowerCase()}`}>
-                            {translateDb(item.status)}
-                          </span>
-                          {item.is_damaged && (
-                            <span className="badge badge-error" style={{ background: '#dc3545', color: '#fff', marginLeft: '6px' }}>
-                              {currentLang === 'ar' ? 'تالف' : 'Damaged'}
+                    {execKpiBreakdown.map((row, idx) => {
+                      const sharePct = execBreakdownTotals.totalGrams > 0 ? ((row.totalWeightGrams / execBreakdownTotals.totalGrams) * 100).toFixed(1) : '0';
+                      return (
+                        <tr key={idx}>
+                          <td>
+                            <strong style={{ color: 'var(--text-primary)', fontSize: '13px' }}>
+                              {translateDb(row.denomination)}
+                            </strong>
+                          </td>
+                          <td>
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                              <i className="fa-solid fa-cube" style={{ color: '#D4AF37' }}></i>
+                              {translateDb(row.metal)}
                             </span>
-                          )}
-                        </td>
-                        <td style={{ textAlign: 'center' }}>
-                          <div style={{ display: 'flex', gap: '5px', justifyContent: 'center' }}>
-                            {item.status === 'READY' && !item.is_damaged && (
-                              <button className="btn btn-primary" style={{ padding: '4px 10px', fontSize: '11px' }}
-                                onClick={() => {
-                                  setTransferItemId(item.item_id);
-                                  setTransferItemSerial(item.serial_number);
-                                  setShowTransferModal(true);
-                                }}>
-                                <i className="fa-solid fa-paper-plane"></i> {currentLang === 'ar' ? 'تحويل' : 'Transfer'}
-                              </button>
-                            )}
-                            {item.status === 'READY' && !item.is_damaged && (
-                              <button className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: '11px', background: '#dc3545' }}
-                                onClick={() => {
-                                  setDamageItemId(item.item_id);
-                                  setDamageReason('');
-                                  setDamageDesc('');
-                                  setDamageDocId('');
-                                  setShowDamageModal(true);
-                                }}>
-                                <i className="fa-solid fa-triangle-exclamation"></i> {currentLang === 'ar' ? 'تالف' : 'Damaged'}
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                    {(execBoard?.items ?? []).length === 0 && (
-                      <tr>
-                        <td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '20px' }}>
-                          {t('msg_no_activity_yet')}
-                        </td>
-                      </tr>
-                    )}
+                          </td>
+                          <td>{row.unitWeightGrams >= 1000 ? `${(row.unitWeightGrams / 1000).toFixed(3)} KG` : `${row.unitWeightGrams} g`}</td>
+                          <td style={{ textAlign: 'center' }}>
+                            <span style={{
+                              display: 'inline-block',
+                              padding: '4px 14px',
+                              borderRadius: '16px',
+                              background: 'rgba(0, 155, 78, 0.12)',
+                              color: 'var(--kfh-green)',
+                              fontWeight: 700,
+                              fontSize: '13px',
+                              border: '1px solid rgba(0, 155, 78, 0.25)'
+                            }}>
+                              {row.count} {currentLang === 'en' ? 'bars' : 'سبيكة'}
+                            </span>
+                          </td>
+                          <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--text-primary)' }}>
+                            {row.totalWeightKg.toFixed(3)} KG
+                          </td>
+                          <td style={{ textAlign: 'right', color: 'var(--text-muted)' }}>
+                            {row.totalWeightGrams.toLocaleString()} g
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                              <div style={{ width: '60px', height: '6px', background: 'rgba(255,255,255,0.1)', borderRadius: '3px', overflow: 'hidden' }}>
+                                <div style={{ width: `${sharePct}%`, height: '100%', background: 'var(--kfh-green)' }}></div>
+                              </div>
+                              <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{sharePct}%</span>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
+                  <tfoot>
+                    <tr style={{ background: 'rgba(0, 155, 78, 0.08)', fontWeight: 'bold' }}>
+                      <td colSpan={3} style={{ color: 'var(--kfh-green)', fontSize: '13px' }}>
+                        <i className="fa-solid fa-calculator"></i> {currentLang === 'en' ? 'TOTAL' : 'الإجمالي الكلي'}
+                      </td>
+                      <td style={{ textAlign: 'center', color: 'var(--kfh-green)', fontSize: '14px' }}>
+                        {execBreakdownTotals.totalBars} {currentLang === 'en' ? 'bars' : 'سبيكة'}
+                      </td>
+                      <td style={{ textAlign: 'right', color: 'var(--kfh-green)', fontSize: '14px' }}>
+                        {execBreakdownTotals.totalKg.toFixed(3)} KG
+                      </td>
+                      <td style={{ textAlign: 'right', color: 'var(--kfh-green)' }}>
+                        {execBreakdownTotals.totalGrams.toLocaleString()} g
+                      </td>
+                      <td style={{ textAlign: 'center', color: 'var(--kfh-green)' }}>
+                        100%
+                      </td>
+                    </tr>
+                  </tfoot>
                 </table>
               </div>
             )}
