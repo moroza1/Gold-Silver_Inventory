@@ -4410,29 +4410,6 @@ const [migrationApproved, setMigrationApproved] = useState(false);
             Maker: treasury-maker | Checker: treasury-checker (Pass: Password123)
           </div>
 
-          <div style={{ marginTop: '20px', borderTop: '1px dashed var(--surface-border)', paddingTop: '16px', textAlign: 'center' }}>
-            <button
-              type="button"
-              onClick={() => setActiveApp('GFS')}
-              style={{
-                background: 'linear-gradient(135deg, #D4AF37 0%, #AA771C 100%)',
-                color: '#070b14',
-                border: 'none',
-                borderRadius: '8px',
-                padding: '10px 18px',
-                fontSize: '13px',
-                fontWeight: '800',
-                cursor: 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '8px',
-                boxShadow: '0 4px 15px rgba(212, 175, 55, 0.4)'
-              }}
-            >
-              <i className="fa-solid fa-coins"></i> Open GFS Customer Portal
-            </button>
-          </div>
-
           <div style={{ marginTop: '18px', textAlign: 'center' }}>
             <span style={{
               display: 'inline-flex',
