@@ -132,11 +132,25 @@ public class LotLabelSheetDto
     public List<BarcodeLabelDto> Labels { get; set; } = new();
 }
 
+public class CustomBarcodeLabelRequest
+{
+    public string SerialNumber { get; set; } = null!;
+    public string MetalName { get; set; } = "Gold";
+    public decimal WeightGrams { get; set; } = 1000m;
+    public decimal PurityValue { get; set; } = 999.9m;
+    public string? DenominationLabel { get; set; }
+    public string? LotNumber { get; set; }
+    public string? RefinerBrand { get; set; }
+    public string OwnershipType { get; set; } = "KFH_OWNED";
+}
+
 public interface IBarcodeLabelService
 {
     Task<BarcodeLabelDto?> GenerateItemLabelAsync(string serialNumber);
     Task<BarcodeLabelDto?> GenerateItemLabelByIdAsync(int itemId);
     Task<LotLabelSheetDto?> GenerateLotLabelSheetAsync(string lotNumber);
+    Task<(bool valid, string? error, BarcodeLabelDto? label)> GenerateCustomLabelAsync(CustomBarcodeLabelRequest req);
+    Task<List<BarcodeLabelDto>> GenerateBulkLabelsAsync(IEnumerable<string> serialNumbers);
 }
 
 // ============================================================

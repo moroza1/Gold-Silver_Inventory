@@ -2038,5 +2038,56 @@ public class PMIMSTests
         var damagedBars = await repo.GetDamagedBarsAsync();
         Assert.Contains(damagedBars, b => b.ItemId == 601 && b.IsDamaged);
     }
+
+    [Fact]
+    public async Task UC01_AddBarcodeQr_AttributeValidation_ReprintReason_AndBulkGeneration()
+    {
+        using var setup = CreateContext();
+        var repo = new InventoryRepository(setup.Context);
+        var barcodeService = new BarcodeLabelService(repo);
+
+        // 1. Mandatory Attribute Validation (Exception E2)
+        var (invalidNoSerial, error1, _) = await barcodeService.GenerateCustomLabelAsync(new CustomBarcodeLabelRequest
+        {
+            SerialNumber = "",
+            WeightGrams = 1000,
+            PurityValue = 999.9m
+        });
+        Assert.False(invalidNoSerial);
+        Assert.Contains("E2", error1);
+
+        var (invalidWeight, error2, _) = await barcodeService.GenerateCustomLabelAsync(new CustomBarcodeLabelRequest
+        {
+            SerialNumber = "KFH-AU-1KG-009",
+            WeightGrams = -5,
+            PurityValue = 999.9m
+        });
+        Assert.False(invalidWeight);
+        Assert.Contains("E2", error2);
+
+        // 2. Main Flow - Generate Unique GS1-128 & QR Code
+        var (valid, err, label) = await barcodeService.GenerateCustomLabelAsync(new CustomBarcodeLabelRequest
+        {
+            SerialNumber = "KFH-AU-1KG-009",
+            MetalName = "Gold",
+            WeightGrams = 1000,
+            PurityValue = 999.9m,
+            LotNumber = "LOT-2026-AUG",
+            RefinerBrand = "Valcambi Suisse"
+        });
+        Assert.True(valid);
+        Assert.Null(err);
+        Assert.NotNull(label);
+        Assert.Contains("(01)", label.Gs1HumanReadable);
+        Assert.Contains("(21)KFH-AU-1KG-009", label.Gs1HumanReadable);
+        Assert.Contains("(10)LOT-2026-AUG", label.Gs1HumanReadable);
+        Assert.Contains("<svg", label.BarcodeSvg);
+        Assert.Contains("<svg", label.QrCodeSvg);
+
+        // 3. Bulk Label Generation (Alternative Flow A2)
+        var bulk = await barcodeService.GenerateBulkLabelsAsync(new[] { "KFH-AU-1KG-009", "KFH-AU-1KG-010", "KFH-AU-1KG-011" });
+        Assert.Equal(3, bulk.Count);
+        Assert.All(bulk, b => Assert.False(string.IsNullOrEmpty(b.QrCodeSvg)));
+    }
 }
 

@@ -52,7 +52,7 @@ public partial class PMIMSControllers
         var printedBy = req?.PrintedBy ?? User.Identity?.Name ?? "unknown";
         try
         {
-            var evt = await _repository.RecordChainOfCustodyEventAsync(itemId, "LABEL_PRINTED", printedBy, notes: "GS1-128/QR label printed.");
+            var evt = await _repository.RecordChainOfCustodyEventAsync(itemId, "LABEL_PRINTED", printedBy, notes: req?.Notes ?? "GS1-128/QR label printed.");
             return Ok(new { custody_event_id = evt.CustodyEventId, recorded_at = evt.RecordedAt });
         }
         catch (System.Exception ex)
@@ -60,9 +60,82 @@ public partial class PMIMSControllers
             return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
         }
     }
+
+    [Authorize(Policy = "barcode_qr_labeling.write")]
+    [HttpPost("barcode/items/{itemId:int}/reprint")]
+    public async Task<IActionResult> ReprintItemLabel(int itemId, [FromBody] ReprintLabelRequest req)
+    {
+        if (string.IsNullOrWhiteSpace(req?.Reason))
+        {
+            return BadRequest(new { error = "Reprint reason is mandatory (e.g. 'LABEL_DAMAGED', 'PACKAGING_REPLACED', 'AUDIT_REQUEST')." });
+        }
+
+        var label = await _barcodeLabelService.GenerateItemLabelByIdAsync(itemId);
+        if (label == null) return NotFound(new { error = "Inventory item not found." });
+
+        var printedBy = req.ReprintedBy ?? User.Identity?.Name ?? "unknown";
+        try
+        {
+            var notes = $"Reprint Reason: {req.Reason}. {req.Comments}".Trim();
+            var evt = await _repository.RecordChainOfCustodyEventAsync(itemId, "LABEL_REPRINTED", printedBy, notes: notes);
+            return Ok(new
+            {
+                label,
+                custody_event_id = evt.CustodyEventId,
+                recorded_at = evt.RecordedAt,
+                message = "Label reprinted and logged in Chain of Custody."
+            });
+        }
+        catch (System.Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
+    [Authorize(Policy = "barcode_qr_labeling.read")]
+    [HttpPost("barcode/items/generate-custom")]
+    public async Task<IActionResult> GenerateCustomLabel([FromBody] CustomBarcodeLabelRequest req)
+    {
+        var (valid, error, label) = await _barcodeLabelService.GenerateCustomLabelAsync(req);
+        if (!valid || label == null)
+        {
+            return BadRequest(new { error = error ?? "Invalid bar attributes." });
+        }
+        return Ok(label);
+    }
+
+    [Authorize(Policy = "barcode_qr_labeling.read")]
+    [HttpPost("barcode/bulk-generate")]
+    public async Task<IActionResult> BulkGenerateLabels([FromBody] BulkGenerateLabelsRequest req)
+    {
+        if (req?.SerialNumbers == null || req.SerialNumbers.Count == 0)
+        {
+            return BadRequest(new { error = "Please provide at least one serial number." });
+        }
+
+        var labels = await _barcodeLabelService.GenerateBulkLabelsAsync(req.SerialNumbers);
+        return Ok(new
+        {
+            total_labels = labels.Count,
+            labels
+        });
+    }
 }
 
 public class LogLabelPrintRequest
 {
     public string? PrintedBy { get; set; }
+    public string? Notes { get; set; }
+}
+
+public class ReprintLabelRequest
+{
+    public string Reason { get; set; } = null!; // e.g. LABEL_DAMAGED, PACKAGING_REPLACED, PHYSICAL_AUDIT
+    public string? Comments { get; set; }
+    public string? ReprintedBy { get; set; }
+}
+
+public class BulkGenerateLabelsRequest
+{
+    public List<string> SerialNumbers { get; set; } = new();
 }

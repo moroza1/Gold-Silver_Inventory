@@ -67,6 +67,83 @@ public class BarcodeLabelService : IBarcodeLabelService
         };
     }
 
+    public async Task<(bool valid, string? error, BarcodeLabelDto? label)> GenerateCustomLabelAsync(CustomBarcodeLabelRequest req)
+    {
+        if (string.IsNullOrWhiteSpace(req.SerialNumber))
+        {
+            return (false, "E2: Serial number is mandatory.", null);
+        }
+
+        if (req.WeightGrams <= 0)
+        {
+            return (false, "E2: Weight must be greater than zero.", null);
+        }
+
+        if (req.PurityValue < 900.0m || req.PurityValue > 1000.0m)
+        {
+            return (false, "E2: Purity must be between 900.0 and 1000.0 (e.g. 999.9).", null);
+        }
+
+        // Check if bar already exists in repository (for context)
+        var existing = await _repository.GetItemBySerialNumberAsync(req.SerialNumber.Trim());
+        if (existing != null)
+        {
+            var existingLabel = MapToDto(existing);
+            return (true, null, existingLabel);
+        }
+
+        // Generate standalone label
+        var gtin14 = ComputeGtin14(1);
+        var lotNumber = req.LotNumber ?? "LOT-MANUAL";
+        var elementString = BuildGs1ElementString(gtin14, lotNumber, req.SerialNumber.Trim());
+        var humanReadable = BuildHumanReadable(gtin14, lotNumber, req.SerialNumber.Trim());
+
+        var denom = string.IsNullOrWhiteSpace(req.DenominationLabel) ? $"{req.WeightGrams}g" : req.DenominationLabel;
+        var productLabel = $"{req.MetalName} {denom} ({req.PurityValue})".Trim();
+        if (!string.IsNullOrWhiteSpace(req.RefinerBrand))
+        {
+            productLabel += $" - {req.RefinerBrand}";
+        }
+
+        var label = new BarcodeLabelDto
+        {
+            ItemId = 0,
+            SerialNumber = req.SerialNumber.Trim(),
+            ProductLabel = productLabel,
+            Gtin14 = gtin14,
+            LotNumber = lotNumber,
+            OwnershipType = req.OwnershipType ?? "KFH_OWNED",
+            StatusCode = "READY",
+            LocationDescription = "Main Vault Stage",
+            IsDamaged = false,
+            Gs1ElementString = elementString,
+            Gs1HumanReadable = humanReadable,
+            BarcodeSvg = BuildGs1BarcodeSvg(elementString),
+            QrCodeSvg = BuildQrCodeSvg(humanReadable)
+        };
+
+        return (true, null, label);
+    }
+
+    public async Task<List<BarcodeLabelDto>> GenerateBulkLabelsAsync(IEnumerable<string> serialNumbers)
+    {
+        var list = new List<BarcodeLabelDto>();
+        foreach (var sn in serialNumbers.Where(s => !string.IsNullOrWhiteSpace(s)))
+        {
+            var label = await GenerateItemLabelAsync(sn.Trim());
+            if (label != null)
+            {
+                list.Add(label);
+            }
+            else
+            {
+                var (valid, _, customLabel) = await GenerateCustomLabelAsync(new CustomBarcodeLabelRequest { SerialNumber = sn.Trim() });
+                if (valid && customLabel != null) list.Add(customLabel);
+            }
+        }
+        return list;
+    }
+
     // ------------------------------------------------------------------------
     // Mapping
     // ------------------------------------------------------------------------
