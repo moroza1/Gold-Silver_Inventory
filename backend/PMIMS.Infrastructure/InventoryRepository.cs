@@ -1805,6 +1805,11 @@ public class InventoryRepository : IInventoryRepository
 
     public async Task<string> ProcessWorkflowActionAsync(int instanceId, string username, string action, string? comments)
     {
+        action = (action ?? "").ToUpper().Trim();
+        if (action == "APPROVE") action = "APPROVED";
+        if (action == "REJECT") action = "REJECTED";
+        if (action == "RETURN") action = "RETURNED";
+
         var instance = await _dbContext.WorkflowInstances.FindAsync(instanceId);
         if (instance == null) return "INSTANCE_NOT_FOUND";
 

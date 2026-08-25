@@ -341,22 +341,18 @@ public static class DbSeeder
     /// </summary>
     public static async Task EnsureWorkflowTemplatesAsync(AppDbContext context)
     {
-        // Remove legacy PURCHASE_ORDER workflow template if present
-        var legacyPoWf = await context.WorkflowTemplates
-            .Include(t => t.Steps)
-            .FirstOrDefaultAsync(t => t.WorkflowType == "PURCHASE_ORDER");
-        if (legacyPoWf != null)
-        {
-            if (legacyPoWf.Steps != null && legacyPoWf.Steps.Any())
-            {
-                context.WorkflowSteps.RemoveRange(legacyPoWf.Steps);
-            }
-            context.WorkflowTemplates.Remove(legacyPoWf);
-            await context.SaveChangesAsync();
-        }
-
         var workflows = new[]
         {
+            new
+            {
+                WorkflowType = "PURCHASE_ORDER",
+                Name = "Default Purchase Order Workflow",
+                Description = "Standard Maker-Checker approval for procurement purchase orders.",
+                MakerStepName = "Purchase Order Maker Creation",
+                MakerDesc = "Maker drafts purchase order, assigns supplier, quantities, and agreed prices.",
+                CheckerStepName = "Purchase Order Checker Approval",
+                CheckerDesc = "Checker reviews PO terms, budget, and authorizes supplier procurement."
+            },
             new
             {
                 WorkflowType = "INTAKE_SHIPMENT",
