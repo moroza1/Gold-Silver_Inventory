@@ -342,7 +342,7 @@ const Translations: Record<string, Record<string, string>> = {
     th_gl_reference: "Core Banking Reference",
     th_gl_initiated_by: "Initiated By",
     th_gl_created_at: "Created At",
-    th_cost_basis: "Cost Basis (USD)",
+    th_cost_basis: "Average Cost",
     th_market_val: "Market Value (USD)",
     th_unrealized_pnl: "Unrealized P&L",
     th_occupancy: "Occupancy Rate",
@@ -656,7 +656,7 @@ const Translations: Record<string, Record<string, string>> = {
     th_gl_reference: "مرجع النظام المصرفي",
     th_gl_initiated_by: "بواسطة",
     th_gl_created_at: "تاريخ الإنشاء",
-    th_cost_basis: "التكلفة الدفترية (USD)",
+    th_cost_basis: "متوسط التكلفة",
     th_market_val: "القيمة السوقية (USD)",
     th_unrealized_pnl: "الأرباح/الخسائر غير المحققة",
     th_occupancy: "نسبة الإشغال",
@@ -1600,6 +1600,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   // UC01 - Barcode & QR Code Labeling states
   const [barcodeTab, setBarcodeTab] = useState<'generate' | 'reprint' | 'bulk'>('generate');
   const [barcodeSelectedItemId, setBarcodeSelectedItemId] = useState<number | null>(null);
+  const [barcodeSearchQuery, setBarcodeSearchQuery] = useState('');
   const [barcodeCurrentLabel, setBarcodeCurrentLabel] = useState<any | null>(null);
   const [barcodeLabelLoading, setBarcodeLabelLoading] = useState(false);
   const [barcodeCustomSerial, setBarcodeCustomSerial] = useState('KFH-AU-1KG-001');
@@ -4372,12 +4373,16 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     let csvContent = "\uFEFF"; 
     
     if (reportType === 'valuation') {
-      csvContent += "Serial Number,Metal,Denomination,Weight (Grams),Location,Ownership,Cost Basis (USD),Market Value (USD),Unrealized PNL (USD)\n";
+      csvContent += "Serial Number,Metal,Denomination,Weight (Grams),Location / Coordinates,Ownership,Quality / Damage,Damage Reason,Cost Basis (USD)\n";
       reportData
         .filter(i => !filterMetal || i.metal_name === filterMetal)
         .filter(i => !filterVault || i.ownership_type === filterVault)
         .forEach(row => {
-          csvContent += `"${row.serial_number}","${row.metal_name}","${row.denomination}",${row.weight_grams},"${row.location}","${row.ownership_type}",${row.cost_basis},${row.market_value},${row.unrealized_pnl}\n`;
+          const quality = row.is_damaged 
+            ? "DAMAGED" 
+            : (row.damage_status === 'PENDING_APPROVAL' ? "Pending Review" : "Pristine");
+          const damageReason = (row.damage_reason || '').replace(/"/g, '""');
+          csvContent += `"${row.serial_number}","${row.metal_name}","${row.denomination}",${row.weight_grams},"${row.location}","${row.ownership_type}","${quality}","${damageReason}",${row.cost_basis}\n`;
         });
     } else if (reportType === 'occupancy') {
       csvContent += "Vault,Zone / Room,Total Slots,Occupied Slots,Occupancy Rate (%)\n";
@@ -4385,19 +4390,55 @@ const [migrationApproved, setMigrationApproved] = useState(false);
         csvContent += `"${row.vault_name}","${row.zone_room}",${row.total_slots},${row.occupied_slots},${row.occupancy}\n`;
       });
     } else if (reportType === 'audit') {
-      csvContent += "Timestamp,User,Module,Action Description\n";
+      csvContent += "Timestamp,User,Module,Action Description,Entity,Integrity Status\n";
       reportData.forEach(row => {
-        csvContent += `"${new Date(row.timestamp).toLocaleString()}","${row.username}","${row.moduleName}","${row.actionDescription.replace(/"/g, '""')}"\n`;
+        const entity = row.entityType ? `${row.entityType}${row.entityId ? ' #' + row.entityId : ''}` : '';
+        csvContent += `"${new Date(row.timestamp).toLocaleString()}","${row.username}","${row.moduleName}","${(row.actionDescription || '').replace(/"/g, '""')}","${entity}","${row.tamperStatus || 'Verified'}"\n`;
       });
     } else if (reportType === 'transactions') {
-      csvContent += "Transaction Number,Serial Number,Transaction Type,Source,Destination,Ownership,Executed By,Timestamp\n";
+      csvContent += "Transaction Number,Serial Number,Transaction Type,Source,Destination,Ownership,Initiated By,Approved By,Timestamp\n";
       reportData.forEach(row => {
-        csvContent += `"${row.transaction_number}","${row.serial_number}","${row.transaction_type}","${row.source_vault || ''} ${row.source_location || ''}","${row.destination_vault || ''} ${row.destination_location || ''}","${row.source_ownership}","${row.initiated_by}","${new Date(row.timestamp).toLocaleString()}"\n`;
+        csvContent += `"${row.transaction_number}","${row.serial_number}","${row.transaction_type}","${row.source_vault || ''} ${row.source_location ? '(' + row.source_location + ')' : ''}","${row.destination_vault || ''} ${row.destination_location ? '(' + row.destination_location + ')' : ''}","${row.source_ownership}","${row.initiated_by}","${row.approved_by || ''}","${new Date(row.timestamp).toLocaleString()}"\n`;
+      });
+    } else if (reportType === 'inventory_balance') {
+      csvContent += "Vault,Metal Type,Denomination,Ready Qty,Total Weight (g)\n";
+      reportData.forEach(row => {
+        csvContent += `"${row.vault}","${row.metal_type}","${row.denomination}",${row.ready_qty},${row.total_weight_grams}\n`;
+      });
+    } else if (reportType === 'reconciliation') {
+      csvContent += "Case ID,Serial Number,Denomination,Expected Location,Mismatch Location,Reason Code,Resolved By,Resolved At\n";
+      reportData.forEach(row => {
+        csvContent += `"${row.case_id}","${row.serial_number}","${row.denomination}","${row.expected}","${row.mismatch}","${row.reason_code || ''}","${row.resolved_by || ''}","${row.resolved_at ? new Date(row.resolved_at).toLocaleString() : ''}"\n`;
       });
     } else if (reportType === 'gl_postings') {
       csvContent += "Source,Debit Account,Credit Account,Amount,Currency,Status,Core Banking Reference,Initiated By,Created At\n";
       reportData.forEach(row => {
         csvContent += `"${row.source_type} #${row.source_id}","${row.debit_account}","${row.credit_account}",${row.amount},"${row.currency}","${row.status_code}","${row.core_banking_reference || ''}","${row.initiated_by}","${new Date(row.created_at).toLocaleString()}"\n`;
+      });
+    } else if (reportType === 'kpis') {
+      csvContent += "KPI Name,Value\n";
+      reportData.forEach(row => {
+        csvContent += `"${row.kpi}","${row.value}"\n`;
+      });
+    } else if (reportType === 'exceptions') {
+      csvContent += "Exception Type,Reference,Description,Severity,Raised At,Status\n";
+      reportData.forEach(row => {
+        csvContent += `"${row.exception_type}","${row.reference}","${(row.description || '').replace(/"/g, '""')}","${row.severity}","${new Date(row.raised_at).toLocaleString()}","${row.status}"\n`;
+      });
+    } else if (reportType === 'cost_analysis') {
+      csvContent += "Group / Metal,Product,Denomination,Total Weight (g),Average Unit Cost,Total Landed Cost,Market Value\n";
+      reportData.forEach(row => {
+        csvContent += `"${row.group_key || ''}","${row.product_name || ''}","${row.denomination || ''}",${row.weight_grams || 0},${row.avg_unit_cost || 0},${row.total_cost || 0},${row.market_value || 0}\n`;
+      });
+    } else if (reportType === 'cost_variance') {
+      csvContent += "Category,Budget (KWD),Actual Cost (KWD),Variance (KWD),Variance (%)\n";
+      reportData.forEach(row => {
+        csvContent += `"${row.category}",${row.budget},${row.actual},${row.variance},${row.variance_pct}\n`;
+      });
+    } else if (reportType === 'movements') {
+      csvContent += "Period / Date,Movement Type,Total Items,Total Weight (g),Source,Destination\n";
+      reportData.forEach(row => {
+        csvContent += `"${row.period || ''}","${row.movement_type || ''}",${row.total_items || 0},${row.total_weight_grams || 0},"${row.source || ''}","${row.destination || ''}"\n`;
       });
     }
 
@@ -4657,7 +4698,6 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     { type: 'section', key: 'section-dashboards', label: t('menu_dashboards') },
     { type: 'item', key: 'screen-exec', label: t('menu_exec'), icon: 'fa-solid fa-chart-line', permission: 'dashboard', onClick: () => setActiveTab('screen-exec') },
     { type: 'item', key: 'screen-pending-req', label: t('menu_pending_requests'), icon: 'fa-solid fa-circle-exclamation', permission: 'pending_actions', onClick: () => { setActiveTab('screen-pending-req'); fetchWorkflows(); } },
-    { type: 'item', key: 'screen-realtime', label: currentLang === 'en' ? 'Real-Time Monitoring' : 'المراقبة اللحظية', icon: 'fa-solid fa-tower-broadcast', permission: 'reports', onClick: () => { setActiveTab('screen-realtime'); fetchLiveBalances(); }, showLiveDot: true },
     { type: 'item', key: 'screen-my-activity', label: t('menu_my_activity'), icon: 'fa-solid fa-user-clock', permission: 'dashboard', onClick: () => { setActiveTab('screen-my-activity'); fetchMyActivity(); } },
 
     // 2. Core Vault & Physical Operations (Daily Operations - Highest Frequency)
@@ -4686,6 +4726,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     { type: 'section', key: 'section-admin', label: currentLang === 'en' ? 'Administration & Setup' : 'الإدارة والإعداد' },
     { type: 'item', key: 'screen-workflows', label: canAccess('workflow_design') ? t('menu_workflows') : t('menu_workflows_queue'), icon: 'fa-solid fa-diagram-project', permission: 'workflows', onClick: () => { setActiveTab('screen-workflows'); fetchWorkflows(); } },
     { type: 'item', key: 'screen-user-admin', label: t('menu_user_admin'), icon: 'fa-solid fa-users-gear', permission: 'user_admin', onClick: () => { setActiveTab('screen-user-admin'); fetchAdminData(); } },
+    { type: 'item', key: 'screen-realtime', label: currentLang === 'en' ? 'Real-Time Monitoring' : 'المراقبة اللحظية', icon: 'fa-solid fa-tower-broadcast', permission: 'monitoring', onClick: () => { setActiveTab('screen-realtime'); fetchLiveBalances(); }, showLiveDot: true },
     { type: 'item', key: 'screen-rules', label: currentLang === 'en' ? 'Business Rules Engine' : 'محرك قواعد الأعمال', icon: 'fa-solid fa-scale-balanced', permission: 'rules_engine', onClick: () => { setActiveTab('screen-rules'); fetchBusinessRules(); } },
     { type: 'item', key: 'screen-migration', label: t('menu_migration'), icon: 'fa-solid fa-file-import', permission: 'migration', onClick: () => setActiveTab('screen-migration') },
     { type: 'item', key: 'screen-sql-admin', label: currentLang === 'en' ? 'SQL Query Tool' : 'أداة SQL', icon: 'fa-solid fa-database', permission: 'user_admin', onClick: () => setActiveTab('screen-sql-admin') },
@@ -6513,7 +6554,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     <th>{currentLang === 'en' ? 'Damage Reason' : 'سبب التلف'}</th>
                     <th>{currentLang === 'en' ? 'MOCI Assay / Inspection Doc' : 'مستند الفحص / وزارة التجارة'}</th>
                     <th>{currentLang === 'en' ? 'Approval Status' : 'حالة الاعتماد'}</th>
-                    <th>{currentLang === 'en' ? 'Checker Actions' : 'إجراءات المراجع'}</th>
+                    <th>{currentLang === 'en' ? 'Workflow Status' : 'حالة سير العمل'}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -6548,22 +6589,51 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                         </td>
                         <td>
                           {isPending && (
-                            <div style={{ display: 'flex', gap: '6px' }}>
-                              <button className="btn btn-primary btn-sm" onClick={() => handleProcessDamageAction(bar.itemId, 'APPROVE')}>
-                                <i className="fa-solid fa-check"></i> {currentLang === 'en' ? 'Approve' : 'اعتماد'}
-                              </button>
-                              <button className="btn btn-secondary btn-sm" style={{ background: '#dc3545' }} onClick={() => handleProcessDamageAction(bar.itemId, 'REJECT')}>
-                                <i className="fa-solid fa-xmark"></i> {currentLang === 'en' ? 'Reject' : 'رفض'}
-                              </button>
-                            </div>
+                            <span style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              color: '#d97706',
+                              background: 'rgba(245, 158, 11, 0.1)',
+                              padding: '4px 10px',
+                              borderRadius: '12px',
+                              fontSize: '12px',
+                              fontWeight: 600,
+                              border: '1px solid rgba(245, 158, 11, 0.25)'
+                            }}>
+                              <i className="fa-solid fa-hourglass-half"></i>
+                              {currentLang === 'en' ? 'Awaiting Decision in My Pending Actions' : 'بانتظار الاعتماد في الإجراءات المعلقة'}
+                            </span>
                           )}
                           {isApproved && (
-                            <span style={{ color: 'var(--accent-red)', fontSize: '12px' }}>
+                            <span style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              color: 'var(--accent-red)',
+                              background: 'rgba(239, 68, 68, 0.1)',
+                              padding: '4px 10px',
+                              borderRadius: '12px',
+                              fontSize: '12px',
+                              fontWeight: 600,
+                              border: '1px solid rgba(239, 68, 68, 0.25)'
+                            }}>
                               <i className="fa-solid fa-ban"></i> {currentLang === 'en' ? 'Quarantined / Defective' : 'معزولة / تالفة'}
                             </span>
                           )}
                           {isRejected && (
-                            <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
+                            <span style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              color: 'var(--text-muted)',
+                              background: 'rgba(255, 255, 255, 0.05)',
+                              padding: '4px 10px',
+                              borderRadius: '12px',
+                              fontSize: '12px',
+                              fontWeight: 600,
+                              border: '1px solid var(--surface-border)'
+                            }}>
                               <i className="fa-solid fa-rotate-left"></i> {currentLang === 'en' ? 'Restored to Ready' : 'تم استعادة الحالة السليمة'}
                             </span>
                           )}
@@ -6649,252 +6719,467 @@ const [migrationApproved, setMigrationApproved] = useState(false);
           </div>
 
           {/* TAB 1: SINGLE BAR GENERATOR & PRINT */}
-          {barcodeTab === 'generate' && (
-            <div className="split-grid-3">
-              {/* Left Form: Select Existing or Register Custom Bar */}
-              <div className="glass-card" style={{ gridColumn: 'span 1' }}>
-                <h4 style={{ margin: '0 0 14px 0', fontSize: '15px', color: 'var(--kfh-green)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <i className="fa-solid fa-sliders"></i>
-                  {currentLang === 'en' ? 'Bar Specification & Attributes' : 'مواصفات وبيانات السبيكة'}
-                </h4>
+          {barcodeTab === 'generate' && (() => {
+            const query = (barcodeSearchQuery || '').toLowerCase().trim();
+            const filteredInventory = inventoryList.filter((b: any) => {
+              if (!query) return true;
+              const sn = (b.serial_number || '').toLowerCase();
+              const denom = (b.denomination || '').toLowerCase();
+              const metal = (b.metal || '').toLowerCase();
+              const loc = (b.location || '').toLowerCase();
+              const status = (b.status || '').toLowerCase();
+              const brand = (b.brand || b.origin || '').toLowerCase();
+              return sn.includes(query) || denom.includes(query) || metal.includes(query) || loc.includes(query) || status.includes(query) || brand.includes(query);
+            });
 
-                {/* Pick Existing Vault Bar */}
-                <div className="form-group">
-                  <label style={{ fontSize: '12px', fontWeight: 600 }}>
-                    {currentLang === 'en' ? 'Pick from Vault Inventory' : 'اختر من مخزون الخزينة'}
-                  </label>
-                  <select
-                    className="form-control"
-                    style={{ color: '#000', fontSize: '12px' }}
-                    value={barcodeSelectedItemId || ''}
-                    onChange={e => {
-                      const id = parseInt(e.target.value);
-                      if (id) {
-                        fetchItemBarcodeLabel(id);
-                      } else {
-                        setBarcodeSelectedItemId(null);
+            const selectedBar = inventoryList.find((b: any) => b.item_id === barcodeSelectedItemId);
+
+            return (
+              <div className="split-grid-3">
+                {/* Left Panel: Search & Select Real Bar from Vault Inventory */}
+                <div className="glass-card" style={{ gridColumn: 'span 1' }}>
+                  <h4 style={{ margin: '0 0 14px 0', fontSize: '15px', color: 'var(--accent-gold)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <i className="fa-solid fa-magnifying-glass-chart"></i>
+                    {currentLang === 'en' ? 'Select & Lookup Vault Inventory Bar' : 'البحث واختيار سبيكة من المخزون'}
+                  </h4>
+
+                  {/* Search input */}
+                  <div className="form-group" style={{ marginBottom: '12px' }}>
+                    <label style={{ fontSize: '12px', fontWeight: 600, display: 'flex', justifyContent: 'space-between' }}>
+                      <span>{currentLang === 'en' ? 'Search Inventory Serial / Product' : 'بحث بالرقم التسلسلي أو الصنف'}</span>
+                      <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{filteredInventory.length} {currentLang === 'en' ? 'bars' : 'سبائك'}</span>
+                    </label>
+                    <div style={{ position: 'relative' }}>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder={currentLang === 'en' ? 'Search serial (e.g. B00570), 100g, Zone Alpha...' : 'ابحث بالرقم (مثال B00570)، 100g، الموقع...'}
+                        value={barcodeSearchQuery}
+                        onChange={e => setBarcodeSearchQuery(e.target.value)}
+                        style={{ paddingLeft: currentLang === 'ar' ? '12px' : '36px', paddingRight: currentLang === 'ar' ? '36px' : '12px' }}
+                      />
+                      <i
+                        className="fa-solid fa-magnifying-glass"
+                        style={{
+                          position: 'absolute',
+                          top: '50%',
+                          transform: 'translateY(-50%)',
+                          [currentLang === 'ar' ? 'right' : 'left']: '12px',
+                          color: 'var(--text-muted)'
+                        }}
+                      />
+                      {barcodeSearchQuery && (
+                        <button
+                          type="button"
+                          onClick={() => setBarcodeSearchQuery('')}
+                          style={{
+                            position: 'absolute',
+                            top: '50%',
+                            transform: 'translateY(-50%)',
+                            [currentLang === 'ar' ? 'left' : 'right']: '10px',
+                            background: 'none',
+                            border: 'none',
+                            color: 'var(--text-muted)',
+                            cursor: 'pointer',
+                            padding: '4px'
+                          }}
+                        >
+                          <i className="fa-solid fa-xmark"></i>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Inventory Selection Dropdown */}
+                  <div className="form-group" style={{ marginBottom: '16px' }}>
+                    <label style={{ fontSize: '12px', fontWeight: 600 }}>
+                      {currentLang === 'en' ? 'Choose Serial from Vault List' : 'اختر الرقم التسلسلي من القائمة'}
+                    </label>
+                    <select
+                      className="form-control"
+                      style={{ color: '#000', fontSize: '12px', fontWeight: 600 }}
+                      value={barcodeSelectedItemId || ''}
+                      onChange={e => {
+                        const id = parseInt(e.target.value);
+                        setBarcodeSelectedItemId(id || null);
                         setBarcodeCurrentLabel(null);
-                      }
-                    }}
-                  >
-                    <option value="">{currentLang === 'en' ? '-- Select a Vault Bar --' : '-- اختر سبيكة من الخزينة --'}</option>
-                    {inventoryList.map((b: any) => (
-                      <option key={b.item_id} value={b.item_id}>
-                        {b.serial_number} — {b.metal} {b.denomination} ({b.location || 'Vault'}) [{b.status}]
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div style={{ textAlign: 'center', margin: '12px 0', fontSize: '11px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <div style={{ flex: 1, height: '1px', background: 'var(--surface-border)' }}></div>
-                  <span>{currentLang === 'en' ? 'OR NEW / AD-HOC BAR' : 'أو إدخال سبيكة جديدة'}</span>
-                  <div style={{ flex: 1, height: '1px', background: 'var(--surface-border)' }}></div>
-                </div>
-
-                {/* Mandatory Attribute Inputs (Pre-Conditions & Validation) */}
-                <div className="form-group">
-                  <label style={{ fontSize: '12px', fontWeight: 600 }}>
-                    {currentLang === 'en' ? 'Serial Number (Mandatory - BR-001)' : 'الرقم التسلسلي (إلزامي - BR-001)'}
-                  </label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={barcodeCustomSerial}
-                    onChange={e => setBarcodeCustomSerial(e.target.value)}
-                    placeholder="e.g. KFH-AU-1KG-001"
-                    style={{ fontWeight: 'bold' }}
-                  />
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                  <div className="form-group">
-                    <label style={{ fontSize: '12px' }}>{currentLang === 'en' ? 'Metal' : 'المعدن'}</label>
-                    <select className="form-control" style={{ color: '#000' }} value={barcodeCustomMetal} onChange={e => setBarcodeCustomMetal(e.target.value)}>
-                      <option value="Gold">Gold (ذهب)</option>
-                      <option value="Silver">Silver (فضة)</option>
+                      }}
+                    >
+                      <option value="">{currentLang === 'en' ? '-- Select a Serialized Bar --' : '-- اختر سبيكة من المخزون --'}</option>
+                      {filteredInventory.map((b: any) => (
+                        <option key={b.item_id} value={b.item_id}>
+                          {b.serial_number} — {b.metal} {b.denomination} ({b.location || 'Vault Stage'}) [{b.status}]
+                        </option>
+                      ))}
                     </select>
                   </div>
-                  <div className="form-group">
-                    <label style={{ fontSize: '12px' }}>{currentLang === 'en' ? 'Weight (Grams)' : 'الوزن (جرام)'}</label>
-                    <input
-                      type="number"
-                      className="form-control"
-                      value={barcodeCustomWeight}
-                      onChange={e => setBarcodeCustomWeight(parseFloat(e.target.value) || 0)}
-                    />
-                  </div>
+
+                  {/* Selected Bar Details & Location Specs Card */}
+                  {selectedBar ? (
+                    <div style={{
+                      background: 'rgba(212, 175, 55, 0.06)',
+                      border: '1px solid rgba(212, 175, 55, 0.3)',
+                      borderRadius: '10px',
+                      padding: '14px',
+                      marginBottom: '16px'
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', borderBottom: '1px solid rgba(212, 175, 55, 0.2)', paddingBottom: '8px' }}>
+                        <div>
+                          <span style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                            {currentLang === 'en' ? 'Selected Bar Serial' : 'الرقم التسلسلي المحدد'}
+                          </span>
+                          <div style={{ fontSize: '18px', fontWeight: 900, color: 'var(--accent-gold)', fontFamily: 'monospace' }}>
+                            {selectedBar.serial_number}
+                          </div>
+                        </div>
+                        <span className={`badge ${selectedBar.status === 'READY' ? 'badge-ready' : selectedBar.is_damaged ? 'badge-quarantined' : 'badge-reserved'}`}>
+                          {selectedBar.status}
+                        </span>
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '12px' }}>
+                        <div>
+                          <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{currentLang === 'en' ? 'Product / Denom:' : 'الصنف / الفئة:'}</span>
+                          <div style={{ fontWeight: 600 }}>{selectedBar.denomination || selectedBar.metal}</div>
+                        </div>
+                        <div>
+                          <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{currentLang === 'en' ? 'Metal & Purity:' : 'المعدن والنقاوة:'}</span>
+                          <div style={{ fontWeight: 600 }}>{selectedBar.metal} (999.9)</div>
+                        </div>
+                        <div>
+                          <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{currentLang === 'en' ? 'Brand / Mint:' : 'العلامة / المصفاة:'}</span>
+                          <div style={{ fontWeight: 600 }}>{selectedBar.origin || selectedBar.brand || 'Nadir Gold'}</div>
+                        </div>
+                        <div>
+                          <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{currentLang === 'en' ? 'Ownership:' : 'نوع الملكية:'}</span>
+                          <div style={{ fontWeight: 600 }}>{selectedBar.ownership || 'KFH_OWNED'}</div>
+                        </div>
+                      </div>
+
+                      <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px dashed rgba(212, 175, 55, 0.25)', fontSize: '12px' }}>
+                        <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>
+                          <i className="fa-solid fa-location-dot" style={{ color: 'var(--accent-gold)', marginRight: '4px' }}></i>
+                          {currentLang === 'en' ? 'Vault Coordinate Location:' : 'موقع وإحداثيات الخزينة:'}
+                        </span>
+                        <div style={{ fontWeight: 700, color: 'var(--kfh-green)', marginTop: '2px' }}>
+                          {selectedBar.location || 'Zone Alpha - Shelf Row 1 - Slot 1'}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{
+                      padding: '24px 16px',
+                      textAlign: 'center',
+                      background: 'rgba(255, 255, 255, 0.02)',
+                      borderRadius: '10px',
+                      border: '1px dashed var(--surface-border)',
+                      marginBottom: '16px',
+                      color: 'var(--text-muted)',
+                      fontSize: '12px'
+                    }}>
+                      <i className="fa-solid fa-hand-pointer" style={{ fontSize: '24px', color: 'var(--accent-gold)', marginBottom: '8px', display: 'block' }}></i>
+                      {currentLang === 'en'
+                        ? 'Select a gold bar from the inventory list above to review its data and generate its official denomination assay label.'
+                        : 'يرجى اختيار سبيكة من القائمة أعلاه لمراجعة بياناتها وتوليد ملصق الشهادة والباركود الخاص بها.'}
+                    </div>
+                  )}
+
+                  {/* Generate Button */}
+                  <button
+                    className="btn btn-primary"
+                    style={{
+                      width: '100%',
+                      padding: '12px',
+                      fontSize: '14px',
+                      fontWeight: 700,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '10px',
+                      background: selectedBar ? 'linear-gradient(135deg, #009B4E 0%, #007a3d 100%)' : undefined
+                    }}
+                    onClick={() => {
+                      if (selectedBar) {
+                        fetchItemBarcodeLabel(selectedBar.item_id);
+                      }
+                    }}
+                    disabled={!selectedBar || barcodeLabelLoading}
+                  >
+                    <i className={`fa-solid ${barcodeLabelLoading ? 'fa-spinner fa-spin' : 'fa-qrcode'}`}></i>
+                    <span>{currentLang === 'en' ? 'Generate QR & Barcode Assay Label' : 'توليد باركود وشهادة السبيكة'}</span>
+                  </button>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                  <div className="form-group">
-                    <label style={{ fontSize: '12px' }}>{currentLang === 'en' ? 'Purity Value' : 'درجة النقاوة'}</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      className="form-control"
-                      value={barcodeCustomPurity}
-                      onChange={e => setBarcodeCustomPurity(parseFloat(e.target.value) || 0)}
-                    />
+                {/* Right Panel: KFH Denomination Blister Card Assay Label Preview & Print */}
+                <div className="glass-card" style={{ gridColumn: 'span 2' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid var(--surface-border)', paddingBottom: '12px' }}>
+                    <div>
+                      <h4 style={{ margin: 0, fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <i className="fa-solid fa-id-card-clip" style={{ color: 'var(--accent-gold)' }}></i>
+                        {currentLang === 'en' ? 'KFH Gold Bar Denomination Assay Card' : 'بطاقة وشهادة سبيكة الذهب المعتمدة لبيتك'}
+                      </h4>
+                      <p style={{ margin: '2px 0 0 0', fontSize: '11px', color: 'var(--text-muted)' }}>
+                        {currentLang === 'en'
+                          ? 'Standard individual denomination blister card format with ISO/IEC 18004 QR and GS1-128 barcode.'
+                          : 'بطاقة التغليف الفردية للسبيكة مع رمز QR وباركود GS1-128 المعتمد.'}
+                      </p>
+                    </div>
+
+                    {barcodeCurrentLabel && (
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button
+                          className="btn btn-primary"
+                          style={{
+                            background: 'linear-gradient(135deg, #009B4E 0%, #007a3d 100%)',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            padding: '8px 16px',
+                            fontWeight: 700
+                          }}
+                          onClick={() => handlePrintBarcodeLabel(barcodeCurrentLabel.itemId)}
+                        >
+                          <i className="fa-solid fa-print"></i>
+                          <span>{currentLang === 'en' ? 'Print Card Label' : 'طباعة البطاقة والملصق'}</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
-                  <div className="form-group">
-                    <label style={{ fontSize: '12px' }}>{currentLang === 'en' ? 'Lot / Batch #' : 'رقم الشحنة / اللوت'}</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      value={barcodeCustomLot}
-                      onChange={e => setBarcodeCustomLot(e.target.value)}
-                    />
-                  </div>
-                </div>
 
-                <div className="form-group">
-                  <label style={{ fontSize: '12px' }}>{currentLang === 'en' ? 'Refiner / Assay Brand' : 'المصفاة / العلامة'}</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={barcodeCustomRefiner}
-                    onChange={e => setBarcodeCustomRefiner(e.target.value)}
-                    placeholder="e.g. Valcambi Suisse"
-                  />
-                </div>
-
-                <button
-                  className="btn btn-primary"
-                  style={{ width: '100%', marginTop: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
-                  onClick={generateCustomBarcodeLabel}
-                  disabled={barcodeLabelLoading}
-                >
-                  <i className={`fa-solid ${barcodeLabelLoading ? 'fa-spinner fa-spin' : 'fa-wand-magic-sparkles'}`}></i>
-                  <span>{currentLang === 'en' ? 'Generate GS1-128 & QR Code' : 'توليد الباركود ورمز QR'}</span>
-                </button>
-              </div>
-
-              {/* Right Panel: Live Physical Label Card Preview & Actions */}
-              <div className="glass-card" style={{ gridColumn: 'span 2' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid var(--surface-border)', paddingBottom: '12px' }}>
-                  <h4 style={{ margin: 0, fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <i className="fa-solid fa-eye" style={{ color: 'var(--accent-green)' }}></i>
-                    {currentLang === 'en' ? 'Physical Label Preview (Bank Packaging Standard 50mm x 30mm)' : 'معاينة الملصق المادي (معيار التغليف المصرفي 50x30 مم)'}
-                  </h4>
-                  {barcodeCurrentLabel && (
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <button
-                        className="btn btn-primary btn-sm"
-                        style={{ background: 'var(--kfh-green)', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-                        onClick={() => handlePrintBarcodeLabel(barcodeCurrentLabel.itemId)}
+                  {barcodeCurrentLabel ? (
+                    <div>
+                      {/* Authentic KFH Gold Bar Blister Pack Assay Card (Matching Photo) */}
+                      <div
+                        id="printable-label-card"
+                        style={{
+                          background: 'linear-gradient(180deg, #181c24 0%, #0d1017 100%)',
+                          color: '#ffffff',
+                          borderRadius: '16px',
+                          border: '2px solid rgba(212, 175, 55, 0.45)',
+                          padding: '24px 22px',
+                          maxWidth: '400px',
+                          margin: '0 auto 20px auto',
+                          boxShadow: '0 20px 40px rgba(0,0,0,0.6), inset 0 0 24px rgba(212,175,55,0.1)',
+                          position: 'relative',
+                          overflow: 'hidden',
+                          fontFamily: 'Inter, system-ui, sans-serif'
+                        }}
                       >
-                        <i className="fa-solid fa-print"></i>
-                        <span>{currentLang === 'en' ? 'Print Label (Audit Logged)' : 'طباعة الملصق (موثق)'}</span>
-                      </button>
+                        {/* Gold foil decorative wave arcs (matching physical card) */}
+                        <div
+                          style={{
+                            position: 'absolute',
+                            right: '-40px',
+                            top: '70px',
+                            width: '140px',
+                            height: '260px',
+                            border: '18px solid rgba(212, 175, 55, 0.35)',
+                            borderRadius: '50%',
+                            transform: 'rotate(-25deg)',
+                            pointerEvents: 'none'
+                          }}
+                        />
+
+                        {/* Top Section: Serial Watermark on edge & KFH Official Emblem */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px', position: 'relative', zIndex: 2 }}>
+                          {/* Vertical Serial watermark on left edge */}
+                          <div
+                            style={{
+                              writingMode: 'vertical-rl',
+                              transform: 'rotate(180deg)',
+                              fontSize: '11px',
+                              color: '#d4af37',
+                              fontFamily: 'monospace',
+                              fontWeight: 800,
+                              letterSpacing: '1.5px',
+                              opacity: 0.9
+                            }}
+                          >
+                            {barcodeCurrentLabel.serialNumber}
+                          </div>
+
+                          {/* KFH Logo Header */}
+                          <div style={{ textAlign: 'right', display: 'flex', alignItems: 'center', gap: '8px', marginLeft: 'auto' }}>
+                            <div>
+                              <div style={{ fontSize: '13px', fontWeight: 900, color: '#f7e5a9', letterSpacing: '0.5px' }}>بيت التمويل الكويتي</div>
+                              <div style={{ fontSize: '10px', color: '#d4af37', fontWeight: 700, letterSpacing: '0.5px' }}>Kuwait Finance House</div>
+                            </div>
+                            <div
+                              style={{
+                                width: '38px',
+                                height: '38px',
+                                border: '2px solid #d4af37',
+                                borderRadius: '6px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                background: 'rgba(212, 175, 55, 0.15)',
+                                color: '#d4af37',
+                                fontSize: '18px',
+                                fontWeight: 900
+                              }}
+                            >
+                              <i className="fa-solid fa-building-columns"></i>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Center: Inset Gold Bar Ingot (Matching Photo) */}
+                        <div
+                          style={{
+                            background: 'linear-gradient(145deg, #fceda2 0%, #d4af37 35%, #b8860b 70%, #fceda2 100%)',
+                            borderRadius: '12px',
+                            padding: '20px 16px',
+                            margin: '0 16px 16px 16px',
+                            boxShadow: '0 10px 24px rgba(0,0,0,0.7), inset 0 2px 4px rgba(255,255,255,0.7), inset 0 -2px 4px rgba(0,0,0,0.5)',
+                            border: '2px solid #f9e28c',
+                            textAlign: 'center',
+                            color: '#3d2500',
+                            position: 'relative',
+                            zIndex: 2
+                          }}
+                        >
+                          {/* Brand / Refiner */}
+                          <div style={{ fontSize: '18px', fontWeight: 900, letterSpacing: '1.5px', textTransform: 'uppercase', marginBottom: '8px' }}>
+                            {barcodeCurrentLabel.refinerBrand || selectedBar?.origin || 'NADIR GOLD'}
+                          </div>
+
+                          {/* Weight */}
+                          <div style={{ fontSize: '32px', fontWeight: 900, lineHeight: 1.1 }}>
+                            {barcodeCurrentLabel.weightGrams ? `${barcodeCurrentLabel.weightGrams}g` : (selectedBar?.denomination || '100g')}
+                          </div>
+
+                          {/* Metal & Purity */}
+                          <div style={{ fontSize: '14px', fontWeight: 800, letterSpacing: '1px', marginTop: '2px' }}>
+                            FINE GOLD
+                          </div>
+                          <div style={{ fontSize: '20px', fontWeight: 900, letterSpacing: '2px', marginTop: '2px' }}>
+                            {barcodeCurrentLabel.purityValue || '999.9'}
+                          </div>
+
+                          {/* Melter Assayer Box */}
+                          <div
+                            style={{
+                              display: 'inline-block',
+                              border: '1.5px solid #3d2500',
+                              padding: '2px 8px',
+                              borderRadius: '3px',
+                              fontSize: '10px',
+                              fontWeight: 800,
+                              letterSpacing: '0.5px',
+                              marginTop: '8px'
+                            }}
+                          >
+                            NMR MELTER ASSAYER
+                          </div>
+
+                          {/* Engraved Serial Number */}
+                          <div
+                            style={{
+                              marginTop: '12px',
+                              fontSize: '20px',
+                              fontWeight: 900,
+                              fontFamily: 'monospace',
+                              letterSpacing: '2px',
+                              borderTop: '1px solid rgba(61, 37, 0, 0.3)',
+                              paddingTop: '8px'
+                            }}
+                          >
+                            {barcodeCurrentLabel.serialNumber}
+                          </div>
+                        </div>
+
+                        {/* Bottom: KFH Certificate script & Arabic denomination */}
+                        <div style={{ textAlign: 'center', marginBottom: '14px', position: 'relative', zIndex: 2 }}>
+                          <div
+                            style={{
+                              fontFamily: 'cursive, "Brush Script MT", Georgia, serif',
+                              fontSize: '24px',
+                              color: '#f7e5a9',
+                              fontStyle: 'italic',
+                              letterSpacing: '1px'
+                            }}
+                          >
+                            <span style={{ fontWeight: 'bold', marginRight: '6px' }}>KFH</span> Certificate
+                          </div>
+                          <div style={{ fontSize: '13px', color: '#d4af37', fontWeight: 800 }}>
+                            {barcodeCurrentLabel.weightGrams ? `${barcodeCurrentLabel.weightGrams}g` : (selectedBar?.denomination || '100g')} غرام
+                          </div>
+                        </div>
+
+                        {/* Machine-Readable Barcode & QR Code Security Assay Tag */}
+                        <div
+                          style={{
+                            background: '#ffffff',
+                            color: '#111827',
+                            borderRadius: '8px',
+                            padding: '12px',
+                            border: '1px solid #d4af37',
+                            position: 'relative',
+                            zIndex: 2
+                          }}
+                        >
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 75px', gap: '8px', alignItems: 'center' }}>
+                            <div>
+                              <div style={{ fontSize: '10px', fontWeight: 800, color: '#009B4E' }}>
+                                📍 {barcodeCurrentLabel.locationDescription || selectedBar?.location || 'Vault Stage'}
+                              </div>
+                              <div style={{ fontSize: '9px', color: '#4B5563', marginTop: '2px' }}>
+                                <strong>GTIN-14:</strong> {barcodeCurrentLabel.gtin14}
+                              </div>
+                              <div style={{ fontSize: '9px', color: '#4B5563' }}>
+                                <strong>Batch / Lot:</strong> {barcodeCurrentLabel.lotNumber || 'N/A'}
+                              </div>
+                            </div>
+                            <div
+                              style={{ width: '70px', height: '70px', margin: '0 auto', background: '#fff', padding: '2px' }}
+                              dangerouslySetInnerHTML={{ __html: barcodeCurrentLabel.qrCodeSvg }}
+                            />
+                          </div>
+
+                          {/* Barcode SVG */}
+                          <div style={{ textAlign: 'center', borderTop: '1px dashed #d1d5db', paddingTop: '6px', marginTop: '6px' }}>
+                            <div
+                              style={{ maxWidth: '100%', height: '38px', margin: '0 auto', display: 'flex', justifyContent: 'center' }}
+                              dangerouslySetInnerHTML={{ __html: barcodeCurrentLabel.barcodeSvg }}
+                            />
+                            <div style={{ fontFamily: 'monospace', fontSize: '9px', fontWeight: 'bold', color: '#111827', letterSpacing: '0.5px' }}>
+                              {barcodeCurrentLabel.gs1HumanReadable}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Technical Audit Specs */}
+                      <div style={{ background: 'var(--bg-secondary)', padding: '14px', borderRadius: '8px', border: '1px solid var(--surface-border)', fontSize: '12px' }}>
+                        <div style={{ fontWeight: 'bold', marginBottom: '8px', color: 'var(--accent-gold)' }}>
+                          <i className="fa-solid fa-circle-check"></i> {currentLang === 'en' ? 'Verified Denomination & Inventory Coordinates' : 'بيانات وإحداثيات السبيكة المعتمدة'}
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '8px' }}>
+                          <div><strong>Serial:</strong> {barcodeCurrentLabel.serialNumber}</div>
+                          <div><strong>Location:</strong> {barcodeCurrentLabel.locationDescription || selectedBar?.location}</div>
+                          <div><strong>GTIN-14 (AI 01):</strong> {barcodeCurrentLabel.gtin14}</div>
+                          <div><strong>Status:</strong> {barcodeCurrentLabel.statusCode || 'READY'}</div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ textAlign: 'center', padding: '56px 20px', color: 'var(--text-muted)' }}>
+                      <i className="fa-solid fa-qrcode" style={{ fontSize: '52px', color: 'var(--accent-gold)', marginBottom: '16px', display: 'block' }}></i>
+                      <p style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-main)', margin: '0 0 6px 0' }}>
+                        {currentLang === 'en' ? 'No Bar Selected for Card Generation' : 'لم يتم اختيار سبيكة لتوليد البطاقة'}
+                      </p>
+                      <span style={{ fontSize: '12px' }}>
+                        {currentLang === 'en'
+                          ? 'Select or search for a serialized gold bar from the inventory list on the left and click "Generate QR & Barcode Assay Label".'
+                          : 'اختر أو ابحث عن سبيكة ذهب من المخزون على اليسار ثم اضغط "توليد باركود وشهادة السبيكة".'}
+                      </span>
                     </div>
                   )}
                 </div>
-
-                {barcodeCurrentLabel ? (
-                  <div>
-                    {/* The Rendered High-Fidelity Bank Physical Label */}
-                    <div
-                      id="printable-label-card"
-                      style={{
-                        background: '#FFFFFF',
-                        color: '#111827',
-                        borderRadius: '8px',
-                        border: '2px solid #009B4E',
-                        padding: '18px 24px',
-                        maxWidth: '560px',
-                        margin: '0 auto 20px auto',
-                        boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
-                        fontFamily: 'Inter, system-ui, sans-serif'
-                      }}
-                    >
-                      {/* Label Header */}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #009B4E', paddingBottom: '8px', marginBottom: '12px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <div style={{ width: '24px', height: '24px', background: '#009B4E', color: '#fff', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '14px' }}>K</div>
-                          <div>
-                            <div style={{ fontWeight: '900', fontSize: '13px', color: '#009B4E', letterSpacing: '0.5px' }}>KUWAIT FINANCE HOUSE</div>
-                            <div style={{ fontSize: '9px', color: '#6B7280', fontWeight: '600' }}>TREASURY & PRECIOUS METALS DIVISION</div>
-                          </div>
-                        </div>
-                        <div style={{ textAlign: 'right' }}>
-                          <span style={{ fontSize: '10px', background: '#009B4E', color: '#fff', padding: '2px 8px', borderRadius: '12px', fontWeight: 'bold' }}>
-                            {barcodeCurrentLabel.ownershipType || 'KFH_OWNED'}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Product Specifications & QR Code Grid */}
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 120px', gap: '16px', alignItems: 'center', marginBottom: '14px' }}>
-                        <div>
-                          <div style={{ fontSize: '16px', fontWeight: '900', color: '#111827', marginBottom: '4px' }}>
-                            {barcodeCurrentLabel.productLabel || 'Gold 1000g (999.9)'}
-                          </div>
-                          <div style={{ fontSize: '12px', color: '#374151', marginBottom: '2px' }}>
-                            <strong>Serial:</strong> <span style={{ fontFamily: 'monospace', fontWeight: 'bold', color: '#009B4E' }}>{barcodeCurrentLabel.serialNumber}</span>
-                          </div>
-                          <div style={{ fontSize: '11px', color: '#4B5563', marginBottom: '2px' }}>
-                            <strong>Lot/Batch:</strong> {barcodeCurrentLabel.lotNumber || 'LOT-2026-AUG'}
-                          </div>
-                          <div style={{ fontSize: '11px', color: '#4B5563' }}>
-                            <strong>Location:</strong> {barcodeCurrentLabel.locationDescription || 'Main Vault Stage'}
-                          </div>
-                          {barcodeCurrentLabel.isDamaged && (
-                            <div style={{ marginTop: '6px', fontSize: '10px', background: '#FEE2E2', color: '#DC2626', padding: '2px 6px', borderRadius: '4px', fontWeight: 'bold', display: 'inline-block' }}>
-                              ⚠️ DAMAGED - QUARANTINE
-                            </div>
-                          )}
-                        </div>
-
-                        {/* ISO/IEC 18004 2D QR Code SVG */}
-                        <div style={{ textAlign: 'center' }}>
-                          <div
-                            style={{ width: '110px', height: '110px', margin: '0 auto', background: '#fff', padding: '4px', border: '1px solid #E5E7EB', borderRadius: '6px' }}
-                            dangerouslySetInnerHTML={{ __html: barcodeCurrentLabel.qrCodeSvg }}
-                          />
-                          <span style={{ fontSize: '8px', color: '#9CA3AF', display: 'block', marginTop: '2px' }}>ISO/IEC 18004 QR</span>
-                        </div>
-                      </div>
-
-                      {/* GS1-128 Linear Barcode SVG & Element String */}
-                      <div style={{ textAlign: 'center', borderTop: '1px dashed #D1D5DB', paddingTop: '10px' }}>
-                        <div
-                          style={{ maxWidth: '100%', height: '50px', margin: '0 auto 6px auto', display: 'flex', justifyContent: 'center' }}
-                          dangerouslySetInnerHTML={{ __html: barcodeCurrentLabel.barcodeSvg }}
-                        />
-                        <div style={{ fontFamily: 'monospace', fontSize: '11px', fontWeight: 'bold', color: '#111827', letterSpacing: '1px' }}>
-                          {barcodeCurrentLabel.gs1HumanReadable}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Metadata & Technical Specs Accordion */}
-                    <div style={{ background: 'var(--bg-secondary)', padding: '14px', borderRadius: '8px', border: '1px solid var(--surface-border)', fontSize: '12px' }}>
-                      <div style={{ fontWeight: 'bold', marginBottom: '8px', color: 'var(--accent-gold)' }}>
-                        <i className="fa-solid fa-circle-info"></i> GS1 Compliance & Security Traceability Specs
-                      </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '8px' }}>
-                        <div><strong>GTIN-14 (AI 01):</strong> {barcodeCurrentLabel.gtin14}</div>
-                        <div><strong>Serial (AI 21):</strong> {barcodeCurrentLabel.serialNumber}</div>
-                        <div><strong>Batch (AI 10):</strong> {barcodeCurrentLabel.lotNumber || 'N/A'}</div>
-                        <div><strong>Status:</strong> {barcodeCurrentLabel.statusCode || 'READY'}</div>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div style={{ textAlign: 'center', padding: '48px 20px', color: 'var(--text-muted)' }}>
-                    <i className="fa-solid fa-qrcode" style={{ fontSize: '48px', color: 'var(--accent-gold)', marginBottom: '14px', display: 'block' }}></i>
-                    <p style={{ fontSize: '14px', margin: '0 0 6px 0' }}>
-                      {currentLang === 'en' ? 'No bar selected for label rendering.' : 'لم يتم اختيار سبيكة لعرض الملصق.'}
-                    </p>
-                    <span style={{ fontSize: '12px' }}>
-                      {currentLang === 'en' ? 'Select a bar from inventory or fill the form on the left to generate GS1-128 & QR code.' : 'اختر سبيكة من القائمة أو املأ النموذج على اليسار لإنشاء الملصق.'}
-                    </span>
-                  </div>
-                )}
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* TAB 2: CONTROLLED REPRINT (DAMAGE REASON LOG - A1) */}
           {barcodeTab === 'reprint' && (
@@ -8202,8 +8487,6 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                             <th>{t('th_ownership')}</th>
                             <th>{currentLang === 'en' ? 'Quality / Damage' : 'حالة الجودة / التلف'}</th>
                             <th>{t('th_cost_basis')}</th>
-                            <th>{t('th_market_val')}</th>
-                            <th>{t('th_unrealized_pnl')}</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -8233,10 +8516,8 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                                     </span>
                                   )}
                                 </td>
-                                <td>${row.cost_basis?.toLocaleString()}</td>
-                                <td>${row.market_value?.toLocaleString()}</td>
-                                <td style={{ color: row.unrealized_pnl >= 0 ? 'var(--accent-green)' : 'var(--accent-red)' }}>
-                                  {row.unrealized_pnl >= 0 ? '+' : ''}${row.unrealized_pnl?.toLocaleString()}
+                                <td>
+                                  {(row.average_cost || row.cost_basis || 0).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })} KWD
                                 </td>
                               </tr>
                             ))}

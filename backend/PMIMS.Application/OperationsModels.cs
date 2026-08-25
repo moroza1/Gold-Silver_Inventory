@@ -102,6 +102,11 @@ public class BarcodeLabelDto
     public int ItemId { get; set; }
     public string SerialNumber { get; set; } = null!;
     public string ProductLabel { get; set; } = null!;
+    public string MetalName { get; set; } = "Gold";
+    public decimal WeightGrams { get; set; }
+    public decimal PurityValue { get; set; } = 999.9m;
+    public string? Denomination { get; set; }
+    public string? RefinerBrand { get; set; }
     public string Gtin14 { get; set; } = null!;
     public string? LotNumber { get; set; }
     public string OwnershipType { get; set; } = null!;

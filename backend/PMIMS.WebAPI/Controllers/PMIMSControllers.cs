@@ -1068,7 +1068,8 @@ public partial class PMIMSControllers : ControllerBase
                     damage_status = item.DamageApprovalStatus ?? (item.IsDamaged ? "APPROVED" : "NONE"),
                     damage_reason = item.DamageReason,
                     damage_description = item.DamageDescription,
-                    cost_basis = Math.Round(costBasis, 2),
+                    average_cost = item.AveragePurchaseCost ?? 0m,
+                    cost_basis = item.AveragePurchaseCost ?? 0m,
                     market_value = Math.Round(currentMarketValue, 2),
                     unrealized_pnl = Math.Round(unrealizedPnl, 2)
                 });

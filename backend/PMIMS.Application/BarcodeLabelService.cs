@@ -165,11 +165,22 @@ public class BarcodeLabelService : IBarcodeLabelService
             humanReadable += " [DAMAGED - QUARANTINE]";
         }
 
+        var weight = item.Product?.Denomination?.WeightGrams ?? 0m;
+        var metal = item.Product?.MetalType?.MetalName ?? "Gold";
+        var purity = item.Product?.Purity?.PurityValue ?? 999.9m;
+        var denomLabel = item.Product?.Denomination?.Label ?? $"{weight}g";
+        var brand = item.Lot?.Vendor?.VendorName ?? "KFH Mint";
+
         return new BarcodeLabelDto
         {
             ItemId = item.ItemId,
             SerialNumber = item.SerialNumber,
             ProductLabel = productLabel,
+            MetalName = metal,
+            WeightGrams = weight,
+            PurityValue = purity,
+            Denomination = denomLabel,
+            RefinerBrand = brand,
             Gtin14 = gtin14,
             LotNumber = lotNumber,
             OwnershipType = item.OwnershipType,
