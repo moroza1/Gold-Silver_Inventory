@@ -1690,13 +1690,20 @@ public class InventoryRepository : IInventoryRepository
         int order = 1;
         foreach (var elem in doc.RootElement.EnumerateArray())
         {
+            string stepName = elem.TryGetProperty("step_name", out var sn) ? (sn.GetString() ?? "")
+                : (elem.TryGetProperty("stepName", out var sn2) ? (sn2.GetString() ?? "") : "");
+            string reqRole = elem.TryGetProperty("required_role", out var rr) ? (rr.GetString() ?? "")
+                : (elem.TryGetProperty("requiredRole", out var rr2) ? (rr2.GetString() ?? "") : "");
+            string desc = elem.TryGetProperty("description", out var ds) ? (ds.GetString() ?? "")
+                : (elem.TryGetProperty("Description", out var ds2) ? (ds2.GetString() ?? "") : "");
+
             var step = new WorkflowStep
             {
                 TemplateId = template.TemplateId,
                 StepOrder = order++,
-                StepName = elem.GetProperty("step_name").GetString() ?? "",
-                RequiredRole = elem.GetProperty("required_role").GetString() ?? "",
-                Description = elem.GetProperty("description").GetString() ?? ""
+                StepName = stepName,
+                RequiredRole = reqRole,
+                Description = desc
             };
             _dbContext.WorkflowSteps.Add(step);
         }
@@ -1805,6 +1812,10 @@ public class InventoryRepository : IInventoryRepository
                 var item = await _dbContext.InventoryItems.FindAsync(instance.EntityId);
                 if (item != null)
                 {
+                    item.IsDamaged = false;
+                    item.DamageApprovalStatus = "REJECTED";
+                    item.DamageApprovedBy = username;
+                    item.DamageApprovedAt = DateTime.UtcNow;
                     item.StatusCode = "READY";
                     item.DamageReason = null;
                     item.DamageDescription = null;
@@ -1815,6 +1826,11 @@ public class InventoryRepository : IInventoryRepository
             {
                 var purchase = await _dbContext.PendingTurkeyPurchases.FindAsync(instance.EntityId);
                 if (purchase != null) purchase.StatusCode = "REJECTED";
+            }
+            else if (instance.WorkflowType == "THRESHOLD_CONFIG")
+            {
+                var change = await _dbContext.PendingThresholdChanges.FindAsync(instance.EntityId);
+                if (change != null) change.StatusCode = "REJECTED";
             }
         }
         else if (action == "RETURNED")
@@ -1835,10 +1851,24 @@ public class InventoryRepository : IInventoryRepository
                 var pending = await _dbContext.PendingIntakes.FindAsync(instance.EntityId);
                 if (pending != null) pending.StatusCode = "PENDING_APPROVAL";
             }
+            else if (instance.WorkflowType == "DAMAGE_BAR")
+            {
+                var item = await _dbContext.InventoryItems.FindAsync(instance.EntityId);
+                if (item != null)
+                {
+                    item.IsDamaged = false;
+                    item.DamageApprovalStatus = "PENDING_APPROVAL";
+                }
+            }
             else if (instance.WorkflowType == "TURKEY_PURCHASE")
             {
                 var purchase = await _dbContext.PendingTurkeyPurchases.FindAsync(instance.EntityId);
                 if (purchase != null) purchase.StatusCode = "PENDING_APPROVAL";
+            }
+            else if (instance.WorkflowType == "THRESHOLD_CONFIG")
+            {
+                var change = await _dbContext.PendingThresholdChanges.FindAsync(instance.EntityId);
+                if (change != null) change.StatusCode = "PENDING_APPROVAL";
             }
         }
         else if (action == "APPROVED")
@@ -1861,13 +1891,23 @@ public class InventoryRepository : IInventoryRepository
                     var transfer = await _dbContext.BranchTransfers.FindAsync(instance.EntityId);
                     if (transfer != null)
                     {
-                        transfer.StatusCode = "APPROVED";
-                        transfer.ApprovedBy = username;
-
-                        // Trigger the transfer logic
                         var item = await _dbContext.InventoryItems.FindAsync(transfer.ItemId);
                         if (item != null)
                         {
+                            // Invariant: Main Vault outbound movement workflows must validate Is Damaged before location update
+                            if (item.IsDamaged)
+                            {
+                                transfer.StatusCode = "REJECTED";
+                                instance.StatusCode = "REJECTED";
+                                item.StatusCode = "DAMAGED";
+                                await _dbContext.SaveChangesAsync();
+                                await SaveAuditLogAsync(username, "SECURITY", "TRANSFER_REJECTED", $"Outbound movement workflow rejected for bar '{item.SerialNumber}': Bar is marked as damaged. Location remained unchanged.", entityType: "InventoryItem", entityId: item.SerialNumber);
+                                throw new InvalidOperationException($"Outbound movement rejected: Gold bar '{item.SerialNumber}' is marked as damaged and cannot be moved from the vault. Location remains unchanged.");
+                            }
+
+                            transfer.StatusCode = "APPROVED";
+                            transfer.ApprovedBy = username;
+
                             // Find a free destination location at the destination branch
                             var destLoc = await _dbContext.InventoryLocations
                                 .FirstOrDefaultAsync(l => l.BranchId == transfer.DestinationBranchId);
@@ -1928,7 +1968,10 @@ public class InventoryRepository : IInventoryRepository
                     if (item != null)
                     {
                         item.IsDamaged = true;
-                        item.StatusCode = "READY";
+                        item.DamageApprovalStatus = "APPROVED";
+                        item.DamageApprovedBy = username;
+                        item.DamageApprovedAt = DateTime.UtcNow;
+                        item.StatusCode = "DAMAGED";
                     }
                 }
                 else if (instance.WorkflowType == "TURKEY_PURCHASE")
@@ -1937,6 +1980,66 @@ public class InventoryRepository : IInventoryRepository
                     if (result != "SUCCESS")
                     {
                         throw new InvalidOperationException($"Turkey purchase approval execution failed: {result}");
+                    }
+                }
+                else if (instance.WorkflowType == "THRESHOLD_CONFIG")
+                {
+                    var change = await _dbContext.PendingThresholdChanges
+                        .Include(p => p.Product)
+                        .Include(p => p.Vendor)
+                        .FirstOrDefaultAsync(p => p.PendingChangeId == instance.EntityId);
+                    if (change != null)
+                    {
+                        change.StatusCode = "APPROVED";
+                        change.ApprovedBy = username;
+
+                        if (change.ChangeType == "CREATE")
+                        {
+                            var threshold = new ReorderThreshold
+                            {
+                                ThresholdType = string.IsNullOrWhiteSpace(change.ThresholdType) ? "LOW_STOCK" : change.ThresholdType,
+                                ProductId = change.ProductId,
+                                VendorId = change.VendorId,
+                                MinStockQty = change.MinStockQty,
+                                MaxStockQty = change.MaxStockQty ?? (change.ThresholdType == "HIGH_STOCK" ? change.MinStockQty : null),
+                                ReorderQty = change.ReorderQty,
+                                IsActive = change.IsActive,
+                                CreatedAt = DateTime.UtcNow,
+                                UpdatedAt = DateTime.UtcNow
+                            };
+                            _dbContext.ReorderThresholds.Add(threshold);
+                            await _dbContext.SaveChangesAsync();
+                            change.ThresholdId = threshold.ThresholdId;
+                        }
+                        else if (change.ChangeType == "AMEND" || change.ChangeType == "ACTIVATE" || change.ChangeType == "DEACTIVATE")
+                        {
+                            if (change.ThresholdId.HasValue)
+                            {
+                                var threshold = await _dbContext.ReorderThresholds.FindAsync(change.ThresholdId.Value);
+                                if (threshold != null)
+                                {
+                                    threshold.ThresholdType = string.IsNullOrWhiteSpace(change.ThresholdType) ? threshold.ThresholdType : change.ThresholdType;
+                                    threshold.ProductId = change.ProductId;
+                                    threshold.VendorId = change.VendorId;
+                                    threshold.MinStockQty = change.MinStockQty;
+                                    threshold.MaxStockQty = change.MaxStockQty ?? (change.ThresholdType == "HIGH_STOCK" ? change.MinStockQty : threshold.MaxStockQty);
+                                    threshold.ReorderQty = change.ReorderQty;
+                                    threshold.IsActive = change.IsActive;
+                                    threshold.UpdatedAt = DateTime.UtcNow;
+                                }
+                            }
+                        }
+                        else if (change.ChangeType == "DELETE")
+                        {
+                            if (change.ThresholdId.HasValue)
+                            {
+                                var threshold = await _dbContext.ReorderThresholds.FindAsync(change.ThresholdId.Value);
+                                if (threshold != null)
+                                {
+                                    _dbContext.ReorderThresholds.Remove(threshold);
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -2275,26 +2378,161 @@ public class InventoryRepository : IInventoryRepository
     // Stock Reorder Thresholds
     // =========================================================================
 
-    public async Task<IEnumerable<ReorderThreshold>> GetReorderThresholdsAsync()
+    public async Task<IEnumerable<ReorderThreshold>> GetReorderThresholdsAsync(string? thresholdType = null)
     {
-        return await _dbContext.ReorderThresholds
+        var query = _dbContext.ReorderThresholds
             .Include(t => t.Product).ThenInclude(p => p!.MetalType)
             .Include(t => t.Product).ThenInclude(p => p!.Denomination)
             .Include(t => t.Vendor)
-            .OrderBy(t => t.ProductId)
-            .ToListAsync();
+            .AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(thresholdType))
+        {
+            string norm = thresholdType.ToUpperInvariant();
+            query = query.Where(t => t.ThresholdType == norm);
+        }
+
+        return await query.OrderBy(t => t.ProductId).ThenBy(t => t.ThresholdType).ToListAsync();
     }
 
-    public async Task<ReorderThreshold> SaveReorderThresholdAsync(int? thresholdId, int productId, int vendorId, int minStockQty, int reorderQty, bool isActive)
+    public async Task<PendingThresholdChange> SubmitThresholdChangeRequestAsync(string thresholdType, int? thresholdId, int productId, int vendorId, int minStockQty, int? maxStockQty, int reorderQty, bool isActive, string requestedBy, string? comments = null)
     {
+        string type = string.IsNullOrWhiteSpace(thresholdType) ? "LOW_STOCK" : thresholdType.ToUpperInvariant();
+        string changeType = "CREATE";
+        if (thresholdId.HasValue && thresholdId.Value > 0)
+        {
+            var existing = await _dbContext.ReorderThresholds.FindAsync(thresholdId.Value)
+                ?? throw new InvalidOperationException("Threshold configuration not found.");
+            
+            if (existing.IsActive != isActive)
+            {
+                changeType = isActive ? "ACTIVATE" : "DEACTIVATE";
+            }
+            else
+            {
+                changeType = "AMEND";
+            }
+            type = existing.ThresholdType;
+        }
+
+        var product = await _dbContext.MetalProducts.FindAsync(productId)
+            ?? throw new InvalidOperationException("Specified precious metal product not found.");
+        var vendor = await _dbContext.Vendors.FindAsync(vendorId)
+            ?? throw new InvalidOperationException("Specified vendor not found.");
+
+        int effectiveMaxQty = maxStockQty ?? (type == "HIGH_STOCK" ? minStockQty : minStockQty * 3);
+
+        var pending = new PendingThresholdChange
+        {
+            ChangeType = changeType,
+            ThresholdType = type,
+            ThresholdId = thresholdId,
+            ProductId = productId,
+            VendorId = vendorId,
+            MinStockQty = minStockQty,
+            MaxStockQty = type == "HIGH_STOCK" ? (maxStockQty ?? minStockQty) : maxStockQty,
+            ReorderQty = reorderQty,
+            IsActive = isActive,
+            StatusCode = "PENDING_APPROVAL",
+            RequestedBy = requestedBy,
+            Comments = comments,
+            CreatedAt = DateTime.UtcNow
+        };
+
+        _dbContext.PendingThresholdChanges.Add(pending);
+        await _dbContext.SaveChangesAsync();
+
+        // Start THRESHOLD_CONFIG workflow instance for Maker-Checker approval
+        await StartWorkflowInstanceAsync("THRESHOLD_CONFIG", pending.PendingChangeId, requestedBy);
+
+        await _dbContext.Entry(pending).Reference(p => p.Product).LoadAsync();
+        await _dbContext.Entry(pending).Reference(p => p.Vendor).LoadAsync();
+        if (pending.Product != null)
+        {
+            await _dbContext.Entry(pending.Product).Reference(p => p.MetalType).LoadAsync();
+            await _dbContext.Entry(pending.Product).Reference(p => p.Denomination).LoadAsync();
+        }
+
+        return pending;
+    }
+
+    public async Task<PendingThresholdChange> SubmitThresholdDeleteRequestAsync(int thresholdId, string requestedBy, string? comments = null)
+    {
+        var existing = await _dbContext.ReorderThresholds
+            .Include(t => t.Product).ThenInclude(p => p!.MetalType)
+            .Include(t => t.Product).ThenInclude(p => p!.Denomination)
+            .Include(t => t.Vendor)
+            .FirstOrDefaultAsync(t => t.ThresholdId == thresholdId)
+            ?? throw new InvalidOperationException("Threshold configuration not found for deletion.");
+
+        var pending = new PendingThresholdChange
+        {
+            ChangeType = "DELETE",
+            ThresholdType = existing.ThresholdType,
+            ThresholdId = thresholdId,
+            ProductId = existing.ProductId,
+            VendorId = existing.VendorId,
+            MinStockQty = existing.MinStockQty,
+            MaxStockQty = existing.MaxStockQty,
+            ReorderQty = existing.ReorderQty,
+            IsActive = false,
+            StatusCode = "PENDING_APPROVAL",
+            RequestedBy = requestedBy,
+            Comments = comments ?? "Requested threshold deletion.",
+            CreatedAt = DateTime.UtcNow
+        };
+
+        _dbContext.PendingThresholdChanges.Add(pending);
+        await _dbContext.SaveChangesAsync();
+
+        // Start THRESHOLD_CONFIG workflow instance for Maker-Checker approval
+        await StartWorkflowInstanceAsync("THRESHOLD_CONFIG", pending.PendingChangeId, requestedBy);
+
+        pending.Product = existing.Product;
+        pending.Vendor = existing.Vendor;
+        return pending;
+    }
+
+    public async Task<PendingThresholdChange?> GetPendingThresholdChangeByIdAsync(int pendingChangeId)
+    {
+        return await _dbContext.PendingThresholdChanges
+            .Include(p => p.Product).ThenInclude(prod => prod!.MetalType)
+            .Include(p => p.Product).ThenInclude(prod => prod!.Denomination)
+            .Include(p => p.Vendor)
+            .FirstOrDefaultAsync(p => p.PendingChangeId == pendingChangeId);
+    }
+
+    public async Task<IEnumerable<PendingThresholdChange>> GetPendingThresholdChangesAsync(string? thresholdType = null)
+    {
+        var query = _dbContext.PendingThresholdChanges
+            .Where(p => p.StatusCode == "PENDING_APPROVAL")
+            .Include(p => p.Product).ThenInclude(prod => prod!.MetalType)
+            .Include(p => p.Product).ThenInclude(prod => prod!.Denomination)
+            .Include(p => p.Vendor)
+            .AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(thresholdType))
+        {
+            string norm = thresholdType.ToUpperInvariant();
+            query = query.Where(p => p.ThresholdType == norm);
+        }
+
+        return await query.OrderByDescending(p => p.CreatedAt).ToListAsync();
+    }
+
+    public async Task<ReorderThreshold> SaveReorderThresholdAsync(int? thresholdId, int productId, int vendorId, int minStockQty, int? maxStockQty, int reorderQty, bool isActive, string thresholdType = "LOW_STOCK")
+    {
+        string normType = string.IsNullOrWhiteSpace(thresholdType) ? "LOW_STOCK" : thresholdType.ToUpperInvariant();
         ReorderThreshold threshold;
         if (thresholdId.HasValue && thresholdId.Value > 0)
         {
             threshold = await _dbContext.ReorderThresholds.FindAsync(thresholdId.Value)
                 ?? throw new InvalidOperationException("Threshold not found.");
+            threshold.ThresholdType = normType;
             threshold.ProductId = productId;
             threshold.VendorId = vendorId;
             threshold.MinStockQty = minStockQty;
+            threshold.MaxStockQty = normType == "HIGH_STOCK" ? (maxStockQty ?? minStockQty) : maxStockQty;
             threshold.ReorderQty = reorderQty;
             threshold.IsActive = isActive;
             threshold.UpdatedAt = DateTime.UtcNow;
@@ -2303,9 +2541,11 @@ public class InventoryRepository : IInventoryRepository
         {
             threshold = new ReorderThreshold
             {
+                ThresholdType = normType,
                 ProductId = productId,
                 VendorId = vendorId,
                 MinStockQty = minStockQty,
+                MaxStockQty = normType == "HIGH_STOCK" ? (maxStockQty ?? minStockQty) : maxStockQty,
                 ReorderQty = reorderQty,
                 IsActive = isActive
             };
@@ -2328,7 +2568,7 @@ public class InventoryRepository : IInventoryRepository
         return true;
     }
 
-    public async Task<IEnumerable<dynamic>> CheckLowStockAlertsAsync()
+    public async Task<IEnumerable<StockAlertItem>> CheckStockAlertsAsync()
     {
         var thresholds = await _dbContext.ReorderThresholds
             .Where(t => t.IsActive)
@@ -2337,9 +2577,9 @@ public class InventoryRepository : IInventoryRepository
             .Include(t => t.Vendor)
             .ToListAsync();
 
-        if (!thresholds.Any()) return Enumerable.Empty<dynamic>();
+        if (!thresholds.Any()) return Enumerable.Empty<StockAlertItem>();
 
-        var alerts = new List<dynamic>();
+        var alerts = new List<StockAlertItem>();
 
         foreach (var t in thresholds)
         {
@@ -2348,24 +2588,64 @@ public class InventoryRepository : IInventoryRepository
                 .Where(i => i.ProductId == t.ProductId && i.StatusCode == "READY" && i.OwnershipType == "KFH_OWNED")
                 .CountAsync();
 
-            if (currentStock <= t.MinStockQty)
+            if (t.ThresholdType == "HIGH_STOCK")
             {
-                alerts.Add(new
+                int maxLevel = t.MaxStockQty ?? t.MinStockQty;
+                if (currentStock >= maxLevel && maxLevel > 0)
                 {
-                    threshold_id = t.ThresholdId,
-                    product_id = t.ProductId,
-                    product_code = t.Product?.ProductCode ?? "",
-                    product_name = $"{t.Product?.MetalType?.MetalName ?? ""} {t.Product?.Denomination?.Label ?? ""}",
-                    vendor_name = t.Vendor?.VendorName ?? "",
-                    min_stock_qty = t.MinStockQty,
-                    reorder_qty = t.ReorderQty,
-                    current_stock = currentStock,
-                    deficit = t.MinStockQty - currentStock
-                });
+                    alerts.Add(new StockAlertItem
+                    {
+                        threshold_id = t.ThresholdId,
+                        threshold_type = "HIGH_STOCK",
+                        alert_type = "HIGH_STOCK",
+                        product_id = t.ProductId,
+                        product_code = t.Product?.ProductCode ?? "",
+                        product_name = $"{t.Product?.MetalType?.MetalName ?? ""} {t.Product?.Denomination?.Label ?? ""}",
+                        vendor_name = t.Vendor?.VendorName ?? "",
+                        threshold_limit = maxLevel,
+                        min_stock_qty = t.MinStockQty,
+                        max_stock_qty = maxLevel,
+                        reorder_qty = t.ReorderQty,
+                        current_stock = currentStock,
+                        excess_qty = currentStock - maxLevel,
+                        deficit = 0,
+                        message = $"High stock alert: {t.Product?.ProductCode} has reached/exceeded maximum holding capacity ({currentStock} >= {maxLevel} pcs)."
+                    });
+                }
+            }
+            else
+            {
+                // Default LOW_STOCK
+                if (currentStock <= t.MinStockQty)
+                {
+                    alerts.Add(new StockAlertItem
+                    {
+                        threshold_id = t.ThresholdId,
+                        threshold_type = "LOW_STOCK",
+                        alert_type = "LOW_STOCK",
+                        product_id = t.ProductId,
+                        product_code = t.Product?.ProductCode ?? "",
+                        product_name = $"{t.Product?.MetalType?.MetalName ?? ""} {t.Product?.Denomination?.Label ?? ""}",
+                        vendor_name = t.Vendor?.VendorName ?? "",
+                        threshold_limit = t.MinStockQty,
+                        min_stock_qty = t.MinStockQty,
+                        max_stock_qty = t.MaxStockQty,
+                        reorder_qty = t.ReorderQty,
+                        current_stock = currentStock,
+                        deficit = t.MinStockQty - currentStock,
+                        excess_qty = 0,
+                        message = $"Low stock alert: {t.Product?.ProductCode} is at or below minimum threshold floor ({currentStock} <= {t.MinStockQty} pcs)."
+                    });
+                }
             }
         }
 
         return alerts;
+    }
+
+    public async Task<IEnumerable<StockAlertItem>> CheckLowStockAlertsAsync()
+    {
+        return await CheckStockAlertsAsync();
     }
 
     public async Task<(int poId, string result)> CreateDraftPurchaseOrderAsync(int thresholdId, string createdBy)
@@ -3783,6 +4063,8 @@ public class InventoryRepository : IInventoryRepository
         var item = await _dbContext.InventoryItems.FindAsync(itemId);
         if (item == null) throw new InvalidOperationException("Item not found.");
 
+        // Invariant: IsDamaged flag must NOT become effective until Maker-Checker authorization
+        item.IsDamaged = false;
         item.DamageApprovalStatus = "PENDING_APPROVAL";
         item.DamageReportedBy = user;
         item.DamageReason = reason;

@@ -107,6 +107,13 @@ public class BarcodeLabelDto
     public string OwnershipType { get; set; } = null!;
     public string StatusCode { get; set; } = null!;
     public string? LocationDescription { get; set; }
+    public bool IsDamaged { get; set; }
+    public string? DamageApprovalStatus { get; set; }
+    public string? DamageReason { get; set; }
+    public string? DamageDescription { get; set; }
+    public string? DamageReportedBy { get; set; }
+    public string? DamageApprovedBy { get; set; }
+    public DateTime? DamageApprovedAt { get; set; }
     // Machine-encoded content actually stored in the symbols (contains the raw FNC1
     // control character for the barcode's GS1-128 encoding).
     public string Gs1ElementString { get; set; } = null!;

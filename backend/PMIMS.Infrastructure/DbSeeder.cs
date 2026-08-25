@@ -121,6 +121,78 @@ public static class DbSeeder
                             }
                         }
                     }
+
+                    // Check and update reorder_thresholds
+                    var thCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    using (var pragmaCmd = connection.CreateCommand())
+                    {
+                        pragmaCmd.CommandText = "PRAGMA table_info(reorder_thresholds);";
+                        using var reader = await pragmaCmd.ExecuteReaderAsync();
+                        while (await reader.ReadAsync())
+                        {
+                            var colName = reader["name"]?.ToString();
+                            if (!string.IsNullOrEmpty(colName)) thCols.Add(colName);
+                        }
+                    }
+                    if (thCols.Count > 0)
+                    {
+                        if (!thCols.Contains("threshold_type"))
+                        {
+                            try
+                            {
+                                using var alterCmd = connection.CreateCommand();
+                                alterCmd.CommandText = "ALTER TABLE reorder_thresholds ADD COLUMN threshold_type TEXT NOT NULL DEFAULT 'LOW_STOCK';";
+                                await alterCmd.ExecuteNonQueryAsync();
+                            }
+                            catch { }
+                        }
+                        if (!thCols.Contains("max_stock_qty"))
+                        {
+                            try
+                            {
+                                using var alterCmd = connection.CreateCommand();
+                                alterCmd.CommandText = "ALTER TABLE reorder_thresholds ADD COLUMN max_stock_qty INTEGER NULL;";
+                                await alterCmd.ExecuteNonQueryAsync();
+                            }
+                            catch { }
+                        }
+                    }
+
+                    // Check and update pending_threshold_changes
+                    var pthCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    using (var pragmaCmd = connection.CreateCommand())
+                    {
+                        pragmaCmd.CommandText = "PRAGMA table_info(pending_threshold_changes);";
+                        using var reader = await pragmaCmd.ExecuteReaderAsync();
+                        while (await reader.ReadAsync())
+                        {
+                            var colName = reader["name"]?.ToString();
+                            if (!string.IsNullOrEmpty(colName)) pthCols.Add(colName);
+                        }
+                    }
+                    if (pthCols.Count > 0)
+                    {
+                        if (!pthCols.Contains("threshold_type"))
+                        {
+                            try
+                            {
+                                using var alterCmd = connection.CreateCommand();
+                                alterCmd.CommandText = "ALTER TABLE pending_threshold_changes ADD COLUMN threshold_type TEXT NOT NULL DEFAULT 'LOW_STOCK';";
+                                await alterCmd.ExecuteNonQueryAsync();
+                            }
+                            catch { }
+                        }
+                        if (!pthCols.Contains("max_stock_qty"))
+                        {
+                            try
+                            {
+                                using var alterCmd = connection.CreateCommand();
+                                alterCmd.CommandText = "ALTER TABLE pending_threshold_changes ADD COLUMN max_stock_qty INTEGER NULL;";
+                                await alterCmd.ExecuteNonQueryAsync();
+                            }
+                            catch { }
+                        }
+                    }
                 }
                 else if (context.Database.IsSqlServer())
                 {
@@ -150,34 +222,31 @@ public static class DbSeeder
                         BEGIN
                             ALTER TABLE pending_intakes ADD ownership_type VARCHAR(30) NOT NULL CONSTRAINT DF_pending_intakes_ownership_type DEFAULT 'KFH_OWNED';
                         END
+
+                        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('reorder_thresholds') AND name = 'threshold_type')
+                        BEGIN
+                            ALTER TABLE reorder_thresholds ADD threshold_type VARCHAR(30) NOT NULL CONSTRAINT DF_reorder_thresholds_threshold_type DEFAULT 'LOW_STOCK';
+                        END
+
+                        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('reorder_thresholds') AND name = 'max_stock_qty')
+                        BEGIN
+                            ALTER TABLE reorder_thresholds ADD max_stock_qty INT NULL;
+                        END
+
+                        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('pending_threshold_changes') AND name = 'threshold_type')
+                        BEGIN
+                            ALTER TABLE pending_threshold_changes ADD threshold_type VARCHAR(30) NOT NULL CONSTRAINT DF_pending_threshold_changes_threshold_type DEFAULT 'LOW_STOCK';
+                        END
+
+                        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('pending_threshold_changes') AND name = 'max_stock_qty')
+                        BEGIN
+                            ALTER TABLE pending_threshold_changes ADD max_stock_qty INT NULL;
+                        END
                     ");
                 }
 
-                // 3. Ensure TURKEY_PURCHASE workflow template exists
-                var hasTurkeyWf = await context.WorkflowTemplates.AnyAsync(t => t.WorkflowType == "TURKEY_PURCHASE");
-                if (!hasTurkeyWf)
-                {
-                    var turkeyPurchaseWorkflow = new WorkflowTemplate
-                    {
-                        WorkflowType = "TURKEY_PURCHASE",
-                        Name = "Default Turkey Gold Purchase Workflow",
-                        Description = "Maker-Checker verification for purchasing consignment gold from Turkey.",
-                        IsActive = true
-                    };
-                    context.WorkflowTemplates.Add(turkeyPurchaseWorkflow);
-                    await context.SaveChangesAsync();
-
-                    var turkeyPurchaseStep1 = new WorkflowStep
-                    {
-                        TemplateId = turkeyPurchaseWorkflow.TemplateId,
-                        StepOrder = 1,
-                        StepName = "Turkey Purchase Checker Approval",
-                        RequiredRole = "Treasury Operations (Checker)",
-                        Description = "Checker verifies serials and purchase price, approving ownership transfer to KFH."
-                    };
-                    context.WorkflowSteps.Add(turkeyPurchaseStep1);
-                    await context.SaveChangesAsync();
-                }
+                // 3. Ensure all default workflow templates and Maker-Checker steps exist
+                await EnsureWorkflowTemplatesAsync(context);
             }
             finally
             {
@@ -187,6 +256,165 @@ public static class DbSeeder
         catch (Exception ex)
         {
             Console.WriteLine($"⚠️ Schema update check warning: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Ensures all 6 core workflows have active workflow template definitions with Maker and Checker steps.
+    /// Step 1: Treasury Operations (Maker) verification.
+    /// Step 2: Treasury Operations (Checker) approval.
+    /// </summary>
+    public static async Task EnsureWorkflowTemplatesAsync(AppDbContext context)
+    {
+        // Remove legacy PURCHASE_ORDER workflow template if present
+        var legacyPoWf = await context.WorkflowTemplates
+            .Include(t => t.Steps)
+            .FirstOrDefaultAsync(t => t.WorkflowType == "PURCHASE_ORDER");
+        if (legacyPoWf != null)
+        {
+            if (legacyPoWf.Steps != null && legacyPoWf.Steps.Any())
+            {
+                context.WorkflowSteps.RemoveRange(legacyPoWf.Steps);
+            }
+            context.WorkflowTemplates.Remove(legacyPoWf);
+            await context.SaveChangesAsync();
+        }
+
+        var workflows = new[]
+        {
+            new
+            {
+                WorkflowType = "INTAKE_SHIPMENT",
+                Name = "Default Intake Shipment Workflow",
+                Description = "Standard Maker-Checker verification for incoming shipments.",
+                MakerStepName = "Intake Shipment Maker Verification",
+                MakerDesc = "Maker inspects shipment package, logs serials, and reviews delivery documentation.",
+                CheckerStepName = "Intake Shipment Checker Approval",
+                CheckerDesc = "Checker validates weight, serial counts, and authorizes vault shelf placement."
+            },
+            new
+            {
+                WorkflowType = "BRANCH_TRANSFER",
+                Name = "Default Branch Transfer Workflow",
+                Description = "Standard Maker-Checker verification for branch transfers.",
+                MakerStepName = "Branch Transfer Maker Verification",
+                MakerDesc = "Maker confirms transfer request items, destination vault, and courier dispatch details.",
+                CheckerStepName = "Branch Transfer Checker Approval",
+                CheckerDesc = "Checker validates transfer routing and authorizes vault transfer movement."
+            },
+            new
+            {
+                WorkflowType = "TURKEY_PURCHASE",
+                Name = "Default Turkey Gold Purchase Workflow",
+                Description = "Maker-Checker verification for purchasing consignment gold from Turkey.",
+                MakerStepName = "Turkey Purchase Maker Verification",
+                MakerDesc = "Maker checks consignment serials, gold purity certification, and agreed buy rate.",
+                CheckerStepName = "Turkey Purchase Checker Approval",
+                CheckerDesc = "Checker verifies serials and agreed buy rate, approving ownership transfer to KFH."
+            },
+            new
+            {
+                WorkflowType = "DAMAGE_BAR",
+                Name = "Default Damage Bar Workflow",
+                Description = "Standard Maker-Checker verification for marking gold bars as damaged.",
+                MakerStepName = "Damage Bar Maker Verification",
+                MakerDesc = "Maker inspects damaged bar, records defect report, and attaches visual evidence.",
+                CheckerStepName = "Damage Bar Checker Approval",
+                CheckerDesc = "Checker reviews damage evidence and approves quarantine status change."
+            },
+            new
+            {
+                WorkflowType = "CUSTODY_WITHDRAWAL",
+                Name = "Default Customer Gold Custody Withdrawal Workflow",
+                Description = "Maker-Checker verification for client physical gold withdrawal and delivery handover.",
+                MakerStepName = "Custody Handover Maker Verification",
+                MakerDesc = "Maker checks withdrawal request, customer civil ID, and staging of custody bars.",
+                CheckerStepName = "Custody Checker Handover Authorization",
+                CheckerDesc = "Checker validates customer civil ID, PACI handover OTP, and authorizes vault dispatch."
+            },
+            new
+            {
+                WorkflowType = "THRESHOLD_CONFIG",
+                Name = "Default Cut-Off Threshold Configuration Workflow",
+                Description = "Maker-Checker verification for creation, amendment, activation, deactivation, or deletion of stock cut-off thresholds.",
+                MakerStepName = "Threshold Configuration Maker Verification",
+                MakerDesc = "Maker configures product denomination, vendor, min stock cut-off, reorder level, and active state.",
+                CheckerStepName = "Threshold Configuration Checker Authorization",
+                CheckerDesc = "Checker reviews threshold parameters against enterprise stock policy and authorizes threshold activation or removal."
+            }
+        };
+
+        foreach (var def in workflows)
+        {
+            var template = await context.WorkflowTemplates
+                .Include(t => t.Steps)
+                .FirstOrDefaultAsync(t => t.WorkflowType == def.WorkflowType);
+
+            if (template == null)
+            {
+                template = new WorkflowTemplate
+                {
+                    WorkflowType = def.WorkflowType,
+                    Name = def.Name,
+                    Description = def.Description,
+                    IsActive = true
+                };
+                context.WorkflowTemplates.Add(template);
+                await context.SaveChangesAsync();
+
+                var step1 = new WorkflowStep
+                {
+                    TemplateId = template.TemplateId,
+                    StepOrder = 1,
+                    StepName = def.MakerStepName,
+                    RequiredRole = "Treasury Operations (Maker)",
+                    Description = def.MakerDesc
+                };
+                var step2 = new WorkflowStep
+                {
+                    TemplateId = template.TemplateId,
+                    StepOrder = 2,
+                    StepName = def.CheckerStepName,
+                    RequiredRole = "Treasury Operations (Checker)",
+                    Description = def.CheckerDesc
+                };
+                context.WorkflowSteps.AddRange(step1, step2);
+                await context.SaveChangesAsync();
+            }
+            else
+            {
+                if (template.Steps == null || template.Steps.Count < 2)
+                {
+                    bool hasPending = await context.WorkflowInstances.AnyAsync(i => i.TemplateId == template.TemplateId && i.StatusCode == "PENDING_MAKER");
+                    if (!hasPending)
+                    {
+                        if (template.Steps != null && template.Steps.Any())
+                        {
+                            context.WorkflowSteps.RemoveRange(template.Steps);
+                            await context.SaveChangesAsync();
+                        }
+
+                        var step1 = new WorkflowStep
+                        {
+                            TemplateId = template.TemplateId,
+                            StepOrder = 1,
+                            StepName = def.MakerStepName,
+                            RequiredRole = "Treasury Operations (Maker)",
+                            Description = def.MakerDesc
+                        };
+                        var step2 = new WorkflowStep
+                        {
+                            TemplateId = template.TemplateId,
+                            StepOrder = 2,
+                            StepName = def.CheckerStepName,
+                            RequiredRole = "Treasury Operations (Checker)",
+                            Description = def.CheckerDesc
+                        };
+                        context.WorkflowSteps.AddRange(step1, step2);
+                        await context.SaveChangesAsync();
+                    }
+                }
+            }
         }
     }
     // Single source of truth for system-group module permissions, shared by the fresh
@@ -200,7 +428,7 @@ public static class DbSeeder
             {"dashboard","READ_ONLY"}, {"pending_actions","READ_WRITE"}, {"spatial_map","READ_ONLY"},
             {"custody","READ_ONLY"}, {"stocktake","READ_ONLY"}, {"migration","HIDDEN"}, {"reports","READ_ONLY"},
             {"workflows","READ_ONLY"}, {"settings","HIDDEN"}, {"user_admin","HIDDEN"}, {"vault_location","HIDDEN"},
-            {"master_data","HIDDEN"}, {"workflow_design","HIDDEN"}, {"intake","FULL"}, {"rules_engine","HIDDEN"},
+            {"master_data","HIDDEN"}, {"workflow_design","READ_ONLY"}, {"intake","FULL"}, {"rules_engine","HIDDEN"},
             {"monitoring","HIDDEN"}, {"barcode_qr_labeling","FULL"}, {"purchase_orders","FULL"},
             {"dispensing","FULL"}, {"device_integration","HIDDEN"}, {"notifications","READ_ONLY"},
         },
@@ -209,7 +437,7 @@ public static class DbSeeder
             {"dashboard","READ_ONLY"}, {"pending_actions","FULL"}, {"spatial_map","READ_ONLY"},
             {"custody","READ_ONLY"}, {"stocktake","READ_WRITE"}, {"migration","HIDDEN"}, {"reports","READ_ONLY"},
             {"workflows","READ_ONLY"}, {"settings","HIDDEN"}, {"user_admin","HIDDEN"}, {"vault_location","HIDDEN"},
-            {"master_data","HIDDEN"}, {"workflow_design","HIDDEN"}, {"intake","READ_ONLY"}, {"rules_engine","HIDDEN"},
+            {"master_data","HIDDEN"}, {"workflow_design","READ_ONLY"}, {"intake","READ_ONLY"}, {"rules_engine","HIDDEN"},
             {"monitoring","HIDDEN"}, {"barcode_qr_labeling","READ_ONLY"}, {"purchase_orders","READ_ONLY"},
             {"dispensing","READ_ONLY"}, {"device_integration","HIDDEN"}, {"notifications","READ_ONLY"},
         },
@@ -218,7 +446,7 @@ public static class DbSeeder
             {"dashboard","READ_ONLY"}, {"pending_actions","FULL"}, {"spatial_map","READ_ONLY"},
             {"custody","READ_ONLY"}, {"stocktake","FULL"}, {"migration","HIDDEN"}, {"reports","FULL"},
             {"workflows","READ_ONLY"}, {"settings","HIDDEN"}, {"user_admin","HIDDEN"}, {"vault_location","HIDDEN"},
-            {"master_data","HIDDEN"}, {"workflow_design","HIDDEN"}, {"intake","READ_ONLY"}, {"rules_engine","HIDDEN"},
+            {"master_data","HIDDEN"}, {"workflow_design","READ_ONLY"}, {"intake","READ_ONLY"}, {"rules_engine","HIDDEN"},
             {"monitoring","HIDDEN"}, {"barcode_qr_labeling","READ_ONLY"}, {"purchase_orders","READ_ONLY"},
             {"dispensing","READ_ONLY"}, {"device_integration","HIDDEN"}, {"notifications","READ_ONLY"},
         },
@@ -489,116 +717,8 @@ public static class DbSeeder
 
         // 17. (No simulated reconciliation break — starting from zero stock.)
 
-        // 18. Default Active Workflow Templates Seeding
-        // 1. TURKEY_PURCHASE (Consignment Gold Purchase from Turkey)
-        var turkeyPurchaseWorkflow = new WorkflowTemplate
-        {
-            WorkflowType = "TURKEY_PURCHASE",
-            Name = "Default Turkey Gold Purchase Workflow",
-            Description = "Maker-Checker verification for purchasing consignment gold from Turkey.",
-            IsActive = true
-        };
-        context.WorkflowTemplates.Add(turkeyPurchaseWorkflow);
-        await context.SaveChangesAsync();
-
-        var turkeyPurchaseStep1 = new WorkflowStep
-        {
-            TemplateId = turkeyPurchaseWorkflow.TemplateId,
-            StepOrder = 1,
-            StepName = "Turkey Purchase Checker Approval",
-            RequiredRole = "Treasury Operations (Checker)",
-            Description = "Checker verifies serials and agreed buy rate, approving ownership transfer to KFH."
-        };
-        context.WorkflowSteps.Add(turkeyPurchaseStep1);
-        await context.SaveChangesAsync();
-
-        // 2. DAMAGE_BAR (Damaged Gold Bar Quarantine)
-        var damageWorkflow = new WorkflowTemplate
-        {
-            WorkflowType = "DAMAGE_BAR",
-            Name = "Default Damage Bar Workflow",
-            Description = "Standard Maker-Checker verification for marking gold bars as damaged.",
-            IsActive = true
-        };
-        context.WorkflowTemplates.Add(damageWorkflow);
-        await context.SaveChangesAsync();
-
-        var damageStep1 = new WorkflowStep
-        {
-            TemplateId = damageWorkflow.TemplateId,
-            StepOrder = 1,
-            StepName = "Damage Bar Checker Approval",
-            RequiredRole = "Treasury Operations (Checker)",
-            Description = "Checker reviews damage evidence and approves status change."
-        };
-        context.WorkflowSteps.Add(damageStep1);
-        await context.SaveChangesAsync();
-
-        // 3. INTAKE_SHIPMENT (Incoming Shipment Receipt & Weighing)
-        var intakeWorkflow = new WorkflowTemplate
-        {
-            WorkflowType = "INTAKE_SHIPMENT",
-            Name = "Default Intake Shipment Workflow",
-            Description = "Standard Maker-Checker verification for incoming shipments.",
-            IsActive = true
-        };
-        context.WorkflowTemplates.Add(intakeWorkflow);
-        await context.SaveChangesAsync();
-
-        var intakeStep1 = new WorkflowStep
-        {
-            TemplateId = intakeWorkflow.TemplateId,
-            StepOrder = 1,
-            StepName = "Intake Checker Verification",
-            RequiredRole = "Treasury Operations (Checker)",
-            Description = "Checker verifies weight, serials and approves shelf placement."
-        };
-        context.WorkflowSteps.Add(intakeStep1);
-        await context.SaveChangesAsync();
-
-        // 4. BRANCH_TRANSFER (Inter-Branch & Vault Transfer)
-        var transferWorkflow = new WorkflowTemplate
-        {
-            WorkflowType = "BRANCH_TRANSFER",
-            Name = "Default Branch Transfer Workflow",
-            Description = "Standard Maker-Checker verification for branch transfers.",
-            IsActive = true
-        };
-        context.WorkflowTemplates.Add(transferWorkflow);
-        await context.SaveChangesAsync();
-
-        var transferStep1 = new WorkflowStep
-        {
-            TemplateId = transferWorkflow.TemplateId,
-            StepOrder = 1,
-            StepName = "Branch Transfer Checker Approval",
-            RequiredRole = "Treasury Operations (Checker)",
-            Description = "Checker reviews and approves the branch transfer."
-        };
-        context.WorkflowSteps.Add(transferStep1);
-        await context.SaveChangesAsync();
-
-        // 5. CUSTODY_WITHDRAWAL (Client Custody Withdrawal & Handover)
-        var custodyWithdrawalWorkflow = new WorkflowTemplate
-        {
-            WorkflowType = "CUSTODY_WITHDRAWAL",
-            Name = "Default Customer Gold Custody Withdrawal Workflow",
-            Description = "Maker-Checker verification for client physical gold withdrawal and delivery handover.",
-            IsActive = true
-        };
-        context.WorkflowTemplates.Add(custodyWithdrawalWorkflow);
-        await context.SaveChangesAsync();
-
-        var custodyWithdrawalStep1 = new WorkflowStep
-        {
-            TemplateId = custodyWithdrawalWorkflow.TemplateId,
-            StepOrder = 1,
-            StepName = "Custody Checker Handover Authorization",
-            RequiredRole = "Treasury Operations (Checker)",
-            Description = "Checker validates customer civil ID, PACI handover OTP, and authorizes vault dispatch."
-        };
-        context.WorkflowSteps.Add(custodyWithdrawalStep1);
-        await context.SaveChangesAsync();
+        // 18. Default Active Workflow Templates Seeding (Maker and Checker Steps)
+        await EnsureWorkflowTemplatesAsync(context);
 
 
         // 19. Default Privilege Groups with Permission Matrices

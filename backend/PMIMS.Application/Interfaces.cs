@@ -118,11 +118,16 @@ public interface IInventoryRepository
     // Effective Permissions (merged from all groups — highest wins)
     Task<Dictionary<string, string>> GetEffectivePermissionsForUserAsync(string username);
 
-    // Stock Reorder Thresholds
-    Task<IEnumerable<ReorderThreshold>> GetReorderThresholdsAsync();
-    Task<ReorderThreshold> SaveReorderThresholdAsync(int? thresholdId, int productId, int vendorId, int minStockQty, int reorderQty, bool isActive);
+    // Stock Thresholds (Low-Stock Floor & High-Stock Ceiling Governed by Maker-Checker Workflow)
+    Task<IEnumerable<ReorderThreshold>> GetReorderThresholdsAsync(string? thresholdType = null);
+    Task<ReorderThreshold> SaveReorderThresholdAsync(int? thresholdId, int productId, int vendorId, int minStockQty, int? maxStockQty, int reorderQty, bool isActive, string thresholdType = "LOW_STOCK");
     Task<bool> DeleteReorderThresholdAsync(int thresholdId);
-    Task<IEnumerable<dynamic>> CheckLowStockAlertsAsync();
+    Task<PendingThresholdChange> SubmitThresholdChangeRequestAsync(string thresholdType, int? thresholdId, int productId, int vendorId, int minStockQty, int? maxStockQty, int reorderQty, bool isActive, string requestedBy, string? comments = null);
+    Task<PendingThresholdChange> SubmitThresholdDeleteRequestAsync(int thresholdId, string requestedBy, string? comments = null);
+    Task<PendingThresholdChange?> GetPendingThresholdChangeByIdAsync(int pendingChangeId);
+    Task<IEnumerable<PendingThresholdChange>> GetPendingThresholdChangesAsync(string? thresholdType = null);
+    Task<IEnumerable<StockAlertItem>> CheckStockAlertsAsync();
+    Task<IEnumerable<StockAlertItem>> CheckLowStockAlertsAsync();
     Task<(int poId, string result)> CreateDraftPurchaseOrderAsync(int thresholdId, string createdBy);
 
     // KFH Branch settings CRUD & Workflow Transfers

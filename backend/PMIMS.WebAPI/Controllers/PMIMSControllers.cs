@@ -365,7 +365,15 @@ public partial class PMIMSControllers : ControllerBase
             location = i.Location?.Description ?? "Unknown",
             location_id = i.LocationId,
             status = i.StatusCode,
-            ownership = i.OwnershipType
+            ownership = i.OwnershipType,
+            is_damaged = i.IsDamaged,
+            damage_status = i.DamageApprovalStatus ?? (i.IsDamaged ? "APPROVED" : "NONE"),
+            damage_reason = i.DamageReason,
+            damage_description = i.DamageDescription,
+            damage_doc_id = i.DamageEvidenceDocId,
+            damage_reported_by = i.DamageReportedBy,
+            damage_approved_by = i.DamageApprovedBy,
+            damage_approved_at = i.DamageApprovedAt
         }));
     }
 
@@ -1050,6 +1058,10 @@ public partial class PMIMSControllers : ControllerBase
                     location = item.Location?.Description ?? "Unknown",
                     status_code = item.StatusCode,
                     ownership_type = item.OwnershipType,
+                    is_damaged = item.IsDamaged,
+                    damage_status = item.DamageApprovalStatus ?? (item.IsDamaged ? "APPROVED" : "NONE"),
+                    damage_reason = item.DamageReason,
+                    damage_description = item.DamageDescription,
                     cost_basis = Math.Round(costBasis, 2),
                     market_value = Math.Round(currentMarketValue, 2),
                     unrealized_pnl = Math.Round(unrealizedPnl, 2)
@@ -1251,6 +1263,32 @@ public partial class PMIMSControllers : ControllerBase
                         damage_doc_id = item.DamageEvidenceDocId,
                         status_code = item.StatusCode,
                         created_by = item.DamageReportedBy ?? "SYSTEM"
+                    };
+                }
+            }
+            else if (inst.WorkflowType == "THRESHOLD_CONFIG")
+            {
+                var change = await _repository.GetPendingThresholdChangeByIdAsync(inst.EntityId);
+                if (change != null)
+                {
+                    entityDetails = new
+                    {
+                        pending_change_id = change.PendingChangeId,
+                        change_type = change.ChangeType,
+                        threshold_type = change.ThresholdType,
+                        threshold_id = change.ThresholdId,
+                        product_id = change.ProductId,
+                        product_code = change.Product?.ProductCode ?? "",
+                        product_name = $"{change.Product?.MetalType?.MetalName ?? ""} {change.Product?.Denomination?.Label ?? ""}",
+                        vendor_id = change.VendorId,
+                        vendor_name = change.Vendor?.VendorName ?? "",
+                        min_stock_qty = change.MinStockQty,
+                        max_stock_qty = change.MaxStockQty,
+                        reorder_qty = change.ReorderQty,
+                        is_active = change.IsActive,
+                        status_code = change.StatusCode,
+                        created_by = change.RequestedBy,
+                        comments = change.Comments
                     };
                 }
             }
@@ -1655,7 +1693,7 @@ public partial class PMIMSControllers : ControllerBase
         }
     }
 
-    [Authorize(Policy = "custody.write")]
+    [Authorize]
     [HttpPost("inventory/items/{id}/mark-damaged")]
     public async Task<IActionResult> MarkDamaged(int id, [FromBody] MarkDamagedRequest req)
     {
@@ -1672,7 +1710,7 @@ public partial class PMIMSControllers : ControllerBase
         }
     }
 
-    [Authorize(Policy = "custody.write")]
+    [Authorize]
     [HttpPost("inventory/items/{id}/damage-action")]
     public async Task<IActionResult> ProcessDamagedAction(int id, [FromBody] ProcessDamageActionRequest req)
     {
@@ -1689,12 +1727,65 @@ public partial class PMIMSControllers : ControllerBase
         }
     }
 
-    [Authorize(Policy = "custody.read")]
+    [Authorize]
     [HttpGet("inventory/damaged-items")]
     public async Task<IActionResult> GetDamagedBars()
     {
         var bars = await _repository.GetDamagedBarsAsync();
         return Ok(bars);
+    }
+
+    [Authorize(Policy = "custody.read")]
+    [HttpGet("inventory/items/{id:int}/movement-validation")]
+    public async Task<IActionResult> GetMovementValidationById(int id)
+    {
+        var items = await _repository.GetItemsAsync();
+        var item = items.FirstOrDefault(i => i.ItemId == id);
+        if (item == null) return NotFound(new { error = "Inventory item not found." });
+
+        bool canMove = !item.IsDamaged && item.StatusCode == "READY";
+        return Ok(new
+        {
+            item_id = item.ItemId,
+            serial_number = item.SerialNumber,
+            can_move = canMove,
+            is_damaged = item.IsDamaged,
+            damage_status = item.DamageApprovalStatus ?? (item.IsDamaged ? "APPROVED" : "NONE"),
+            damage_reason = item.DamageReason,
+            damage_description = item.DamageDescription,
+            status_code = item.StatusCode,
+            current_location_id = item.LocationId,
+            current_location = item.Location?.Description ?? "Unknown",
+            validation_message = item.IsDamaged
+                ? $"BLOCKED: Bar '{item.SerialNumber}' is marked as DAMAGED ({item.DamageReason ?? "DEFECT"}). Outbound movement from Main Vault is prohibited."
+                : (canMove ? "VALID: Bar is ready for outbound vault movement." : $"RESTRICTED: Bar status is '{item.StatusCode}'.")
+        });
+    }
+
+    [Authorize(Policy = "custody.read")]
+    [HttpGet("inventory/items/by-serial/{serialNumber}/movement-validation")]
+    public async Task<IActionResult> GetMovementValidationBySerial(string serialNumber)
+    {
+        var item = await _repository.GetItemBySerialNumberAsync(serialNumber);
+        if (item == null) return NotFound(new { error = $"Inventory item with serial '{serialNumber}' not found." });
+
+        bool canMove = !item.IsDamaged && item.StatusCode == "READY";
+        return Ok(new
+        {
+            item_id = item.ItemId,
+            serial_number = item.SerialNumber,
+            can_move = canMove,
+            is_damaged = item.IsDamaged,
+            damage_status = item.DamageApprovalStatus ?? (item.IsDamaged ? "APPROVED" : "NONE"),
+            damage_reason = item.DamageReason,
+            damage_description = item.DamageDescription,
+            status_code = item.StatusCode,
+            current_location_id = item.LocationId,
+            current_location = item.Location?.Description ?? "Unknown",
+            validation_message = item.IsDamaged
+                ? $"BLOCKED: Bar '{item.SerialNumber}' is marked as DAMAGED ({item.DamageReason ?? "DEFECT"}). Outbound movement from Main Vault is prohibited."
+                : (canMove ? "VALID: Bar is ready for outbound vault movement." : $"RESTRICTED: Bar status is '{item.StatusCode}'.")
+        });
     }
 
     [Authorize(Policy = "intake.write")]
@@ -2173,9 +2264,11 @@ public class AddMemberRequest
 public class SaveReorderThresholdRequest
 {
     public int? ThresholdId { get; set; }
+    public string ThresholdType { get; set; } = "LOW_STOCK"; // LOW_STOCK, HIGH_STOCK
     public int ProductId { get; set; }
     public int VendorId { get; set; }
     public int MinStockQty { get; set; }
+    public int? MaxStockQty { get; set; }
     public int ReorderQty { get; set; }
     public bool IsActive { get; set; } = true;
 }

@@ -874,9 +874,11 @@ public class UserGroupMembership
 public class ReorderThreshold
 {
     public int ThresholdId { get; set; }
+    public string ThresholdType { get; set; } = "LOW_STOCK"; // LOW_STOCK, HIGH_STOCK
     public int ProductId { get; set; }
     public int VendorId { get; set; }
-    public int MinStockQty { get; set; }
+    public int MinStockQty { get; set; } // Min threshold alert level (LOW_STOCK)
+    public int? MaxStockQty { get; set; } // Max threshold alert level (HIGH_STOCK)
     public int ReorderQty { get; set; }
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
@@ -884,6 +886,25 @@ public class ReorderThreshold
 
     public MetalProduct? Product { get; set; }
     public Vendor? Vendor { get; set; }
+}
+
+public class StockAlertItem
+{
+    public int threshold_id { get; set; }
+    public string threshold_type { get; set; } = "LOW_STOCK";
+    public string alert_type { get; set; } = "LOW_STOCK";
+    public int product_id { get; set; }
+    public string product_code { get; set; } = "";
+    public string product_name { get; set; } = "";
+    public string vendor_name { get; set; } = "";
+    public int threshold_limit { get; set; }
+    public int min_stock_qty { get; set; }
+    public int? max_stock_qty { get; set; }
+    public int reorder_qty { get; set; }
+    public int current_stock { get; set; }
+    public int deficit { get; set; }
+    public int excess_qty { get; set; }
+    public string message { get; set; } = "";
 }
 
 public class BranchTransfer
@@ -968,6 +989,29 @@ public class PendingTurkeyPurchase
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public string? ApprovedBy { get; set; }
     public DateTime? ApprovedAt { get; set; }
+}
+
+public class PendingThresholdChange
+{
+    public int PendingChangeId { get; set; }
+    public string ChangeType { get; set; } = "CREATE"; // CREATE, AMEND, ACTIVATE, DEACTIVATE, DELETE
+    public string ThresholdType { get; set; } = "LOW_STOCK"; // LOW_STOCK, HIGH_STOCK
+    public int? ThresholdId { get; set; }
+    public int ProductId { get; set; }
+    public int VendorId { get; set; }
+    public int MinStockQty { get; set; }
+    public int? MaxStockQty { get; set; }
+    public int ReorderQty { get; set; }
+    public bool IsActive { get; set; } = true;
+    public string StatusCode { get; set; } = "PENDING_APPROVAL"; // PENDING_APPROVAL, APPROVED, REJECTED
+    public string RequestedBy { get; set; } = null!;
+    public string? ApprovedBy { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public string? Comments { get; set; }
+
+    public MetalProduct? Product { get; set; }
+    public Vendor? Vendor { get; set; }
+    public ReorderThreshold? Threshold { get; set; }
 }
 
 // ============================================================

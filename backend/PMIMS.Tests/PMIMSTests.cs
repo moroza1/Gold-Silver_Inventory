@@ -89,7 +89,8 @@ public class PMIMSTests
         context.Vaults.Add(vaultMain);
 
         var branchMain = new Branch { BranchId = 1, BranchCode = "MAIN_HO", BranchName = "Main HO Vault Operations", VaultId = 1 };
-        context.Branches.Add(branchMain);
+        var branchSalmiya = new Branch { BranchId = 2, BranchCode = "SALMIYA", BranchName = "Salmiya Branch Vault Operations", VaultId = 1 };
+        context.Branches.AddRange(branchMain, branchSalmiya);
 
         var loc1 = new InventoryLocation
         {
@@ -1195,6 +1196,90 @@ public class PMIMSTests
     }
 
     [Fact]
+    public async Task DamageBar_MakerChecker_Workflow_Lifecycle_IsDamagedEffectiveOnlyOnCheckerApproval()
+    {
+        using var setup = CreateContext();
+        await SeedBasicDataAsync(setup.Context);
+        await DbSeeder.EnsureWorkflowTemplatesAsync(setup.Context);
+
+        var groupMaker = new PrivilegeGroup { GroupName = "Treasury Operations (Maker)", Description = "Maker group", IsSystem = true };
+        var groupChecker = new PrivilegeGroup { GroupName = "Treasury Operations (Checker)", Description = "Checker group", IsSystem = true };
+        setup.Context.PrivilegeGroups.AddRange(groupMaker, groupChecker);
+        await setup.Context.SaveChangesAsync();
+
+        var userMaker = new AppUser { Username = "treasury-maker", DisplayName = "Test Maker", Email = "maker@test.local", PasswordHash = "test-hash" };
+        var userChecker = new AppUser { Username = "treasury-checker", DisplayName = "Test Checker", Email = "checker@test.local", PasswordHash = "test-hash" };
+        setup.Context.AppUsers.AddRange(userMaker, userChecker);
+        await setup.Context.SaveChangesAsync();
+
+        setup.Context.UserGroupMemberships.AddRange(
+            new UserGroupMembership { UserId = userMaker.UserId, GroupId = groupMaker.GroupId, AssignedBy = "TEST" },
+            new UserGroupMembership { UserId = userChecker.UserId, GroupId = groupChecker.GroupId, AssignedBy = "TEST" }
+        );
+
+        var item = new InventoryItem
+        {
+            ItemId = 301,
+            SerialNumber = "SN-DAMAGE-WF-TEST-001",
+            ProductId = 1,
+            LotId = 1,
+            LocationId = 1,
+            OwnershipType = "KFH_OWNED",
+            StatusCode = "READY",
+            IsDamaged = false
+        };
+        setup.Context.InventoryItems.Add(item);
+        await setup.Context.SaveChangesAsync();
+
+        var repo = new InventoryRepository(setup.Context);
+
+        // 1. Maker reports damage -> creates DAMAGE_BAR workflow instance
+        await repo.MarkBarDamagedAsync(301, "DENTED_CORNER", "Corner chipped during transport", "DOC-CHIP-01", "treasury-maker");
+
+        // Verify IsDamaged is STILL FALSE before workflow approval
+        var itemBeforeApproval = await setup.Context.InventoryItems.FindAsync(301);
+        Assert.NotNull(itemBeforeApproval);
+        Assert.False(itemBeforeApproval.IsDamaged);
+        Assert.Equal("PENDING_APPROVAL", itemBeforeApproval.DamageApprovalStatus);
+
+        // Retrieve active workflow instance for DAMAGE_BAR
+        var instances = (await repo.GetActiveWorkflowInstancesAsync()).ToList();
+        var wfInst = instances.FirstOrDefault(i => i.WorkflowType == "DAMAGE_BAR" && i.EntityId == 301);
+        Assert.NotNull(wfInst);
+
+        // Step 1: Maker Verification
+        var step1Result = await repo.ProcessWorkflowActionAsync(
+            instanceId: wfInst.InstanceId,
+            username: "treasury-maker",
+            action: "APPROVED",
+            comments: "Maker verified physical damage"
+        );
+        Assert.Equal("SUCCESS", step1Result);
+
+        // Verify IsDamaged is STILL FALSE after Step 1 (only Maker verified, Checker has not authorized yet)
+        var itemAfterStep1 = await setup.Context.InventoryItems.FindAsync(301);
+        Assert.NotNull(itemAfterStep1);
+        Assert.False(itemAfterStep1.IsDamaged);
+
+        // Step 2: Checker Authorization (Terminal Step)
+        var step2Result = await repo.ProcessWorkflowActionAsync(
+            instanceId: wfInst.InstanceId,
+            username: "treasury-checker",
+            action: "APPROVED",
+            comments: "Checker authorized quarantine"
+        );
+        Assert.Equal("SUCCESS", step2Result);
+
+        // Verify IsDamaged is NOW TRUE and status is DAMAGED
+        var itemAfterStep2 = await setup.Context.InventoryItems.FindAsync(301);
+        Assert.NotNull(itemAfterStep2);
+        Assert.True(itemAfterStep2.IsDamaged);
+        Assert.Equal("APPROVED", itemAfterStep2.DamageApprovalStatus);
+        Assert.Equal("DAMAGED", itemAfterStep2.StatusCode);
+        Assert.Equal("treasury-checker", itemAfterStep2.DamageApprovedBy);
+    }
+
+    [Fact]
     public async Task TestGfsDeliveryRequestValidationAndCourierReturn()
     {
         using var setup = CreateContext();
@@ -1447,6 +1532,511 @@ public class PMIMSTests
             Assert.Contains("approved_by", cols, StringComparer.OrdinalIgnoreCase);
             Assert.Contains("notes", cols, StringComparer.OrdinalIgnoreCase);
         }
+    }
+
+    [Fact]
+    public async Task ThresholdConfig_MakerChecker_FullLifecycle_CreatesAmendsAndDeletesOnlyOnApproval()
+    {
+        using var setup = CreateContext();
+        await SeedBasicDataAsync(setup.Context);
+        await DbSeeder.EnsureWorkflowTemplatesAsync(setup.Context);
+
+        var groupMaker = new PrivilegeGroup { GroupName = "Treasury Operations (Maker)", Description = "Maker group", IsSystem = true };
+        var groupChecker = new PrivilegeGroup { GroupName = "Treasury Operations (Checker)", Description = "Checker group", IsSystem = true };
+        setup.Context.PrivilegeGroups.AddRange(groupMaker, groupChecker);
+        await setup.Context.SaveChangesAsync();
+
+        var userMaker = new AppUser { Username = "treasury-maker", DisplayName = "Test Maker", Email = "maker@test.local", PasswordHash = "test-hash" };
+        var userChecker = new AppUser { Username = "treasury-checker", DisplayName = "Test Checker", Email = "checker@test.local", PasswordHash = "test-hash" };
+        setup.Context.AppUsers.AddRange(userMaker, userChecker);
+        await setup.Context.SaveChangesAsync();
+
+        setup.Context.UserGroupMemberships.AddRange(
+            new UserGroupMembership { UserId = userMaker.UserId, GroupId = groupMaker.GroupId, AssignedBy = "TEST" },
+            new UserGroupMembership { UserId = userChecker.UserId, GroupId = groupChecker.GroupId, AssignedBy = "TEST" }
+        );
+        await setup.Context.SaveChangesAsync();
+
+        var repo = new InventoryRepository(setup.Context);
+
+        // 1. Maker submits creation request
+        var createRequest = await repo.SubmitThresholdChangeRequestAsync(
+            thresholdType: "LOW_STOCK",
+            thresholdId: null,
+            productId: 1,
+            vendorId: 1,
+            minStockQty: 10,
+            maxStockQty: null,
+            reorderQty: 25,
+            isActive: true,
+            requestedBy: "treasury-maker",
+            comments: "Initial cut-off threshold for gold kilobars"
+        );
+
+        Assert.NotNull(createRequest);
+        Assert.Equal("CREATE", createRequest.ChangeType);
+        Assert.Equal("LOW_STOCK", createRequest.ThresholdType);
+        Assert.Equal("PENDING_APPROVAL", createRequest.StatusCode);
+
+        // Verify threshold NOT active in ReorderThresholds yet
+        var thresholdsBeforeApproval = await repo.GetReorderThresholdsAsync();
+        Assert.DoesNotContain(thresholdsBeforeApproval, t => t.ProductId == 1 && t.MinStockQty == 10);
+
+        // Get workflow instance for THRESHOLD_CONFIG
+        var instances = (await repo.GetActiveWorkflowInstancesAsync()).ToList();
+        var wfInst = instances.FirstOrDefault(i => i.WorkflowType == "THRESHOLD_CONFIG" && i.EntityId == createRequest.PendingChangeId);
+        Assert.NotNull(wfInst);
+
+        // 2a. Maker verifies creation (Step 1)
+        var makerStepResult = await repo.ProcessWorkflowActionAsync(
+            instanceId: wfInst.InstanceId,
+            username: "treasury-maker",
+            action: "APPROVED",
+            comments: "Maker verified threshold configuration parameters"
+        );
+        Assert.Equal("SUCCESS", makerStepResult);
+
+        // 2b. Checker approves creation (Step 2 - Terminal)
+        var actionResult = await repo.ProcessWorkflowActionAsync(
+            instanceId: wfInst.InstanceId,
+            username: "treasury-checker",
+            action: "APPROVED",
+            comments: "Authorized threshold addition"
+        );
+        Assert.Equal("SUCCESS", actionResult);
+
+        // Threshold should now exist in ReorderThresholds
+        var thresholdsAfterApproval = (await repo.GetReorderThresholdsAsync()).ToList();
+        var createdTh = thresholdsAfterApproval.FirstOrDefault(t => t.ProductId == 1 && t.MinStockQty == 10);
+        Assert.NotNull(createdTh);
+        Assert.Equal("LOW_STOCK", createdTh.ThresholdType);
+        Assert.Equal(25, createdTh.ReorderQty);
+        Assert.True(createdTh.IsActive);
+
+        // 3. Maker submits amendment request
+        var amendRequest = await repo.SubmitThresholdChangeRequestAsync(
+            thresholdType: "LOW_STOCK",
+            thresholdId: createdTh.ThresholdId,
+            productId: 1,
+            vendorId: 1,
+            minStockQty: 15,
+            maxStockQty: null,
+            reorderQty: 30,
+            isActive: true,
+            requestedBy: "treasury-maker",
+            comments: "Adjusted min stock to 15 pcs"
+        );
+
+        Assert.Equal("AMEND", amendRequest.ChangeType);
+        Assert.Equal("PENDING_APPROVAL", amendRequest.StatusCode);
+
+        // Old values still in effect before approval
+        var thBeforeAmendApproval = (await repo.GetReorderThresholdsAsync()).First(t => t.ThresholdId == createdTh.ThresholdId);
+        Assert.Equal(10, thBeforeAmendApproval.MinStockQty);
+
+        // Maker verifies Step 1 & Checker approves Step 2
+        var amendInstances = (await repo.GetActiveWorkflowInstancesAsync()).ToList();
+        var amendWf = amendInstances.First(i => i.WorkflowType == "THRESHOLD_CONFIG" && i.EntityId == amendRequest.PendingChangeId);
+        await repo.ProcessWorkflowActionAsync(
+            instanceId: amendWf.InstanceId,
+            username: "treasury-maker",
+            action: "APPROVED",
+            comments: "Maker verified amendment"
+        );
+        await repo.ProcessWorkflowActionAsync(
+            instanceId: amendWf.InstanceId,
+            username: "treasury-checker",
+            action: "APPROVED",
+            comments: "Approved 15 pcs limit"
+        );
+
+        var thAfterAmendApproval = (await repo.GetReorderThresholdsAsync()).First(t => t.ThresholdId == createdTh.ThresholdId);
+        Assert.Equal(15, thAfterAmendApproval.MinStockQty);
+        Assert.Equal(30, thAfterAmendApproval.ReorderQty);
+
+        // 4. Maker submits deletion request
+        var deleteRequest = await repo.SubmitThresholdDeleteRequestAsync(
+            thresholdId: createdTh.ThresholdId,
+            requestedBy: "treasury-maker",
+            comments: "Retiring threshold"
+        );
+
+        Assert.Equal("DELETE", deleteRequest.ChangeType);
+        Assert.Equal("PENDING_APPROVAL", deleteRequest.StatusCode);
+
+        // Still exists prior to approval
+        var thBeforeDeleteApproval = (await repo.GetReorderThresholdsAsync()).FirstOrDefault(t => t.ThresholdId == createdTh.ThresholdId);
+        Assert.NotNull(thBeforeDeleteApproval);
+
+        // Maker verifies Step 1 & Checker approves Step 2
+        var deleteInstances = (await repo.GetActiveWorkflowInstancesAsync()).ToList();
+        var deleteWf = deleteInstances.First(i => i.WorkflowType == "THRESHOLD_CONFIG" && i.EntityId == deleteRequest.PendingChangeId);
+        await repo.ProcessWorkflowActionAsync(
+            instanceId: deleteWf.InstanceId,
+            username: "treasury-maker",
+            action: "APPROVED",
+            comments: "Maker verified deletion"
+        );
+        await repo.ProcessWorkflowActionAsync(
+            instanceId: deleteWf.InstanceId,
+            username: "treasury-checker",
+            action: "APPROVED",
+            comments: "Approved threshold deletion"
+        );
+
+        var thAfterDeleteApproval = (await repo.GetReorderThresholdsAsync()).FirstOrDefault(t => t.ThresholdId == createdTh.ThresholdId);
+        Assert.Null(thAfterDeleteApproval);
+    }
+
+    [Fact]
+    public async Task ThresholdConfig_MakerChecker_Rejection_DoesNotApplyChanges()
+    {
+        using var setup = CreateContext();
+        await SeedBasicDataAsync(setup.Context);
+        await DbSeeder.EnsureWorkflowTemplatesAsync(setup.Context);
+
+        var groupMaker = new PrivilegeGroup { GroupName = "Treasury Operations (Maker)", Description = "Maker group", IsSystem = true };
+        var groupChecker = new PrivilegeGroup { GroupName = "Treasury Operations (Checker)", Description = "Checker group", IsSystem = true };
+        setup.Context.PrivilegeGroups.AddRange(groupMaker, groupChecker);
+        await setup.Context.SaveChangesAsync();
+
+        var userMaker = new AppUser { Username = "treasury-maker", DisplayName = "Test Maker", Email = "maker@test.local", PasswordHash = "test-hash" };
+        var userChecker = new AppUser { Username = "treasury-checker", DisplayName = "Test Checker", Email = "checker@test.local", PasswordHash = "test-hash" };
+        setup.Context.AppUsers.AddRange(userMaker, userChecker);
+        await setup.Context.SaveChangesAsync();
+
+        setup.Context.UserGroupMemberships.AddRange(
+            new UserGroupMembership { UserId = userMaker.UserId, GroupId = groupMaker.GroupId, AssignedBy = "TEST" },
+            new UserGroupMembership { UserId = userChecker.UserId, GroupId = groupChecker.GroupId, AssignedBy = "TEST" }
+        );
+        await setup.Context.SaveChangesAsync();
+
+        var repo = new InventoryRepository(setup.Context);
+
+        // Maker submits creation request
+        var createRequest = await repo.SubmitThresholdChangeRequestAsync(
+            thresholdType: "LOW_STOCK",
+            thresholdId: null,
+            productId: 1,
+            vendorId: 1,
+            minStockQty: 50,
+            maxStockQty: null,
+            reorderQty: 100,
+            isActive: true,
+            requestedBy: "treasury-maker",
+            comments: "Excessive threshold test"
+        );
+
+        var instances = (await repo.GetActiveWorkflowInstancesAsync()).ToList();
+        var wfInst = instances.First(i => i.WorkflowType == "THRESHOLD_CONFIG" && i.EntityId == createRequest.PendingChangeId);
+
+        // Maker verifies Step 1
+        await repo.ProcessWorkflowActionAsync(
+            instanceId: wfInst.InstanceId,
+            username: "treasury-maker",
+            action: "APPROVED",
+            comments: "Forwarded to checker"
+        );
+
+        // Checker rejects Step 2
+        var actionResult = await repo.ProcessWorkflowActionAsync(
+            instanceId: wfInst.InstanceId,
+            username: "treasury-checker",
+            action: "REJECTED",
+            comments: "Quantity violates risk policy"
+        );
+
+        Assert.Equal("SUCCESS", actionResult);
+
+        // Verify request is rejected and no threshold created
+        var pending = await repo.GetPendingThresholdChangeByIdAsync(createRequest.PendingChangeId);
+        Assert.NotNull(pending);
+        Assert.Equal("REJECTED", pending.StatusCode);
+
+        var thresholds = await repo.GetReorderThresholdsAsync();
+        Assert.DoesNotContain(thresholds, t => t.ProductId == 1 && t.MinStockQty == 50);
+    }
+
+    [Fact]
+    public async Task Independent_LowStock_And_HighStock_Thresholds_EvaluatedCorrectly()
+    {
+        using var setup = CreateContext();
+        await SeedBasicDataAsync(setup.Context);
+
+        var repo = new InventoryRepository(setup.Context);
+
+        // Save Low-Stock Threshold: min 5 pcs
+        await repo.SaveReorderThresholdAsync(
+            thresholdId: null,
+            productId: 1,
+            vendorId: 1,
+            minStockQty: 5,
+            maxStockQty: null,
+            reorderQty: 10,
+            isActive: true,
+            thresholdType: "LOW_STOCK"
+        );
+
+        // Save High-Stock Threshold: max 20 pcs
+        await repo.SaveReorderThresholdAsync(
+            thresholdId: null,
+            productId: 1,
+            vendorId: 1,
+            minStockQty: 0,
+            maxStockQty: 20,
+            reorderQty: 0,
+            isActive: true,
+            thresholdType: "HIGH_STOCK"
+        );
+
+        // Query thresholds by type
+        var lowThresholds = (await repo.GetReorderThresholdsAsync("LOW_STOCK")).ToList();
+        var highThresholds = (await repo.GetReorderThresholdsAsync("HIGH_STOCK")).ToList();
+
+        Assert.Single(lowThresholds);
+        Assert.Equal(5, lowThresholds[0].MinStockQty);
+
+        Assert.Single(highThresholds);
+        Assert.Equal(20, highThresholds[0].MaxStockQty);
+
+        // Initial check: product 1 has 0 items in setup -> triggers LOW_STOCK alert
+        var alerts = (await repo.CheckStockAlertsAsync()).ToList();
+        Assert.Contains(alerts, a => ((string)a.alert_type) == "LOW_STOCK" && ((int)a.product_id) == 1);
+        Assert.DoesNotContain(alerts, a => ((string)a.alert_type) == "HIGH_STOCK" && ((int)a.product_id) == 1);
+
+        // Add 25 ready items for product 1 to breach high-stock ceiling
+        for (int i = 1; i <= 25; i++)
+        {
+            setup.Context.InventoryItems.Add(new InventoryItem
+            {
+                ProductId = 1,
+                SerialNumber = $"BAR-HIGH-TEST-{i:D3}",
+                StatusCode = "READY",
+                LotId = 1,
+                LocationId = 1,
+                OwnershipType = "KFH_OWNED",
+                RowVersion = new byte[8]
+            });
+        }
+        await setup.Context.SaveChangesAsync();
+
+        var alertsAfterAdd = (await repo.CheckStockAlertsAsync()).ToList();
+        // Low stock is no longer breached (25 > 5), but high stock is breached (25 >= 20)
+        Assert.DoesNotContain(alertsAfterAdd, a => a.alert_type == "LOW_STOCK" && a.product_id == 1);
+        Assert.Contains(alertsAfterAdd, a => a.alert_type == "HIGH_STOCK" && a.product_id == 1 && a.excess_qty == 5);
+    }
+
+    [Fact]
+    public async Task OutboundMovement_DamagedBar_IsRejectedAndLocationUnchanged()
+    {
+        using var setup = CreateContext();
+        await SeedBasicDataAsync(setup.Context);
+        await DbSeeder.EnsureWorkflowTemplatesAsync(setup.Context);
+
+        var groupMaker = new PrivilegeGroup { GroupName = "Treasury Operations (Maker)", Description = "Maker group", IsSystem = true };
+        var groupChecker = new PrivilegeGroup { GroupName = "Treasury Operations (Checker)", Description = "Checker group", IsSystem = true };
+        setup.Context.PrivilegeGroups.AddRange(groupMaker, groupChecker);
+        await setup.Context.SaveChangesAsync();
+
+        var userMaker = new AppUser { Username = "treasury-maker", DisplayName = "Test Maker", Email = "maker@test.local", PasswordHash = "test-hash" };
+        var userChecker = new AppUser { Username = "treasury-checker", DisplayName = "Test Checker", Email = "checker@test.local", PasswordHash = "test-hash" };
+        setup.Context.AppUsers.AddRange(userMaker, userChecker);
+        await setup.Context.SaveChangesAsync();
+
+        setup.Context.UserGroupMemberships.AddRange(
+            new UserGroupMembership { UserId = userMaker.UserId, GroupId = groupMaker.GroupId, AssignedBy = "TEST" },
+            new UserGroupMembership { UserId = userChecker.UserId, GroupId = groupChecker.GroupId, AssignedBy = "TEST" }
+        );
+
+        // Bar physically located in Main Vault (LocationId = 1) and marked DAMAGED
+        var damagedBar = new InventoryItem
+        {
+            ItemId = 401,
+            SerialNumber = "SN-DAMAGED-OUTBOUND-001",
+            ProductId = 1,
+            LotId = 1,
+            LocationId = 1, // Main Vault
+            OwnershipType = "KFH_OWNED",
+            StatusCode = "DAMAGED",
+            IsDamaged = true,
+            DamageApprovalStatus = "APPROVED",
+            AveragePurchaseCost = 19.25m,
+            RowVersion = new byte[8]
+        };
+        setup.Context.InventoryItems.Add(damagedBar);
+        await setup.Context.SaveChangesAsync();
+
+        var repo = new InventoryRepository(setup.Context);
+
+        // 1. Direct transfer attempt is blocked immediately
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await repo.InitiateBranchTransferAsync(401, 2, "Test Courier", "treasury-maker");
+        });
+
+        // 2. Workflow initiation for branch transfer is blocked immediately
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await repo.InitiateWorkflowBranchTransferAsync(401, 2, "Test Courier", "treasury-maker");
+        });
+
+        // 3. If a workflow instance somehow exists, approving it validates IsDamaged, rejects the workflow, and leaves LocationId unchanged
+        var transfer = new BranchTransfer
+        {
+            ItemId = 401,
+            SourceBranchId = 1,
+            DestinationBranchId = 2,
+            CourierInfo = "Test Courier",
+            StatusCode = "PENDING_APPROVAL",
+            CreatedBy = "treasury-maker"
+        };
+        setup.Context.BranchTransfers.Add(transfer);
+        await setup.Context.SaveChangesAsync();
+
+        var wfInst = await repo.StartWorkflowInstanceAsync("BRANCH_TRANSFER", transfer.TransferId, "treasury-maker");
+
+        // Step 1: Maker Verification
+        var step1Result = await repo.ProcessWorkflowActionAsync(wfInst.InstanceId, "treasury-maker", "APPROVED", "Maker transfer verification");
+        Assert.Equal("SUCCESS", step1Result);
+
+        // Step 2: Checker Authorization (Terminal Step) attempts transfer -> validates IsDamaged, throws, cancels/rejects workflow, and preserves LocationId = 1
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await repo.ProcessWorkflowActionAsync(wfInst.InstanceId, "treasury-checker", "APPROVED", "Attempting transfer of damaged bar");
+        });
+
+        var barAfter = await setup.Context.InventoryItems.FindAsync(401);
+        Assert.NotNull(barAfter);
+        Assert.Equal(1, barAfter.LocationId); // Location MUST remain strictly unchanged (Main Vault)
+        Assert.True(barAfter.IsDamaged);
+        Assert.Equal("DAMAGED", barAfter.StatusCode);
+
+        var transferAfter = await setup.Context.BranchTransfers.FindAsync(transfer.TransferId);
+        Assert.NotNull(transferAfter);
+        Assert.Equal("REJECTED", transferAfter.StatusCode);
+    }
+
+    [Fact]
+    public async Task MarkingBarAsDamaged_PreservesOwnership_AveragePurchaseCost_Denomination_ProductType_Location()
+    {
+        using var setup = CreateContext();
+        await SeedBasicDataAsync(setup.Context);
+        await DbSeeder.EnsureWorkflowTemplatesAsync(setup.Context);
+
+        var groupMaker = new PrivilegeGroup { GroupName = "Treasury Operations (Maker)", Description = "Maker group", IsSystem = true };
+        var groupChecker = new PrivilegeGroup { GroupName = "Treasury Operations (Checker)", Description = "Checker group", IsSystem = true };
+        setup.Context.PrivilegeGroups.AddRange(groupMaker, groupChecker);
+        await setup.Context.SaveChangesAsync();
+
+        var userMaker = new AppUser { Username = "treasury-maker", DisplayName = "Test Maker", Email = "maker@test.local", PasswordHash = "test-hash" };
+        var userChecker = new AppUser { Username = "treasury-checker", DisplayName = "Test Checker", Email = "checker@test.local", PasswordHash = "test-hash" };
+        setup.Context.AppUsers.AddRange(userMaker, userChecker);
+        await setup.Context.SaveChangesAsync();
+
+        setup.Context.UserGroupMemberships.AddRange(
+            new UserGroupMembership { UserId = userMaker.UserId, GroupId = groupMaker.GroupId, AssignedBy = "TEST" },
+            new UserGroupMembership { UserId = userChecker.UserId, GroupId = groupChecker.GroupId, AssignedBy = "TEST" }
+        );
+
+        // Initial pristine bar
+        var originalBar = new InventoryItem
+        {
+            ItemId = 501,
+            SerialNumber = "SN-INVARIANT-TEST-501",
+            ProductId = 1, // 1KG Gold Bar
+            LotId = 1,
+            LocationId = 1, // Zone Alpha, Shelf Row 1, Slot 1
+            OwnershipType = "KFH_OWNED",
+            AveragePurchaseCost = 21.750m,
+            CustomerAccountNumber = "KFH-ACC-88899",
+            StatusCode = "READY",
+            IsDamaged = false,
+            RowVersion = new byte[8]
+        };
+        setup.Context.InventoryItems.Add(originalBar);
+        await setup.Context.SaveChangesAsync();
+
+        var repo = new InventoryRepository(setup.Context);
+
+        // 1. Report damage via Maker-Checker workflow
+        await repo.MarkBarDamagedAsync(501, "SCRATCHED_SURFACE", "Deep scratch across serial", "DOC-501", "treasury-maker");
+
+        // Verify attributes preserved while pending approval
+        var barPending = await setup.Context.InventoryItems.FindAsync(501);
+        Assert.NotNull(barPending);
+        Assert.Equal("KFH_OWNED", barPending.OwnershipType);
+        Assert.Equal(21.750m, barPending.AveragePurchaseCost);
+        Assert.Equal(1, barPending.ProductId);
+        Assert.Equal(1, barPending.LocationId);
+        Assert.False(barPending.IsDamaged); // Not effective yet
+
+        // 2. Maker step verified & Checker step approved
+        var instances = (await repo.GetActiveWorkflowInstancesAsync()).ToList();
+        var wfInst = instances.First(i => i.WorkflowType == "DAMAGE_BAR" && i.EntityId == 501);
+
+        await repo.ProcessWorkflowActionAsync(wfInst.InstanceId, "treasury-maker", "APPROVED", "Maker inspection");
+        await repo.ProcessWorkflowActionAsync(wfInst.InstanceId, "treasury-checker", "APPROVED", "Checker authorization");
+
+        // Verify attributes strictly preserved after becoming effective as Damaged
+        var barDamaged = await setup.Context.InventoryItems.FindAsync(501);
+        Assert.NotNull(barDamaged);
+        Assert.True(barDamaged.IsDamaged);
+        Assert.Equal("DAMAGED", barDamaged.StatusCode);
+        Assert.Equal("APPROVED", barDamaged.DamageApprovalStatus);
+
+        // CRITICAL INVARIANTS:
+        Assert.Equal("KFH_OWNED", barDamaged.OwnershipType); // Ownership must NOT change
+        Assert.Equal(21.750m, barDamaged.AveragePurchaseCost); // Average purchase cost must NOT change
+        Assert.Equal(1, barDamaged.ProductId); // Product type and denomination must NOT change
+        Assert.Equal(1, barDamaged.LocationId); // Physical vault location must NOT change
+        Assert.Equal("KFH-ACC-88899", barDamaged.CustomerAccountNumber);
+    }
+
+    [Fact]
+    public async Task DamagedStatus_VisibleIn_BarcodeScan_MovementValidation_AndReporting()
+    {
+        using var setup = CreateContext();
+        await SeedBasicDataAsync(setup.Context);
+
+        var damagedBar = new InventoryItem
+        {
+            ItemId = 601,
+            SerialNumber = "SN-SCAN-DAMAGED-601",
+            ProductId = 1,
+            LotId = 1,
+            LocationId = 1,
+            OwnershipType = "KFH_OWNED",
+            StatusCode = "DAMAGED",
+            IsDamaged = true,
+            DamageApprovalStatus = "APPROVED",
+            DamageReason = "CRACKED_CORNER",
+            DamageDescription = "Severe structural crack found during audit",
+            RowVersion = new byte[8]
+        };
+        setup.Context.InventoryItems.Add(damagedBar);
+        await setup.Context.SaveChangesAsync();
+
+        var repo = new InventoryRepository(setup.Context);
+        var barcodeService = new BarcodeLabelService(repo);
+
+        // 1. QR Scan / Barcode generation reflects DAMAGED status
+        var label = await barcodeService.GenerateItemLabelAsync("SN-SCAN-DAMAGED-601");
+        Assert.NotNull(label);
+        Assert.True(label.IsDamaged);
+        Assert.Equal("APPROVED", label.DamageApprovalStatus);
+        Assert.Equal("CRACKED_CORNER", label.DamageReason);
+        Assert.Contains("DAMAGED - QUARANTINE", label.Gs1HumanReadable);
+
+        // 2. Outbound movement validation confirms blocked status
+        var items = await repo.GetItemsAsync();
+        var item = items.First(i => i.ItemId == 601);
+        bool canMove = !item.IsDamaged && item.StatusCode == "READY";
+        Assert.False(canMove);
+        Assert.True(item.IsDamaged);
+
+        // 3. Audit trail / reporting reflects damaged state
+        var damagedBars = await repo.GetDamagedBarsAsync();
+        Assert.Contains(damagedBars, b => b.ItemId == 601 && b.IsDamaged);
     }
 }
 

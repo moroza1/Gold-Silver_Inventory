@@ -1077,15 +1077,18 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   const [editBrandLbmaCert, setEditBrandLbmaCert] = useState(true);
   const [editBrandDesc, setEditBrandDesc] = useState('');
 
-  // Stock Reorder Thresholds
+  // Stock Thresholds (Low-Stock Floor & High-Stock Ceiling)
   const [reorderThresholds, setReorderThresholds] = useState<any[]>([]);
   const [lowStockAlerts, setLowStockAlerts] = useState<any[]>([]);
   const [showNotificationMenu, setShowNotificationMenu] = useState(false);
   const [products, setProducts] = useState<any[]>([]);
+  const [newThresholdType, setNewThresholdType] = useState('LOW_STOCK');
   const [newThresholdProductId, setNewThresholdProductId] = useState('');
   const [newThresholdVendorId, setNewThresholdVendorId] = useState('');
   const [newThresholdMinQty, setNewThresholdMinQty] = useState('5');
+  const [newThresholdMaxQty, setNewThresholdMaxQty] = useState('50');
   const [newThresholdReorderQty, setNewThresholdReorderQty] = useState('10');
+  const [thresholdFilterType, setThresholdFilterType] = useState('ALL');
 
   // KFH Branches CRUD state
   const [branchesList, setBranchesList] = useState<any[]>([]);
@@ -1356,11 +1359,12 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   // Workflow engine state declarations
   const [workflowTemplates, setWorkflowTemplates] = useState<any[]>([]);
   const [activeWorkflowInstances, setActiveWorkflowInstances] = useState<any[]>([]);
-  const [selectedWfType, setSelectedWfType] = useState('TURKEY_PURCHASE');
-  const [wfName, setWfName] = useState('Default Turkey Gold Purchase Workflow');
-  const [wfDesc, setWfDesc] = useState('Maker-Checker verification for purchasing consignment gold from Turkey.');
+  const [selectedWfType, setSelectedWfType] = useState('INTAKE_SHIPMENT');
+  const [wfName, setWfName] = useState('Default Intake Shipment Workflow');
+  const [wfDesc, setWfDesc] = useState('Standard Maker-Checker verification for incoming shipments.');
   const [wfSteps, setWfSteps] = useState<any[]>([
-    { step_name: 'Turkey Purchase Checker Approval', required_role: 'Treasury Operations (Checker)', description: 'Checker verifies serials and agreed buy rate, approving ownership transfer to KFH.' }
+    { step_name: 'Intake Shipment Maker Verification', required_role: 'Treasury Operations (Maker)', description: 'Maker inspects shipment package, logs serials, and reviews delivery documentation.' },
+    { step_name: 'Intake Shipment Checker Approval', required_role: 'Treasury Operations (Checker)', description: 'Checker validates weight, serial counts, and authorizes vault shelf placement.' }
   ]);
   const [actionComments, setActionComments] = useState<Record<number, string>>({});
   const [loadingWF, setLoadingWF] = useState(false);
@@ -1597,14 +1601,15 @@ const [migrationApproved, setMigrationApproved] = useState(false);
         const templates = await resTemp.json();
         setWorkflowTemplates(templates);
         // Find existing template for active selected type
-        const current = templates.find((t: any) => t.workflowType === selectedWfType);
-        if (current) {
-          setWfName(current.name);
-          setWfDesc(current.description);
-          setWfSteps(current.steps.map((s: any) => ({
-            step_name: s.stepName,
-            required_role: s.requiredRole,
-            description: s.description
+        const current = templates.find((t: any) => (t.workflowType || t.workflow_type) === selectedWfType);
+        if (current && current.steps && current.steps.length >= 2) {
+          setWfName(current.name || '');
+          setWfDesc(current.description || '');
+          const sortedSteps = [...current.steps].sort((a: any, b: any) => (a.stepOrder ?? a.step_order ?? 0) - (b.stepOrder ?? b.step_order ?? 0));
+          setWfSteps(sortedSteps.map((s: any) => ({
+            step_name: s.stepName || s.step_name || 'Step',
+            required_role: s.requiredRole || s.required_role || 'Treasury Operations (Maker)',
+            description: s.description || ''
           })));
         }
       }
@@ -1675,19 +1680,84 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   };
 
   useEffect(() => {
-    const current = workflowTemplates.find((t: any) => t.workflowType === selectedWfType);
-    if (current) {
-      setWfName(current.name);
-      setWfDesc(current.description);
-      setWfSteps(current.steps.map((s: any) => ({
-        step_name: s.stepName,
-        required_role: s.requiredRole,
-        description: s.description
+    const current = workflowTemplates.find((t: any) => (t.workflowType || t.workflow_type) === selectedWfType);
+    if (current && current.steps && current.steps.length >= 2) {
+      setWfName(current.name || '');
+      setWfDesc(current.description || '');
+      const sortedSteps = [...current.steps].sort((a: any, b: any) => (a.stepOrder ?? a.step_order ?? 0) - (b.stepOrder ?? b.step_order ?? 0));
+      setWfSteps(sortedSteps.map((s: any) => ({
+        step_name: s.stepName || s.step_name || 'Step',
+        required_role: s.requiredRole || s.required_role || 'Treasury Operations (Maker)',
+        description: s.description || ''
       })));
     } else {
-      setWfName(`Default ${selectedWfType} Workflow`);
-      setWfDesc(`Approval workflow for ${selectedWfType}`);
-      setWfSteps([]);
+      const defaultWfDescriptions: Record<string, { name: string; desc: string; makerStep: string; checkerStep: string; makerDesc: string; checkerDesc: string }> = {
+        'INTAKE_SHIPMENT': {
+          name: 'Default Intake Shipment Workflow',
+          desc: 'Standard Maker-Checker verification for incoming shipments.',
+          makerStep: 'Intake Shipment Maker Verification',
+          checkerStep: 'Intake Shipment Checker Approval',
+          makerDesc: 'Maker inspects shipment package, logs serials, and reviews delivery documentation.',
+          checkerDesc: 'Checker validates weight, serial counts, and authorizes vault shelf placement.'
+        },
+        'BRANCH_TRANSFER': {
+          name: 'Default Branch Transfer Workflow',
+          desc: 'Standard Maker-Checker verification for branch transfers.',
+          makerStep: 'Branch Transfer Maker Verification',
+          checkerStep: 'Branch Transfer Checker Approval',
+          makerDesc: 'Maker confirms transfer request items, destination vault, and courier dispatch details.',
+          checkerDesc: 'Checker validates transfer routing and authorizes vault transfer movement.'
+        },
+        'TURKEY_PURCHASE': {
+          name: 'Default Turkey Gold Purchase Workflow',
+          desc: 'Maker-Checker verification for purchasing consignment gold from Turkey.',
+          makerStep: 'Turkey Purchase Maker Verification',
+          checkerStep: 'Turkey Purchase Checker Approval',
+          makerDesc: 'Maker checks consignment serials, gold purity certification, and agreed buy rate.',
+          checkerDesc: 'Checker verifies serials and agreed buy rate, approving ownership transfer to KFH.'
+        },
+        'DAMAGE_BAR': {
+          name: 'Default Damage Bar Workflow',
+          desc: 'Standard Maker-Checker verification for marking gold bars as damaged.',
+          makerStep: 'Damage Bar Maker Verification',
+          checkerStep: 'Damage Bar Checker Approval',
+          makerDesc: 'Maker inspects damaged bar, records defect report, and attaches visual evidence.',
+          checkerDesc: 'Checker reviews damage evidence and approves quarantine status change.'
+        },
+        'CUSTODY_WITHDRAWAL': {
+          name: 'Default Customer Gold Custody Withdrawal Workflow',
+          desc: 'Maker-Checker verification for client physical gold withdrawal and delivery handover.',
+          makerStep: 'Custody Handover Maker Verification',
+          checkerStep: 'Custody Checker Handover Authorization',
+          makerDesc: 'Maker checks withdrawal request, customer civil ID, and staging of custody bars.',
+          checkerDesc: 'Checker validates customer civil ID, PACI handover OTP, and authorizes vault dispatch.'
+        },
+        'THRESHOLD_CONFIG': {
+          name: 'Default Cut-Off Threshold Configuration Workflow',
+          desc: 'Maker-Checker verification for creation, amendment, activation, deactivation, or deletion of stock cut-off thresholds.',
+          makerStep: 'Threshold Configuration Maker Verification',
+          checkerStep: 'Threshold Configuration Checker Authorization',
+          makerDesc: 'Maker configures product denomination, vendor, min stock cut-off, reorder level, and active state.',
+          checkerDesc: 'Checker reviews threshold parameters against enterprise stock policy and authorizes threshold activation or removal.'
+        }
+      };
+
+      const meta = defaultWfDescriptions[selectedWfType];
+      if (meta) {
+        setWfName(meta.name);
+        setWfDesc(meta.desc);
+        setWfSteps([
+          { step_name: meta.makerStep, required_role: 'Treasury Operations (Maker)', description: meta.makerDesc },
+          { step_name: meta.checkerStep, required_role: 'Treasury Operations (Checker)', description: meta.checkerDesc }
+        ]);
+      } else {
+        setWfName(`Default ${selectedWfType} Workflow`);
+        setWfDesc(`Approval workflow for ${selectedWfType}`);
+        setWfSteps([
+          { step_name: 'Maker Verification Stage', required_role: 'Treasury Operations (Maker)', description: 'Maker review of transaction parameters.' },
+          { step_name: 'Checker Approval Stage', required_role: 'Treasury Operations (Checker)', description: 'Checker authorization of transaction.' }
+        ]);
+      }
     }
   }, [selectedWfType, workflowTemplates]);
 
@@ -1819,6 +1889,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     fetchReconciliation();
     fetchWorkflows();
     fetchReorderThresholds();
+    fetchPendingThresholdChanges();
     fetchLowStockAlerts();
     fetchBranches();
     fetchAdminData();
@@ -2139,11 +2210,20 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     }
   };
 
-  // Reorder Thresholds
+  // Reorder Thresholds (Maker-Checker Governed)
+  const [pendingThresholdChanges, setPendingThresholdChanges] = useState<any[]>([]);
+
   const fetchReorderThresholds = async () => {
     try {
       const res = await fetch(`${API_BASE}/inventory/reorder-thresholds`);
       if (res.ok) setReorderThresholds(await res.json());
+    } catch (_) {}
+  };
+
+  const fetchPendingThresholdChanges = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/inventory/pending-threshold-changes`);
+      if (res.ok) setPendingThresholdChanges(await res.json());
     } catch (_) {}
   };
 
@@ -2182,29 +2262,47 @@ const [migrationApproved, setMigrationApproved] = useState(false);
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          thresholdType: newThresholdType,
           productId: parseInt(newThresholdProductId),
           vendorId: parseInt(newThresholdVendorId),
           minStockQty: parseInt(newThresholdMinQty) || 5,
-          reorderQty: parseInt(newThresholdReorderQty) || 10,
+          maxStockQty: newThresholdType === 'HIGH_STOCK' ? (parseInt(newThresholdMaxQty) || 50) : null,
+          reorderQty: newThresholdType === 'LOW_STOCK' ? (parseInt(newThresholdReorderQty) || 10) : 0,
           isActive: true
         })
       });
       if (res.ok) {
+        const data = await res.json();
+        alert(currentLang === 'en' ? (data.message || "Threshold configuration submitted for Maker-Checker approval.") : "تم إرسال إعداد حد المخزون للاعتماد (صانع - معتمد).");
         fetchReorderThresholds();
+        fetchPendingThresholdChanges();
+        fetchWorkflows();
         fetchLowStockAlerts();
         setNewThresholdProductId('');
         setNewThresholdVendorId('');
         setNewThresholdMinQty('5');
+        setNewThresholdMaxQty('50');
         setNewThresholdReorderQty('10');
+      } else {
+        alert(await describeApiError(res, currentLang, 'Failed to submit threshold change', 'فشل إرسال طلب حد المخزون'));
       }
     } catch (_) {}
   };
 
   const handleDeleteThreshold = async (id: number) => {
+    if (!window.confirm(currentLang === 'en' ? 'Submit request to delete this cut-off threshold?' : 'هل تريد إرسال طلب لحذف هذا الحد التنبيهي؟')) return;
     try {
-      await fetch(`${API_BASE}/inventory/reorder-thresholds/${id}`, { method: 'DELETE' });
-      fetchReorderThresholds();
-      fetchLowStockAlerts();
+      const res = await fetch(`${API_BASE}/inventory/reorder-thresholds/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        const data = await res.json();
+        alert(currentLang === 'en' ? (data.message || "Threshold deletion request submitted for Maker-Checker approval.") : "تم إرسال طلب حذف حد المخزون للاعتماد.");
+        fetchReorderThresholds();
+        fetchPendingThresholdChanges();
+        fetchWorkflows();
+        fetchLowStockAlerts();
+      } else {
+        alert(await describeApiError(res, currentLang, 'Failed to submit threshold deletion', 'فشل إرسال طلب حذف حد المخزون'));
+      }
     } catch (_) {}
   };
 
@@ -4385,7 +4483,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     // 2. Core Vault & Physical Operations (Daily Operations - Highest Frequency)
     { type: 'section', key: 'section-operations', label: t('menu_operations') },
     { type: 'item', key: 'screen-intake', label: currentLang === 'en' ? 'Receive Shipment' : 'استلام الشحنات', icon: 'fa-solid fa-dolly', permission: 'intake', onClick: () => { setActiveTab('screen-intake'); fetchSuppliers(); fetchPendingIntakes(); fetchLocations(); fetchProducts(); } },
-    { type: 'item', key: 'screen-turkey-purchase', label: t('menu_turkey_purchase'), icon: 'fa-solid fa-handshake', permission: 'purchase_orders', onClick: () => { setActiveTab('screen-turkey-purchase'); fetchTurkeyInventory(); fetchPendingTurkeyPurchases(); } },
+    { type: 'item', key: 'screen-turkey-purchase', label: t('menu_turkey_purchase'), icon: 'fa-solid fa-handshake', permission: 'intake', onClick: () => { setActiveTab('screen-turkey-purchase'); fetchTurkeyInventory(); fetchPendingTurkeyPurchases(); } },
     { type: 'item', key: 'screen-spatial', label: t('menu_spatial'), icon: 'fa-solid fa-warehouse', permission: 'spatial_map', onClick: () => setActiveTab('screen-spatial') },
     { type: 'item', key: 'screen-transfers', label: t('menu_transfers'), icon: 'fa-solid fa-truck-arrow-right', permission: 'intake', onClick: () => { setActiveTab('screen-transfers'); fetchTransfers(); } },
     { type: 'item', key: 'screen-custody', label: t('menu_custody'), icon: 'fa-solid fa-vault', permission: 'custody', onClick: () => setActiveTab('screen-custody') },
@@ -4395,7 +4493,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     { type: 'item', key: 'screen-damaged-bars', label: currentLang === 'en' ? 'Damaged Bar Approvals' : 'اعتماد السبائك التالفة', icon: 'fa-solid fa-triangle-exclamation', permission: 'custody', onClick: () => { setActiveTab('screen-damaged-bars'); fetchDamagedBars(); } },
 
     // 3. Stock Limits & Enterprise Thresholds
-    { type: 'item', key: 'screen-stock-thresholds', label: currentLang === 'en' ? 'Stock Limits & Thresholds' : 'حدود المخزون وإعادة الطلب', icon: 'fa-solid fa-gauge-high', permission: 'master_data', onClick: () => { setActiveTab('screen-admin'); setSettingsTab('stocklimits'); fetchReorderThresholds(); fetchProducts(); } },
+    { type: 'item', key: 'screen-stock-thresholds', label: currentLang === 'en' ? 'Stock Limits & Thresholds' : 'حدود المخزون وإعادة الطلب', icon: 'fa-solid fa-gauge-high', permission: 'master_data', onClick: () => { setActiveTab('screen-admin'); setSettingsTab('stocklimits'); fetchReorderThresholds(); fetchPendingThresholdChanges(); fetchProducts(); } },
 
     // 4. Audit, Controls & Compliance (Periodic / Weekly / Regulatory Frequency)
     { type: 'section', key: 'section-controls', label: t('menu_controls') },
@@ -4653,7 +4751,6 @@ const [migrationApproved, setMigrationApproved] = useState(false);
             <h1 style={{ margin: 0, fontSize: '17px', color: '#005A3E', fontWeight: 'bold' }}>{t(
               activeTab === 'screen-exec' ? 'title_exec' :
               activeTab === 'screen-my-activity' ? 'title_my_activity' :
-              activeTab === 'screen-active-deals' ? 'title_active_deals' :
               activeTab === 'screen-customer-receipt' ? 'title_customer_receipt' :
               activeTab.replace('screen-', 'menu_')
             )}</h1>
@@ -5290,486 +5387,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
           )}
         </section>
 
-        {/* SCREEN VIEWPORT: PO & PROCUREMENT */}
-        <section className={`screen-viewport ${activeTab === 'screen-po' ? 'active' : ''}`}>
-          {printingPO ? (
-            <div className="glass-card" id="po-print-area">
-              <div style={{ textAlign: 'center', marginBottom: '30px', borderBottom: '2px solid #D4AF37', paddingBottom: '15px' }}>
-                <h2 style={{ margin: 0 }}>KUWAIT FINANCE HOUSE (KFH)</h2>
-                <span style={{ fontSize: '12px', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 'bold' }}>PRECIOUS METALS INVENTORY MANAGEMENT SYSTEM (PMIMS)</span>
-                <h3 style={{ marginTop: '10px', textDecoration: 'underline' }}>
-                  {currentLang === 'en' ? 'Purchase Order' : 'طلب شراء'}
-                </h3>
-              </div>
 
-              <table style={{ width: '100%', marginBottom: '20px' }}>
-                <tbody>
-                  <tr><td style={{ padding: '8px', width: '220px' }}><strong>{t('th_po_code')}</strong></td><td style={{ padding: '8px' }}>{printingPO.po_number}</td></tr>
-                  <tr><td style={{ padding: '8px' }}><strong>{t('th_supplier')}</strong></td><td style={{ padding: '8px' }}>{printingPO.supplier}</td></tr>
-                  <tr><td style={{ padding: '8px' }}><strong>{t('th_weight')}</strong></td><td style={{ padding: '8px' }}>{printingPO.weight}g</td></tr>
-                  <tr><td style={{ padding: '8px' }}><strong>{t('th_cost')}</strong></td><td style={{ padding: '8px' }}>{printingPO.cost.toLocaleString()} {printingPO.currency}</td></tr>
-                  <tr><td style={{ padding: '8px' }}><strong>{currentLang === 'en' ? 'Total Quantity' : 'إجمالي الكمية'}</strong></td><td style={{ padding: '8px' }}>{printingPO.qty || 1}</td></tr>
-                  <tr><td style={{ padding: '8px' }}><strong>{t('th_status')}</strong></td><td style={{ padding: '8px' }}>{translateDb(printingPO.status_code)}</td></tr>
-                  <tr><td style={{ padding: '8px' }}><strong>{currentLang === 'en' ? 'Created By' : 'أنشئ بواسطة'}</strong></td><td style={{ padding: '8px' }}>{printingPO.created_by}</td></tr>
-                  <tr><td style={{ padding: '8px' }}><strong>{currentLang === 'en' ? 'Approved By' : 'اعتمد بواسطة'}</strong></td><td style={{ padding: '8px' }}>{printingPO.approved_by || '—'}</td></tr>
-                </tbody>
-              </table>
-
-              {printingPO.items && printingPO.items.length > 0 && (
-                <table style={{ width: '100%', marginBottom: '20px', borderCollapse: 'collapse' }}>
-                  <thead>
-                    <tr style={{ borderBottom: '1px solid #D4AF37' }}>
-                      <th style={{ padding: '8px', textAlign: 'left' }}>{currentLang === 'en' ? 'Denomination' : 'الفئة'}</th>
-                      <th style={{ padding: '8px', textAlign: 'right' }}>{currentLang === 'en' ? 'Quantity' : 'الكمية'}</th>
-                      <th style={{ padding: '8px', textAlign: 'right' }}>{currentLang === 'en' ? 'Unit Cost' : 'سعر الوحدة'}</th>
-                      <th style={{ padding: '8px', textAlign: 'right' }}>{currentLang === 'en' ? 'Line Total' : 'إجمالي البند'}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {printingPO.items.map((it: any, i: number) => {
-                      const p = products.find((pp: any) => String(pp.product_id) === String(it.product_id));
-                      const denom = p ? `${p.metal_name || ''} ${p.denomination_label || ''}`.trim() : (it.product_code || `#${it.product_id}`);
-                      return (
-                        <tr key={i} style={{ borderBottom: '1px solid rgba(0,0,0,0.1)' }}>
-                          <td style={{ padding: '8px' }}>{denom}{p?.weight_grams ? ` (${p.weight_grams}g)` : ''}</td>
-                          <td style={{ padding: '8px', textAlign: 'right' }}>{it.qty}</td>
-                          <td style={{ padding: '8px', textAlign: 'right' }}>{(it.unit_cost || 0).toLocaleString()}</td>
-                          <td style={{ padding: '8px', textAlign: 'right' }}>{((it.unit_cost || 0) * (it.qty || 0)).toLocaleString()}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              )}
-
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginTop: '20px' }}>
-                <span>{currentLang === 'en' ? 'Date Generated' : 'تاريخ الإصدار'}: {new Date().toLocaleString()}</span>
-                <span>{currentLang === 'en' ? 'Operator' : 'المشغل'}: {displayName} ({userRole})</span>
-              </div>
-
-              <div style={{ marginTop: '30px' }}>
-                <button className="btn" onClick={() => setPrintingPO(null)}>
-                  {currentLang === 'en' ? 'Close' : 'إغلاق'}
-                </button>
-              </div>
-            </div>
-          ) : (
-          <div style={{ maxWidth: '900px', margin: '0 auto' }}>
-
-            <div className="glass-card po-form-card po-create" id="po-form-card">
-              <style>{`
-                .po-create .po-head { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:22px; }
-                .po-create .po-head h3 { margin:0; font-size:20px; font-weight:700; color:var(--text-primary); }
-                .po-create .po-badge { background:#F3F4F6; color:#6B7280; border:1px solid #E5E7EB; border-radius:999px; padding:5px 14px; font-size:12px; font-weight:600; white-space:nowrap; }
-                .po-create .po-grid2 { display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-bottom:24px; }
-                .po-create .po-fg { display:flex; flex-direction:column; gap:7px; }
-                .po-create .po-fg > label { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:#6B7280; font-weight:600; margin:0; }
-                .po-create input, .po-create select { background:#F9FAFB; border:1px solid #E5E7EB; border-radius:8px; padding:10px 12px; font-size:14px; width:100%; color:var(--text-primary); box-sizing:border-box; transition:border-color .15s, box-shadow .15s, background .15s; }
-                .po-create input:focus, .po-create select:focus { outline:none; border-color:#10B981; box-shadow:0 0 0 3px rgba(16,185,129,.15); background:#fff; }
-                .po-create input:disabled, .po-create select:disabled { background:#F3F4F6; color:#9CA3AF; cursor:not-allowed; }
-                .po-create .po-section-title { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:#6B7280; font-weight:700; }
-                .po-create table { width:100%; border-collapse:collapse; }
-                .po-create thead th { font-size:11px; text-transform:uppercase; letter-spacing:.03em; color:#9CA3AF; font-weight:600; padding:10px 12px; border-bottom:1px solid #E5E7EB; background:#F9FAFB; }
-                .po-create tbody td { padding:11px 12px; border-bottom:1px solid #F3F4F6; font-size:14px; color:var(--text-primary); }
-                .po-create tbody tr:last-child td { border-bottom:none; }
-                .po-create .po-summary { margin-left:auto; width:360px; max-width:100%; margin-top:20px; }
-                .po-create .po-sum-row { display:flex; justify-content:space-between; padding:10px 2px; font-size:14px; color:#374151; border-bottom:1px solid #F3F4F6; }
-                .po-create .po-sum-grand { border-top:2px solid #E5E7EB; border-bottom:none; margin-top:4px; padding-top:14px; font-size:19px; font-weight:800; color:var(--text-primary); }
-                .po-create .po-actions { display:flex; justify-content:flex-end; align-items:center; gap:10px; margin-top:24px; padding-top:18px; border-top:1px solid #F3F4F6; }
-                .po-create .btn-emerald { background:#059669; color:#fff; border:none; border-radius:8px; padding:12px 24px; font-size:14px; font-weight:700; cursor:pointer; box-shadow:0 1px 2px rgba(0,0,0,.06); }
-                .po-create .btn-emerald:hover { background:#047857; }
-                .po-create .btn-ghost { background:#fff; color:#374151; border:1px solid #E5E7EB; border-radius:8px; padding:12px 20px; font-size:14px; font-weight:600; cursor:pointer; }
-                .po-create .btn-ghost:hover { background:#F9FAFB; }
-                .po-create .btn-link { background:none; border:none; color:#6B7280; font-size:14px; font-weight:600; cursor:pointer; padding:12px 8px; }
-                .po-create .btn-link:hover { color:var(--text-primary); }
-                @media(max-width:640px){ .po-create .po-grid2 { grid-template-columns:1fr; } }
-              `}</style>
-              <div className="po-head">
-                <h3>{isEditingPO ? (currentLang === 'en' ? 'Amend Purchase Order' : 'تعديل طلب الشراء') : (currentLang === 'en' ? 'Create Purchase Order (Maker)' : 'إنشاء طلب شراء')}</h3>
-                <span className="po-badge">{isEditingPO ? (currentLang === 'en' ? 'Amending' : 'قيد التعديل') : (currentLang === 'en' ? 'Draft' : 'مسودة')}</span>
-              </div>
-              {!canModify('purchase_orders') && (
-                <div style={{ padding: '10px', background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.25)', borderRadius: '8px', color: 'var(--accent-red)', fontSize: '12px', marginBottom: '15px' }}>
-                  <i className="fa-solid fa-circle-exclamation"></i> {currentLang === 'en' ? 'Read-Only Mode: You cannot create or modify purchase orders.' : 'وضع القراءة فقط: لا يمكنك إنشاء أو تعديل طلبات الشراء.'}
-                </div>
-              )}
-              {/* General info — 2-column light-grey inputs. */}
-              <div className="po-grid2">
-                <div className="po-fg">
-                  <label>{t('form_po_num')}</label>
-                  <input type="text" value={poNum} onChange={e => setPoNum(e.target.value)} disabled={isEditingPO || !canModify('purchase_orders')} />
-                </div>
-                <div className="po-fg">
-                  <label>{t('form_supplier')}</label>
-                  <select value={poSupplier} onChange={e => setPoSupplier(parseInt(e.target.value))} disabled={!canModify('purchase_orders')}>
-                    <option value={1}>Valcambi Suisse (Switzerland)</option>
-                    <option value={2}>Nadir Gold Refinery (Turkey)</option>
-                  </select>
-                </div>
-                <div className="po-fg">
-                  <label>{currentLang === 'en' ? 'P.O. Date' : 'تاريخ الطلب'}</label>
-                  <input type="date" value={poDate} onChange={e => setPoDate(e.target.value)} disabled={!canModify('purchase_orders')} />
-                </div>
-                <div className="po-fg">
-                  <label>{currentLang === 'en' ? 'Origin Country' : 'بلد المنشأ'}</label>
-                  <select value={poOrigin} onChange={e => setPoOrigin(e.target.value)} disabled={!canModify('purchase_orders')}>
-                    <option value="Switzerland">{t('opt_swiss')}</option>
-                    <option value="Turkey">{t('opt_turkey')}</option>
-                  </select>
-                </div>
-                <div className="po-fg">
-                  <label>{currentLang === 'en' ? 'Currency' : 'العملة'}</label>
-                  <select value={poCurrency} onChange={e => setPoCurrency(e.target.value)} disabled={!canModify('purchase_orders')}>
-                    <option value="USD">USD — US Dollar</option>
-                    <option value="EUR">EUR — Euro</option>
-                    <option value="CHF">CHF — Swiss Franc</option>
-                    <option value="KWD">KWD — Kuwaiti Dinar</option>
-                  </select>
-                </div>
-                <div className="po-fg">
-                  <label>{currentLang === 'en' ? 'Supplier Invoice Number' : 'رقم فاتورة المورد'}</label>
-                  <input type="text" value={poInvoiceNumber} onChange={e => setPoInvoiceNumber(e.target.value)} disabled={!canModify('purchase_orders')} placeholder={currentLang === 'en' ? 'e.g. INV-VAL-20260703' : 'مثال: INV-VAL-20260703'} />
-                </div>
-                <div className="po-fg">
-                  <label>{currentLang === 'en' ? 'Supplier Invoice Date' : 'تاريخ فاتورة المورد'}</label>
-                  <input type="date" value={poInvoiceDate} onChange={e => setPoInvoiceDate(e.target.value)} disabled={!canModify('purchase_orders')} />
-                </div>
-              </div>
-              <div className="form-group">
-                <label className="po-section-title">{currentLang === 'en' ? 'Line Items' : 'بنود الطلب'}</label>
-
-                {/* Entry row: pick the denomination + its data, then Add it to the grid below.
-                    When editing an existing grid row this switches to Update. */}
-                {canModify('purchase_orders') && (
-                  <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-end', flexWrap: 'wrap', padding: '10px', border: '1px solid var(--surface-border)', borderRadius: '8px', marginBottom: '10px', background: 'rgba(255,255,255,0.02)' }}>
-                    <div style={{ flex: '2 1 220px', minWidth: 0, position: 'relative' }}>
-                      <label style={{ fontSize: '11px' }}>{currentLang === 'en' ? 'Item' : 'الصنف'}</label>
-                      <input
-                        className="form-control"
-                        style={{ width: '100%' }}
-                        placeholder={currentLang === 'en' ? 'Search item by name or code…' : 'ابحث عن الصنف بالاسم أو الرمز…'}
-                        value={poComboOpen ? poComboQuery : (poComboSelected ? poProductLabel(poComboSelected) : '')}
-                        onFocus={() => { setPoComboQuery(''); setPoComboOpen(true); }}
-                        onBlur={() => setTimeout(() => setPoComboOpen(false), 120)}
-                        onChange={e => { setPoComboQuery(e.target.value); if (!poComboOpen) setPoComboOpen(true); }}
-                      />
-                      {poComboOpen && (
-                        <ul role="listbox" style={{ position: 'absolute', zIndex: 30, top: '100%', left: 0, right: 0, margin: '4px 0 0', padding: '4px', listStyle: 'none', background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--surface-border)', borderRadius: '8px', maxHeight: '220px', overflowY: 'auto', boxShadow: 'var(--shadow-premium)' }}>
-                          {poComboMatches.length === 0 ? (
-                            <li style={{ padding: '8px 10px', color: 'var(--text-muted)', fontSize: '12px' }}>
-                              {currentLang === 'en' ? 'No matching items' : 'لا توجد أصناف مطابقة'}
-                            </li>
-                          ) : (
-                            poComboMatches.map((p: any) => (
-                              <li
-                                key={p.product_id}
-                                role="option"
-                                aria-selected={String(p.product_id) === String(poEntryProduct)}
-                                onMouseDown={() => { setPoEntryProduct(String(p.product_id)); setPoComboOpen(false); setPoComboQuery(''); }}
-                                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(2,132,199,0.10)'; }}
-                                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = String(p.product_id) === String(poEntryProduct) ? 'rgba(2,132,199,0.12)' : 'transparent'; }}
-                                style={{ padding: '8px 10px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', color: 'var(--text-primary)', background: String(p.product_id) === String(poEntryProduct) ? 'rgba(2,132,199,0.12)' : 'transparent' }}
-                              >
-                                {poProductLabel(p)}
-                              </li>
-                            ))
-                          )}
-                        </ul>
-                      )}
-                    </div>
-                    <div style={{ flex: '1 1 70px', minWidth: 0 }}>
-                      <label style={{ fontSize: '11px' }}>{currentLang === 'en' ? 'Quantity' : 'الكمية'}</label>
-                      <input type="number" className="form-control" min="0" value={poEntryQty} onChange={e => setPoEntryQty(e.target.value === '' ? 0 : (parseInt(e.target.value) || 0))} />
-                    </div>
-                    <div style={{ flex: '1 1 100px', minWidth: 0 }}>
-                      <label style={{ fontSize: '11px' }}>{currentLang === 'en' ? 'Unit Price' : 'سعر الوحدة'}</label>
-                      <input type="number" className="form-control" min="0" value={poEntryCost} onChange={e => setPoEntryCost(e.target.value === '' ? 0 : (parseFloat(e.target.value) || 0))} />
-                    </div>
-                    <button type="button" className="btn btn-primary" style={{ padding: '8px 14px' }} onClick={commitPoEntry}>
-                      <i className={`fa-solid ${poEntryEditIdx !== null ? 'fa-check' : 'fa-plus'}`}></i>{' '}
-                      {poEntryEditIdx !== null ? (currentLang === 'en' ? 'Update' : 'تحديث') : (currentLang === 'en' ? 'Add' : 'إضافة')}
-                    </button>
-                    {poEntryEditIdx !== null && (
-                      <button type="button" className="btn" style={{ padding: '8px 12px' }} onClick={resetPoEntry}>
-                        {currentLang === 'en' ? 'Cancel' : 'إلغاء'}
-                      </button>
-                    )}
-                  </div>
-                )}
-
-                {/* Datagrid of committed line items */}
-                <div className="table-responsive">
-                  <table style={{ width: '100%' }}>
-                    <thead>
-                      <tr>
-                        <th>{currentLang === 'en' ? 'Item ID' : 'رمز الصنف'}</th>
-                        <th>{currentLang === 'en' ? 'Item Name' : 'اسم الصنف'}</th>
-                        <th style={{ textAlign: 'right' }}>{currentLang === 'en' ? 'Weight' : 'الوزن'}</th>
-                        <th style={{ textAlign: 'right' }}>{currentLang === 'en' ? 'Qty' : 'الكمية'}</th>
-                        <th style={{ textAlign: 'right' }}>{currentLang === 'en' ? 'Unit Price' : 'سعر الوحدة'}</th>
-                        <th style={{ textAlign: 'right' }}>{currentLang === 'en' ? 'Line Total' : 'إجمالي البند'}</th>
-                        {canModify('purchase_orders') && <th style={{ textAlign: 'center' }}>{t('th_action')}</th>}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {poLines.length === 0 ? (
-                        <tr>
-                          <td colSpan={canModify('purchase_orders') ? 7 : 6} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '14px', fontSize: '12px' }}>
-                            {currentLang === 'en' ? 'No line items yet — add one above.' : 'لا توجد بنود بعد — أضف بندًا من الأعلى.'}
-                          </td>
-                        </tr>
-                      ) : (
-                        poLines.map((line, idx) => {
-                          const p = products.find((pp: any) => String(pp.product_id) === String(line.product_id));
-                          const itemId = p?.product_code || `#${line.product_id}`;
-                          const itemName = p ? `${p.metal_name} ${p.denomination_label}` : `#${line.product_id}`;
-                          return (
-                            <tr key={idx} style={poEntryEditIdx === idx ? { background: 'rgba(0,155,78,0.10)' } : undefined}>
-                              <td>{itemId}</td>
-                              <td>{itemName}</td>
-                              <td style={{ textAlign: 'right' }}>{lineWeight(line).toLocaleString()}g</td>
-                              <td style={{ textAlign: 'right' }}>{line.qty}</td>
-                              <td style={{ textAlign: 'right' }}>{(line.unit_cost || 0).toLocaleString()}</td>
-                              <td style={{ textAlign: 'right' }}>{((line.unit_cost || 0) * (line.qty || 0)).toLocaleString()}</td>
-                              {canModify('purchase_orders') && (
-                                <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
-                                  <button type="button" className="btn" title={currentLang === 'en' ? 'Edit' : 'تعديل'} style={{ padding: '4px 8px', fontSize: '11px', backgroundColor: 'var(--accent-orange)', color: '#000', marginInlineEnd: '4px' }} onClick={() => editPoLine(idx)}>
-                                    <i className="fa-solid fa-pen"></i>
-                                  </button>
-                                  <button type="button" className="btn" title={currentLang === 'en' ? 'Delete' : 'حذف'} style={{ padding: '4px 8px', fontSize: '11px', backgroundColor: 'var(--accent-red)', color: '#fff' }} onClick={() => deletePoLine(idx)}>
-                                    <i className="fa-solid fa-trash"></i>
-                                  </button>
-                                </td>
-                              )}
-                            </tr>
-                          );
-                        })
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              {/* Acquisition fees — Cost Tracking & Valuation purchase cost detail. Rolled
-                  into PurchaseOrder.LandedCost server-side, which is what actually costs the
-                  received bars (InventoryLot.AverageUnitCost) once the shipment is intake'd. */}
-              <div className="form-group">
-                <label className="po-section-title">{currentLang === 'en' ? 'Acquisition Fees (added to landed cost)' : 'رسوم الاستحواذ (تُضاف إلى تكلفة الوصول)'}</label>
-                <div className="po-grid2">
-                  <div className="po-fg">
-                    <label>{currentLang === 'en' ? 'Freight / Shipping' : 'الشحن'}</label>
-                    <input type="number" min="0" value={poFreightCost} onChange={e => setPoFreightCost(parseFloat(e.target.value) || 0)} disabled={!canModify('purchase_orders')} />
-                  </div>
-                  <div className="po-fg">
-                    <label>{currentLang === 'en' ? 'Insurance' : 'التأمين'}</label>
-                    <input type="number" min="0" value={poInsuranceCost} onChange={e => setPoInsuranceCost(parseFloat(e.target.value) || 0)} disabled={!canModify('purchase_orders')} />
-                  </div>
-                  <div className="po-fg">
-                    <label>{currentLang === 'en' ? 'Customs Duty' : 'الرسوم الجمركية'}</label>
-                    <input type="number" min="0" value={poCustomsDutyCost} onChange={e => setPoCustomsDutyCost(parseFloat(e.target.value) || 0)} disabled={!canModify('purchase_orders')} />
-                  </div>
-                  <div className="po-fg">
-                    <label>{currentLang === 'en' ? 'Other Fees' : 'رسوم أخرى'}</label>
-                    <input type="number" min="0" value={poOtherFeesCost} onChange={e => setPoOtherFeesCost(parseFloat(e.target.value) || 0)} disabled={!canModify('purchase_orders')} />
-                  </div>
-                  <div className="po-fg" style={{ gridColumn: '1 / -1' }}>
-                    <label>{currentLang === 'en' ? 'Other Fees Description' : 'وصف الرسوم الأخرى'}</label>
-                    <input type="text" value={poOtherFeesDescription} onChange={e => setPoOtherFeesDescription(e.target.value)} disabled={!canModify('purchase_orders') || poOtherFeesCost === 0} placeholder={currentLang === 'en' ? 'e.g. Assay/refining fee' : 'مثال: رسوم الفحص/التكرير'} />
-                  </div>
-                </div>
-              </div>
-
-              {/* Financial summary — right-aligned. */}
-              <div className="po-summary">
-                <div className="po-sum-row">
-                  <span>{currentLang === 'en' ? 'Total Weight' : 'إجمالي الوزن'}</span>
-                  <span style={{ fontWeight: 600 }}>{poWeight.toLocaleString()} g</span>
-                </div>
-                <div className="po-sum-row">
-                  <span>{currentLang === 'en' ? 'Subtotal' : 'المجموع الفرعي'}</span>
-                  <span style={{ fontWeight: 600 }}>{linesTotalCost(poLines).toLocaleString()} {poCurrency}</span>
-                </div>
-                <div className="po-sum-row po-sum-grand">
-                  <span>{currentLang === 'en' ? 'Grand Total' : 'الإجمالي العام'}</span>
-                  <span style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                    <input type="number" style={{ width: '150px', textAlign: 'right', fontWeight: 800, fontSize: '18px' }} value={poCost} onChange={e => { setPoCostOverridden(true); setPoCost(parseFloat(e.target.value) || 0); }} disabled={!canModify('purchase_orders')} />
-                    <span style={{ fontSize: '13px', color: 'var(--text-muted)', fontWeight: 600 }}>{poCurrency}</span>
-                    {poCostOverridden && canModify('purchase_orders') && (
-                      <button type="button" className="btn-ghost" title={currentLang === 'en' ? 'Reset to summed total' : 'إعادة إلى المجموع'} style={{ padding: '8px 10px' }} onClick={() => { setPoCostOverridden(false); setPoCost(linesTotalCost(poLines)); }}>
-                        <i className="fa-solid fa-rotate-left"></i>
-                      </button>
-                    )}
-                  </span>
-                </div>
-                {poCostOverridden && (
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px', textAlign: 'right' }}>
-                    {currentLang === 'en' ? 'Manual override — click ↺ to restore the summed total.' : 'تعديل يدوي — اضغط ↺ للعودة إلى المجموع.'}
-                  </div>
-                )}
-                <div className="po-sum-row">
-                  <span>{currentLang === 'en' ? 'Total Acquisition Fees' : 'إجمالي رسوم الاستحواذ'}</span>
-                  <span style={{ fontWeight: 600 }}>{(poFreightCost + poInsuranceCost + poCustomsDutyCost + poOtherFeesCost).toLocaleString()} {poCurrency}</span>
-                </div>
-                <div className="po-sum-row po-sum-grand">
-                  <span>{currentLang === 'en' ? 'Landed Cost (used for Average Cost valuation)' : 'التكلفة الفعلية (تُستخدم لتقييم متوسط التكلفة)'}</span>
-                  <span style={{ fontWeight: 800 }}>{(poCost + poFreightCost + poInsuranceCost + poCustomsDutyCost + poOtherFeesCost).toLocaleString()} {poCurrency}</span>
-                </div>
-              </div>
-
-              {/* Action buttons — right aligned. */}
-              <div className="po-actions">
-                {isEditingPO ? (
-                  <>
-                    <button type="button" className="btn-link" onClick={handleCancelEditPO}>{currentLang === 'en' ? 'Cancel' : 'إلغاء'}</button>
-                    {canModify('purchase_orders') && (
-                      <button type="button" className="btn-emerald" onClick={handleUpdatePO}>{currentLang === 'en' ? 'Save Changes' : 'حفظ التعديلات'}</button>
-                    )}
-                  </>
-                ) : (
-                  <>
-                    <button type="button" className="btn-link" onClick={resetPoForm}>{currentLang === 'en' ? 'Clear' : 'مسح'}</button>
-                    {canModify('purchase_orders') && (
-                      <button type="button" className="btn-emerald" onClick={handleCreatePO}>{t('btn_create_po')}</button>
-                    )}
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
-          )}
-        </section>
-
-        {/* SCREEN VIEWPORT: ACTIVE DEALS (Purchase Orders registry -- approve / delete / print) */}
-        <section className={`screen-viewport ${activeTab === 'screen-active-deals' ? 'active' : ''}`}>
-          <div className="glass-card">
-            <h3>{t('po_table_title')}</h3>
-            <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>{t('po_table_subtitle')}</p>
-            <div className="table-responsive">
-              <table>
-                <thead>
-                  <tr>
-                    <th style={{ width: '40px' }}></th>
-                    <th>{t('th_po_code')}</th>
-                    <th>{t('th_supplier')}</th>
-                    <th>{t('th_weight')}</th>
-                    <th>{t('th_cost')}</th>
-                    <th title={currentLang === 'en' ? 'Total cost including freight/insurance/customs/other fees — feeds Average Cost valuation' : 'التكلفة الإجمالية شاملة الشحن/التأمين/الجمارك/الرسوم الأخرى — تُستخدم في تقييم متوسط التكلفة'}>
-                      {currentLang === 'en' ? 'Landed Cost' : 'التكلفة الفعلية'}
-                    </th>
-                    <th>{t('th_status')}</th>
-                    {canModify('purchase_orders') && <th style={{ width: '280px', textAlign: 'center' }}>{t('th_action')}</th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {poList.length === 0 ? (
-                    <tr>
-                      <td colSpan={canModify('purchase_orders') ? 8 : 7} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '20px' }}>
-                        {t('active_deals_empty')}
-                      </td>
-                    </tr>
-                  ) : (
-                    poList.map((po: any, poIdx: number) => {
-                      const items = po.items && po.items.length > 0 ? po.items : [{ product_id: 1, qty: po.qty || 1 }];
-                      const isExpanded = expandedPOId === po.po_id;
-
-                      return (
-                        <React.Fragment key={poIdx}>
-                          {/* HEADER ROW - Click to expand */}
-                          <tr onClick={() => setExpandedPOId(isExpanded ? null : po.po_id)} style={{ cursor: 'pointer', backgroundColor: isExpanded ? 'rgba(59, 130, 246, 0.04)' : undefined }}>
-                            <td style={{ textAlign: 'center', padding: '12px 8px' }}>
-                              <i className={`fa-solid fa-chevron-${isExpanded ? 'down' : 'right'}`} style={{ color: 'var(--accent-blue)', fontSize: '14px' }}></i>
-                            </td>
-                            <td><strong>{po.po_number}</strong>{po.supplier_invoice_number && <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Inv.' : 'فاتورة'} {po.supplier_invoice_number}</div>}</td>
-                            <td>{po.supplier}</td>
-                            <td>{po.weight}g</td>
-                            <td>${po.cost.toLocaleString()} {po.currency}</td>
-                            <td>${(po.landed_cost ?? po.cost).toLocaleString()} {po.currency}</td>
-                            <td><span className="badge badge-ready">{translateDb(po.status_code)}</span></td>
-                            {canModify('purchase_orders') && (
-                              <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
-                                {po.status_code !== 'APPROVED' && po.status_code !== 'REJECTED' && po.status_code !== 'RECEIVED' && (
-                                  <button className="btn btn-primary" style={{ padding: '4px 8px', fontSize: '11px', marginInlineEnd: '4px' }} onClick={() => handleApprovePO(po.po_id)}>
-                                    <i className="fa-solid fa-check"></i> {t('btn_approve')}
-                                  </button>
-                                )}
-                                {(po.status_code === 'APPROVED' || po.status_code === 'RECEIVED') && (
-                                  <button className="btn" style={{ backgroundColor: 'var(--accent-blue)', padding: '4px 8px', fontSize: '11px', marginInlineEnd: '4px' }} onClick={() => handlePrintPO(po)}>
-                                    <i className="fa-solid fa-print"></i> {t('btn_print')}
-                                  </button>
-                                )}
-                                <button className="btn" style={{ backgroundColor: 'var(--accent-red)', color: '#fff', padding: '4px 8px', fontSize: '11px' }} onClick={() => handleDeletePO(po.po_id, po.po_number)}>
-                                  <i className="fa-solid fa-trash"></i> {t('btn_delete')}
-                                </button>
-                              </td>
-                            )}
-                          </tr>
-
-                          {/* EXPANDED DETAILS ROW - Shows items */}
-                          {isExpanded && (
-                            <tr style={{ backgroundColor: 'rgba(59, 130, 246, 0.04)' }}>
-                              <td colSpan={canModify('purchase_orders') ? 8 : 7} style={{ padding: '16px 20px' }}>
-                                <div style={{ marginLeft: '20px' }}>
-                                  <h5 style={{ margin: '0 0 12px 0', fontSize: '13px', color: 'var(--accent-blue)', fontWeight: 'bold' }}>
-                                    {currentLang === 'en' ? 'Items:' : 'المنتجات:'}
-                                  </h5>
-                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                                    {items.map((item: any, itemIdx: number) => {
-                                      const prod = products.find((p: any) => p.product_id === item.product_id);
-                                      const prodName = prod ? `${prod.metal_name} ${prod.denomination_label}` : (item.product_code || `Product #${item.product_id}`);
-                                      const itemQty = item.qty || item.ordered_qty || 1;
-                                      const itemWeight = prod && prod.weight_per_unit ? (prod.weight_per_unit * itemQty) : (po.weight / items.length);
-                                      const itemCost = po.cost / items.length;
-                                      const itemLandedCost = (po.landed_cost ?? po.cost) / items.length;
-
-                                      return (
-                                        <div key={itemIdx} style={{
-                                          padding: '12px 14px',
-                                          backgroundColor: 'rgba(255, 255, 255, 0.6)',
-                                          border: '1px solid rgba(59, 130, 246, 0.2)',
-                                          borderRadius: '4px',
-                                          fontSize: '13px',
-                                          display: 'grid',
-                                          gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr',
-                                          gap: '12px',
-                                          alignItems: 'center'
-                                        }}>
-                                          <div>
-                                            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>{currentLang === 'en' ? 'Product' : 'المنتج'}</div>
-                                            <strong style={{ color: 'var(--accent-blue)' }}>{prodName}</strong>
-                                          </div>
-                                          <div>
-                                            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>{currentLang === 'en' ? 'Quantity' : 'الكمية'}</div>
-                                            <strong>{itemQty}</strong> {currentLang === 'en' ? 'units' : 'وحدات'}
-                                          </div>
-                                          <div>
-                                            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>{currentLang === 'en' ? 'Weight' : 'الوزن'}</div>
-                                            <strong>{itemWeight.toFixed(2)}g</strong>
-                                          </div>
-                                          <div>
-                                            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>{currentLang === 'en' ? 'Cost' : 'التكلفة'}</div>
-                                            <strong>${itemCost.toLocaleString(undefined, { maximumFractionDigits: 2 })}</strong>
-                                          </div>
-                                          <div>
-                                            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>{currentLang === 'en' ? 'Landed Cost' : 'التكلفة الفعلية'}</div>
-                                            <strong>${itemLandedCost.toLocaleString(undefined, { maximumFractionDigits: 2 })}</strong>
-                                          </div>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                </div>
-                              </td>
-                            </tr>
-                          )}
-                        </React.Fragment>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </section>
 
         {/* SCREEN VIEWPORT: RECEIVE SHIPMENTS (INTAKE - UC03) */}
         <section className={`screen-viewport ${activeTab === 'screen-intake' ? 'active' : ''}`}>
@@ -6330,8 +5948,16 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       const parsed = parseGs1Barcode(val.trim());
                       const found = inventoryList.find((item: any) => item.serial_number === parsed.serial);
                       if (found) {
-                         setTransferItemId(found.item_id);
-                         setTransferItemSerial(found.serial_number);
+                        if (found.is_damaged || found.status === 'DAMAGED') {
+                          alert(currentLang === 'en'
+                            ? `⚠️ Outbound Movement BLOCKED: Bar ${found.serial_number} is marked as DAMAGED (${found.damage_reason || 'Defect'}). It cannot be moved or transferred from Main Vault.`
+                            : `⚠️ حظر حركة الخروج: السبيكة ${found.serial_number} موسومة كـ تالفة (${found.damage_reason || 'عيب'}). لا يمكن نقلها أو إخراجها من الخزينة الرئيسية.`);
+                          setTransferItemId(null);
+                          setTransferItemSerial('');
+                        } else {
+                          setTransferItemId(found.item_id);
+                          setTransferItemSerial(found.serial_number);
+                        }
                       }
                     }}
                     disabled={!canModify('purchase_orders')}
@@ -6700,17 +6326,25 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     : 'حوكمة مبدأ الرقابة الثنائية (Maker-Checker) للسبائك التالفة. يقوم الصانع بالإبلاغ عن العيوب، ويقوم المراجع بالاعتماد المستقل للعزل أو الرفض.'}
                 </p>
               </div>
-              {canModify('custody') && (
-                <button className="btn btn-primary" onClick={() => {
-                  setDamageItemId(null);
+              <button
+                className="btn btn-primary"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', background: '#dc3545', borderColor: '#dc3545', padding: '10px 18px', fontSize: '13px', fontWeight: 'bold' }}
+                onClick={() => {
+                  const readyList = inventoryList.filter((b: any) => !b.is_damaged && b.status !== 'DAMAGED');
+                  const defaultBar = readyList.length > 0 ? readyList[0] : (inventoryList.length > 0 ? inventoryList[0] : null);
+                  setDamageItemId(defaultBar?.item_id || null);
+                  setDamageMatchedBar(defaultBar || null);
+                  setDamageScanSerial(defaultBar?.serial_number || '');
+                  setDamageScanStatus(defaultBar ? 'found' : 'idle');
                   setDamageReason('SCRATCHED_HALLMARK');
-                  setDamageDesc('');
+                  setDamageDesc('Physical inspection defect identified. Requesting Maker-Checker quarantine.');
                   setDamageDocId(`DOC-MOCI-${Date.now().toString().slice(-4)}`);
                   setShowDamageModal(true);
-                }}>
-                  <i className="fa-solid fa-triangle-exclamation"></i> {currentLang === 'en' ? 'Report Damaged Bar' : 'الإبلاغ عن سبيكة تالفة'}
-                </button>
-              )}
+                }}
+              >
+                <i className="fa-solid fa-triangle-exclamation"></i>
+                <span>{currentLang === 'en' ? 'Initiate Damage Workflow / Report Bar' : 'بدء دورة اعتماد تلف سبيكة / إبلاغ'}</span>
+              </button>
             </div>
 
             <div className="table-responsive">
@@ -6757,7 +6391,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                           </span>
                         </td>
                         <td>
-                          {isPending && checkUserRoleMatches('Operations Checker', userRole) && (
+                          {isPending && (
                             <div style={{ display: 'flex', gap: '6px' }}>
                               <button className="btn btn-primary btn-sm" onClick={() => handleProcessDamageAction(bar.itemId, 'APPROVE')}>
                                 <i className="fa-solid fa-check"></i> {currentLang === 'en' ? 'Approve' : 'اعتماد'}
@@ -6767,14 +6401,14 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                               </button>
                             </div>
                           )}
-                          {isPending && !checkUserRoleMatches('Operations Checker', userRole) && (
-                            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                              {currentLang === 'en' ? 'Awaiting Checker (4-Eyes)' : 'بانتظار مراجع العمليات'}
-                            </span>
-                          )}
                           {isApproved && (
                             <span style={{ color: 'var(--accent-red)', fontSize: '12px' }}>
                               <i className="fa-solid fa-ban"></i> {currentLang === 'en' ? 'Quarantined / Defective' : 'معزولة / تالفة'}
+                            </span>
+                          )}
+                          {isRejected && (
+                            <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
+                              <i className="fa-solid fa-rotate-left"></i> {currentLang === 'en' ? 'Restored to Ready' : 'تم استعادة الحالة السليمة'}
                             </span>
                           )}
                         </td>
@@ -6783,8 +6417,29 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                   })}
                   {damagedBarsList.length === 0 && (
                     <tr>
-                      <td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '24px' }}>
-                        {currentLang === 'en' ? 'No damaged bars pending review or on record.' : 'لا توجد سبائك تالفة معلقة أو مسجلة.'}
+                      <td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '36px 20px' }}>
+                        <i className="fa-solid fa-shield-halved" style={{ fontSize: '28px', color: 'var(--accent-green)', marginBottom: '10px', display: 'block' }}></i>
+                        <p style={{ margin: '0 0 12px 0', fontSize: '14px' }}>
+                          {currentLang === 'en' ? 'No damaged bars currently reported or pending review.' : 'لا توجد سبائك تالفة معلقة أو مسجلة حالياً.'}
+                        </p>
+                        <button
+                          className="btn btn-outline"
+                          style={{ borderColor: '#dc3545', color: '#dc3545', fontSize: '12px' }}
+                          onClick={() => {
+                            const readyList = inventoryList.filter((b: any) => !b.is_damaged && b.status !== 'DAMAGED');
+                            const defaultBar = readyList.length > 0 ? readyList[0] : (inventoryList.length > 0 ? inventoryList[0] : null);
+                            setDamageItemId(defaultBar?.item_id || null);
+                            setDamageMatchedBar(defaultBar || null);
+                            setDamageScanSerial(defaultBar?.serial_number || '');
+                            setDamageScanStatus(defaultBar ? 'found' : 'idle');
+                            setDamageReason('SCRATCHED_HALLMARK');
+                            setDamageDesc('Physical inspection defect identified. Requesting Maker-Checker quarantine.');
+                            setDamageDocId(`DOC-MOCI-${Date.now().toString().slice(-4)}`);
+                            setShowDamageModal(true);
+                          }}
+                        >
+                          <i className="fa-solid fa-triangle-exclamation"></i> {currentLang === 'en' ? 'Initiate New Damage Report' : 'بدء تقرير تلف سبيكة جديد'}
+                        </button>
                       </td>
                     </tr>
                   )}
@@ -7946,6 +7601,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                             <th>{t('th_weight_grams')}</th>
                             <th>{t('th_coords')}</th>
                             <th>{t('th_ownership')}</th>
+                            <th>{currentLang === 'en' ? 'Quality / Damage' : 'حالة الجودة / التلف'}</th>
                             <th>{t('th_cost_basis')}</th>
                             <th>{t('th_market_val')}</th>
                             <th>{t('th_unrealized_pnl')}</th>
@@ -7963,6 +7619,21 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                                 <td>{row.weight_grams}g</td>
                                 <td>{translateDb(row.location)}</td>
                                 <td>{translateDb(row.ownership_type)}</td>
+                                <td>
+                                  {row.is_damaged ? (
+                                    <span className="badge badge-quarantined" title={row.damage_reason || 'Quarantined Damaged Bar'}>
+                                      <i className="fa-solid fa-triangle-exclamation"></i> {currentLang === 'en' ? 'DAMAGED' : 'تالفة'}
+                                    </span>
+                                  ) : row.damage_status === 'PENDING_APPROVAL' ? (
+                                    <span className="badge badge-reserved" title="Pending Maker-Checker Review">
+                                      <i className="fa-solid fa-clock"></i> {currentLang === 'en' ? 'Pending Review' : 'قيد المراجعة'}
+                                    </span>
+                                  ) : (
+                                    <span className="badge badge-ready">
+                                      <i className="fa-solid fa-circle-check"></i> {currentLang === 'en' ? 'Pristine' : 'سليمة'}
+                                    </span>
+                                  )}
+                                </td>
                                 <td>${row.cost_basis?.toLocaleString()}</td>
                                 <td>${row.market_value?.toLocaleString()}</td>
                                 <td style={{ color: row.unrealized_pnl >= 0 ? 'var(--accent-green)' : 'var(--accent-red)' }}>
@@ -8579,7 +8250,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
               </button>
               <button className={`btn-tab ${settingsTab === 'suppliers' ? 'active' : ''}`} onClick={() => setSettingsTab('suppliers')}>{t('tab_suppliers')}</button>
               <button className={`btn-tab ${settingsTab === 'denoms' ? 'active' : ''}`} onClick={() => { setSettingsTab('denoms'); fetchProducts(); fetchBrands(); }}>{t('tab_denoms')}</button>
-              <button className={`btn-tab ${settingsTab === 'stocklimits' ? 'active' : ''}`} onClick={() => { setSettingsTab('stocklimits'); fetchReorderThresholds(); }}>
+              <button className={`btn-tab ${settingsTab === 'stocklimits' ? 'active' : ''}`} onClick={() => { setSettingsTab('stocklimits'); fetchReorderThresholds(); fetchPendingThresholdChanges(); }}>
                 <i className="fa-solid fa-gauge-high"></i> {currentLang === 'ar' ? 'حدود المخزون' : 'Stock Limits'}
               </button>
               <button className={`btn-tab ${settingsTab === 'branches' ? 'active' : ''}`} onClick={() => { setSettingsTab('branches'); fetchBranches(); }}>
@@ -9431,14 +9102,39 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                   <div>
                     <h4 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <i className="fa-solid fa-gauge-high" style={{ color: 'var(--accent-gold)' }}></i>
-                      {currentLang === 'ar' ? 'حدود المخزون وإعادة الطلب للمؤسسة' : 'Stock Limits & Enterprise Thresholds'}
+                      {currentLang === 'ar' ? 'حدود المخزون التنبيهية للمؤسسة (الحد الأدنى والأقصى)' : 'Stock Limits & Enterprise Thresholds (Low & High Limits)'}
                     </h4>
                     <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: '4px 0 0 0' }}>
                       {currentLang === 'ar'
-                        ? 'تهيئة الحد الأدنى للمخزون (نقطة إعادة الطلب) وكميات الشراء التلقائية بالقطع والكيلوجرام لجميع فئات الذهب.'
-                        : 'Configure Enterprise minimum stock limits (reorder points) and purchase order triggers in pieces and KG equivalent.'}
+                        ? 'تهيئة حدود المخزون الدنيا (تنبيه نقص المخزون وإعادة الطلب) والحدود القصوى (تنبيه تجاوز الطاقة الاستيعابية) بشكل مستقل لكل فئة.'
+                        : 'Maintain independent Low-Stock (minimum floor & reorder point) and High-Stock (maximum holding ceiling) alert levels per denomination.'}
                     </p>
                   </div>
+                </div>
+
+                {/* Filter Controls: All / Low-Stock / High-Stock */}
+                <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', flexWrap: 'wrap' }}>
+                  <button 
+                    className={`btn ${thresholdFilterType === 'ALL' ? 'btn-primary' : 'btn-secondary'}`}
+                    style={{ padding: '6px 14px', fontSize: '12px' }}
+                    onClick={() => setThresholdFilterType('ALL')}
+                  >
+                    <i className="fa-solid fa-layer-group"></i> {currentLang === 'ar' ? 'جميع الحدود' : 'All Configurations'} ({reorderThresholds.length})
+                  </button>
+                  <button 
+                    className={`btn ${thresholdFilterType === 'LOW_STOCK' ? 'btn-primary' : 'btn-secondary'}`}
+                    style={{ padding: '6px 14px', fontSize: '12px', background: thresholdFilterType === 'LOW_STOCK' ? 'var(--accent-orange)' : undefined, borderColor: thresholdFilterType === 'LOW_STOCK' ? 'var(--accent-orange)' : undefined, color: thresholdFilterType === 'LOW_STOCK' ? '#000' : undefined }}
+                    onClick={() => setThresholdFilterType('LOW_STOCK')}
+                  >
+                    <i className="fa-solid fa-arrow-trend-down"></i> {currentLang === 'ar' ? 'حدود نقص المخزون (الحد الأدنى)' : 'Low-Stock Limits (Min Floor)'} ({reorderThresholds.filter(t => t.threshold_type === 'LOW_STOCK' || !t.threshold_type).length})
+                  </button>
+                  <button 
+                    className={`btn ${thresholdFilterType === 'HIGH_STOCK' ? 'btn-primary' : 'btn-secondary'}`}
+                    style={{ padding: '6px 14px', fontSize: '12px', background: thresholdFilterType === 'HIGH_STOCK' ? '#8B5CF6' : undefined, borderColor: thresholdFilterType === 'HIGH_STOCK' ? '#8B5CF6' : undefined, color: thresholdFilterType === 'HIGH_STOCK' ? '#FFF' : undefined }}
+                    onClick={() => setThresholdFilterType('HIGH_STOCK')}
+                  >
+                    <i className="fa-solid fa-arrow-trend-up"></i> {currentLang === 'ar' ? 'حدود فائض المخزون (الحد الأقصى)' : 'High-Stock Limits (Max Ceiling)'} ({reorderThresholds.filter(t => t.threshold_type === 'HIGH_STOCK').length})
+                  </button>
                 </div>
 
                 {!canModify('master_data') && (
@@ -9447,73 +9143,172 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                   </div>
                 )}
 
+                {pendingThresholdChanges && pendingThresholdChanges.length > 0 && (
+                  <div className="glass-card" style={{ marginBottom: '25px', border: '1px solid var(--accent-orange)', background: 'rgba(255, 145, 0, 0.04)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
+                      <i className="fa-solid fa-clock" style={{ color: 'var(--accent-orange)', fontSize: '18px' }}></i>
+                      <h4 style={{ margin: 0, color: 'var(--accent-orange)', fontSize: '14px' }}>
+                        {currentLang === 'ar' ? 'تعديلات حدود المخزون قيد انتظار اعتماد الصانع والمعتمد (Maker-Checker)' : 'Cut-Off Threshold Changes Awaiting Maker-Checker Sign-off'}
+                      </h4>
+                      <span className="badge badge-reserved">{pendingThresholdChanges.length}</span>
+                    </div>
+                    <div className="table-responsive">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>{currentLang === 'ar' ? 'نوع الإجراء' : 'Change Type'}</th>
+                            <th>{currentLang === 'ar' ? 'نوع الحد' : 'Threshold Type'}</th>
+                            <th>{currentLang === 'ar' ? 'المنتج' : 'Product'}</th>
+                            <th>{currentLang === 'ar' ? 'مستوى التنبيه' : 'Alert Level'}</th>
+                            <th>{currentLang === 'ar' ? 'كمية إعادة الطلب' : 'Reorder Qty'}</th>
+                            <th>{currentLang === 'ar' ? 'مقدم الطلب' : 'Requested By'}</th>
+                            <th>{currentLang === 'ar' ? 'الحالة' : 'Status'}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {pendingThresholdChanges.map((pc: any) => {
+                            const isHigh = pc.threshold_type === 'HIGH_STOCK';
+                            return (
+                              <tr key={pc.pending_change_id}>
+                                <td><span className="badge badge-ready">{pc.change_type}</span></td>
+                                <td>
+                                  <span className="badge" style={{ background: isHigh ? 'rgba(139, 92, 246, 0.2)' : 'rgba(255, 145, 0, 0.2)', color: isHigh ? '#A78BFA' : 'var(--accent-orange)', border: `1px solid ${isHigh ? '#8B5CF6' : 'var(--accent-orange)'}` }}>
+                                    {isHigh ? (currentLang === 'ar' ? '📈 حد أقصى' : 'HIGH_STOCK') : (currentLang === 'ar' ? '📉 حد أدنى' : 'LOW_STOCK')}
+                                  </span>
+                                </td>
+                                <td><strong>{pc.product_name || pc.product_code}</strong></td>
+                                <td>
+                                  <span className="badge badge-reserved">
+                                    {isHigh ? `Max: ${pc.max_stock_qty || pc.min_stock_qty} pcs` : `Min: ${pc.min_stock_qty} pcs`}
+                                  </span>
+                                </td>
+                                <td>
+                                  {isHigh ? <span style={{ color: 'var(--text-muted)' }}>—</span> : <span className="badge badge-ready">{pc.reorder_qty} pcs</span>}
+                                </td>
+                                <td>{pc.requested_by}</td>
+                                <td><span className="badge badge-quarantined">{pc.status_code}</span></td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
                 <div className="table-responsive" style={{ marginBottom: '30px' }}>
                   <table>
                     <thead>
                       <tr>
+                        <th>{currentLang === 'ar' ? 'نوع الحد' : 'Threshold Type'}</th>
                         <th>{currentLang === 'ar' ? 'المنتج والفئة' : 'Product & Metal'}</th>
                         <th>{currentLang === 'ar' ? 'المورد المفضل' : 'Preferred Vendor'}</th>
-                        <th>{currentLang === 'ar' ? 'الحد الأدنى للمخزون' : 'Min Stock Limit'}</th>
+                        <th>{currentLang === 'ar' ? 'مستوى التنبيه المحدد' : 'Configured Limit'}</th>
                         <th>{currentLang === 'ar' ? 'كمية إعادة الطلب' : 'Reorder Qty'}</th>
                         <th>{currentLang === 'ar' ? 'المتوفر حالياً' : 'Current In-Stock'}</th>
+                        <th>{currentLang === 'ar' ? 'حالة التنبيه' : 'Alert Status'}</th>
                         <th>{currentLang === 'ar' ? 'الحالة' : 'Status'}</th>
                         {canModify('master_data') && <th style={{ width: '80px', textAlign: 'center' }}>{currentLang === 'ar' ? 'إجراء' : 'Action'}</th>}
                       </tr>
                     </thead>
                     <tbody>
-                      {reorderThresholds.length === 0 ? (
-                        <tr><td colSpan={canModify('master_data') ? 7 : 6} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '30px' }}>
-                          <i className="fa-solid fa-inbox" style={{ fontSize: '24px', marginBottom: '8px', display: 'block' }}></i>
-                          {currentLang === 'ar' ? 'لم يتم تعيين حدود بعد' : 'No thresholds configured yet'}
-                        </td></tr>
-                      ) : reorderThresholds.map((th: any) => {
-                        const matchingProd = products.find((p: any) => p.product_id === th.product_id);
-                        const weightGrams = matchingProd?.weight_grams || 1000;
-                        const minKg = ((th.min_stock_qty * weightGrams) / 1000).toFixed(2);
-                        const reorderKg = ((th.reorder_qty * weightGrams) / 1000).toFixed(2);
-                        const currentItemStock = inventoryList.filter((i: any) => i.product_id === th.product_id && i.status === 'READY').length;
-                        const currentKg = ((currentItemStock * weightGrams) / 1000).toFixed(2);
-                        const isLow = currentItemStock <= th.min_stock_qty;
+                      {(() => {
+                        const filtered = reorderThresholds.filter((th: any) => {
+                          if (thresholdFilterType === 'ALL') return true;
+                          if (thresholdFilterType === 'LOW_STOCK') return th.threshold_type === 'LOW_STOCK' || !th.threshold_type;
+                          if (thresholdFilterType === 'HIGH_STOCK') return th.threshold_type === 'HIGH_STOCK';
+                          return true;
+                        });
 
-                        return (
-                          <tr key={th.threshold_id}>
-                            <td>
-                              <strong>{th.product_name || th.product_code}</strong>
-                              <span style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)' }}>{weightGrams}g / bar</span>
-                            </td>
-                            <td>{th.vendor_name || '—'}</td>
-                            <td>
-                              <span className="badge badge-reserved" style={{ fontSize: '12px' }}>{th.min_stock_qty} pcs</span>
-                              <span style={{ display: 'block', fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>({minKg} KG)</span>
-                            </td>
-                            <td>
-                              <span className="badge badge-ready" style={{ fontSize: '12px' }}>{th.reorder_qty} pcs</span>
-                              <span style={{ display: 'block', fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>({reorderKg} KG)</span>
-                            </td>
-                            <td>
-                              <span className={`badge ${isLow ? 'badge-quarantined' : 'badge-ready'}`} style={{ fontSize: '12px' }}>
-                                {currentItemStock} pcs
-                              </span>
-                              <span style={{ display: 'block', fontSize: '10px', color: isLow ? '#DC2626' : 'var(--text-muted)', marginTop: '2px' }}>
-                                ({currentKg} KG) {isLow ? '⚠️ Low Stock' : ''}
-                              </span>
-                            </td>
-                            <td>
-                              <span className={`badge ${th.is_active ? 'badge-ready' : 'badge-sold'}`}>
-                                {th.is_active ? (currentLang === 'ar' ? 'نشط' : 'Active') : (currentLang === 'ar' ? 'معطل' : 'Disabled')}
-                              </span>
-                            </td>
-                            {canModify('master_data') && (
-                              <td style={{ textAlign: 'center' }}>
-                                <button className="btn" style={{ padding: '4px 8px', fontSize: '12px', color: 'var(--accent-red)', borderColor: '#FECACA' }}
-                                  onClick={() => handleDeleteThreshold(th.threshold_id)} title="Delete">
-                                  <i className="fa-solid fa-trash"></i>
-                                </button>
+                        if (filtered.length === 0) {
+                          return (
+                            <tr><td colSpan={canModify('master_data') ? 9 : 8} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '30px' }}>
+                              <i className="fa-solid fa-inbox" style={{ fontSize: '24px', marginBottom: '8px', display: 'block' }}></i>
+                              {currentLang === 'ar' ? 'لم يتم تعيين حدود مطابقة بعد' : 'No matching thresholds configured yet'}
+                            </td></tr>
+                          );
+                        }
+
+                        return filtered.map((th: any) => {
+                          const isHigh = th.threshold_type === 'HIGH_STOCK';
+                          const matchingProd = products.find((p: any) => p.product_id === th.product_id);
+                          const weightGrams = matchingProd?.weight_grams || 1000;
+                          const limitQty = isHigh ? (th.max_stock_qty || th.min_stock_qty) : th.min_stock_qty;
+                          const limitKg = ((limitQty * weightGrams) / 1000).toFixed(2);
+                          const reorderKg = ((th.reorder_qty * weightGrams) / 1000).toFixed(2);
+                          const currentItemStock = inventoryList.filter((i: any) => i.product_id === th.product_id && i.status === 'READY').length;
+                          const currentKg = ((currentItemStock * weightGrams) / 1000).toFixed(2);
+                          
+                          const isLowBreached = !isHigh && currentItemStock <= th.min_stock_qty;
+                          const isHighBreached = isHigh && currentItemStock >= limitQty && limitQty > 0;
+                          const hasAlert = isLowBreached || isHighBreached;
+
+                          return (
+                            <tr key={th.threshold_id}>
+                              <td>
+                                <span className="badge" style={{ background: isHigh ? 'rgba(139, 92, 246, 0.15)' : 'rgba(255, 145, 0, 0.15)', color: isHigh ? '#A78BFA' : 'var(--accent-orange)', border: `1px solid ${isHigh ? '#8B5CF6' : 'var(--accent-orange)'}`, fontSize: '11px' }}>
+                                  {isHigh ? (currentLang === 'ar' ? '📈 حد أقصى' : 'HIGH_STOCK') : (currentLang === 'ar' ? '📉 حد أدنى' : 'LOW_STOCK')}
+                                </span>
                               </td>
-                            )}
-                          </tr>
-                        );
-                      })}
+                              <td>
+                                <strong>{th.product_name || th.product_code}</strong>
+                                <span style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)' }}>{weightGrams}g / bar</span>
+                              </td>
+                              <td>{th.vendor_name || '—'}</td>
+                              <td>
+                                <span className={`badge ${isHigh ? 'badge-quarantined' : 'badge-reserved'}`} style={{ fontSize: '12px' }}>
+                                  {isHigh ? `Max: ${limitQty} pcs` : `Min: ${limitQty} pcs`}
+                                </span>
+                                <span style={{ display: 'block', fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>({limitKg} KG)</span>
+                              </td>
+                              <td>
+                                {isHigh ? (
+                                  <span style={{ color: 'var(--text-muted)' }}>—</span>
+                                ) : (
+                                  <>
+                                    <span className="badge badge-ready" style={{ fontSize: '12px' }}>{th.reorder_qty} pcs</span>
+                                    <span style={{ display: 'block', fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>({reorderKg} KG)</span>
+                                  </>
+                                )}
+                              </td>
+                              <td>
+                                <strong style={{ fontSize: '13px' }}>{currentItemStock} pcs</strong>
+                                <span style={{ display: 'block', fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                                  ({currentKg} KG)
+                                </span>
+                              </td>
+                              <td>
+                                {isLowBreached ? (
+                                  <span className="badge badge-quarantined" style={{ fontSize: '11px' }}>
+                                    <i className="fa-solid fa-triangle-exclamation"></i> {currentLang === 'ar' ? '⚠️ نقص مخزون' : '⚠️ Low Stock'}
+                                  </span>
+                                ) : isHighBreached ? (
+                                  <span className="badge" style={{ background: 'rgba(239, 68, 68, 0.2)', color: 'var(--accent-red)', border: '1px solid var(--accent-red)', fontSize: '11px' }}>
+                                    <i className="fa-solid fa-circle-exclamation"></i> {currentLang === 'ar' ? '📈 فائض مخزون' : '📈 High Ceiling'}
+                                  </span>
+                                ) : (
+                                  <span className="badge badge-ready" style={{ fontSize: '11px' }}>
+                                    <i className="fa-solid fa-check"></i> {currentLang === 'ar' ? 'مستوى مثالي' : 'Optimal'}
+                                  </span>
+                                )}
+                              </td>
+                              <td>
+                                <span className={`badge ${th.is_active ? 'badge-ready' : 'badge-sold'}`}>
+                                  {th.is_active ? (currentLang === 'ar' ? 'نشط' : 'Active') : (currentLang === 'ar' ? 'معطل' : 'Disabled')}
+                                </span>
+                              </td>
+                              {canModify('master_data') && (
+                                <td style={{ textAlign: 'center' }}>
+                                  <button className="btn" style={{ padding: '4px 8px', fontSize: '12px', color: 'var(--accent-red)', borderColor: '#FECACA' }}
+                                    onClick={() => handleDeleteThreshold(th.threshold_id)} title="Delete">
+                                    <i className="fa-solid fa-trash"></i>
+                                  </button>
+                                </td>
+                              )}
+                            </tr>
+                          );
+                        });
+                      })()}
                     </tbody>
                   </table>
                 </div>
@@ -9523,8 +9318,33 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                 <div className="glass-card" style={{ marginTop: '24px' }}>
                   <h4 style={{ marginBottom: '16px', fontSize: '15px' }}>
                     <i className="fa-solid fa-plus-circle" style={{ color: 'var(--kfh-green)', marginRight: '8px' }}></i>
-                    {currentLang === 'ar' ? 'إضافة حد مخزون جديد للمؤسسة' : 'Add Enterprise Stock Limit & Reorder Trigger'}
+                    {currentLang === 'ar' ? 'إضافة حد تنبيهي جديد للمخزون (صانع - معتمد)' : 'Add Enterprise Stock Limit & Alert Level (Maker-Checker)'}
                   </h4>
+
+                  {/* Threshold Type Picker */}
+                  <div style={{ display: 'flex', gap: '15px', marginBottom: '16px', padding: '12px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', border: '1px solid var(--surface-border)' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontWeight: newThresholdType === 'LOW_STOCK' ? 'bold' : 'normal' }}>
+                      <input 
+                        type="radio" 
+                        name="newThresholdType" 
+                        value="LOW_STOCK" 
+                        checked={newThresholdType === 'LOW_STOCK'} 
+                        onChange={() => setNewThresholdType('LOW_STOCK')} 
+                      />
+                      <span>📉 {currentLang === 'ar' ? 'حد أدنى للمخزون (نقص المخزون وإعادة الطلب)' : 'Low-Stock Floor Limit (Min Stock & Reorder)'}</span>
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontWeight: newThresholdType === 'HIGH_STOCK' ? 'bold' : 'normal' }}>
+                      <input 
+                        type="radio" 
+                        name="newThresholdType" 
+                        value="HIGH_STOCK" 
+                        checked={newThresholdType === 'HIGH_STOCK'} 
+                        onChange={() => setNewThresholdType('HIGH_STOCK')} 
+                      />
+                      <span>📈 {currentLang === 'ar' ? 'حد أقصى للمخزون (فائض المخزون وسقف التخزين)' : 'High-Stock Ceiling Limit (Max Capacity Alert)'}</span>
+                    </label>
+                  </div>
+
                   <div className="split-grid-2" style={{ gap: '16px' }}>
                     <div className="form-group" style={{ marginBottom: 0 }}>
                       <label>{currentLang === 'ar' ? 'المنتج والفئة' : 'Product & Denomination'}</label>
@@ -9544,32 +9364,49 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                         ))}
                       </select>
                     </div>
-                    <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label>
-                        {currentLang === 'ar' ? 'الحد الأدنى للمخزون (بالقطع)' : 'Minimum Stock Floor (Pieces)'}
-                        {newThresholdProductId && (
-                          <span style={{ fontSize: '11px', color: 'var(--accent-gold)', marginLeft: '6px' }}>
-                            ≈ {(((parseInt(newThresholdMinQty) || 0) * (products.find((p: any) => p.product_id === parseInt(newThresholdProductId))?.weight_grams || 1000)) / 1000).toFixed(2)} KG
-                          </span>
-                        )}
-                      </label>
-                      <input type="number" className="form-control" value={newThresholdMinQty} onChange={e => setNewThresholdMinQty(e.target.value)} min="1" />
-                    </div>
-                    <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label>
-                        {currentLang === 'ar' ? 'كمية إعادة الطلب (بالقطع)' : 'Reorder Trigger Quantity (Pieces)'}
-                        {newThresholdProductId && (
-                          <span style={{ fontSize: '11px', color: 'var(--accent-green)', marginLeft: '6px' }}>
-                            ≈ {(((parseInt(newThresholdReorderQty) || 0) * (products.find((p: any) => p.product_id === parseInt(newThresholdProductId))?.weight_grams || 1000)) / 1000).toFixed(2)} KG
-                          </span>
-                        )}
-                      </label>
-                      <input type="number" className="form-control" value={newThresholdReorderQty} onChange={e => setNewThresholdReorderQty(e.target.value)} min="1" />
-                    </div>
+
+                    {newThresholdType === 'LOW_STOCK' ? (
+                      <>
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label>
+                            {currentLang === 'ar' ? 'الحد الأدنى للمخزون (بالقطع)' : 'Minimum Stock Floor Limit (Pieces)'}
+                            {newThresholdProductId && (
+                              <span style={{ fontSize: '11px', color: 'var(--accent-gold)', marginLeft: '6px' }}>
+                                ≈ {(((parseInt(newThresholdMinQty) || 0) * (products.find((p: any) => p.product_id === parseInt(newThresholdProductId))?.weight_grams || 1000)) / 1000).toFixed(2)} KG
+                              </span>
+                            )}
+                          </label>
+                          <input type="number" className="form-control" value={newThresholdMinQty} onChange={e => setNewThresholdMinQty(e.target.value)} min="1" />
+                        </div>
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label>
+                            {currentLang === 'ar' ? 'كمية إعادة الطلب المقترحة (بالقطع)' : 'Reorder Quantity (Pieces)'}
+                            {newThresholdProductId && (
+                              <span style={{ fontSize: '11px', color: 'var(--accent-green)', marginLeft: '6px' }}>
+                                ≈ {(((parseInt(newThresholdReorderQty) || 0) * (products.find((p: any) => p.product_id === parseInt(newThresholdProductId))?.weight_grams || 1000)) / 1000).toFixed(2)} KG
+                              </span>
+                            )}
+                          </label>
+                          <input type="number" className="form-control" value={newThresholdReorderQty} onChange={e => setNewThresholdReorderQty(e.target.value)} min="1" />
+                        </div>
+                      </>
+                    ) : (
+                      <div className="form-group" style={{ marginBottom: 0, gridColumn: '1 / -1' }}>
+                        <label>
+                          {currentLang === 'ar' ? 'الحد الأقصى لسعة المخزون (بالقطع - تنبيه الفائض)' : 'Maximum Stock Ceiling Limit (Pieces - Over-Stock Alert)'}
+                          {newThresholdProductId && (
+                            <span style={{ fontSize: '11px', color: '#A78BFA', marginLeft: '6px' }}>
+                              ≈ {(((parseInt(newThresholdMaxQty) || 0) * (products.find((p: any) => p.product_id === parseInt(newThresholdProductId))?.weight_grams || 1000)) / 1000).toFixed(2)} KG
+                            </span>
+                          )}
+                        </label>
+                        <input type="number" className="form-control" value={newThresholdMaxQty} onChange={e => setNewThresholdMaxQty(e.target.value)} min="1" />
+                      </div>
+                    )}
                   </div>
                   <button className="btn btn-primary" style={{ marginTop: '16px' }} onClick={handleAddThreshold}
                     disabled={!newThresholdProductId || !newThresholdVendorId}>
-                    <i className="fa-solid fa-plus"></i> {currentLang === 'ar' ? 'حفظ حد المخزون' : 'Save Enterprise Stock Limit'}
+                    <i className="fa-solid fa-paper-plane"></i> {currentLang === 'ar' ? 'إرسال حد المخزون للاعتماد (صانع)' : 'Submit Stock Limit for Verification (Maker)'}
                   </button>
                 </div>
                 )}
@@ -10235,7 +10072,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
               only Hidden actually hid the whole screen, and that also hid the Pending
               Queue those roles legitimately need. Gating the whole authoring card here
               keeps the Queue visible while hiding the designer for non-designers. */}
-          {canAccess('workflow_design') && (
+          {(canAccess('workflow_design') || canAccess('workflows')) && (
           <div className="glass-card" style={{ marginBottom: '25px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '15px' }}>
               <div>
@@ -10267,22 +10104,23 @@ const [migrationApproved, setMigrationApproved] = useState(false);
               <div className="form-group" style={{ marginBottom: 0, flex: 1, minWidth: '200px' }}>
                 <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', fontWeight: '600' }}>{t('wf_type')}</label>
                 <select value={selectedWfType} onChange={e => setSelectedWfType(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '8px', background: 'var(--bg-secondary)', border: '1px solid var(--surface-border)', color: '#000' }}>
-                  <option value="TURKEY_PURCHASE">{currentLang === 'en' ? '🇹🇷 Buy Gold from Turkey (TURKEY_PURCHASE)' : '🇹🇷 شراء الذهب من تركيا (TURKEY_PURCHASE)'}</option>
-                  <option value="DAMAGE_BAR">{currentLang === 'en' ? '⚠️ Damaged Bar Quarantine (DAMAGE_BAR)' : '⚠️ إثبات وإحالة السبائك التالفة (DAMAGE_BAR)'}</option>
                   <option value="INTAKE_SHIPMENT">{currentLang === 'en' ? '📦 Intake Shipment Receipt (INTAKE_SHIPMENT)' : '📦 استلام وتوثيق الشحنات (INTAKE_SHIPMENT)'}</option>
                   <option value="BRANCH_TRANSFER">{currentLang === 'en' ? '🚚 Branch & Vault Transfer (BRANCH_TRANSFER)' : '🚚 التحويل بين الفروع والخزائن (BRANCH_TRANSFER)'}</option>
+                  <option value="TURKEY_PURCHASE">{currentLang === 'en' ? '🇹🇷 Buy Gold from Turkey (TURKEY_PURCHASE)' : '🇹🇷 شراء الذهب من تركيا (TURKEY_PURCHASE)'}</option>
+                  <option value="DAMAGE_BAR">{currentLang === 'en' ? '⚠️ Damaged Bar Quarantine (DAMAGE_BAR)' : '⚠️ إثبات وإحالة السبائك التالفة (DAMAGE_BAR)'}</option>
                   <option value="CUSTODY_WITHDRAWAL">{currentLang === 'en' ? '🔒 Custody Withdrawal & Handover (CUSTODY_WITHDRAWAL)' : '🔒 سحب أمانات عميل وتسليم (CUSTODY_WITHDRAWAL)'}</option>
+                  <option value="THRESHOLD_CONFIG">{currentLang === 'en' ? '⚙️ Cut-Off Threshold Config (THRESHOLD_CONFIG)' : '⚙️ إعداد حدود المخزون التنبيهية (THRESHOLD_CONFIG)'}</option>
                 </select>
               </div>
 
               <div className="form-group" style={{ marginBottom: 0, flex: 2, minWidth: '250px' }}>
                 <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', fontWeight: '600' }}>{t('wf_name')}</label>
-                <input type="text" value={wfName} onChange={e => setWfName(e.target.value)} className="form-control" style={{ marginBottom: 0 }} />
+                <input type="text" value={wfName} onChange={e => setWfName(e.target.value)} disabled={!canModify('workflow_design')} className="form-control" style={{ marginBottom: 0 }} />
               </div>
 
               <div className="form-group" style={{ marginBottom: 0, flex: 3, minWidth: '300px' }}>
                 <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', fontWeight: '600' }}>{t('wf_desc')}</label>
-                <input type="text" value={wfDesc} onChange={e => setWfDesc(e.target.value)} className="form-control" style={{ marginBottom: 0 }} />
+                <input type="text" value={wfDesc} onChange={e => setWfDesc(e.target.value)} disabled={!canModify('workflow_design')} className="form-control" style={{ marginBottom: 0 }} />
               </div>
             </div>
 
@@ -10305,6 +10143,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       <input 
                         type="text" 
                         value={step.step_name} 
+                        disabled={!canModify('workflow_design')}
                         onChange={e => {
                           const updated = [...wfSteps];
                           updated[idx].step_name = e.target.value;
@@ -10319,6 +10158,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       <label style={{ fontSize: '10px', display: 'block', marginBottom: '4px' }}>{t('wf_required_role')}</label>
                       <select 
                         value={step.required_role} 
+                        disabled={!canModify('workflow_design')}
                         onChange={e => {
                           const updated = [...wfSteps];
                           updated[idx].required_role = e.target.value;
@@ -10327,9 +10167,20 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                         style={{ width: '100%', padding: '6px', borderRadius: '4px', background: 'var(--bg-secondary)', border: '1px solid var(--surface-border)', color: '#000', fontSize: '12px' }}
                       >
                         <option value="">-- Select Group --</option>
-                        {adminGroups.map((g: any, gIdx: number) => (
-                          <option key={gIdx} value={g.groupName}>{g.groupName}</option>
-                        ))}
+                        {adminGroups && adminGroups.length > 0 ? (
+                          adminGroups.map((g: any, gIdx: number) => (
+                            <option key={gIdx} value={g.groupName}>{g.groupName}</option>
+                          ))
+                        ) : (
+                          <>
+                            <option value="Treasury Operations (Maker)">Treasury Operations (Maker)</option>
+                            <option value="Treasury Operations (Checker)">Treasury Operations (Checker)</option>
+                            <option value="IT Administrators">IT Administrators</option>
+                            <option value="Vault Custodians">Vault Custodians</option>
+                            <option value="Reconciliation Officers">Reconciliation Officers</option>
+                            <option value="Branch Operations">Branch Operations</option>
+                          </>
+                        )}
                       </select>
                     </div>
 
@@ -10338,6 +10189,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       <input 
                         type="text" 
                         value={step.description} 
+                        disabled={!canModify('workflow_design')}
                         onChange={e => {
                           const updated = [...wfSteps];
                           updated[idx].description = e.target.value;
@@ -10348,52 +10200,58 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       />
                     </div>
 
-                    <div className="step-node-controls">
-                      {idx > 0 && (
-                        <button title="Move Left" onClick={() => {
-                          const updated = [...wfSteps];
-                          const temp = updated[idx];
-                          updated[idx] = updated[idx - 1];
-                          updated[idx - 1] = temp;
+                    {canModify('workflow_design') && (
+                      <div className="step-node-controls">
+                        {idx > 0 && (
+                          <button title="Move Left" onClick={() => {
+                            const updated = [...wfSteps];
+                            const temp = updated[idx];
+                            updated[idx] = updated[idx - 1];
+                            updated[idx - 1] = temp;
+                            setWfSteps(updated);
+                          }}>
+                            <i className="fa-solid fa-arrow-left"></i>
+                          </button>
+                        )}
+                        {idx < wfSteps.length - 1 && (
+                          <button title="Move Right" onClick={() => {
+                            const updated = [...wfSteps];
+                            const temp = updated[idx];
+                            updated[idx] = updated[idx + 1];
+                            updated[idx + 1] = temp;
+                            setWfSteps(updated);
+                          }}>
+                            <i className="fa-solid fa-arrow-right"></i>
+                          </button>
+                        )}
+                        <button className="delete-btn" title="Remove Step" onClick={() => {
+                          const updated = wfSteps.filter((_, sIdx) => sIdx !== idx);
                           setWfSteps(updated);
                         }}>
-                          <i className="fa-solid fa-arrow-left"></i>
+                          <i className="fa-solid fa-trash-can"></i>
                         </button>
-                      )}
-                      {idx < wfSteps.length - 1 && (
-                        <button title="Move Right" onClick={() => {
-                          const updated = [...wfSteps];
-                          const temp = updated[idx];
-                          updated[idx] = updated[idx + 1];
-                          updated[idx + 1] = temp;
-                          setWfSteps(updated);
-                        }}>
-                          <i className="fa-solid fa-arrow-right"></i>
-                        </button>
-                      )}
-                      <button className="delete-btn" title="Remove Step" onClick={() => {
-                        const updated = wfSteps.filter((_, sIdx) => sIdx !== idx);
-                        setWfSteps(updated);
-                      }}>
-                        <i className="fa-solid fa-trash-can"></i>
-                      </button>
-                    </div>
+                      </div>
+                    )}
                   </div>
                 </React.Fragment>
               ))}
 
               {/* Add New Step Card */}
-              {wfSteps.length > 0 && <div className="connector-line"></div>}
-              <div className="add-step-card" onClick={() => {
-                setWfSteps([...wfSteps, {
-                  step_name: 'New Approval Stage',
-                  required_role: 'Operations Checker',
-                  description: 'Review step comments and details.'
-                }]);
-              }}>
-                <i className="fa-solid fa-plus-circle"></i>
-                <span>{t('btn_add_step')}</span>
-              </div>
+              {canModify('workflow_design') && (
+                <>
+                  {wfSteps.length > 0 && <div className="connector-line"></div>}
+                  <div className="add-step-card" onClick={() => {
+                    setWfSteps([...wfSteps, {
+                      step_name: 'New Approval Stage',
+                      required_role: 'Treasury Operations (Checker)',
+                      description: 'Review step comments and details.'
+                    }]);
+                  }}>
+                    <i className="fa-solid fa-plus-circle"></i>
+                    <span>{t('btn_add_step')}</span>
+                  </div>
+                </>
+              )}
             </div>
           </div>
           )}
@@ -10470,6 +10328,13 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                                   <strong>{inst.details.shipment_reference || `Shipment #${inst.details.pending_intake_id}`}</strong><br/>
                                   <span style={{ color: 'var(--accent-gold)' }}>
                                     {inst.details.vendor_name} | {inst.details.delivery_note || inst.details.airway_bill || 'Direct Intake'}
+                                  </span>
+                                </div>
+                              ) : inst.workflow_type === 'THRESHOLD_CONFIG' ? (
+                                <div style={{ fontSize: '12px' }}>
+                                  <strong>[{inst.details.change_type}] {inst.details.product_name || inst.details.product_code || `Threshold #${inst.details.threshold_id || inst.entity_id}`}</strong><br/>
+                                  <span style={{ color: 'var(--accent-gold)' }}>
+                                    {currentLang === 'en' ? 'Min Stock:' : 'الحد الأدنى:'} {inst.details.min_stock_qty} pcs | {currentLang === 'en' ? 'Reorder:' : 'إعادة الطلب:'} {inst.details.reorder_qty} pcs | {inst.details.vendor_name || 'Vendor'}
                                   </span>
                                 </div>
                               ) : (
@@ -10831,6 +10696,50 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                               </div>
                             ) : null;
                           })()}
+                        </div>
+                      ) : selectedWfInstance.workflow_type === "THRESHOLD_CONFIG" ? (
+                        <div className="split-grid-2" style={{ gap: '10px 20px' }}>
+                          <div><strong>{currentLang === 'en' ? 'Operation Action:' : 'نوع العملية:'}</strong> <span className="badge badge-ready">{selectedWfInstance.details.change_type}</span></div>
+                          <div>
+                            <strong>{currentLang === 'en' ? 'Threshold Type:' : 'نوع الحد التنبيهي:'}</strong>{' '}
+                            <span className="badge" style={{ background: selectedWfInstance.details.threshold_type === 'HIGH_STOCK' ? 'rgba(139, 92, 246, 0.2)' : 'rgba(255, 145, 0, 0.2)', color: selectedWfInstance.details.threshold_type === 'HIGH_STOCK' ? '#A78BFA' : 'var(--accent-orange)', border: `1px solid ${selectedWfInstance.details.threshold_type === 'HIGH_STOCK' ? '#8B5CF6' : 'var(--accent-orange)'}` }}>
+                              {selectedWfInstance.details.threshold_type === 'HIGH_STOCK' ? (currentLang === 'ar' ? '📈 حد أقصى (سقف المخزون)' : 'HIGH_STOCK (Max Ceiling)') : (currentLang === 'ar' ? '📉 حد أدنى (نقص وإعادة طلب)' : 'LOW_STOCK (Min Floor)')}
+                            </span>
+                          </div>
+                          <div><strong>{currentLang === 'en' ? 'Product:' : 'المنتج:'}</strong> {selectedWfInstance.details.product_name || selectedWfInstance.details.product_code}</div>
+                          <div><strong>{currentLang === 'en' ? 'Vendor:' : 'المورد:'}</strong> {selectedWfInstance.details.vendor_name || '—'}</div>
+                          {selectedWfInstance.details.threshold_type === 'HIGH_STOCK' ? (
+                            <div><strong>{currentLang === 'en' ? 'Max Stock Ceiling Limit:' : 'الحد الأقصى لسعة المخزون:'}</strong> <span className="badge badge-quarantined">{selectedWfInstance.details.max_stock_qty || selectedWfInstance.details.min_stock_qty} pcs</span></div>
+                          ) : (
+                            <>
+                              <div><strong>{currentLang === 'en' ? 'Min Stock Floor Limit:' : 'الحد الأدنى للمخزون:'}</strong> <span className="badge badge-reserved">{selectedWfInstance.details.min_stock_qty} pcs</span></div>
+                              <div><strong>{currentLang === 'en' ? 'Reorder Quantity:' : 'كمية إعادة الطلب:'}</strong> <span className="badge badge-ready">{selectedWfInstance.details.reorder_qty} pcs</span></div>
+                            </>
+                          )}
+                          <div><strong>{currentLang === 'en' ? 'Target Status:' : 'الحالة المستهدفة:'}</strong> <span className={`badge ${selectedWfInstance.details.is_active ? 'badge-ready' : 'badge-sold'}`}>{selectedWfInstance.details.is_active ? 'Active' : 'Disabled'}</span></div>
+                          <div><strong>{currentLang === 'en' ? 'Requested By (Maker):' : 'مقدم الطلب (صانع):'}</strong> {selectedWfInstance.details.created_by}</div>
+                          {selectedWfInstance.details.comments && (
+                            <div style={{ gridColumn: '1 / -1' }}><strong>{currentLang === 'en' ? 'Comments / Reason:' : 'الملاحظات / السبب:'}</strong> {selectedWfInstance.details.comments}</div>
+                          )}
+                        </div>
+                      ) : selectedWfInstance.workflow_type === "DAMAGE_BAR" ? (
+                        <div className="split-grid-2" style={{ gap: '10px 20px' }}>
+                          <div><strong>{currentLang === 'en' ? 'Serial Number:' : 'الرقم التسلسلي:'}</strong> <span style={{ fontFamily: 'monospace', fontWeight: 'bold', color: 'var(--accent-gold)' }}>{selectedWfInstance.details.serial_number}</span></div>
+                          <div><strong>{currentLang === 'en' ? 'Product / Metal:' : 'المنتج / الفئة:'}</strong> {selectedWfInstance.details.product_name}</div>
+                          <div><strong>{currentLang === 'en' ? 'Weight:' : 'الوزن:'}</strong> {selectedWfInstance.details.weight_grams}g</div>
+                          <div><strong>{currentLang === 'en' ? 'Damage Reason:' : 'سبب التلف:'}</strong> <span className="badge badge-quarantined">{selectedWfInstance.details.damage_reason || 'DEFECT_FOUND'}</span></div>
+                          <div><strong>{currentLang === 'en' ? 'Evidence Document:' : 'مستند الإثبات:'}</strong> {selectedWfInstance.details.damage_doc_id || 'DOC-REF-NONE'}</div>
+                          <div><strong>{currentLang === 'en' ? 'Reported By (Maker):' : 'مقدم التقرير (صانع):'}</strong> {selectedWfInstance.details.created_by}</div>
+                          <div><strong>{currentLang === 'en' ? 'Status Code:' : 'رمز الحالة:'}</strong> <span className="badge badge-reserved">{selectedWfInstance.details.status_code}</span></div>
+                          <div><strong>{currentLang === 'en' ? 'Is Damaged Effective:' : 'فاعلية وسم التلف:'}</strong> <span className="badge badge-sold">{currentLang === 'en' ? 'NO (Pending Checker Approval)' : 'لا (بانتظار اعتماد المعتمد)'}</span></div>
+                          {selectedWfInstance.details.damage_description && (
+                            <div style={{ gridColumn: '1 / -1', marginTop: '4px' }}>
+                              <strong>{currentLang === 'en' ? 'Detailed Defect Description:' : 'الوصف التفصيلي للتلف:'}</strong>
+                              <p style={{ margin: '4px 0 0 0', padding: '8px', background: 'rgba(239, 68, 68, 0.06)', borderRadius: '4px', border: '1px solid rgba(239, 68, 68, 0.2)', fontSize: '13px' }}>
+                                {selectedWfInstance.details.damage_description}
+                              </p>
+                            </div>
+                          )}
                         </div>
                       ) : (
                         <div className="split-grid-2" style={{ gap: '10px 20px' }}>
@@ -11595,7 +11504,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                   </div>
 
                   {/* OCR & Quick Scan Action Buttons */}
-                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '12px' }}>
                     {/* OCR Photo Upload */}
                     <label
                       className="btn btn-outline"
@@ -11644,6 +11553,40 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       <span>{currentLang === 'en' ? 'Simulate Barcode Scan' : 'محاكاة مسح الباركود'}</span>
                     </button>
                   </div>
+
+                  {/* Direct Dropdown Selection Alternative */}
+                  <div style={{ marginTop: '8px' }}>
+                    <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+                      {currentLang === 'en' ? '— OR Choose Gold Bar from Vault Inventory —' : '— أو اختر السبيكة مباشرة من قائمة الخزينة —'}
+                    </label>
+                    <select
+                      className="form-control"
+                      style={{ color: '#000', fontSize: '12px' }}
+                      value={damageItemId || ''}
+                      onChange={e => {
+                        const selectedId = parseInt(e.target.value);
+                        const bar = inventoryList.find((b: any) => b.item_id === selectedId);
+                        if (bar) {
+                          setDamageItemId(bar.item_id);
+                          setDamageMatchedBar(bar);
+                          setDamageScanSerial(bar.serial_number);
+                          setDamageScanStatus('found');
+                        } else {
+                          setDamageItemId(null);
+                          setDamageMatchedBar(null);
+                          setDamageScanSerial('');
+                          setDamageScanStatus('idle');
+                        }
+                      }}
+                    >
+                      <option value="">{currentLang === 'en' ? '-- Select a Bar from Vault --' : '-- اختر سبيكة من الخزينة --'}</option>
+                      {inventoryList.map((b: any) => (
+                        <option key={b.item_id} value={b.item_id}>
+                          {b.serial_number} - {b.metal} {b.denomination} ({b.location || 'Main Vault'}) [{b.status}]
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
 
                 {/* VERIFIED MATCHED BAR CARD */}
@@ -11660,7 +11603,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                       <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#065F46', display: 'flex', alignItems: 'center', gap: '6px' }}>
                         <i className="fa-solid fa-circle-check" style={{ color: '#10B981' }}></i>
-                        {currentLang === 'en' ? 'Verified Vault Bar Found' : 'تم التحقق من السبيكة في الخزينة'}
+                        {currentLang === 'en' ? 'Verified Vault Bar Selected' : 'تم اختيار السبيكة من الخزينة'}
                       </span>
                       <span className="badge badge-ready">{damageMatchedBar.status || 'READY'}</span>
                     </div>
@@ -11681,6 +11624,22 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       <div>
                         <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10px' }}>{currentLang === 'en' ? 'Refiner / Brand' : 'المصفاة / العلامة'}</span>
                         <span>{damageMatchedBar.origin || 'Switzerland'}</span>
+                      </div>
+                      <div>
+                        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10px' }}>{currentLang === 'en' ? 'Quality / Damage Status' : 'حالة الجودة / التلف'}</span>
+                        {damageMatchedBar.is_damaged ? (
+                          <span className="badge badge-quarantined" style={{ fontSize: '11px' }}>
+                            <i className="fa-solid fa-triangle-exclamation"></i> {currentLang === 'en' ? 'DAMAGED (Quarantined)' : 'تالفة (محظورة)'}
+                          </span>
+                        ) : damageMatchedBar.damage_status === 'PENDING_APPROVAL' ? (
+                          <span className="badge badge-reserved" style={{ fontSize: '11px' }}>
+                            <i className="fa-solid fa-clock"></i> {currentLang === 'en' ? 'Pending Review' : 'قيد المراجعة'}
+                          </span>
+                        ) : (
+                          <span className="badge badge-ready" style={{ fontSize: '11px' }}>
+                            <i className="fa-solid fa-circle-check"></i> {currentLang === 'en' ? 'Pristine' : 'سليمة'}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -11705,8 +11664,8 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     <i className="fa-solid fa-circle-exclamation" style={{ fontSize: '16px' }}></i>
                     <span>
                       {currentLang === 'en'
-                        ? `Bar with serial '${damageScanSerial}' not found in vault inventory. Please verify serial or re-scan.`
-                        : `السبيكة ذات الرقم التسلسلي '${damageScanSerial}' غير موجودة في سجلات الخزينة. يرجى إعادة المسح.`}
+                        ? `Bar with serial '${damageScanSerial}' not found in vault inventory. Please select from dropdown or re-scan.`
+                        : `السبيكة ذات الرقم التسلسلي '${damageScanSerial}' غير موجودة في سجلات الخزينة. يرجى الاختيار من القائمة أو إعادة المسح.`}
                     </span>
                   </div>
                 )}
@@ -11734,27 +11693,29 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                 </div>
 
                 <button
+                  type="button"
                   className="btn btn-primary"
-                  style={{ width: '100%', marginTop: '15px', background: '#dc3545' }}
-                  disabled={!damageItemId || !damageReason || !damageDesc}
+                  style={{ width: '100%', marginTop: '15px', background: '#dc3545', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', cursor: 'pointer' }}
                   onClick={async () => {
-                    if (!damageItemId || !damageReason || !damageDesc) {
-                      alert(currentLang === 'en' ? 'Please scan/verify a valid bar, select reason, and provide description.' : 'يرجى مسح سبيكة صحيحة وتحديد السبب والوصف.');
+                    if (!damageItemId) {
+                      alert(currentLang === 'en' ? 'Please scan or select a gold bar from the vault first.' : 'الرجاء مسح أو اختيار سبيكة من الخزينة أولاً.');
                       return;
                     }
+                    const finalDesc = (damageDesc && damageDesc.trim()) ? damageDesc.trim() : 'Physical inspection defect identified. Requesting Maker-Checker quarantine.';
+                    const finalDocId = (damageDocId && damageDocId.trim()) ? damageDocId.trim() : `DOC-MOCI-${Date.now().toString().slice(-4)}`;
                     try {
                       const res = await fetch(`${API_BASE}/inventory/items/${damageItemId}/mark-damaged`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
                         body: JSON.stringify({
-                          reason: damageReason,
-                          description: damageDesc,
-                          evidenceDocId: damageDocId,
+                          reason: damageReason || 'SCRATCHED_HALLMARK',
+                          description: finalDesc,
+                          evidenceDocId: finalDocId,
                           reportedBy: username || 'treasury-maker'
                         })
                       });
                       if (res.ok) {
-                        alert(currentLang === 'en' ? 'Damage report submitted! Awaiting Checker 4-Eyes approval.' : 'تم إرسال بلاغ التلف! بانتظار اعتماد المراجع وفق مبدأ 4-Eyes.');
+                        alert(currentLang === 'en' ? 'Damage report submitted! Maker-Checker workflow initiated.' : 'تم إرسال تقرير التلف وبدء مسار الاعتماد الثنائي بنجاح.');
                         setShowDamageModal(false);
                         setDamageItemId(null);
                         setDamageMatchedBar(null);
@@ -11765,15 +11726,15 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                         fetchDamagedBars();
                         fetchWorkflows();
                       } else {
-                        const err = await res.json();
-                        alert(err.error || 'Failed to mark damaged');
+                        alert(await describeApiError(res, currentLang, 'Failed to mark damaged', 'فشل تقديم تقرير التلف'));
                       }
                     } catch (e) {
-                      alert('Error submitting damage report');
+                      alert(currentLang === 'en' ? 'Error submitting damage report. Please check server.' : 'حدث خطأ أثناء إرسال تقرير التلف.');
                     }
                   }}
                 >
-                  <i className="fa-solid fa-triangle-exclamation"></i> {currentLang === 'ar' ? 'تقديم بلاغ التلف للمراجع (4-Eyes)' : 'Submit Damage Report to Checker (4-Eyes)'}
+                  <i className="fa-solid fa-paper-plane"></i>
+                  <span>{currentLang === 'ar' ? 'إرسال تقرير التلف وبدء مسار الاعتماد (Maker-Checker)' : 'Submit Damage Report & Start Maker-Checker Workflow'}</span>
                 </button>
               </div>
             </div>
@@ -11948,30 +11909,13 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                         onChange={e => setIntakeSelectedProductId(parseInt(e.target.value))}
                         style={{ fontSize: '12px', padding: '8px', height: '36px', color: '#000', minWidth: '180px' }}
                       >
-                        {(() => {
-                          const intakePO = poList.find((p: any) => p.po_id === intakePOId);
-                          const poItems = intakePO?.items && intakePO.items.length ? intakePO.items : null;
-                          return poItems ? (
-                            poItems.map((it: any) => {
-                              const p = products.find((pp: any) => String(pp.product_id) === String(it.product_id));
-                              const denom = p ? `${p.metal_name} ${p.denomination_label}` : `#${it.product_id}`;
-                              const scanned = scannedSerials.filter(s => s.product_id === it.product_id).length;
-                              return (
-                                <option key={it.product_id} value={it.product_id}>
-                                  {denom} ({scanned}/{it.qty})
-                                </option>
-                              );
-                            })
-                          ) : (
-                            products
-                              .filter((p: any) => p.is_active !== false)
-                              .map((p: any) => (
-                                <option key={p.product_id} value={p.product_id}>
-                                  {p.metal_name} {p.denomination_label}
-                                </option>
-                              ))
-                          );
-                        })()}
+                        {products
+                          .filter((p: any) => p.is_active !== false)
+                          .map((p: any) => (
+                            <option key={p.product_id} value={p.product_id}>
+                              {p.metal_name} {p.denomination_label}
+                            </option>
+                          ))}
                       </select>
                       <button
                         className="btn btn-primary"
@@ -12134,21 +12078,6 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                   <div>
                     <span style={{ color: 'var(--text-muted)' }}>{currentLang === 'ar' ? 'إجمالي الممسوح:' : 'Total Scanned:'}</span>
                     <span style={{ fontWeight: 600, marginLeft: '6px', color: 'var(--kfh-green)', fontSize: '14px' }}>{scannedSerials.length}</span>
-                  </div>
-                  <div>
-                    <span style={{ color: 'var(--text-muted)' }}>{currentLang === 'ar' ? 'طلب الشراء:' : 'PO Items:'}</span>
-                    <span style={{ fontWeight: 600, marginLeft: '6px', color: '#000', fontSize: '14px' }}>
-                      {(() => {
-                        const intakePO = poList.find((p: any) => p.po_id === intakePOId);
-                        return intakePO?.items ? intakePO.items.reduce((sum: number, it: any) => sum + it.qty, 0) : 0;
-                      })()}
-                    </span>
-                  </div>
-                  <div style={{ paddingLeft: '10px', borderLeft: '1px solid var(--border-color)' }}>
-                    <span style={{ color: 'var(--text-muted)' }}>{currentLang === 'ar' ? 'نسبة الاكتمال:' : 'Completion:'}</span>
-                    <span style={{ fontWeight: 600, marginLeft: '6px', fontSize: '14px', color: scannedSerials.length === (poList.find((p: any) => p.po_id === intakePOId)?.items?.reduce((sum: number, it: any) => sum + it.qty, 0) || 0) ? 'var(--accent-green)' : '#ffc107' }}>
-                      {Math.round((scannedSerials.length / (poList.find((p: any) => p.po_id === intakePOId)?.items?.reduce((sum: number, it: any) => sum + it.qty, 0) || 1)) * 100)}%
-                    </span>
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: '8px' }}>

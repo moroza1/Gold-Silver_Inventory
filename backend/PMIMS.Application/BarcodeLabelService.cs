@@ -83,6 +83,11 @@ public class BarcodeLabelService : IBarcodeLabelService
             productLabel += $" ({item.Product.Purity.PurityValue})";
         }
 
+        if (item.IsDamaged)
+        {
+            humanReadable += " [DAMAGED - QUARANTINE]";
+        }
+
         return new BarcodeLabelDto
         {
             ItemId = item.ItemId,
@@ -93,6 +98,13 @@ public class BarcodeLabelService : IBarcodeLabelService
             OwnershipType = item.OwnershipType,
             StatusCode = item.StatusCode,
             LocationDescription = item.Location?.Description,
+            IsDamaged = item.IsDamaged,
+            DamageApprovalStatus = item.DamageApprovalStatus,
+            DamageReason = item.DamageReason,
+            DamageDescription = item.DamageDescription,
+            DamageReportedBy = item.DamageReportedBy,
+            DamageApprovedBy = item.DamageApprovedBy,
+            DamageApprovedAt = item.DamageApprovedAt,
             Gs1ElementString = elementString,
             Gs1HumanReadable = humanReadable,
             BarcodeSvg = BuildGs1BarcodeSvg(elementString),
