@@ -343,31 +343,53 @@ public class InventoryRepository : IInventoryRepository
             using var doc = JsonDocument.Parse(serialsJsonList);
             int totalItems = doc.RootElement.EnumerateArray().Count();
 
-            var lot = new InventoryLot
+            if (string.IsNullOrWhiteSpace(lotNumber))
             {
-                LotNumber = lotNumber,
-                PoId = isCustomerReceipt ? null : poId,
-                VendorId = effectiveVendorId,
-                AcquisitionDate = receivingDate ?? DateTime.UtcNow,
-                TotalItems = totalItems,
-                AverageUnitCost = avgCost,
-                CreatedAt = DateTime.UtcNow,
-                ShipmentReference = shipmentReference,
-                DeliveryNoteNumber = deliveryNoteNumber,
-                AirwayBillNumber = airwayBillNumber,
-                SupportingDocumentUrl = supportingDocumentUrl,
-                DiscrepancyNotes = discrepancyNotes,
-                ReceivingDate = receivingDate ?? DateTime.UtcNow
-            };
-
-            // SAFEGUARD: Ensure AcquisitionDate is NEVER null -- required for dashboard filtering
-            if (lot.AcquisitionDate == default)
-            {
-                lot.AcquisitionDate = DateTime.UtcNow;
+                lotNumber = isCustomerReceipt 
+                    ? $"RCPT-CUST-{DateTime.UtcNow:yyyyMMddHHmmss}" 
+                    : (poId.HasValue ? $"LOT-PO-{poId}-{DateTime.UtcNow:yyyyMMddHHmmss}" : $"LOT-SUP-{DateTime.UtcNow:yyyyMMddHHmmss}");
             }
 
-            _dbContext.InventoryLots.Add(lot);
-            await _dbContext.SaveChangesAsync();
+            var lot = await _dbContext.InventoryLots.FirstOrDefaultAsync(l => l.LotNumber == lotNumber);
+            if (lot == null)
+            {
+                lot = new InventoryLot
+                {
+                    LotNumber = lotNumber,
+                    PoId = isCustomerReceipt ? null : poId,
+                    VendorId = effectiveVendorId,
+                    AcquisitionDate = receivingDate ?? DateTime.UtcNow,
+                    TotalItems = totalItems,
+                    AverageUnitCost = avgCost,
+                    CreatedAt = DateTime.UtcNow,
+                    ShipmentReference = shipmentReference,
+                    DeliveryNoteNumber = deliveryNoteNumber,
+                    AirwayBillNumber = airwayBillNumber,
+                    SupportingDocumentUrl = supportingDocumentUrl,
+                    DiscrepancyNotes = discrepancyNotes,
+                    ReceivingDate = receivingDate ?? DateTime.UtcNow
+                };
+
+                // SAFEGUARD: Ensure AcquisitionDate is NEVER null -- required for dashboard filtering
+                if (lot.AcquisitionDate == default)
+                {
+                    lot.AcquisitionDate = DateTime.UtcNow;
+                }
+
+                _dbContext.InventoryLots.Add(lot);
+                await _dbContext.SaveChangesAsync();
+            }
+            else
+            {
+                lot.TotalItems += totalItems;
+                if (lot.PoId == null && !isCustomerReceipt && poId.HasValue) lot.PoId = poId;
+                if (avgCost > 0) lot.AverageUnitCost = avgCost;
+                if (!string.IsNullOrWhiteSpace(shipmentReference)) lot.ShipmentReference = shipmentReference;
+                if (!string.IsNullOrWhiteSpace(deliveryNoteNumber)) lot.DeliveryNoteNumber = deliveryNoteNumber;
+                if (!string.IsNullOrWhiteSpace(airwayBillNumber)) lot.AirwayBillNumber = airwayBillNumber;
+                if (receivingDate.HasValue) lot.ReceivingDate = receivingDate.Value;
+                await _dbContext.SaveChangesAsync();
+            }
 
             // A customer custody deposit stays CUSTOMER_OWNED; Turkey consignment stays TURKEY_OWNED; other supplier receipt is KFH_OWNED.
             string finalOwnershipType = isCustomerReceipt && receiptReason == "CUSTODY_DEPOSIT" 
@@ -1355,23 +1377,67 @@ public class InventoryRepository : IInventoryRepository
         var brand = await _dbContext.Brands.FindAsync(brandId);
         if (brand == null) return false;
 
-        // Check if any product or item uses this brand
-        var hasProducts = await _dbContext.MetalProducts.AnyAsync(p => p.BrandId == brandId);
-        var hasItems = await _dbContext.InventoryItems.AnyAsync(i => i.BrandId == brandId);
-        if (hasProducts || hasItems)
+        // Disassociate any referencing products or items so brand can be cleanly removed
+        var referencingProducts = await _dbContext.MetalProducts.Where(p => p.BrandId == brandId).ToListAsync();
+        foreach (var p in referencingProducts)
         {
-            brand.IsActive = false; // Soft delete
+            p.BrandId = null;
         }
-        else
+
+        var referencingItems = await _dbContext.InventoryItems.Where(i => i.BrandId == brandId).ToListAsync();
+        foreach (var i in referencingItems)
         {
-            _dbContext.Brands.Remove(brand);
+            i.BrandId = null;
         }
+
+        _dbContext.Brands.Remove(brand);
         await _dbContext.SaveChangesAsync();
         return true;
     }
 
     public async Task<IEnumerable<MetalProduct>> GetProductsAsync() => await _dbContext.MetalProducts.Include(p => p.Denomination).Include(p => p.Purity).Include(p => p.MetalType).Include(p => p.Brand).ToListAsync();
     public async Task<IEnumerable<Vendor>> GetVendorsAsync() => await _dbContext.Vendors.ToListAsync();
+
+    public async Task<Vendor> CreateVendorAsync(string vendorCode, string vendorName, string countryOfOrigin, bool isShariaCompliant, string? contactEmail)
+    {
+        var vendor = new Vendor
+        {
+            VendorCode = vendorCode.Trim().ToUpperInvariant(),
+            VendorName = vendorName.Trim(),
+            CountryOfOrigin = countryOfOrigin.Trim(),
+            IsShariaCompliant = isShariaCompliant,
+            ContactEmail = contactEmail?.Trim() ?? "info@kfh.internal",
+            CreatedAt = DateTime.UtcNow
+        };
+        _dbContext.Vendors.Add(vendor);
+        await _dbContext.SaveChangesAsync();
+        return vendor;
+    }
+
+    public async Task<Vendor?> UpdateVendorAsync(int vendorId, string vendorCode, string vendorName, string countryOfOrigin, bool isShariaCompliant, string? contactEmail)
+    {
+        var vendor = await _dbContext.Vendors.FindAsync(vendorId);
+        if (vendor == null) return null;
+
+        vendor.VendorCode = vendorCode.Trim().ToUpperInvariant();
+        vendor.VendorName = vendorName.Trim();
+        vendor.CountryOfOrigin = countryOfOrigin.Trim();
+        vendor.IsShariaCompliant = isShariaCompliant;
+        if (!string.IsNullOrWhiteSpace(contactEmail)) vendor.ContactEmail = contactEmail.Trim();
+
+        await _dbContext.SaveChangesAsync();
+        return vendor;
+    }
+
+    public async Task<bool> DeleteVendorAsync(int vendorId)
+    {
+        var vendor = await _dbContext.Vendors.FindAsync(vendorId);
+        if (vendor == null) return false;
+
+        _dbContext.Vendors.Remove(vendor);
+        await _dbContext.SaveChangesAsync();
+        return true;
+    }
     public async Task<IEnumerable<InventoryLocation>> GetLocationsAsync() => await _dbContext.InventoryLocations.Include(l => l.Vault).Include(l => l.Branch).ToListAsync();
 
     public async Task<InventoryLocation> AddLocationAsync(int vaultId, int? branchId, string zoneRoom, string shelfRow, string slotBin)
@@ -2859,23 +2925,35 @@ public class InventoryRepository : IInventoryRepository
             throw new ArgumentException("sourceType must be SUPPLIER or CUSTOMER.");
         }
 
-        // UC03 E1: Duplicate serial number validation
+        // UC03 E1: Duplicate serial number validation (combined Product Type + Serial Number)
         if (!string.IsNullOrWhiteSpace(serialsJsonList))
         {
             using var jsonDoc = JsonDocument.Parse(serialsJsonList);
-            var serialsSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var serialsSet = new HashSet<(int productId, string serial)>();
             foreach (var element in jsonDoc.RootElement.EnumerateArray())
             {
-                string? serial = element.TryGetProperty("serial", out var s) ? s.GetString() : null;
+                string? serial = element.TryGetProperty("serial", out var s) ? s.GetString() : (element.TryGetProperty("serial_number", out var sn) ? sn.GetString() : null);
+                int productId = element.TryGetProperty("product_id", out var p) ? p.GetInt32() : (element.TryGetProperty("productId", out var p2) ? p2.GetInt32() : 0);
+
                 if (!string.IsNullOrWhiteSpace(serial))
                 {
-                    if (!serialsSet.Add(serial))
+                    if (productId > 0)
                     {
-                        throw new InvalidOperationException($"Duplicate Serial Number in shipment batch: '{serial}'. Each bar must have a unique serial number.");
+                        if (!serialsSet.Add((productId, serial.Trim().ToUpperInvariant())))
+                        {
+                            throw new InvalidOperationException($"Duplicate Serial Number in shipment batch: '{serial}' for the same product type. Each bar of the same product must have a unique serial number.");
+                        }
+                        if (await _dbContext.InventoryItems.AnyAsync(i => i.ProductId == productId && i.SerialNumber == serial))
+                        {
+                            throw new InvalidOperationException($"Duplicate Serial Number: '{serial}' already exists in inventory records for this product type. (UC03 Exception E1)");
+                        }
                     }
-                    if (await _dbContext.InventoryItems.AnyAsync(i => i.SerialNumber == serial))
+                    else
                     {
-                        throw new InvalidOperationException($"Duplicate Serial Number: '{serial}' already exists in inventory records. (UC03 Exception E1)");
+                        if (await _dbContext.InventoryItems.AnyAsync(i => i.SerialNumber == serial))
+                        {
+                            throw new InvalidOperationException($"Duplicate Serial Number: '{serial}' already exists in inventory records. (UC03 Exception E1)");
+                        }
                     }
                 }
             }

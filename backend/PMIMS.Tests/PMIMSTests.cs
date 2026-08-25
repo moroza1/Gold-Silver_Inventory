@@ -1379,12 +1379,11 @@ public class PMIMSTests
         Assert.NotNull(updated);
         Assert.Equal("VALCAMBI-CH", updated.BrandCode);
 
-        // 5. Delete Brand (soft-deletes when referenced)
+        // 5. Delete Brand (hard-deletes and nullifies product references)
         var deleted = await repo.DeleteBrandAsync(brand.BrandId);
         Assert.True(deleted);
         var brandAfterDelete = await repo.GetBrandByIdAsync(brand.BrandId);
-        Assert.NotNull(brandAfterDelete);
-        Assert.False(brandAfterDelete.IsActive);
+        Assert.Null(brandAfterDelete);
     }
 
     [Fact]

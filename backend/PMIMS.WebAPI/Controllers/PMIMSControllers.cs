@@ -298,7 +298,7 @@ public partial class PMIMSControllers : ControllerBase
                         metal_type = itemsInSlot.FirstOrDefault()?.Product?.MetalType?.MetalName
                     };
                 })
-                .OrderBy(s => s.slot_bin)
+                .OrderBy(s => ExtractSlotNumber(s.slot_bin))
                 .ToList();
 
                 return new
@@ -314,10 +314,16 @@ public partial class PMIMSControllers : ControllerBase
                     slots
                 };
             })
-            .OrderBy(g => g.shelf_row)
+            .OrderBy(g => ExtractSlotNumber(g.shelf_row))
             .ToList();
 
         return Ok(grouped);
+    }
+
+    private static int ExtractSlotNumber(string text)
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(text ?? "", @"\d+");
+        return match.Success ? int.Parse(match.Value) : 0;
     }
 
     [Authorize(Policy = "vault_location.write")]
@@ -1230,6 +1236,32 @@ public partial class PMIMSControllers : ControllerBase
                 var pur = purchases.FirstOrDefault(p => p.PendingPurchaseId == inst.EntityId);
                 if (pur != null)
                 {
+                    List<string> serials = new();
+                    try
+                    {
+                        serials = JsonSerializer.Deserialize<List<string>>(pur.SerialsJsonList ?? "[]") ?? new();
+                    }
+                    catch { }
+
+                    var allItems = await _repository.GetItemsAsync();
+                    var matchedItems = allItems
+                        .Where(i => serials.Contains(i.SerialNumber))
+                        .Select(i => new
+                        {
+                            item_id = i.ItemId,
+                            serial_number = i.SerialNumber,
+                            product_code = i.Product?.ProductCode ?? "N/A",
+                            product_name = i.Product?.Denomination?.Label ?? i.Product?.ProductCode ?? "Gold Bar",
+                            weight_grams = i.Product?.Denomination?.WeightGrams ?? 0,
+                            metal_type = i.Product?.MetalType?.MetalName ?? "Gold",
+                            purity = i.Product?.Purity?.PurityValue ?? i.FinenessPpt ?? 999.9m,
+                            brand_name = i.Product?.Brand?.BrandName ?? i.Product?.BrandName ?? i.RefinerName ?? "N/A",
+                            origin_country = i.Product?.OriginCountry ?? i.Product?.Brand?.CountryOfOrigin ?? (i.RefinerName != null && (i.RefinerName.Contains("IGR") || i.RefinerName.Contains("Nadir")) ? "Turkey" : "Switzerland"),
+                            status_code = i.StatusCode,
+                            location_code = i.Location?.Description ?? (i.Location != null ? $"{i.Location.ZoneRoom} - {i.Location.ShelfRow} - {i.Location.SlotBin}" : "Main Vault")
+                        })
+                        .ToList();
+
                     entityDetails = new
                     {
                         pending_purchase_id = pur.PendingPurchaseId,
@@ -1241,6 +1273,7 @@ public partial class PMIMSControllers : ControllerBase
                         requested_by = pur.RequestedBy,
                         notes = pur.Notes,
                         serials_json = pur.SerialsJsonList,
+                        items = matchedItems,
                         status_code = pur.StatusCode,
                         created_by = pur.RequestedBy
                     };
@@ -2316,4 +2349,13 @@ public class SaveBranchRequest
     public string BranchName { get; set; } = null!;
     public int VaultId { get; set; }
     public bool IsActive { get; set; } = true;
+}
+
+public class SaveVendorRequest
+{
+    public string VendorCode { get; set; } = null!;
+    public string VendorName { get; set; } = null!;
+    public string CountryOfOrigin { get; set; } = "Switzerland";
+    public bool IsShariaCompliant { get; set; } = true;
+    public string? ContactEmail { get; set; }
 }

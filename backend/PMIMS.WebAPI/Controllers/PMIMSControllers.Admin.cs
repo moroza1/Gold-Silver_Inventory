@@ -223,6 +223,55 @@ public partial class PMIMSControllers
         return Ok(new { message = "Branch deleted successfully." });
     }
 
+    [Authorize(Policy = "master_data.write")]
+    [HttpPost("catalog/vendors")]
+    public async Task<IActionResult> CreateVendor([FromBody] SaveVendorRequest req)
+    {
+        if (string.IsNullOrWhiteSpace(req.VendorCode) || string.IsNullOrWhiteSpace(req.VendorName))
+            return BadRequest(new { error = "VendorCode and VendorName are required." });
+
+        var vendor = await _repository.CreateVendorAsync(req.VendorCode, req.VendorName, req.CountryOfOrigin, req.IsShariaCompliant, req.ContactEmail);
+        return Ok(new {
+            vendor_id = vendor.VendorId,
+            code = vendor.VendorCode,
+            name = vendor.VendorName,
+            country = vendor.CountryOfOrigin,
+            sharia = vendor.IsShariaCompliant,
+            email = vendor.ContactEmail,
+            message = "Vendor created successfully."
+        });
+    }
+
+    [Authorize(Policy = "master_data.write")]
+    [HttpPut("catalog/vendors/{id}")]
+    public async Task<IActionResult> UpdateVendor(int id, [FromBody] SaveVendorRequest req)
+    {
+        if (string.IsNullOrWhiteSpace(req.VendorCode) || string.IsNullOrWhiteSpace(req.VendorName))
+            return BadRequest(new { error = "VendorCode and VendorName are required." });
+
+        var vendor = await _repository.UpdateVendorAsync(id, req.VendorCode, req.VendorName, req.CountryOfOrigin, req.IsShariaCompliant, req.ContactEmail);
+        if (vendor == null) return NotFound(new { error = "Vendor not found." });
+
+        return Ok(new {
+            vendor_id = vendor.VendorId,
+            code = vendor.VendorCode,
+            name = vendor.VendorName,
+            country = vendor.CountryOfOrigin,
+            sharia = vendor.IsShariaCompliant,
+            email = vendor.ContactEmail,
+            message = "Vendor updated successfully."
+        });
+    }
+
+    [Authorize(Policy = "master_data.write")]
+    [HttpDelete("catalog/vendors/{id}")]
+    public async Task<IActionResult> DeleteVendor(int id)
+    {
+        var result = await _repository.DeleteVendorAsync(id);
+        if (!result) return NotFound(new { error = "Vendor not found." });
+        return Ok(new { message = "Vendor deleted successfully." });
+    }
+
     // =========================================================================
     // STOCK REORDER THRESHOLDS
     // =========================================================================

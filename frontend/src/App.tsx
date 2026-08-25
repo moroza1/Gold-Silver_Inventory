@@ -10,10 +10,10 @@ const normalizeApiBase = (url?: string) => {
   return clean.endsWith('/api') ? clean : `${clean}/api`;
 };
 
-const API_BASE = normalizeApiBase(rawApiUrl) || (
+const API_BASE = (
   typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
-    ? (window.location.port === '80' || window.location.port === '8080' ? `http://${window.location.hostname}:8080/api` : 'http://localhost:5000/api')
-    : 'https://api.aisoftwares.cloud/api'
+    ? (normalizeApiBase(rawApiUrl) || `http://${window.location.hostname}:8080/api`)
+    : (normalizeApiBase(rawApiUrl) || 'https://api.aisoftwares.cloud/api')
 );
 
 // --- "Between dates" range filter helpers ---------------------------------
@@ -923,19 +923,7 @@ export default function App() {
     damage_reason: string;
     refiner_name: string;
     assay_certificate_number?: string;
-  }[]>([
-    {
-      id: 'bar-1',
-      serial: `BAR-SUP-${Date.now().toString().slice(-4)}-01`,
-      product_id: 1,
-      weight_grams: 1000,
-      purity: 999.9,
-      is_damaged: false,
-      damage_reason: '',
-      refiner_name: 'Valcambi Suisse',
-      assay_certificate_number: 'ASSAY-VAL-999'
-    }
-  ]);
+  }[]>([]);
   const [intakeOwnershipType, setIntakeOwnershipType] = useState<'TURKEY_OWNED' | 'KFH_OWNED'>('TURKEY_OWNED');
   const [showSerialToolsModal, setShowSerialToolsModal] = useState<boolean>(false);
   const [turkeyInventory, setTurkeyInventory] = useState<{
@@ -1080,6 +1068,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   // Stock Thresholds (Low-Stock Floor & High-Stock Ceiling)
   const [reorderThresholds, setReorderThresholds] = useState<any[]>([]);
   const [lowStockAlerts, setLowStockAlerts] = useState<any[]>([]);
+  const [lowStockAlarmCollapsed, setLowStockAlarmCollapsed] = useState<boolean>(true);
   const [showNotificationMenu, setShowNotificationMenu] = useState(false);
   const [products, setProducts] = useState<any[]>([]);
   const [newThresholdType, setNewThresholdType] = useState('LOW_STOCK');
@@ -1275,13 +1264,22 @@ const [migrationApproved, setMigrationApproved] = useState(false);
 
   const handleDeleteBrand = async (idx: number) => {
     const b = brandsList[idx];
-    if (!window.confirm(currentLang === 'en' ? `Delete brand ${b.brand_name}?` : `هل تريد حذف العلامة ${b.brand_name}؟`)) return;
+    if (!b) return;
+    if (!window.confirm(currentLang === 'en' ? `Delete brand "${b.brand_name}" (${b.brand_code})?` : `هل تريد حذف العلامة التجارية "${b.brand_name}" (${b.brand_code})؟`)) return;
     try {
-      const res = await fetch(`${API_BASE}/catalog/brands/${b.brand_id}`, { method: 'DELETE' });
+      const res = await fetch(`${API_BASE}/catalog/brands/${b.brand_id}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders()
+      });
       if (res.ok) {
+        alert(currentLang === 'en' ? 'Brand deleted successfully.' : 'تم حذف العلامة التجارية بنجاح.');
         fetchBrands();
+      } else {
+        alert(await describeApiError(res, currentLang, 'Failed to delete brand', 'فشل حذف العلامة التجارية'));
       }
-    } catch (_) {}
+    } catch (_) {
+      alert(currentLang === 'en' ? 'Error deleting brand.' : 'خطأ أثناء حذف العلامة التجارية.');
+    }
   };
 
   const handleStartEditDenom = (idx: number) => {
@@ -1324,13 +1322,32 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   const [editSupOrigin, setEditSupOrigin] = useState('Switzerland');
   const [editSupSharia, setEditSupSharia] = useState(true);
 
-  const handleAddSupplier = () => {
+  const handleAddSupplier = async () => {
     if (!newSupCode.trim() || !newSupName.trim()) return;
-    setSuppliersList(prev => [...prev, { code: newSupCode.trim().toUpperCase(), name: newSupName.trim(), country: newSupOrigin, sharia: newSupSharia }]);
-    setNewSupCode('');
-    setNewSupName('');
-    setNewSupOrigin('Switzerland');
-    setNewSupSharia(true);
+    try {
+      const res = await fetch(`${API_BASE}/catalog/vendors`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({
+          vendorCode: newSupCode.trim().toUpperCase(),
+          vendorName: newSupName.trim(),
+          countryOfOrigin: newSupOrigin,
+          isShariaCompliant: newSupSharia
+        })
+      });
+      if (res.ok) {
+        alert(currentLang === 'en' ? 'Supplier created successfully.' : 'تم إضافة المورد بنجاح.');
+        setNewSupCode('');
+        setNewSupName('');
+        setNewSupOrigin('Switzerland');
+        setNewSupSharia(true);
+        fetchSuppliers();
+      } else {
+        alert(await describeApiError(res, currentLang, 'Failed to create supplier', 'فشل إضافة المورد'));
+      }
+    } catch (_) {
+      alert(currentLang === 'en' ? 'Error creating supplier.' : 'خطأ أثناء إضافة المورد.');
+    }
   };
 
   const handleStartEditSupplier = (idx: number) => {
@@ -1342,18 +1359,50 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     setEditSupSharia(s.sharia);
   };
 
-  const handleSaveEditSupplier = (idx: number) => {
-    setSuppliersList(prev => prev.map((s, i) => i === idx
-      ? { code: editSupCode.trim().toUpperCase(), name: editSupName.trim(), country: editSupOrigin, sharia: editSupSharia }
-      : s
-    ));
-    setEditingSupIdx(null);
-    alert(currentLang === 'en' ? 'Supplier updated successfully.' : 'تم تحديث المورد بنجاح.');
+  const handleSaveEditSupplier = async (idx: number) => {
+    const s = suppliersList[idx];
+    if (!s) return;
+    try {
+      const res = await fetch(`${API_BASE}/catalog/vendors/${s.vendor_id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({
+          vendorCode: editSupCode.trim().toUpperCase(),
+          vendorName: editSupName.trim(),
+          countryOfOrigin: editSupOrigin,
+          isShariaCompliant: editSupSharia
+        })
+      });
+      if (res.ok) {
+        setEditingSupIdx(null);
+        alert(currentLang === 'en' ? 'Supplier updated successfully.' : 'تم تحديث المورد بنجاح.');
+        fetchSuppliers();
+      } else {
+        alert(await describeApiError(res, currentLang, 'Failed to update supplier', 'فشل تحديث المورد'));
+      }
+    } catch (_) {
+      alert(currentLang === 'en' ? 'Error updating supplier.' : 'خطأ أثناء تحديث المورد.');
+    }
   };
 
-  const handleDeleteSupplier = (idx: number) => {
-    if (!window.confirm(currentLang === 'en' ? 'Delete this supplier?' : 'حذف هذا المورد؟')) return;
-    setSuppliersList(prev => prev.filter((_, i) => i !== idx));
+  const handleDeleteSupplier = async (idx: number) => {
+    const s = suppliersList[idx];
+    if (!s) return;
+    if (!window.confirm(currentLang === 'en' ? `Delete supplier "${s.name}" (${s.code})?` : `هل تريد حذف المورد "${s.name}" (${s.code})؟`)) return;
+    try {
+      const res = await fetch(`${API_BASE}/catalog/vendors/${s.vendor_id}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders()
+      });
+      if (res.ok) {
+        alert(currentLang === 'en' ? 'Supplier deleted successfully.' : 'تم حذف المورد بنجاح.');
+        fetchSuppliers();
+      } else {
+        alert(await describeApiError(res, currentLang, 'Failed to delete supplier', 'فشل حذف المورد'));
+      }
+    } catch (_) {
+      alert(currentLang === 'en' ? 'Error deleting supplier.' : 'خطأ أثناء حذف المورد.');
+    }
   };
 
   // Workflow engine state declarations
@@ -1891,6 +1940,11 @@ const [migrationApproved, setMigrationApproved] = useState(false);
         fetchLocations(); // An approved INTAKE_SHIPMENT places bars in the vault -- refresh the
                           // spatial map so the newly-occupied slots show up without a page reload.
         fetchMyActivity(); // Keep the My Activity dashboard's counts/lists in sync with this decision
+        fetchTurkeyInventory();
+        fetchPendingTurkeyPurchases();
+        fetchReorderThresholds();
+        fetchPendingThresholdChanges();
+        fetchLowStockAlerts();
       } else {
         alert(await describeApiError(res, currentLang, 'Failed to process action', 'فشل تنفيذ الإجراء'));
       }
@@ -1918,6 +1972,8 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     fetchBranches();
     fetchAdminData();
     fetchProducts();
+    fetchTurkeyInventory();
+    fetchPendingTurkeyPurchases();
 
     const interval = setInterval(() => {
       setGoldRate(prev => parseFloat((prev + (Math.random() - 0.5) * 1.5).toFixed(2)));
@@ -2316,7 +2372,10 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   const handleDeleteThreshold = async (id: number) => {
     if (!window.confirm(currentLang === 'en' ? 'Submit request to delete this cut-off threshold?' : 'هل تريد إرسال طلب لحذف هذا الحد التنبيهي؟')) return;
     try {
-      const res = await fetch(`${API_BASE}/inventory/reorder-thresholds/${id}`, { method: 'DELETE' });
+      const res = await fetch(`${API_BASE}/inventory/reorder-thresholds/${id}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders()
+      });
       if (res.ok) {
         const data = await res.json();
         alert(currentLang === 'en' ? (data.message || "Threshold deletion request submitted for Maker-Checker approval.") : "تم إرسال طلب حذف حد المخزون للاعتماد.");
@@ -3908,6 +3967,10 @@ const [migrationApproved, setMigrationApproved] = useState(false);
         fetchTurkeyInventory();
         fetchPendingTurkeyPurchases();
         fetchWorkflows();
+        fetchInventory();
+        fetchExecutiveBoard();
+        fetchLowStockAlerts();
+        fetchReorderThresholds();
         return true;
       } else {
         alert(await describeApiError(res, currentLang, 'Failed to initiate Turkey purchase', 'فشل إنشاء طلب شراء الذهب التركي'));
@@ -3922,18 +3985,19 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   const handleAddIntakeBar = () => {
     const nextIdx = intakeBars.length + 1;
     const defaultProduct = products.length > 0 ? products[0] : null;
+    const defaultBrand = brandsList.length > 0 ? brandsList[0].brand_name : 'Valcambi Suisse';
     setIntakeBars([
       ...intakeBars,
       {
         id: `bar-${Date.now()}-${nextIdx}`,
-        serial: `BAR-SUP-${Date.now().toString().slice(-4)}-${pad2(nextIdx)}`,
+        serial: '',
         product_id: defaultProduct ? defaultProduct.product_id : 1,
         weight_grams: defaultProduct ? defaultProduct.weight_grams : 1000,
         purity: defaultProduct && defaultProduct.purity_value ? parseFloat(defaultProduct.purity_value) : 999.9,
         is_damaged: false,
         damage_reason: '',
-        refiner_name: 'Valcambi Suisse',
-        assay_certificate_number: `ASSAY-VAL-${nextIdx}`
+        refiner_name: defaultBrand,
+        assay_certificate_number: ''
       }
     ]);
   };
@@ -3941,6 +4005,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   const handleAdd5BatchDemo = () => {
     const baseTime = Date.now().toString().slice(-4);
     const defaultProduct = products.length > 0 ? products[0] : null;
+    const defaultBrand = brandsList.length > 0 ? brandsList[0].brand_name : 'Valcambi Suisse';
     const newBars = Array.from({ length: 5 }, (_, i) => {
       const idx = intakeBars.length + i + 1;
       return {
@@ -3951,7 +4016,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
         purity: defaultProduct && defaultProduct.purity_value ? parseFloat(defaultProduct.purity_value) : 999.9,
         is_damaged: false,
         damage_reason: '',
-        refiner_name: 'Valcambi Suisse',
+        refiner_name: defaultBrand,
         assay_certificate_number: `ASSAY-VAL-${idx}`
       };
     });
@@ -3959,10 +4024,6 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   };
 
   const handleRemoveIntakeBar = (id: string) => {
-    if (intakeBars.length <= 1) {
-      alert(currentLang === 'en' ? 'Shipment must contain at least one bar.' : 'يجب أن تحتوي الشحنة على سبيكة واحدة على الأقل.');
-      return;
-    }
     setIntakeBars(intakeBars.filter(b => b.id !== id));
   };
 
@@ -3997,12 +4058,13 @@ const [migrationApproved, setMigrationApproved] = useState(false);
       alert(currentLang === 'en' ? 'Every bar must have a Serial Number.' : 'يجب أن تحتوي كل سبيكة على رقم تسلسلي.');
       return;
     }
-    const serials = intakeBars.map(b => b.serial.trim().toUpperCase());
-    const duplicates = serials.filter((item, index) => serials.indexOf(item) !== index);
+    const keys = intakeBars.map(b => `${b.product_id || 0}_${b.serial.trim().toUpperCase()}`);
+    const duplicates = keys.filter((item, index) => keys.indexOf(item) !== index);
     if (duplicates.length > 0) {
+      const dupSerial = duplicates[0].split('_')[1];
       alert(currentLang === 'en' 
-        ? `Duplicate serial detected in shipment: ${duplicates[0]}.` 
-        : `تم اكتشاف رقم تسلسلي مكرر في الشحنة: ${duplicates[0]}.`);
+        ? `Duplicate serial detected in shipment for the same product type: ${dupSerial}.` 
+        : `تم اكتشاف رقم تسلسلي مكرر لنفس فئة المنتج في الشحنة: ${dupSerial}.`);
       return;
     }
 
@@ -4048,17 +4110,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
         setIntakeAirwayBill('');
         setIntakeDocUrl('');
         setIntakeDiscrepancyNotes('');
-        setIntakeBars([{
-          id: `bar-${Date.now()}`,
-          serial: `BAR-SUP-${Date.now().toString().slice(-4)}-01`,
-          product_id: products.length > 0 ? products[0].product_id : 1,
-          weight_grams: 1000,
-          purity: 999.9,
-          is_damaged: false,
-          damage_reason: '',
-          refiner_name: 'Valcambi Suisse',
-          assay_certificate_number: 'ASSAY-VAL-01'
-        }]);
+        setIntakeBars([]);
         fetchPendingIntakes();
         fetchWorkflows();
         setIntakeActiveSubTab('IN_FLIGHT_LOG');
@@ -5023,21 +5075,6 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                         ))
                       )}
                     </div>
-
-                    <div style={{ padding: '10px 14px', background: '#F9FAFB', borderTop: '1px solid #E5E7EB' }}>
-                      <button
-                        className="btn btn-outline"
-                        style={{ width: '100%', fontSize: '11px', padding: '6px 8px', textAlign: 'center', justifyContent: 'center' }}
-                        onClick={() => {
-                          setShowNotificationMenu(false);
-                          setSettingsTab('stocklimits');
-                          setActiveTab('screen-admin');
-                          fetchReorderThresholds();
-                        }}
-                      >
-                        <i className="fa-solid fa-gauge-high"></i> {currentLang === 'en' ? 'Configure Stock Limits & Reorder Points' : 'إدارة وتعديل حدود المخزون وإعادة الطلب'}
-                      </button>
-                    </div>
                   </div>
                 )}
               </div>
@@ -5180,27 +5217,43 @@ const [migrationApproved, setMigrationApproved] = useState(false);
             </div>
           </div>
 
-          {/* LOW-STOCK ALARM BANNER */}
+          {/* LOW-STOCK ALARM BANNER (COLLAPSED AS DEFAULT) */}
           {lowStockAlerts.length > 0 && (
-            <div className="low-stock-alarm">
-              <div className="alarm-header">
-                <i className="fa-solid fa-triangle-exclamation"></i>
-                <strong>{currentLang === 'ar' ? 'تنبيه: مخزون منخفض' : 'Low Stock Alert'}</strong>
-                <span className="alarm-count">{lowStockAlerts.length}</span>
+            <div className="low-stock-alarm" style={{ marginBottom: '20px' }}>
+              <div
+                className="alarm-header"
+                onClick={() => setLowStockAlarmCollapsed(prev => !prev)}
+                style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', userSelect: 'none' }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <i className="fa-solid fa-triangle-exclamation"></i>
+                  <strong>{currentLang === 'ar' ? 'تنبيه: مخزون منخفض' : 'Low Stock Alert'}</strong>
+                  <span className="alarm-count">{lowStockAlerts.length}</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: 'var(--accent-red)' }}>
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                    {lowStockAlarmCollapsed
+                      ? (currentLang === 'ar' ? 'انقر للتوسيع' : 'Click to expand')
+                      : (currentLang === 'ar' ? 'انقر للطي' : 'Click to collapse')}
+                  </span>
+                  <i className={`fa-solid fa-chevron-${lowStockAlarmCollapsed ? 'down' : 'up'}`} style={{ transition: 'transform 0.2s ease' }}></i>
+                </div>
               </div>
-              <div className="alarm-body">
-                {lowStockAlerts.map((alert: any, i: number) => (
-                  <div key={i} className="alarm-row">
-                    <div className="alarm-info">
-                      <strong>{alert.product_name}</strong>
-                      <span className="alarm-detail">
-                        {currentLang === 'ar' ? 'المخزون الحالي' : 'Current Stock'}: <b style={{color:'var(--accent-red)'}}>{alert.current_stock}</b> / {currentLang === 'ar' ? 'الحد الأدنى' : 'Min'}: {alert.min_stock_qty}
-                      </span>
-                      <span className="alarm-detail">{currentLang === 'ar' ? 'المورد' : 'Supplier'}: {alert.vendor_name}</span>
+              {!lowStockAlarmCollapsed && (
+                <div className="alarm-body">
+                  {lowStockAlerts.map((alert: any, i: number) => (
+                    <div key={i} className="alarm-row">
+                      <div className="alarm-info">
+                        <strong>{alert.product_name}</strong>
+                        <span className="alarm-detail">
+                          {currentLang === 'ar' ? 'المخزون الحالي' : 'Current Stock'}: <b style={{color:'var(--accent-red)'}}>{alert.current_stock}</b> / {currentLang === 'ar' ? 'الحد الأدنى' : 'Min'}: {alert.min_stock_qty}
+                        </span>
+                        <span className="alarm-detail">{currentLang === 'ar' ? 'المورد' : 'Supplier'}: {alert.vendor_name}</span>
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -5529,8 +5582,8 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                 </h3>
                 <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: '4px 0 0 0' }}>
                   {currentLang === 'en' 
-                    ? 'Verify shipment manifest, record individual bar serials and gross weight, flag physical condition/damage, and submit to Vault Maker-Checker approval.' 
-                    : 'التحقق من بيان الشحنة، تسجيل الأرقام التسلسلي والوزن، توثيق حالة السبائك والتلفيات، وإرسالها لاعتماد مراجع الخزينة.'}
+                    ? 'Verify shipment manifest, record individual bar serials and gross weight, and submit to Vault Maker-Checker approval.' 
+                    : 'التحقق من بيان الشحنة، تسجيل الأرقام التسلسلية والوزن، وإرسالها لاعتماد مراجع الخزينة.'}
                 </p>
               </div>
             </div>
@@ -5660,8 +5713,8 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       </h4>
                       <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: '4px 0 0 0' }}>
                         {currentLang === 'en' 
-                          ? 'Enter each bar serial number, select product denomination (auto-assigns weight), and flag damaged bars for quarantine.' 
-                          : 'أدخل الرقم التسلسلي لكل سبيكة، حدد الفئة (يحدد الوزن تلقائياً)، وحدد السبائك التالفة للعزل.'}
+                          ? 'Enter each bar serial number, select product denomination (auto-assigns weight), and choose refiner/brand.' 
+                          : 'أدخل الرقم التسلسلي لكل سبيكة، حدد الفئة (يحدد الوزن تلقائياً)، واختر المصفاة/العلامة التجارية.'}
                       </p>
                     </div>
 
@@ -5680,22 +5733,22 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       <thead>
                         <tr>
                           <th style={{ width: '40px' }}>#</th>
-                          <th style={{ minWidth: '180px' }}>{currentLang === 'en' ? 'Serial Number' : 'الرقم التسلسلي'}</th>
-                          <th style={{ minWidth: '220px' }}>{currentLang === 'en' ? 'Product / Denomination' : 'نوع المنتج / الفئة'}</th>
-                          <th style={{ minWidth: '160px' }}>{currentLang === 'en' ? 'Refiner / Brand' : 'المصفاة / الماركة'}</th>
-                          <th style={{ minWidth: '180px' }}>{currentLang === 'en' ? 'Damaged / Inspection' : 'حالة التلف / الفحص'}</th>
+                          <th style={{ minWidth: '220px' }}>{currentLang === 'en' ? 'Serial Number' : 'الرقم التسلسلي'}</th>
+                          <th style={{ minWidth: '260px' }}>{currentLang === 'en' ? 'Product / Denomination' : 'نوع المنتج / الفئة'}</th>
+                          <th style={{ minWidth: '200px' }}>{currentLang === 'en' ? 'Refiner / Brand' : 'المصفاة / الماركة'}</th>
                           <th style={{ width: '50px' }}></th>
                         </tr>
                       </thead>
                       <tbody>
                         {intakeBars.map((bar, idx) => {
                           return (
-                            <tr key={bar.id} style={{ backgroundColor: bar.is_damaged ? 'rgba(239, 68, 68, 0.04)' : 'transparent' }}>
+                            <tr key={bar.id}>
                               <td><span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{idx + 1}</span></td>
                               <td>
                                 <input
                                   type="text"
                                   className="form-control"
+                                  placeholder={currentLang === 'en' ? 'Enter / Scan Bar Serial...' : 'أدخل / امسح الرقم التسلسلي للسبيكة...'}
                                   value={bar.serial}
                                   onChange={e => handleUpdateIntakeBar(bar.id, 'serial', e.target.value)}
                                   style={{ fontSize: '12px', padding: '4px 8px', fontWeight: 'bold' }}
@@ -5730,30 +5783,6 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                                 </select>
                               </td>
                               <td>
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                  <label style={{ fontSize: '11px', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
-                                    <input
-                                      type="checkbox"
-                                      checked={bar.is_damaged}
-                                      onChange={e => handleUpdateIntakeBar(bar.id, 'is_damaged', e.target.checked)}
-                                    />
-                                    <span style={{ color: bar.is_damaged ? 'var(--accent-red)' : 'inherit', fontWeight: bar.is_damaged ? 'bold' : 'normal' }}>
-                                      {currentLang === 'en' ? 'Damaged / Scratch' : 'تالف / مخدوش'}
-                                    </span>
-                                  </label>
-                                  {bar.is_damaged && (
-                                    <input
-                                      type="text"
-                                      className="form-control"
-                                      placeholder={currentLang === 'en' ? 'Reason (e.g. Broken seal, dented)' : 'سبب التلف...'}
-                                      value={bar.damage_reason}
-                                      onChange={e => handleUpdateIntakeBar(bar.id, 'damage_reason', e.target.value)}
-                                      style={{ fontSize: '11px', padding: '2px 6px', borderColor: 'var(--accent-red)' }}
-                                    />
-                                  )}
-                                </div>
-                              </td>
-                              <td>
                                 <button
                                   className="btn"
                                   style={{ padding: '4px 8px', fontSize: '11px', color: 'var(--accent-red)', background: 'transparent' }}
@@ -5766,6 +5795,16 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                             </tr>
                           );
                         })}
+                        {intakeBars.length === 0 && (
+                          <tr>
+                            <td colSpan={5} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
+                              <i className="fa-solid fa-boxes-stacked" style={{ fontSize: '24px', marginBottom: '8px', display: 'block', opacity: 0.4 }}></i>
+                              {currentLang === 'en'
+                                ? 'No gold bars added yet. Click "+ Add Bar" or "+ Add Serial Range" above to enter shipment bars.'
+                                : 'لم يتم إضافة سبائك بعد. انقر على "+ إضافة سبيكة" أو "+ إضافة نطاق تسلسلي" أعلاه لبدء تسجيل الكشف.'}
+                            </td>
+                          </tr>
+                        )}
                       </tbody>
                     </table>
                   </div>
@@ -5775,7 +5814,6 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                 {(() => {
                   const totalBarsCount = intakeBars.length;
                   const totalGrossWeightG = intakeBars.reduce((sum, b) => sum + (b.weight_grams || 0), 0);
-                  const totalDamagedCount = intakeBars.filter(b => b.is_damaged).length;
 
                   return (
                     <div style={{
@@ -5801,17 +5839,6 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                             {totalGrossWeightG.toLocaleString()} g <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>({(totalGrossWeightG / 1000).toFixed(3)} KG)</span>
                           </div>
                         </div>
-
-                        {totalDamagedCount > 0 && (
-                          <div style={{ padding: '6px 12px', borderRadius: '6px', backgroundColor: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
-                            <div style={{ fontSize: '11px', color: 'var(--accent-red)', fontWeight: 'bold' }}>
-                              <i className="fa-solid fa-triangle-exclamation"></i> {currentLang === 'en' ? 'Damaged Bars Flagged' : 'سبائك تالفة مرصودة'}
-                            </div>
-                            <div style={{ fontSize: '14px', fontWeight: 'bold', color: 'var(--accent-red)' }}>
-                              {totalDamagedCount} {currentLang === 'en' ? 'quarantine items' : 'قطع للعزل'}
-                            </div>
-                          </div>
-                        )}
                       </div>
 
                       {canModify('intake') && (
@@ -5921,9 +5948,9 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       e.preventDefault();
                       if (currentReceiptScanSerial.trim()) {
                         const parsed = parseGs1Barcode(currentReceiptScanSerial.trim());
-                        const isDup = receiptScannedSerials.some(s => s.serial === parsed.serial);
+                        const isDup = receiptScannedSerials.some(s => s.serial === parsed.serial && s.product_id === receiptSelectedProductId);
                         if (isDup) {
-                          alert(currentLang === 'en' ? 'This barcode/serial has already been scanned.' : 'هذا الباركود/الرقم التسلسلي تم مسحه مسبقاً.');
+                          alert(currentLang === 'en' ? 'This barcode/serial has already been scanned for this product type.' : 'هذا الباركود/الرقم التسلسلي تم مسحه مسبقاً لنفس فئة المنتج.');
                           return;
                         }
                         setReceiptScannedSerials([...receiptScannedSerials, { serial: parsed.serial, product_id: receiptSelectedProductId }]);
@@ -5938,9 +5965,9 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                   onClick={() => {
                     if (currentReceiptScanSerial.trim()) {
                       const parsed = parseGs1Barcode(currentReceiptScanSerial.trim());
-                      const isDup = receiptScannedSerials.some(s => s.serial === parsed.serial);
+                      const isDup = receiptScannedSerials.some(s => s.serial === parsed.serial && s.product_id === receiptSelectedProductId);
                       if (isDup) {
-                        alert(currentLang === 'en' ? 'This barcode/serial has already been scanned.' : 'هذا الباركود/الرقم التسلسلي تم مسحه مسبقاً.');
+                        alert(currentLang === 'en' ? 'This barcode/serial has already been scanned for this product type.' : 'هذا الباركود/الرقم التسلسلي تم مسحه مسبقاً لنفس فئة المنتج.');
                         return;
                       }
                       setReceiptScannedSerials([...receiptScannedSerials, { serial: parsed.serial, product_id: receiptSelectedProductId }]);
@@ -7288,24 +7315,13 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                             const serialText = itemsInSlot.map((i: any) => i.serial_number).join(', ') || '';
                             return { slot, itemsInSlot, serialText };
                           })
-                          .sort((a: any, b: any) => {
-                            if (a.serialText && !b.serialText) return -1;
-                            if (!a.serialText && b.serialText) return 1;
-                            if (!a.serialText && !b.serialText) {
-                              return a.slot.slot_bin.localeCompare(b.slot.slot_bin, undefined, { numeric: true, sensitivity: 'base' });
-                            }
-                            return a.serialText.localeCompare(b.serialText, undefined, { numeric: true, sensitivity: 'base' });
-                          })
+                          .sort((a: any, b: any) => a.slot.slot_bin.localeCompare(b.slot.slot_bin, undefined, { numeric: true, sensitivity: 'base' }))
                           .map(({ slot, itemsInSlot, serialText }: any, sIdx: number) => {
-                            const hasBar = itemsInSlot && itemsInSlot.length > 0;
-                            const barItem = hasBar ? itemsInSlot[0] : null;
-                            // A slot is occupied if the backend flagged it OR we have a freshly-fetched
-                            // item sitting in it (covers the window right after an approved intake,
-                            // before the locations payload is re-read). Pick the gold/silver colour
-                            // from the actual metal rather than the (unset) slot.type.
+                            const hasBar = (itemsInSlot && itemsInSlot.length > 0) || slot.occupied;
+                            const barItem = (itemsInSlot && itemsInSlot.length > 0) ? itemsInSlot[0] : null;
                             const isOccupied = slot.occupied || hasBar;
-                            const slotMetal = String(barItem?.metal || slot.metal_type || '').toLowerCase();
-                            const slotText = `${slot.slot_bin}: ${serialText || (currentLang === 'en' ? 'Empty' : 'فارغ')}`;
+                            const slotMetal = String(barItem?.metal || slot.metal_type || slot.type || 'gold').toLowerCase();
+                            const slotText = `${slot.slot_bin}: ${serialText || (isOccupied ? `${slot.item_count || 1} bars` : (currentLang === 'en' ? 'Empty' : 'فارغ'))}`;
                             return (
                               <div
                                 key={sIdx}
@@ -7314,7 +7330,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   setSelectedShelf(loc);
-                                  if (hasBar) {
+                                  if (hasBar && barItem) {
                                     setSelectedBar({
                                       ...barItem,
                                       slot_bin: slot.slot_bin,
@@ -7357,20 +7373,13 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                         .map((slot: any) => {
                           const itemsInSlot = inventoryList.filter((i: any) => i.location_id === slot.location_id);
                           const serialText = itemsInSlot.map((i: any) => i.serial_number).join(', ') || '';
-                          const detailsText = itemsInSlot.map((i: any) => `${i.metal} - ${i.denomination}`).join(', ') || '-';
+                          const detailsText = itemsInSlot.map((i: any) => `${i.metal} - ${i.denomination}`).join(', ') || (slot.occupied ? `${slot.item_count || 1} bars` : '-');
                           return { slot, itemsInSlot, serialText, detailsText };
                         })
-                        .sort((a: any, b: any) => {
-                          if (a.serialText && !b.serialText) return -1;
-                          if (!a.serialText && b.serialText) return 1;
-                          if (!a.serialText && !b.serialText) {
-                            return a.slot.slot_bin.localeCompare(b.slot.slot_bin, undefined, { numeric: true, sensitivity: 'base' });
-                          }
-                          return a.serialText.localeCompare(b.serialText, undefined, { numeric: true, sensitivity: 'base' });
-                        })
+                        .sort((a: any, b: any) => a.slot.slot_bin.localeCompare(b.slot.slot_bin, undefined, { numeric: true, sensitivity: 'base' }))
                         .map(({ slot, itemsInSlot, serialText, detailsText }: any, idx: number) => {
-                          const hasBar = itemsInSlot && itemsInSlot.length > 0;
-                          const barItem = hasBar ? itemsInSlot[0] : null;
+                          const hasBar = (itemsInSlot && itemsInSlot.length > 0) || slot.occupied;
+                          const barItem = (itemsInSlot && itemsInSlot.length > 0) ? itemsInSlot[0] : null;
                           const isRowSelected = selectedBar && barItem && selectedBar.item_id === barItem.item_id;
                           return (
                             <tr 
@@ -11135,7 +11144,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
         {/* WORKFLOW DETAILS ACTION MODAL OVERLAY */}
         {showWfDetailsModal && selectedWfInstance && (
           <div className="modal-overlay active" onClick={() => { setShowWfDetailsModal(false); setSelectedWfInstance(null); }}>
-            <div className="glass-card modal-content-box" style={{ width: '700px' }} onClick={e => e.stopPropagation()}>
+            <div className="glass-card modal-content-box" style={{ width: '900px', maxWidth: '95%' }} onClick={e => e.stopPropagation()}>
               <div className="modal-header">
                 <h3>
                   {currentLang === 'en' ? 'Workflow Pending Action Details' : 'تفاصيل الإجراء المعلق للمسار'}
@@ -11263,28 +11272,88 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                             <div><strong>{currentLang === 'en' ? 'Total Bars:' : 'إجمالي عدد السبائك:'}</strong> {selectedWfInstance.details.total_items} {currentLang === 'en' ? 'bars' : 'سبيكة'}</div>
                             <div><strong>{currentLang === 'en' ? 'Total Weight:' : 'الوزن الإجمالي:'}</strong> {selectedWfInstance.details.total_weight_grams}g ({(selectedWfInstance.details.total_weight_grams / 1000).toFixed(3)} KG)</div>
                             <div><strong>{currentLang === 'en' ? 'Agreed Buy Rate:' : 'سعر الشراء المتفق عليه:'}</strong> <span style={{ color: 'var(--kfh-green)', fontWeight: 'bold' }}>{selectedWfInstance.details.unit_price} KWD/g</span></div>
+                            <div><strong>{currentLang === 'en' ? 'Total Cost Value:' : 'إجمالي القيمة التقديرية:'}</strong> <span style={{ color: 'var(--accent-gold)', fontWeight: 'bold' }}>{((selectedWfInstance.details.total_weight_grams || 0) * (selectedWfInstance.details.unit_price || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 3 })} KWD</span></div>
                             <div><strong>{currentLang === 'en' ? 'Requested By (Maker):' : 'المنشئ:'}</strong> {selectedWfInstance.details.requested_by}</div>
                             {selectedWfInstance.details.notes && (
                               <div style={{ gridColumn: '1 / -1' }}><strong>{currentLang === 'en' ? 'Notes:' : 'الملاحظات:'}</strong> {selectedWfInstance.details.notes}</div>
                             )}
                           </div>
+
+                          {/* Detailed Items DataGrid for Turkey Purchase Review */}
                           {(() => {
-                            let serialsList: string[] = [];
-                            try {
-                              serialsList = JSON.parse(selectedWfInstance.details.serials_json || '[]');
-                            } catch (_) {}
-                            return serialsList.length > 0 ? (
-                              <div style={{ marginTop: '8px' }}>
-                                <strong style={{ fontSize: '12px' }}>{currentLang === 'en' ? 'Serials Included for Purchase:' : 'الأرقام التسلسلية المشمولة بالشراء:'}</strong>
-                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', maxHeight: '120px', overflowY: 'auto', padding: '8px', background: 'rgba(255,255,255,0.03)', borderRadius: '6px', border: '1px solid var(--surface-border)', marginTop: '4px' }}>
-                                  {serialsList.map((s, sIdx) => (
-                                    <span key={sIdx} style={{ fontSize: '11px', padding: '3px 7px', background: 'rgba(0, 155, 78, 0.15)', border: '1px solid var(--kfh-green)', borderRadius: '4px', fontWeight: 'bold' }}>
-                                      {s}
-                                    </span>
-                                  ))}
+                            let itemsList: any[] = selectedWfInstance.details.items || [];
+                            if (itemsList.length === 0) {
+                              let serials: string[] = [];
+                              try {
+                                serials = JSON.parse(selectedWfInstance.details.serials_json || '[]');
+                              } catch (_) {}
+                              itemsList = serials.map(s => {
+                                const inv = inventoryList.find((i: any) => i.serial_number === s);
+                                return {
+                                  serial_number: s,
+                                  product_code: inv?.product_code || inv?.denomination || 'N/A',
+                                  product_name: inv?.denomination || inv?.metal || 'Gold Bar',
+                                  weight_grams: inv?.weight_grams || 0,
+                                  metal_type: inv?.metal || 'Gold',
+                                  purity: inv?.purity || 999.9,
+                                  brand_name: inv?.refiner || inv?.brand_name || 'N/A',
+                                  origin_country: inv?.origin || (inv?.refiner?.includes('IGR') || inv?.refiner?.includes('Nadir') ? 'Turkey' : 'Switzerland'),
+                                  location_code: inv?.location || 'Main Vault'
+                                };
+                              });
+                            }
+
+                            if (itemsList.length === 0) return null;
+
+                            return (
+                              <div style={{ marginTop: '10px', borderTop: '1px solid var(--surface-border)', paddingTop: '12px' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                                  <div style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--kfh-green)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <i className="fa-solid fa-boxes-stacked"></i>
+                                    {currentLang === 'en' ? `Purchased Bars Specifications (${itemsList.length} items):` : `بيانات ومواصفات السبائك المشتراة (${itemsList.length} قطعة):`}
+                                  </div>
+                                  <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                                    {currentLang === 'en' ? 'Includes serials, product types & origins' : 'يتضمن الأرقام التسلسلية وأنواع المنتجات والمنشأ'}
+                                  </span>
+                                </div>
+                                <div className="table-responsive" style={{ maxHeight: '220px', overflowY: 'auto' }}>
+                                  <table style={{ fontSize: '11px' }}>
+                                    <thead>
+                                      <tr>
+                                        <th>#</th>
+                                        <th>{currentLang === 'en' ? 'Serial Number' : 'الرقم التسلسلي'}</th>
+                                        <th>{currentLang === 'en' ? 'Product Code' : 'رمز المنتج'}</th>
+                                        <th>{currentLang === 'en' ? 'Type / Denomination' : 'نوع وفئة السبيكة'}</th>
+                                        <th>{currentLang === 'en' ? 'Gross Wt' : 'الوزن'}</th>
+                                        <th>{currentLang === 'en' ? 'Purity' : 'العيار'}</th>
+                                        <th>{currentLang === 'en' ? 'Refiner / Brand' : 'المصفاة / العلامة'}</th>
+                                        <th>{currentLang === 'en' ? 'Origin' : 'المنشأ'}</th>
+                                        <th>{currentLang === 'en' ? 'Vault Location' : 'موقع الخزينة'}</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {itemsList.map((it: any, iIdx: number) => (
+                                        <tr key={iIdx}>
+                                          <td>{iIdx + 1}</td>
+                                          <td><strong style={{ fontFamily: 'monospace', color: 'var(--accent-gold)' }}>{it.serial_number}</strong></td>
+                                          <td><span className="badge badge-reserved">{it.product_code || 'AU-BAR'}</span></td>
+                                          <td><strong>{it.product_name}</strong></td>
+                                          <td>{it.weight_grams ? `${it.weight_grams}g` : '1000g'}</td>
+                                          <td>{it.purity ? `${it.purity}` : '999.9'}</td>
+                                          <td>{it.brand_name || it.refiner_name || 'N/A'}</td>
+                                          <td>
+                                            <span className={`badge ${String(it.origin_country || '').toLowerCase().includes('turkey') ? 'badge-ready' : 'badge-transfer'}`}>
+                                              {it.origin_country || 'Turkey'}
+                                            </span>
+                                          </td>
+                                          <td style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{it.location_code || 'Main Vault'}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
                                 </div>
                               </div>
-                            ) : null;
+                            );
                           })()}
                         </div>
                       ) : selectedWfInstance.workflow_type === "THRESHOLD_CONFIG" ? (
@@ -12479,9 +12548,9 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                             e.preventDefault();
                             if (currentScanSerial.trim()) {
                               const parsed = parseGs1Barcode(currentScanSerial.trim());
-                              const isDup = scannedSerials.some(s => s.serial === parsed.serial);
+                              const isDup = scannedSerials.some(s => s.serial === parsed.serial && s.product_id === intakeSelectedProductId);
                               if (isDup) {
-                                alert(currentLang === 'en' ? 'This barcode/serial has already been scanned.' : 'هذا الباركود/الرقم التسلسلي تم مسحه مسبقاً.');
+                                alert(currentLang === 'en' ? 'This barcode/serial has already been scanned for this product type.' : 'هذا الباركود/الرقم التسلسلي تم مسحه مسبقاً لنفس فئة المنتج.');
                                 return;
                               }
                               setScannedSerials([
@@ -12513,9 +12582,9 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                         onClick={() => {
                           if (currentScanSerial.trim()) {
                             const parsed = parseGs1Barcode(currentScanSerial.trim());
-                            const isDup = scannedSerials.some(s => s.serial === parsed.serial);
+                            const isDup = scannedSerials.some(s => s.serial === parsed.serial && s.product_id === intakeSelectedProductId);
                             if (isDup) {
-                              alert(currentLang === 'en' ? 'This barcode/serial has already been scanned.' : 'هذا الباركود/الرقم التسلصلي تم مسحه مسبقاً.');
+                              alert(currentLang === 'en' ? 'This barcode/serial has already been scanned for this product type.' : 'هذا الباركود/الرقم التسلسلي تم مسحه مسبقاً لنفس فئة المنتج.');
                               return;
                             }
                             setScannedSerials([

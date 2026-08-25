@@ -331,7 +331,7 @@ public class AppDbContext : DbContext
         {
             entity.HasKey(e => e.ItemId);
             entity.ToTable("inventory_items");
-            entity.HasIndex(e => e.SerialNumber).IsUnique();
+            entity.HasIndex(e => new { e.ProductId, e.SerialNumber }).IsUnique();
             entity.HasOne(e => e.Product).WithMany().HasForeignKey(e => e.ProductId);
             entity.HasOne(e => e.Lot).WithMany().HasForeignKey(e => e.LotId);
             entity.HasOne(e => e.Location).WithMany().HasForeignKey(e => e.LocationId);

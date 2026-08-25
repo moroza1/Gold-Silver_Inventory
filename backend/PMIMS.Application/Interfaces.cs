@@ -37,6 +37,9 @@ public interface IInventoryRepository
     Task<IEnumerable<MetalType>> GetMetalTypesAsync();
     Task<IEnumerable<MetalProduct>> GetProductsAsync();
     Task<IEnumerable<Vendor>> GetVendorsAsync();
+    Task<Vendor> CreateVendorAsync(string vendorCode, string vendorName, string countryOfOrigin, bool isShariaCompliant, string? contactEmail);
+    Task<Vendor?> UpdateVendorAsync(int vendorId, string vendorCode, string vendorName, string countryOfOrigin, bool isShariaCompliant, string? contactEmail);
+    Task<bool> DeleteVendorAsync(int vendorId);
     Task<IEnumerable<InventoryLocation>> GetLocationsAsync();
     Task<InventoryLocation> AddLocationAsync(int vaultId, int? branchId, string zoneRoom, string shelfRow, string slotBin);
     Task<bool> DeleteLocationAsync(int locationId);

@@ -72,6 +72,16 @@ public static class DbSeeder
                         await createTableCmd.ExecuteNonQueryAsync();
                     }
 
+                    // 1b. Ensure inventory_items has composite unique index on (product_id, serial_number)
+                    using (var idxCmd = connection.CreateCommand())
+                    {
+                        idxCmd.CommandText = @"
+                            DROP INDEX IF EXISTS IX_inventory_items_serial_number;
+                            CREATE UNIQUE INDEX IF NOT EXISTS IX_inventory_items_product_id_serial_number ON inventory_items (product_id, serial_number);
+                        ";
+                        try { await idxCmd.ExecuteNonQueryAsync(); } catch { }
+                    }
+
                     // 2. Ensure columns on pending_intakes
                     using var cmd = connection.CreateCommand();
                     cmd.CommandText = "PRAGMA table_info(pending_intakes);";
@@ -158,7 +168,33 @@ public static class DbSeeder
                         }
                     }
 
-                    // Check and update pending_threshold_changes
+                    // Ensure pending_threshold_changes table exists and is up to date
+                    using (var createThresholdTableCmd = connection.CreateCommand())
+                    {
+                        createThresholdTableCmd.CommandText = @"
+                            CREATE TABLE IF NOT EXISTS pending_threshold_changes (
+                                pending_change_id INTEGER NOT NULL CONSTRAINT PK_pending_threshold_changes PRIMARY KEY AUTOINCREMENT,
+                                change_type TEXT NOT NULL DEFAULT 'CREATE',
+                                threshold_type TEXT NOT NULL DEFAULT 'LOW_STOCK',
+                                threshold_id INTEGER,
+                                product_id INTEGER NOT NULL,
+                                vendor_id INTEGER NOT NULL,
+                                min_stock_qty INTEGER NOT NULL,
+                                max_stock_qty INTEGER,
+                                reorder_qty INTEGER NOT NULL,
+                                is_active INTEGER NOT NULL DEFAULT 1,
+                                status_code TEXT NOT NULL DEFAULT 'PENDING_APPROVAL',
+                                requested_by TEXT NOT NULL,
+                                approved_by TEXT,
+                                created_at TEXT NOT NULL,
+                                comments TEXT
+                            );
+                            CREATE INDEX IF NOT EXISTS IX_pending_threshold_changes_status_code ON pending_threshold_changes (status_code);
+                            CREATE INDEX IF NOT EXISTS IX_pending_threshold_changes_threshold_type ON pending_threshold_changes (threshold_type);
+                        ";
+                        await createThresholdTableCmd.ExecuteNonQueryAsync();
+                    }
+
                     var pthCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                     using (var pragmaCmd = connection.CreateCommand())
                     {
@@ -247,6 +283,45 @@ public static class DbSeeder
 
                 // 3. Ensure all default workflow templates and Maker-Checker steps exist
                 await EnsureWorkflowTemplatesAsync(context);
+
+                // 4. Ensure default reorder thresholds exist if empty
+                if (!await context.ReorderThresholds.AnyAsync())
+                {
+                    var products = await context.MetalProducts.ToListAsync();
+                    var defaultVendor = await context.Vendors.FirstOrDefaultAsync(v => v.VendorCode == "VAL-SWISS")
+                                     ?? await context.Vendors.FirstOrDefaultAsync();
+                    if (products.Count > 0 && defaultVendor != null)
+                    {
+                        foreach (var prod in products.Take(4))
+                        {
+                            context.ReorderThresholds.Add(new ReorderThreshold
+                            {
+                                ThresholdType = "LOW_STOCK",
+                                ProductId = prod.ProductId,
+                                VendorId = defaultVendor.VendorId,
+                                MinStockQty = 5,
+                                MaxStockQty = 50,
+                                ReorderQty = 10,
+                                IsActive = true,
+                                CreatedAt = DateTime.UtcNow,
+                                UpdatedAt = DateTime.UtcNow
+                            });
+                            context.ReorderThresholds.Add(new ReorderThreshold
+                            {
+                                ThresholdType = "HIGH_STOCK",
+                                ProductId = prod.ProductId,
+                                VendorId = defaultVendor.VendorId,
+                                MinStockQty = 50,
+                                MaxStockQty = 100,
+                                ReorderQty = 0,
+                                IsActive = true,
+                                CreatedAt = DateTime.UtcNow,
+                                UpdatedAt = DateTime.UtcNow
+                            });
+                        }
+                        await context.SaveChangesAsync();
+                    }
+                }
             }
             finally
             {

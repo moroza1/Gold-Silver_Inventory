@@ -301,20 +301,61 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
     handleApplyExtractedMatches(lines);
   };
 
-  // Handle Range Selection
+  const splitSerial = (s: string) => {
+    const match = s.trim().toUpperCase().match(/^([A-Za-z0-9_-]*?)(\d+)([A-Za-z0-9_-]*)$/);
+    if (!match) return null;
+    return {
+      prefix: match[1],
+      numStr: match[2],
+      num: parseInt(match[2], 10),
+      padLen: match[2].length,
+      suffix: match[3]
+    };
+  };
+
+  // Handle Range Selection (Complete Numeric & Prefix Sequence Matching)
   const handleApplyRangeSelect = () => {
-    if (!rangeStart.trim() || !rangeEnd.trim()) {
+    const rawStart = rangeStart.trim().toUpperCase();
+    const rawEnd = (rangeEnd.trim() || rangeStart.trim()).toUpperCase();
+
+    if (!rawStart) {
       alert(currentLang === 'en' ? 'Please enter Start and End serial numbers.' : 'يرجى إدخال رقم البداية والنهاية.');
       return;
     }
 
-    const start = rangeStart.trim().toUpperCase();
-    const end = rangeEnd.trim().toUpperCase();
+    const startSplit = splitSerial(rawStart);
+    const endSplit = splitSerial(rawEnd);
 
-    const matched = availableItems.filter(i => {
-      const s = i.serial_number.toUpperCase();
-      return s >= start && s <= end;
-    }).map(i => i.serial_number);
+    let matched: string[] = [];
+
+    if (startSplit && endSplit && startSplit.prefix === endSplit.prefix && startSplit.suffix === endSplit.suffix) {
+      const minNum = Math.min(startSplit.num, endSplit.num);
+      const maxNum = Math.max(startSplit.num, endSplit.num);
+
+      matched = availableItems
+        .filter(i => {
+          const itemSplit = splitSerial(i.serial_number);
+          if (!itemSplit) return false;
+          return (
+            itemSplit.prefix === startSplit.prefix &&
+            itemSplit.suffix === startSplit.suffix &&
+            itemSplit.num >= minNum &&
+            itemSplit.num <= maxNum
+          );
+        })
+        .map(i => i.serial_number);
+    } else {
+      // Exact full serial or strict bounds match
+      matched = availableItems
+        .filter(i => {
+          const s = i.serial_number.trim().toUpperCase();
+          if (rawStart === rawEnd) {
+            return s === rawStart;
+          }
+          return s >= rawStart && s <= rawEnd && s.length === rawStart.length;
+        })
+        .map(i => i.serial_number);
+    }
 
     if (matched.length === 0) {
       alert(currentLang === 'en' ? 'No available Turkey bars found in the specified range.' : 'لم يتم العثور على سبائك تركية متاحة ضمن النطاق المحدد.');
@@ -324,6 +365,7 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
     const newSet = new Set([...selectedSerials, ...matched]);
     setSelectedSerials(Array.from(newSet));
     setShowSmartModal(false);
+    alert(currentLang === 'en' ? `Selected ${matched.length} Turkey bar(s) in range ${rawStart}..${rawEnd}.` : `تم تحديد ${matched.length} سبيكة تركية ضمن النطاق ${rawStart}..${rawEnd}.`);
   };
 
   // Toggle single item
