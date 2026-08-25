@@ -1040,6 +1040,8 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   const [ttlInputSeconds, setTtlInputSeconds] = useState<number>(300);
   const [savingTtl, setSavingTtl] = useState(false);
   const [ttlSuccessMsg, setTtlSuccessMsg] = useState<string | null>(null);
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetSuccessMsg, setResetSuccessMsg] = useState<string | null>(null);
   const [sqlQuery, setSqlQuery] = useState('');
   const [sqlResult, setSqlResult] = useState<any>(null);
   const [sqlLoading, setSqlLoading] = useState(false);
@@ -2615,6 +2617,46 @@ const [migrationApproved, setMigrationApproved] = useState(false);
       alert(e.message);
     } finally {
       setSavingTtl(false);
+    }
+  };
+
+  const handleResetStoreData = async () => {
+    const confirmed = window.confirm(
+      currentLang === 'en'
+        ? '⚠️ PRESENTATION ZERO-STATE RESET\n\nAre you sure you want to permanently delete all store inventory items, lots, transactions, movements, purchase orders, workflows, and audit logs?\n\nAll system configuration, users, permissions, vault locations, products, and rules will be PRESERVED.'
+        : '⚠️ تصفير بيانات المخزن لوضع العرض التقديمي\n\nهل أنت متأكد من رغبتك في حذف جميع سبائك المخزون، الشحنات، الحركات، أوامر الشراء، وسجل التدقيق نهائياً للبدء من الصفر؟\n\nسيتم الحفاظ على كافة إعدادات النظام، المستخدمين، الصلاحيات، مواقع الخزينة، والأصناف.'
+    );
+    if (!confirmed) return;
+
+    setResetLoading(true);
+    setResetSuccessMsg(null);
+    try {
+      const res = await fetch(`${API_BASE}/admin/system/reset-store-data`, {
+        method: 'POST',
+        headers: getAuthHeaders()
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setResetSuccessMsg(
+          currentLang === 'en'
+            ? '✓ All store data and audit trail cleared successfully! Ready for clean presentation.'
+            : '✓ تم تصفير بيانات المخزن وسجل التدقيق بنجاح! جاهز للعرض التقديمي.'
+        );
+        fetchInventory();
+        fetchLocations();
+        fetchSuppliers();
+        fetchProducts();
+        fetchWorkflows();
+        fetchMyActivity();
+        loadReport(reportType);
+      } else {
+        const err = await res.json().catch(() => ({ error: 'Failed to reset store data' }));
+        alert(err.error || err.message || 'Failed to reset store data');
+      }
+    } catch (e: any) {
+      alert(e.message || 'Network error resetting store data');
+    } finally {
+      setResetLoading(false);
     }
   };
 
@@ -9142,7 +9184,119 @@ const [migrationApproved, setMigrationApproved] = useState(false);
               <button className={`btn-tab ${settingsTab === 'ttl' ? 'active' : ''}`} onClick={() => { setSettingsTab('ttl'); fetchReservationTtl(); }}>
                 <i className="fa-solid fa-clock-rotate-left"></i> {currentLang === 'ar' ? 'مدة حجز المخزون (TTL)' : 'Checkout Lock TTL'}
               </button>
+              <button
+                className={`btn-tab ${settingsTab === 'reset' ? 'active' : ''}`}
+                style={{ color: '#ef4444' }}
+                onClick={() => setSettingsTab('reset')}
+              >
+                <i className="fa-solid fa-trash-can" style={{ color: '#ef4444' }}></i> {currentLang === 'ar' ? 'تصفير بيانات المخزن (وضع العرض)' : 'Reset Store Data (Demo / Presentation)'}
+              </button>
             </div>
+
+            {settingsTab === 'reset' && (
+              <div className="settings-tab-pane active" style={{ maxWidth: '720px' }}>
+                <div style={{
+                  background: 'rgba(239, 68, 68, 0.06)',
+                  border: '1px solid rgba(239, 68, 68, 0.35)',
+                  borderRadius: '12px',
+                  padding: '24px',
+                  marginBottom: '20px'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '16px' }}>
+                    <div style={{
+                      width: '46px',
+                      height: '46px',
+                      borderRadius: '10px',
+                      background: 'rgba(239, 68, 68, 0.15)',
+                      color: '#ef4444',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '22px'
+                    }}>
+                      <i className="fa-solid fa-triangle-exclamation"></i>
+                    </div>
+                    <div>
+                      <h4 style={{ margin: 0, color: '#ef4444', fontSize: '17px' }}>
+                        {currentLang === 'en' ? 'Presentation Mode: Reset Store Data & Audit Trail' : 'وضع العرض التقديمي: تصفير بيانات المخزن وسجل التدقيق'}
+                      </h4>
+                      <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                        {currentLang === 'en'
+                          ? 'Start from Zero for demonstrations while keeping all master configuration intact.'
+                          : 'البدء من الصفر لتقديم العروض التوضيحية مع الحفاظ على كافة الإعدادات والتهيئة.'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <p style={{ fontSize: '13px', lineHeight: '1.6', color: 'var(--text-main)', marginBottom: '16px' }}>
+                    {currentLang === 'en'
+                      ? 'This operation will permanently wipe all active physical inventory items, bar serials, batches, movements, purchase orders, customer reservations, workflows, and audit trail logs. All configuration (users, roles, vault locations, products, suppliers, branches, and rules) will remain completely intact.'
+                      : 'ستقوم هذه العملية بحذف جميع سبائك المخزون، الشحنات، الحركات، أوامر الشراء، الحجوزات، وسجل التدقيق نهائياً للبدء من الصفر. ستبقى كافة الإعدادات (المستخدمين، الصلاحيات، مواقع الخزينة، الأصناف، الموردين، الفروع، وقواعد الأعمال) محفوظة بالكامل.'}
+                  </p>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', fontSize: '12px', marginBottom: '20px' }}>
+                    <div style={{ background: 'rgba(239, 68, 68, 0.08)', padding: '12px', borderRadius: '8px', border: '1px dashed rgba(239, 68, 68, 0.4)' }}>
+                      <strong style={{ color: '#ef4444', display: 'block', marginBottom: '6px' }}>
+                        <i className="fa-solid fa-xmark"></i> {currentLang === 'en' ? 'Will be Cleared (To Zero):' : 'سيتم حذفه وتصفيره:'}
+                      </strong>
+                      <ul style={{ margin: 0, paddingLeft: currentLang === 'ar' ? 0 : '16px', paddingRight: currentLang === 'ar' ? '16px' : 0, color: 'var(--text-muted)' }}>
+                        <li>{currentLang === 'en' ? 'All Gold & Silver Bars' : 'جميع سبائك الذهب والفضة'}</li>
+                        <li>{currentLang === 'en' ? 'Inventory Lots & Batches' : 'الشحنات واللوتات'}</li>
+                        <li>{currentLang === 'en' ? 'Transactions & Movements' : 'الحركات والتحويلات'}</li>
+                        <li>{currentLang === 'en' ? 'Chain of Custody & Audit Logs' : 'سجل التدقيق والتتبع'}</li>
+                        <li>{currentLang === 'en' ? 'Purchase Orders & Workflows' : 'أوامر الشراء ومسارات العمل'}</li>
+                      </ul>
+                    </div>
+
+                    <div style={{ background: 'rgba(16, 185, 129, 0.08)', padding: '12px', borderRadius: '8px', border: '1px dashed rgba(16, 185, 129, 0.4)' }}>
+                      <strong style={{ color: '#10b981', display: 'block', marginBottom: '6px' }}>
+                        <i className="fa-solid fa-check"></i> {currentLang === 'en' ? 'Preserved (Configuration):' : 'سيتم الحفاظ عليه (الإعدادات):'}
+                      </strong>
+                      <ul style={{ margin: 0, paddingLeft: currentLang === 'ar' ? 0 : '16px', paddingRight: currentLang === 'ar' ? '16px' : 0, color: 'var(--text-muted)' }}>
+                        <li>{currentLang === 'en' ? 'Users & Privilege Groups' : 'المستخدمين ومجموعات الصلاحيات'}</li>
+                        <li>{currentLang === 'en' ? 'Vault Grid & Slot Locations' : 'هيكل ومواقع الخزينة'}</li>
+                        <li>{currentLang === 'en' ? 'Products & Denominations' : 'الأصناف والأوزان'}</li>
+                        <li>{currentLang === 'en' ? 'Suppliers & Branches' : 'الموردين والفروع'}</li>
+                        <li>{currentLang === 'en' ? 'Workflow Templates & Rules' : 'قوالب مسارات العمل وقواعد الأعمال'}</li>
+                      </ul>
+                    </div>
+                  </div>
+
+                  {resetSuccessMsg && (
+                    <div style={{ padding: '12px', borderRadius: '8px', background: 'rgba(16, 185, 129, 0.15)', border: '1px solid #10B981', color: '#065F46', marginBottom: '16px', fontSize: '13px', fontWeight: 'bold' }}>
+                      {resetSuccessMsg}
+                    </div>
+                  )}
+
+                  {canModify('user_admin') ? (
+                    <button
+                      className="btn btn-danger"
+                      style={{
+                        background: '#dc2626',
+                        borderColor: '#b91c1c',
+                        padding: '12px 24px',
+                        fontSize: '14px',
+                        fontWeight: 700,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '8px'
+                      }}
+                      onClick={handleResetStoreData}
+                      disabled={resetLoading}
+                    >
+                      <i className={`fa-solid ${resetLoading ? 'fa-spinner fa-spin' : 'fa-trash-can'}`}></i>
+                      <span>{resetLoading ? (currentLang === 'en' ? 'Resetting Store Data...' : 'جاري التصفير...') : (currentLang === 'en' ? 'Wipe Store Data & Start From Zero' : 'تصفير بيانات المخزن والبدء من الصفر')}</span>
+                    </button>
+                  ) : (
+                    <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>
+                      {currentLang === 'en'
+                        ? 'Only administrators (user_admin) can execute zero-state store data reset.'
+                        : 'فقط مسؤولي النظام لديهم صلاحية تصفير بيانات المخزن.'}
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
 
             {settingsTab === 'ttl' && (
               <div className="settings-tab-pane active" style={{ maxWidth: '520px' }}>
@@ -10638,6 +10792,15 @@ const [migrationApproved, setMigrationApproved] = useState(false);
               <div>
                 {canModify('user_admin') && (
                   <div style={{ display: 'flex', gap: '10px' }}>
+                    <button
+                      className="btn"
+                      style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.4)' }}
+                      onClick={handleResetStoreData}
+                      disabled={resetLoading}
+                      title={currentLang === 'en' ? 'Wipe store data & audit trail for clean demo presentation' : 'تصفير بيانات المخزن وسجل التدقيق للعرض التقديمي'}
+                    >
+                      <i className={`fa-solid ${resetLoading ? 'fa-spinner fa-spin' : 'fa-trash-can'}`}></i> {currentLang === 'en' ? 'Zero-State Reset (Demo)' : 'تصفير المخزن للعرض'}
+                    </button>
                     <button className="btn btn-primary" onClick={() => setShowCreateUserModal(true)}>
                       <i className="fa-solid fa-user-plus"></i> {t('btn_create_user')}
                     </button>

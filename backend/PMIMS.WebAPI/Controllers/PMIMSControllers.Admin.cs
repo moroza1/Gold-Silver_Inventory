@@ -621,6 +621,28 @@ public partial class PMIMSControllers
             message = "Reservation TTL updated successfully."
         });
     }
+
+    // =========================================================================
+    // PRESENTATION MODE / ZERO-STATE RESET
+    // ------------------------------------------------------------------------
+    // Wipes all transactional store data, physical inventory items, lots,
+    // transactions, orders, workflows, and audit logs to start from zero for
+    // demonstrations, while keeping all configuration, master products,
+    // locations, users, and rules.
+    // =========================================================================
+    [Authorize(Policy = "user_admin.write")]
+    [HttpPost("admin/system/reset-store-data")]
+    public async Task<IActionResult> ResetStoreDataAndAuditTrail()
+    {
+        string username = User?.Identity?.Name ?? "system-admin";
+        await _repository.ResetStoreDataAndAuditTrailAsync(username);
+        return Ok(new {
+            success = true,
+            message = "All store inventory, transactions, orders, workflows, and audit trail records have been cleared. System configuration and master data preserved for clean presentation.",
+            resetBy = username,
+            timestamp = DateTime.UtcNow
+        });
+    }
 }
 
 public class SaveTtlRequest { public int TtlSeconds { get; set; } public double? TtlMinutes { get; set; } }

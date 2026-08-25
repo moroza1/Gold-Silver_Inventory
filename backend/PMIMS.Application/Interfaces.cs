@@ -248,6 +248,11 @@ public interface IInventoryRepository
 
 
     // =========================================================================
+    // PRESENTATION MODE / ZERO-STATE STORE DATA & AUDIT TRAIL RESET
+    // =========================================================================
+    Task<bool> ResetStoreDataAndAuditTrailAsync(string initiatedBy);
+
+    // =========================================================================
     // Cost Tracking & Valuation -- Core Banking (IMAL) GL Integration
     // =========================================================================
     // Every GL posting PMIMS has pushed (or attempted to push) to Core Banking,

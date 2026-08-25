@@ -1069,7 +1069,7 @@ public partial class PMIMSControllers : ControllerBase
                     damage_reason = item.DamageReason,
                     damage_description = item.DamageDescription,
                     average_cost = item.AveragePurchaseCost ?? 0m,
-                    cost_basis = item.AveragePurchaseCost ?? 0m,
+                    cost_basis = (methodUpper == "FIFO" || methodUpper == "LIFO") ? costBasis : (item.AveragePurchaseCost ?? costBasis),
                     market_value = Math.Round(currentMarketValue, 2),
                     unrealized_pnl = Math.Round(unrealizedPnl, 2)
                 });

@@ -4986,5 +4986,69 @@ public class InventoryRepository : IInventoryRepository
 
         return "SUCCESS";
     }
+
+    public async Task<bool> ResetStoreDataAndAuditTrailAsync(string initiatedBy)
+    {
+        // 1. Remove all transactional, movement, workflow, and customer records
+        _dbContext.ChainOfCustodyEvents.RemoveRange(_dbContext.ChainOfCustodyEvents);
+        _dbContext.InventoryTransactions.RemoveRange(_dbContext.InventoryTransactions);
+        _dbContext.MovementTransactions.RemoveRange(_dbContext.MovementTransactions);
+        _dbContext.SalesOrders.RemoveRange(_dbContext.SalesOrders);
+        _dbContext.RedemptionRequests.RemoveRange(_dbContext.RedemptionRequests);
+        _dbContext.WithdrawalRequests.RemoveRange(_dbContext.WithdrawalRequests);
+        _dbContext.ReservationRequests.RemoveRange(_dbContext.ReservationRequests);
+        _dbContext.CustomerAllocations.RemoveRange(_dbContext.CustomerAllocations);
+        _dbContext.CustomerHoldings.RemoveRange(_dbContext.CustomerHoldings);
+        _dbContext.StocktakeScans.RemoveRange(_dbContext.StocktakeScans);
+        _dbContext.StocktakeFreezes.RemoveRange(_dbContext.StocktakeFreezes);
+        _dbContext.StocktakeSessions.RemoveRange(_dbContext.StocktakeSessions);
+        _dbContext.MismatchCases.RemoveRange(_dbContext.MismatchCases);
+        _dbContext.ReconciliationItems.RemoveRange(_dbContext.ReconciliationItems);
+        _dbContext.ReconciliationRuns.RemoveRange(_dbContext.ReconciliationRuns);
+        _dbContext.ValuationSnapshots.RemoveRange(_dbContext.ValuationSnapshots);
+        _dbContext.ApprovalActions.RemoveRange(_dbContext.ApprovalActions);
+        _dbContext.WorkflowInstances.RemoveRange(_dbContext.WorkflowInstances);
+        _dbContext.ExtractedDocumentFields.RemoveRange(_dbContext.ExtractedDocumentFields);
+        _dbContext.DocumentUploads.RemoveRange(_dbContext.DocumentUploads);
+        _dbContext.MigrationStagingItems.RemoveRange(_dbContext.MigrationStagingItems);
+        _dbContext.BranchTransfers.RemoveRange(_dbContext.BranchTransfers);
+        _dbContext.PendingIntakes.RemoveRange(_dbContext.PendingIntakes);
+        _dbContext.PendingTurkeyPurchases.RemoveRange(_dbContext.PendingTurkeyPurchases);
+        _dbContext.PendingThresholdChanges.RemoveRange(_dbContext.PendingThresholdChanges);
+        _dbContext.FimSyncLogs.RemoveRange(_dbContext.FimSyncLogs);
+        _dbContext.BusinessRuleEvaluations.RemoveRange(_dbContext.BusinessRuleEvaluations);
+        _dbContext.NotificationDeliveries.RemoveRange(_dbContext.NotificationDeliveries);
+        _dbContext.MonitoringEvents.RemoveRange(_dbContext.MonitoringEvents);
+        _dbContext.IfrsValuationDisclosures.RemoveRange(_dbContext.IfrsValuationDisclosures);
+        _dbContext.CoreBankingLedgerPostings.RemoveRange(_dbContext.CoreBankingLedgerPostings);
+        _dbContext.KFHOnlineTransactionLogs.RemoveRange(_dbContext.KFHOnlineTransactionLogs);
+        _dbContext.GfsDeliveryRequests.RemoveRange(_dbContext.GfsDeliveryRequests);
+        _dbContext.HomeDeliveryRequests.RemoveRange(_dbContext.HomeDeliveryRequests);
+        _dbContext.GfsSyncLogs.RemoveRange(_dbContext.GfsSyncLogs);
+        _dbContext.POItems.RemoveRange(_dbContext.POItems);
+        _dbContext.PurchaseOrders.RemoveRange(_dbContext.PurchaseOrders);
+
+        // 2. Remove physical inventory items, balances, and lots
+        _dbContext.InventoryItems.RemoveRange(_dbContext.InventoryItems);
+        _dbContext.InventoryBalances.RemoveRange(_dbContext.InventoryBalances);
+        _dbContext.InventoryLots.RemoveRange(_dbContext.InventoryLots);
+
+        // 3. Clear audit logs
+        _dbContext.AuditLogs.RemoveRange(_dbContext.AuditLogs);
+
+        await _dbContext.SaveChangesAsync();
+
+        // 4. Record a clean genesis audit log entry for the reset action
+        await SaveAuditLogAsync(
+            username: initiatedBy,
+            ipAddress: "127.0.0.1",
+            moduleName: "user_admin",
+            actionDescription: "STORE_DATA_AND_AUDIT_RESET: All inventory items, lots, transactions, and audit records wiped for presentation zero baseline (configuration and master data preserved).",
+            entityType: "StoreData",
+            entityId: "0"
+        );
+
+        return true;
+    }
 }
 
