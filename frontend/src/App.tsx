@@ -5016,7 +5016,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
               activeTab === 'screen-exec' ? 'title_exec' :
               activeTab === 'screen-my-activity' ? 'title_my_activity' :
               activeTab === 'screen-customer-receipt' ? 'title_customer_receipt' :
-              activeTab.replace('screen-', 'menu_')
+              activeTab.replace('screen-', 'menu_').replace(/-/g, '_')
             )}</h1>
           </div>
 
@@ -11671,25 +11671,15 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                                         <th>{currentLang === 'en' ? 'Serial Number' : 'الرقم التسلسلي'}</th>
                                         <th>{currentLang === 'en' ? 'Gross Wt' : 'الوزن'}</th>
                                         <th>{currentLang === 'en' ? 'Refiner' : 'المصفاة'}</th>
-                                        <th>{currentLang === 'en' ? 'Condition' : 'الحالة'}</th>
                                       </tr>
                                     </thead>
                                     <tbody>
                                       {itemsList.map((it: any, iIdx: number) => (
-                                        <tr key={iIdx} style={{ backgroundColor: it.is_damaged ? 'rgba(239, 68, 68, 0.06)' : 'transparent' }}>
+                                        <tr key={iIdx}>
                                           <td>{iIdx + 1}</td>
-                                          <td><strong>{it.serial}</strong></td>
+                                          <td><strong>{it.serial || it.serial_number || (typeof it === 'string' ? it : 'N/A')}</strong></td>
                                           <td>{it.weight_grams ? `${it.weight_grams}g` : '1000g'}</td>
                                           <td>{it.refiner_name || 'Valcambi Suisse'}</td>
-                                          <td>
-                                            {it.is_damaged ? (
-                                              <span className="badge" style={{ backgroundColor: 'var(--accent-red)', color: '#fff' }}>
-                                                Damaged: {it.damage_reason || 'Quarantined'}
-                                              </span>
-                                            ) : (
-                                              <span className="badge badge-ready">Good Condition</span>
-                                            )}
-                                          </td>
                                         </tr>
                                       ))}
                                     </tbody>
