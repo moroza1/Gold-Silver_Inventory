@@ -1603,6 +1603,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   const [barcodeTab, setBarcodeTab] = useState<'generate' | 'reprint' | 'bulk'>('generate');
   const [barcodeSelectedItemId, setBarcodeSelectedItemId] = useState<number | null>(null);
   const [barcodeSearchQuery, setBarcodeSearchQuery] = useState('');
+  const [barcodeFilterProductType, setBarcodeFilterProductType] = useState<string>('');
   const [barcodeCurrentLabel, setBarcodeCurrentLabel] = useState<any | null>(null);
   const [barcodeLabelLoading, setBarcodeLabelLoading] = useState(false);
   const [barcodeCustomSerial, setBarcodeCustomSerial] = useState('KFH-AU-1KG-001');
@@ -1615,7 +1616,10 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   const [barcodeReprintReason, setBarcodeReprintReason] = useState('LABEL_DAMAGED');
   const [barcodeReprintComments, setBarcodeReprintComments] = useState('');
   const [barcodeReprintResult, setBarcodeReprintResult] = useState<any | null>(null);
-  const [barcodeBulkInput, setBarcodeBulkInput] = useState('KFH-AU-100G-001, KFH-AU-100G-002, KFH-AU-100G-003, KFH-AU-1KG-001');
+  const [barcodeBulkProduct, setBarcodeBulkProduct] = useState('');
+  const [barcodeBulkStartSerial, setBarcodeBulkStartSerial] = useState('');
+  const [barcodeBulkEndSerial, setBarcodeBulkEndSerial] = useState('');
+  const [barcodeBulkInput, setBarcodeBulkInput] = useState('');
   const [barcodeBulkLabels, setBarcodeBulkLabels] = useState<any[]>([]);
   const [barcodeBulkLoading, setBarcodeBulkLoading] = useState(false);
 
@@ -2783,14 +2787,147 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     }
   };
 
-  const handlePrintBarcodeLabel = async (itemId?: number) => {
-    window.print();
+  const handlePrintBarcodeLabel = async (itemId?: number, labelObj?: any) => {
+    const label = labelObj || barcodeCurrentLabel || barcodeReprintResult;
+    if (label) {
+      const printWindow = window.open('', '_blank', 'width=450,height=320');
+      if (printWindow) {
+        const locText = label.locationDescription || 'Vault Stage';
+        const gtinText = label.gtin14 || 'N/A';
+        const lotText = label.lotNumber || 'N/A';
+        const hrText = label.gs1HumanReadable || '';
+
+        printWindow.document.write(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Barcode Label Sticker</title>
+  <style>
+    @page {
+      size: auto;
+      margin: 3mm;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      background: #fff;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 4px;
+    }
+    .sticker-container {
+      width: 95mm;
+      max-width: 380px;
+      background: #ffffff;
+      color: #111827;
+      border: 1.5px solid #d4af37;
+      border-radius: 8px;
+      padding: 10px 12px;
+      box-sizing: border-box;
+    }
+    .top-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+    }
+    .info-col {
+      flex: 1;
+    }
+    .loc-title {
+      font-size: 11px;
+      font-weight: 800;
+      color: #009B4E;
+      margin-bottom: 4px;
+      line-height: 1.2;
+    }
+    .meta-line {
+      font-size: 10px;
+      color: #374151;
+      margin-top: 2px;
+      line-height: 1.2;
+    }
+    .qr-col {
+      width: 72px;
+      height: 72px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .qr-col svg {
+      width: 70px !important;
+      height: 70px !important;
+      display: block;
+    }
+    .dashed-divider {
+      border-top: 1px dashed #d1d5db;
+      margin: 6px 0;
+    }
+    .barcode-col {
+      text-align: center;
+    }
+    .barcode-col svg {
+      max-width: 100%;
+      height: 38px;
+      margin: 0 auto;
+      display: block;
+    }
+    .hr-text {
+      font-family: monospace;
+      font-size: 9.5px;
+      font-weight: bold;
+      color: #111827;
+      letter-spacing: 0.5px;
+      margin-top: 3px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="sticker-container">
+    <div class="top-meta">
+      <div class="info-col">
+        <div class="loc-title">📍 ${locText}</div>
+        <div class="meta-line"><strong>GTIN-14:</strong> ${gtinText}</div>
+        <div class="meta-line"><strong>Batch / Lot:</strong> ${lotText}</div>
+      </div>
+      <div class="qr-col">
+        ${label.qrCodeSvg || ''}
+      </div>
+    </div>
+    <div class="dashed-divider"></div>
+    <div class="barcode-col">
+      ${label.barcodeSvg || ''}
+      <div class="hr-text">${hrText}</div>
+    </div>
+  </div>
+  <script>
+    window.onload = function() {
+      window.focus();
+      window.print();
+      setTimeout(function() { window.close(); }, 500);
+    };
+  </script>
+</body>
+</html>`);
+        printWindow.document.close();
+      }
+    } else {
+      window.print();
+    }
+
     if (itemId && itemId > 0) {
       try {
         await fetch(`${API_BASE}/barcode/items/${itemId}/print-log`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-          body: JSON.stringify({ printedBy: username || 'treasury-maker', notes: 'Physical label printed from UC01 terminal.' })
+          body: JSON.stringify({ printedBy: username || 'treasury-maker', notes: 'Physical bar sticker label printed.' })
         });
       } catch (e) {
         console.warn("Print log error", e);
@@ -2829,12 +2966,135 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     }
   };
 
+  const splitSerialHelper = (serial: string) => {
+    const match = serial.trim().match(/^([A-Za-z0-9\-_]*?)(\d+)([A-Za-z0-9\-_]*)$/);
+    if (!match) return null;
+    return {
+      prefix: match[1] || '',
+      numStr: match[2],
+      num: parseInt(match[2], 10),
+      padLen: match[2].length,
+      suffix: match[3] || ''
+    };
+  };
+
+  const handleAddBulkRange = () => {
+    if (!barcodeBulkProduct) {
+      alert(currentLang === 'en' ? 'Please select the product type / denomination first.' : 'يرجى اختيار نوع وفئة المنتج أولاً.');
+      return;
+    }
+    const start = barcodeBulkStartSerial.trim();
+    const end = barcodeBulkEndSerial.trim();
+    if (!start || !end) {
+      alert(currentLang === 'en' ? 'Please enter both start and end serial numbers.' : 'يرجى إدخال رقم البداية ورقم النهاية.');
+      return;
+    }
+
+    const splitStart = splitSerialHelper(start);
+    const splitEnd = splitSerialHelper(end);
+
+    if (!splitStart || !splitEnd) {
+      alert(currentLang === 'en'
+        ? 'Invalid serial number format. Must contain alphanumeric text ending with numbers (e.g. B0001 to B0010).'
+        : 'صيغة الرقم التسلسلي غير صالحة. يجب أن يحتوي على أحرف متبوعة بأرقام (مثال B0001 إلى B0010).');
+      return;
+    }
+
+    if (splitStart.prefix !== splitEnd.prefix || splitStart.suffix !== splitEnd.suffix) {
+      alert(currentLang === 'en'
+        ? `Serial prefixes or suffixes do not match ("${splitStart.prefix}" vs "${splitEnd.prefix}").`
+        : `بادئة أو لاحقة الرقم التسلسلي غير متطابقة ("${splitStart.prefix}" مقابل "${splitEnd.prefix}").`);
+      return;
+    }
+
+    if (splitStart.padLen !== splitEnd.padLen) {
+      alert(currentLang === 'en'
+        ? `Zero-padding length mismatch between "${start}" (${splitStart.padLen} digits) and "${end}" (${splitEnd.padLen} digits). Exact formatting is required.`
+        : `عدم تطابق عدد الأصفار بين "${start}" (${splitStart.padLen} أرقام) و "${end}" (${splitEnd.padLen} أرقام). يجب استخدام نفس التنسيق الدقيق.`);
+      return;
+    }
+
+    if (splitStart.num > splitEnd.num) {
+      alert(currentLang === 'en'
+        ? 'Start serial number cannot be greater than end serial number.'
+        : 'رقم البداية لا يمكن أن يكون أكبر من رقم النهاية.');
+      return;
+    }
+
+    if (splitEnd.num - splitStart.num > 500) {
+      alert(currentLang === 'en'
+        ? 'Maximum 500 serials can be generated in a single range.'
+        : 'الحد الأقصى للنطاق هو 500 سبيكة دفعة واحدة.');
+      return;
+    }
+
+    // Generate exact serial list with padding
+    const generatedSerials: string[] = [];
+    for (let i = splitStart.num; i <= splitEnd.num; i++) {
+      const numStr = String(i).padStart(splitStart.padLen, '0');
+      generatedSerials.push(`${splitStart.prefix}${numStr}${splitStart.suffix}`);
+    }
+
+    // Check inventory for selected product strictly
+    const productItems = inventoryList.filter((b: any) => {
+      const denom = b.denomination || '';
+      const metal = b.metal || '';
+      const prodKey = `${metal} - ${denom}`;
+      return prodKey === barcodeBulkProduct || denom === barcodeBulkProduct;
+    });
+
+    const inventorySerialsSet = new Set(productItems.map((b: any) => (b.serial_number || '').trim()));
+    const missing = generatedSerials.filter(s => !inventorySerialsSet.has(s));
+
+    if (missing.length > 0) {
+      alert(currentLang === 'en'
+        ? `The following ${missing.length} serial(s) do not exist in inventory for product "${barcodeBulkProduct}":\n${missing.slice(0, 10).join(', ')}${missing.length > 10 ? ` ...and ${missing.length - 10} more` : ''}\n\nPlease check the serial range or denomination.`
+        : `الأرقام التسلسلية التالية (${missing.length}) غير موجودة في المخزون للمنتج "${barcodeBulkProduct}":\n${missing.slice(0, 10).join(', ')}${missing.length > 10 ? ` ...و ${missing.length - 10} أخرى` : ''}\n\nيرجى التأكد من نطاق الأرقام التسلسلية أو الفئة.`);
+      return;
+    }
+
+    // Append to textarea
+    const currentList = barcodeBulkInput.split(/[\n,;]+/).map(s => s.trim()).filter(s => s.length > 0);
+    const combined = Array.from(new Set([...currentList, ...generatedSerials]));
+    setBarcodeBulkInput(combined.join(', '));
+    setBarcodeBulkStartSerial('');
+    setBarcodeBulkEndSerial('');
+  };
+
   const handleBulkGenerateLabels = async () => {
+    if (!barcodeBulkProduct) {
+      alert(currentLang === 'en' ? 'Please select the product type / denomination first.' : 'يرجى اختيار نوع وفئة المنتج أولاً.');
+      return;
+    }
+
     const serials = barcodeBulkInput.split(/[\n,;]+/).map(s => s.trim()).filter(s => s.length > 0);
     if (serials.length === 0) {
       alert(currentLang === 'en' ? 'Please enter at least one serial number.' : 'يرجى إدخال رقم تسلسلي واحد على الأقل.');
       return;
     }
+
+    // Verify all requested serials exist strictly in inventory for the selected product
+    const productItems = inventoryList.filter((b: any) => {
+      const denom = b.denomination || '';
+      const metal = b.metal || '';
+      const prodKey = `${metal} - ${denom}`;
+      return prodKey === barcodeBulkProduct || denom === barcodeBulkProduct;
+    });
+
+    const inventorySerialsMap = new Map<string, any>();
+    productItems.forEach((b: any) => {
+      const sn = (b.serial_number || '').trim();
+      if (sn) inventorySerialsMap.set(sn, b);
+    });
+
+    const missing = serials.filter(s => !inventorySerialsMap.has(s));
+    if (missing.length > 0) {
+      alert(currentLang === 'en'
+        ? `The following ${missing.length} serial(s) do not exist in inventory for product "${barcodeBulkProduct}":\n${missing.slice(0, 10).join(', ')}${missing.length > 10 ? ` ...and ${missing.length - 10} more` : ''}\n\nPlease check the serial list.`
+        : `الأرقام التسلسلية التالية (${missing.length}) غير موجودة في المخزون للمنتج "${barcodeBulkProduct}":\n${missing.slice(0, 10).join(', ')}${missing.length > 10 ? ` ...و ${missing.length - 10} أخرى` : ''}\n\nيرجى التأكد من الأرقام التسلسلية.`);
+      return;
+    }
+
     setBarcodeBulkLoading(true);
     try {
       const res = await fetch(`${API_BASE}/barcode/bulk-generate`, {
@@ -6569,15 +6829,13 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                 className="btn btn-primary"
                 style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', background: '#dc3545', borderColor: '#dc3545', padding: '10px 18px', fontSize: '13px', fontWeight: 'bold' }}
                 onClick={() => {
-                  const readyList = inventoryList.filter((b: any) => !b.is_damaged && b.status !== 'DAMAGED');
-                  const defaultBar = readyList.length > 0 ? readyList[0] : (inventoryList.length > 0 ? inventoryList[0] : null);
-                  setDamageItemId(defaultBar?.item_id || null);
-                  setDamageMatchedBar(defaultBar || null);
-                  setDamageScanSerial(defaultBar?.serial_number || '');
-                  setDamageScanStatus(defaultBar ? 'found' : 'idle');
+                  setDamageItemId(null);
+                  setDamageMatchedBar(null);
+                  setDamageScanSerial('');
+                  setDamageScanStatus('idle');
                   setDamageReason('SCRATCHED_HALLMARK');
-                  setDamageDesc('Physical inspection defect identified. Requesting Maker-Checker quarantine.');
-                  setDamageDocId(`DOC-MOCI-${Date.now().toString().slice(-4)}`);
+                  setDamageDesc('');
+                  setDamageDocId('');
                   setShowDamageModal(true);
                 }}
               >
@@ -6694,15 +6952,13 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                           className="btn btn-outline"
                           style={{ borderColor: '#dc3545', color: '#dc3545', fontSize: '12px' }}
                           onClick={() => {
-                            const readyList = inventoryList.filter((b: any) => !b.is_damaged && b.status !== 'DAMAGED');
-                            const defaultBar = readyList.length > 0 ? readyList[0] : (inventoryList.length > 0 ? inventoryList[0] : null);
-                            setDamageItemId(defaultBar?.item_id || null);
-                            setDamageMatchedBar(defaultBar || null);
-                            setDamageScanSerial(defaultBar?.serial_number || '');
-                            setDamageScanStatus(defaultBar ? 'found' : 'idle');
+                            setDamageItemId(null);
+                            setDamageMatchedBar(null);
+                            setDamageScanSerial('');
+                            setDamageScanStatus('idle');
                             setDamageReason('SCRATCHED_HALLMARK');
-                            setDamageDesc('Physical inspection defect identified. Requesting Maker-Checker quarantine.');
-                            setDamageDocId(`DOC-MOCI-${Date.now().toString().slice(-4)}`);
+                            setDamageDesc('');
+                            setDamageDocId('');
                             setShowDamageModal(true);
                           }}
                         >
@@ -6763,18 +7019,83 @@ const [migrationApproved, setMigrationApproved] = useState(false);
           {/* TAB 1: SINGLE BAR GENERATOR & PRINT */}
           {barcodeTab === 'generate' && (() => {
             const query = (barcodeSearchQuery || '').toLowerCase().trim();
+
+            // Extract distinct product types & denominations from inventory
+            const pMap = new Map<string, { key: string; label: string; count: number }>();
+            inventoryList.forEach((b: any) => {
+              const denom = b.denomination || 'Standard Bar';
+              const metal = b.metal || 'Gold';
+              const key = `${metal} - ${denom}`;
+              if (!pMap.has(key)) {
+                pMap.set(key, { key, label: `${metal} ${denom}`, count: 0 });
+              }
+              pMap.get(key)!.count++;
+            });
+            const productTypesList = Array.from(pMap.values());
+
             const filteredInventory = inventoryList.filter((b: any) => {
+              const denom = b.denomination || '';
+              const metal = b.metal || '';
+              const prodKey = `${metal} - ${denom}`;
+              if (barcodeFilterProductType && prodKey !== barcodeFilterProductType && denom !== barcodeFilterProductType && metal !== barcodeFilterProductType) {
+                return false;
+              }
               if (!query) return true;
               const sn = (b.serial_number || '').toLowerCase();
-              const denom = (b.denomination || '').toLowerCase();
-              const metal = (b.metal || '').toLowerCase();
+              const d = denom.toLowerCase();
+              const m = metal.toLowerCase();
               const loc = (b.location || '').toLowerCase();
               const status = (b.status || '').toLowerCase();
               const brand = (b.brand || b.origin || '').toLowerCase();
-              return sn.includes(query) || denom.includes(query) || metal.includes(query) || loc.includes(query) || status.includes(query) || brand.includes(query);
+              return sn.includes(query) || d.includes(query) || m.includes(query) || loc.includes(query) || status.includes(query) || brand.includes(query);
             });
 
             const selectedBar = inventoryList.find((b: any) => b.item_id === barcodeSelectedItemId);
+
+            const handleSearchBarcodeSerial = () => {
+              const q = (barcodeSearchQuery || '').trim().toLowerCase();
+              if (!q) {
+                return;
+              }
+
+              // Check exact serial match across entire inventory
+              const exact = inventoryList.find((b: any) => (b.serial_number || '').trim().toLowerCase() === q);
+              if (exact) {
+                const denom = exact.denomination || 'Standard Bar';
+                const metal = exact.metal || 'Gold';
+                const prodKey = `${metal} - ${denom}`;
+                setBarcodeFilterProductType(prodKey);
+                setBarcodeSelectedItemId(exact.item_id);
+                setBarcodeCurrentLabel(null);
+                return;
+              }
+
+              // Check if single match in filtered list
+              if (filteredInventory.length === 1) {
+                setBarcodeSelectedItemId(filteredInventory[0].item_id);
+                setBarcodeCurrentLabel(null);
+                return;
+              }
+
+              // Check partial match in full inventory
+              const partialMatches = inventoryList.filter((b: any) => {
+                const sn = (b.serial_number || '').toLowerCase();
+                return sn.includes(q);
+              });
+
+              if (partialMatches.length === 1) {
+                const denom = partialMatches[0].denomination || 'Standard Bar';
+                const metal = partialMatches[0].metal || 'Gold';
+                const prodKey = `${metal} - ${denom}`;
+                setBarcodeFilterProductType(prodKey);
+                setBarcodeSelectedItemId(partialMatches[0].item_id);
+                setBarcodeCurrentLabel(null);
+              } else if (partialMatches.length === 0 && filteredInventory.length === 0) {
+                alert(currentLang === 'en'
+                  ? `No inventory bar found matching serial "${barcodeSearchQuery}".`
+                  : `لم يتم العثور على سبيكة في المخزون برقم تسلسلي مطابق لـ "${barcodeSearchQuery}".`);
+              }
+            };
 
             return (
               <div className="split-grid-3">
@@ -6785,57 +7106,112 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     {currentLang === 'en' ? 'Select & Lookup Vault Inventory Bar' : 'البحث واختيار سبيكة من المخزون'}
                   </h4>
 
-                  {/* Search input */}
+                  {/* Search input with dedicated Search Button */}
                   <div className="form-group" style={{ marginBottom: '12px' }}>
                     <label style={{ fontSize: '12px', fontWeight: 600, display: 'flex', justifyContent: 'space-between' }}>
                       <span>{currentLang === 'en' ? 'Search Inventory Serial / Product' : 'بحث بالرقم التسلسلي أو الصنف'}</span>
                       <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{filteredInventory.length} {currentLang === 'en' ? 'bars' : 'سبائك'}</span>
                     </label>
-                    <div style={{ position: 'relative' }}>
-                      <input
-                        type="text"
-                        className="form-control"
-                        placeholder={currentLang === 'en' ? 'Search serial (e.g. B00570), 100g, Zone Alpha...' : 'ابحث بالرقم (مثال B00570)، 100g، الموقع...'}
-                        value={barcodeSearchQuery}
-                        onChange={e => setBarcodeSearchQuery(e.target.value)}
-                        style={{ paddingLeft: currentLang === 'ar' ? '12px' : '36px', paddingRight: currentLang === 'ar' ? '36px' : '12px' }}
-                      />
-                      <i
-                        className="fa-solid fa-magnifying-glass"
-                        style={{
-                          position: 'absolute',
-                          top: '50%',
-                          transform: 'translateY(-50%)',
-                          [currentLang === 'ar' ? 'right' : 'left']: '12px',
-                          color: 'var(--text-muted)'
-                        }}
-                      />
-                      {barcodeSearchQuery && (
-                        <button
-                          type="button"
-                          onClick={() => setBarcodeSearchQuery('')}
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <div style={{ position: 'relative', flex: 1 }}>
+                        <input
+                          type="text"
+                          className="form-control"
+                          placeholder={currentLang === 'en' ? 'Enter serial (e.g. B00570), product...' : 'أدخل الرقم التسلسلي (مثل B00570)...'}
+                          value={barcodeSearchQuery}
+                          onChange={e => setBarcodeSearchQuery(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              handleSearchBarcodeSerial();
+                            }
+                          }}
+                          style={{ paddingLeft: currentLang === 'ar' ? '12px' : '36px', paddingRight: currentLang === 'ar' ? '36px' : '12px' }}
+                        />
+                        <i
+                          className="fa-solid fa-magnifying-glass"
                           style={{
                             position: 'absolute',
                             top: '50%',
                             transform: 'translateY(-50%)',
-                            [currentLang === 'ar' ? 'left' : 'right']: '10px',
-                            background: 'none',
-                            border: 'none',
-                            color: 'var(--text-muted)',
-                            cursor: 'pointer',
-                            padding: '4px'
+                            [currentLang === 'ar' ? 'right' : 'left']: '12px',
+                            color: 'var(--text-muted)'
                           }}
-                        >
-                          <i className="fa-solid fa-xmark"></i>
-                        </button>
-                      )}
+                        />
+                        {barcodeSearchQuery && (
+                          <button
+                            type="button"
+                            onClick={() => setBarcodeSearchQuery('')}
+                            style={{
+                              position: 'absolute',
+                              top: '50%',
+                              transform: 'translateY(-50%)',
+                              [currentLang === 'ar' ? 'left' : 'right']: '10px',
+                              background: 'none',
+                              border: 'none',
+                              color: 'var(--text-muted)',
+                              cursor: 'pointer',
+                              padding: '4px'
+                            }}
+                          >
+                            <i className="fa-solid fa-xmark"></i>
+                          </button>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        onClick={handleSearchBarcodeSerial}
+                        style={{ padding: '6px 14px', fontSize: '12px', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '6px' }}
+                      >
+                        <i className="fa-solid fa-magnifying-glass"></i>
+                        <span>{currentLang === 'en' ? 'Search' : 'بحث'}</span>
+                      </button>
                     </div>
                   </div>
 
-                  {/* Inventory Selection Dropdown */}
+                  {/* 1. Product Type / Denomination Combo Box */}
+                  <div className="form-group" style={{ marginBottom: '12px' }}>
+                    <label style={{ fontSize: '12px', fontWeight: 600, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span>{currentLang === 'en' ? 'Product Type / Denomination' : 'نوع وفئة السبيكة'}</span>
+                      {barcodeFilterProductType && (
+                        <a
+                          href="#"
+                          onClick={e => {
+                            e.preventDefault();
+                            setBarcodeFilterProductType('');
+                            setBarcodeSelectedItemId(null);
+                          }}
+                          style={{ fontSize: '11px', color: 'var(--accent-gold)', textDecoration: 'none' }}
+                        >
+                          {currentLang === 'en' ? 'Clear Filter' : 'إلغاء التصفية'}
+                        </a>
+                      )}
+                    </label>
+                    <select
+                      className="form-control"
+                      style={{ color: '#000', fontSize: '12px', fontWeight: 600 }}
+                      value={barcodeFilterProductType}
+                      onChange={e => {
+                        setBarcodeFilterProductType(e.target.value);
+                        setBarcodeSelectedItemId(null);
+                        setBarcodeCurrentLabel(null);
+                      }}
+                    >
+                      <option value="">{currentLang === 'en' ? '-- All Products / Denominations --' : '-- جميع المنتجات والفئات --'}</option>
+                      {productTypesList.map((p: any) => (
+                        <option key={p.key} value={p.key}>
+                          {p.label} ({p.count} {currentLang === 'en' ? 'bars' : 'سبيكة'})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* 2. Inventory Serial Selection Dropdown (Filtered by Product Type) */}
                   <div className="form-group" style={{ marginBottom: '16px' }}>
-                    <label style={{ fontSize: '12px', fontWeight: 600 }}>
-                      {currentLang === 'en' ? 'Choose Serial from Vault List' : 'اختر الرقم التسلسلي من القائمة'}
+                    <label style={{ fontSize: '12px', fontWeight: 600, display: 'flex', justifyContent: 'space-between' }}>
+                      <span>{currentLang === 'en' ? 'Choose Serial Number from Vault List' : 'اختر الرقم التسلسلي من القائمة'}</span>
+                      <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{filteredInventory.length} {currentLang === 'en' ? 'available' : 'متاح'}</span>
                     </label>
                     <select
                       className="form-control"
@@ -6979,10 +7355,10 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                             padding: '8px 16px',
                             fontWeight: 700
                           }}
-                          onClick={() => handlePrintBarcodeLabel(barcodeCurrentLabel.itemId)}
+                          onClick={() => handlePrintBarcodeLabel(barcodeCurrentLabel.itemId, barcodeCurrentLabel)}
                         >
                           <i className="fa-solid fa-print"></i>
-                          <span>{currentLang === 'en' ? 'Print Card Label' : 'طباعة البطاقة والملصق'}</span>
+                          <span>{currentLang === 'en' ? 'Print Barcode Sticker' : 'طباعة ملصق الباركود'}</span>
                         </button>
                       </div>
                     )}
@@ -7151,6 +7527,8 @@ const [migrationApproved, setMigrationApproved] = useState(false);
 
                         {/* Machine-Readable Barcode & QR Code Security Assay Tag */}
                         <div
+                          id="printable-barcode-sticker"
+                          className="barcode-sticker-tag"
                           style={{
                             background: '#ffffff',
                             color: '#111827',
@@ -7293,14 +7671,40 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     <i className="fa-solid fa-circle-check" style={{ color: '#10B981' }}></i>
                     {currentLang === 'en' ? 'Reprint Approved & Custody Event Logged' : 'تم اعتماد إعادة الطباعة وتوثيق سجل الحيازة'}
                   </div>
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ maxWidth: '300px', margin: '0 auto', background: '#fff', padding: '8px', borderRadius: '6px' }} dangerouslySetInnerHTML={{ __html: barcodeReprintResult.qrCodeSvg }} />
+                  <div style={{ maxWidth: '380px', margin: '0 auto', background: '#ffffff', color: '#111827', borderRadius: '8px', border: '1.5px solid #d4af37', padding: '12px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 75px', gap: '8px', alignItems: 'center' }}>
+                      <div>
+                        <div style={{ fontSize: '10px', fontWeight: 800, color: '#009B4E' }}>
+                          📍 {barcodeReprintResult.locationDescription || 'Vault Stage'}
+                        </div>
+                        <div style={{ fontSize: '9px', color: '#4B5563', marginTop: '2px' }}>
+                          <strong>GTIN-14:</strong> {barcodeReprintResult.gtin14}
+                        </div>
+                        <div style={{ fontSize: '9px', color: '#4B5563' }}>
+                          <strong>Batch / Lot:</strong> {barcodeReprintResult.lotNumber || 'N/A'}
+                        </div>
+                      </div>
+                      <div
+                        style={{ width: '70px', height: '70px', margin: '0 auto', background: '#fff', padding: '2px' }}
+                        dangerouslySetInnerHTML={{ __html: barcodeReprintResult.qrCodeSvg }}
+                      />
+                    </div>
+                    <div style={{ textAlign: 'center', borderTop: '1px dashed #d1d5db', paddingTop: '6px', marginTop: '6px' }}>
+                      <div
+                        style={{ maxWidth: '100%', height: '38px', margin: '0 auto', display: 'flex', justifyContent: 'center' }}
+                        dangerouslySetInnerHTML={{ __html: barcodeReprintResult.barcodeSvg }}
+                      />
+                      <div style={{ fontFamily: 'monospace', fontSize: '9px', fontWeight: 'bold', color: '#111827', letterSpacing: '0.5px' }}>
+                        {barcodeReprintResult.gs1HumanReadable}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ textAlign: 'center', marginTop: '12px' }}>
                     <button
                       className="btn btn-primary btn-sm"
-                      style={{ marginTop: '12px' }}
-                      onClick={() => handlePrintBarcodeLabel(barcodeReprintResult.itemId)}
+                      onClick={() => handlePrintBarcodeLabel(barcodeReprintResult.itemId, barcodeReprintResult)}
                     >
-                      <i className="fa-solid fa-print"></i> {currentLang === 'en' ? 'Send to Thermal Printer' : 'إرسال للطابعة الحرارية'}
+                      <i className="fa-solid fa-print"></i> {currentLang === 'en' ? 'Send Sticker to Thermal Printer' : 'إرسال الملصق للطابعة الحرارية'}
                     </button>
                   </div>
                 </div>
@@ -7309,88 +7713,265 @@ const [migrationApproved, setMigrationApproved] = useState(false);
           )}
 
           {/* TAB 3: BULK LOT SHIPMENT LABELS (A2) */}
-          {barcodeTab === 'bulk' && (
-            <div className="glass-card">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid var(--surface-border)', paddingBottom: '12px' }}>
-                <div>
-                  <h4 style={{ margin: '0 0 4px 0', fontSize: '16px', color: 'var(--kfh-green)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <i className="fa-solid fa-boxes-stacked"></i>
-                    {currentLang === 'en' ? 'Bulk Shipment QR & Barcode Generation (A2)' : 'التوليد الجماعي لملصقات الشحنات والدفعات (A2)'}
-                  </h4>
-                  <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: 0 }}>
-                    {currentLang === 'en'
-                      ? 'Generate full A4 / thermal roll print sheets for incoming supplier shipments or lot manifests.'
-                      : 'توليد كشوفات طباعة ملصقات A4 أو رول حراري للشحنات والدفعات المستلمة.'}
-                  </p>
+          {barcodeTab === 'bulk' && (() => {
+            // Extract distinct product types & denominations from inventory
+            const pMap = new Map<string, { key: string; label: string; count: number }>();
+            inventoryList.forEach((b: any) => {
+              const denom = b.denomination || 'Standard Bar';
+              const metal = b.metal || 'Gold';
+              const key = `${metal} - ${denom}`;
+              if (!pMap.has(key)) {
+                pMap.set(key, { key, label: `${metal} ${denom}`, count: 0 });
+              }
+              pMap.get(key)!.count++;
+            });
+            const productTypesList = Array.from(pMap.values());
+            const selectedProductObj = productTypesList.find(p => p.key === barcodeBulkProduct);
+            const currentSerialsCount = barcodeBulkInput.split(/[\n,;]+/).map(s => s.trim()).filter(s => s.length > 0).length;
+
+            const handleSelectAllForProduct = () => {
+              if (!barcodeBulkProduct) return;
+              const productItems = inventoryList.filter((b: any) => {
+                const denom = b.denomination || '';
+                const metal = b.metal || '';
+                const prodKey = `${metal} - ${denom}`;
+                return prodKey === barcodeBulkProduct || denom === barcodeBulkProduct;
+              });
+              const allSerials = productItems.map((b: any) => (b.serial_number || '').trim()).filter((s: string) => s.length > 0);
+              setBarcodeBulkInput(allSerials.join(', '));
+            };
+
+            return (
+              <div className="glass-card">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid var(--surface-border)', paddingBottom: '12px', flexWrap: 'wrap', gap: '12px' }}>
+                  <div>
+                    <h4 style={{ margin: '0 0 4px 0', fontSize: '16px', color: 'var(--kfh-green)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <i className="fa-solid fa-boxes-stacked"></i>
+                      {currentLang === 'en' ? 'Bulk Shipment QR & Barcode Generation (A2)' : 'التوليد الجماعي لملصقات الشحنات والدفعات (A2)'}
+                    </h4>
+                    <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: 0 }}>
+                      {currentLang === 'en'
+                        ? 'Select denomination and generate thermal sticker sheets by range or bulk list for vault inventory.'
+                        : 'اختر فئة المنتج وقم بتوليد كشوفات طباعة الملصقات عبر النطاق أو القائمة الجماعية لمخزون الخزينة.'}
+                    </p>
+                  </div>
+                  {barcodeBulkLabels.length > 0 && (
+                    <button className="btn btn-primary" onClick={() => window.print()}>
+                      <i className="fa-solid fa-print"></i> {currentLang === 'en' ? `Print All Labels (${barcodeBulkLabels.length})` : `طباعة كامل الكشف (${barcodeBulkLabels.length})`}
+                    </button>
+                  )}
                 </div>
+
+                {/* Step 1: Mandatory Product / Denomination Selection */}
+                <div style={{ background: 'rgba(212, 175, 55, 0.05)', border: '1px solid rgba(212, 175, 55, 0.25)', borderRadius: '10px', padding: '16px', marginBottom: '16px' }}>
+                  <label style={{ fontSize: '13px', fontWeight: 700, display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <span style={{ color: 'var(--accent-gold)' }}>
+                      <i className="fa-solid fa-tag" style={{ marginRight: '6px' }}></i>
+                      {currentLang === 'en' ? 'Step 1: Select Product Type / Denomination (Mandatory)' : 'الخطوة 1: اختر نوع وفئة المنتج (إلزامي)'}
+                    </span>
+                    {selectedProductObj && (
+                      <span style={{ fontSize: '12px', color: 'var(--kfh-green)', fontWeight: 600 }}>
+                        {selectedProductObj.count} {currentLang === 'en' ? 'bars in inventory' : 'سبيكة في المخزون'}
+                      </span>
+                    )}
+                  </label>
+                  <select
+                    className="form-control"
+                    style={{ color: '#000', fontSize: '13px', fontWeight: 600 }}
+                    value={barcodeBulkProduct}
+                    onChange={e => {
+                      setBarcodeBulkProduct(e.target.value);
+                      setBarcodeBulkLabels([]);
+                    }}
+                  >
+                    <option value="">{currentLang === 'en' ? '-- Choose Product / Denomination First --' : '-- اختر نوع وفئة المنتج أولاً --'}</option>
+                    {productTypesList.map((p: any) => (
+                      <option key={p.key} value={p.key}>
+                        {p.label} ({p.count} {currentLang === 'en' ? 'bars available in vault' : 'سبيكة متاحة في الخزينة'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Step 2: Add Serial Range (Exact matching, no substring) */}
+                <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--surface-border)', borderRadius: '10px', padding: '16px', marginBottom: '16px' }}>
+                  <label style={{ fontSize: '13px', fontWeight: 700, marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-main)' }}>
+                    <i className="fa-solid fa-arrow-down-1-9" style={{ color: 'var(--accent-gold)' }}></i>
+                    {currentLang === 'en' ? 'Step 2: Add Serial Range from Inventory' : 'الخطوة 2: إضافة نطاق تسلسلي من المخزون'}
+                  </label>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', alignItems: 'flex-end' }}>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                        {currentLang === 'en' ? 'Start Serial Number' : 'رقم تسلسلي البداية'}
+                      </label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="e.g. B0001"
+                        value={barcodeBulkStartSerial}
+                        onChange={e => setBarcodeBulkStartSerial(e.target.value)}
+                        style={{ fontFamily: 'monospace', fontSize: '12px' }}
+                      />
+                    </div>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                        {currentLang === 'en' ? 'End Serial Number' : 'رقم تسلسلي النهاية'}
+                      </label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="e.g. B0020"
+                        value={barcodeBulkEndSerial}
+                        onChange={e => setBarcodeBulkEndSerial(e.target.value)}
+                        style={{ fontFamily: 'monospace', fontSize: '12px' }}
+                      />
+                    </div>
+                    <div>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={handleAddBulkRange}
+                        style={{ width: '100%', fontSize: '12px', padding: '8px 14px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                        disabled={!barcodeBulkProduct || !barcodeBulkStartSerial || !barcodeBulkEndSerial}
+                      >
+                        <i className="fa-solid fa-plus"></i>
+                        <span>{currentLang === 'en' ? 'Add Range to Batch' : 'إضافة النطاق للدفعة'}</span>
+                      </button>
+                    </div>
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '8px' }}>
+                    <i className="fa-solid fa-circle-info" style={{ marginRight: '4px' }}></i>
+                    {currentLang === 'en'
+                      ? 'Checks exact existence of serials in vault inventory for the chosen denomination. Substring search is prohibited.'
+                      : 'يتم التحقق الدقيق من وجود كل رقم تسلسلي في المخزون للفئة المحددة. البحث الجزئي محظور.'}
+                  </div>
+                </div>
+
+                {/* Step 3: Batch Serials List & Actions */}
+                <div className="form-group" style={{ marginBottom: '16px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                    <label style={{ fontSize: '12px', fontWeight: 600, margin: 0 }}>
+                      {currentLang === 'en' ? 'Batch Serials for Generation' : 'الأرقام التسلسلية المحددة للدفعة'}
+                    </label>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      {selectedProductObj && (
+                        <button
+                          type="button"
+                          className="btn btn-outline btn-sm"
+                          onClick={handleSelectAllForProduct}
+                          style={{ fontSize: '11px', padding: '2px 8px' }}
+                        >
+                          <i className="fa-solid fa-check-double"></i> {currentLang === 'en' ? `Select All Available (${selectedProductObj.count})` : `تحديد الكل المتاح (${selectedProductObj.count})`}
+                        </button>
+                      )}
+                      {barcodeBulkInput && (
+                        <button
+                          type="button"
+                          className="btn btn-sm"
+                          onClick={() => setBarcodeBulkInput('')}
+                          style={{ fontSize: '11px', padding: '2px 8px', color: 'var(--text-muted)', background: 'none', border: 'none' }}
+                        >
+                          <i className="fa-solid fa-trash-can"></i> {currentLang === 'en' ? 'Clear List' : 'مسح القائمة'}
+                        </button>
+                      )}
+                      <span style={{ fontSize: '11px', color: 'var(--accent-gold)', fontWeight: 700 }}>
+                        {currentSerialsCount} {currentLang === 'en' ? 'serials selected' : 'سبيكة محددة'}
+                      </span>
+                    </div>
+                  </div>
+                  <textarea
+                    className="form-control"
+                    rows={3}
+                    placeholder={currentLang === 'en' ? 'Enter/paste serial numbers or use Add Range above (e.g. B0001, B0002)...' : 'أدخل أو الصق الأرقام التسلسلية أو استخدم إضافة النطاق أعلاه...'}
+                    value={barcodeBulkInput}
+                    onChange={e => setBarcodeBulkInput(e.target.value)}
+                    style={{ fontFamily: 'monospace', fontSize: '12px' }}
+                  />
+                </div>
+
+                <button
+                  className="btn btn-primary"
+                  style={{
+                    marginBottom: '24px',
+                    padding: '10px 24px',
+                    fontSize: '13px',
+                    fontWeight: 700,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    background: barcodeBulkProduct ? 'linear-gradient(135deg, #009B4E 0%, #007a3d 100%)' : undefined
+                  }}
+                  onClick={handleBulkGenerateLabels}
+                  disabled={barcodeBulkLoading || !barcodeBulkProduct || currentSerialsCount === 0}
+                >
+                  <i className={`fa-solid ${barcodeBulkLoading ? 'fa-spinner fa-spin' : 'fa-wand-magic-sparkles'}`}></i>
+                  <span>{currentLang === 'en' ? `Generate Batch Label Sheet (${currentSerialsCount})` : `توليد كشف الملصقات الجماعي (${currentSerialsCount})`}</span>
+                </button>
+
+                {/* Multi-Label Sheet Grid (Matching physical barcode sticker format) */}
                 {barcodeBulkLabels.length > 0 && (
-                  <button className="btn btn-primary" onClick={() => window.print()}>
-                    <i className="fa-solid fa-print"></i> {currentLang === 'en' ? 'Print All Labels Sheet' : 'طباعة كامل الكشف'}
-                  </button>
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', borderBottom: '1px solid var(--surface-border)', paddingBottom: '8px' }}>
+                      <span style={{ fontWeight: 700, fontSize: '14px', color: 'var(--accent-gold)' }}>
+                        <i className="fa-solid fa-tags" style={{ marginRight: '6px' }}></i>
+                        {currentLang === 'en' ? `Generated Barcode Stickers (${barcodeBulkLabels.length})` : `ملصقات الباركود المولدة (${barcodeBulkLabels.length})`}
+                      </span>
+                      <button className="btn btn-primary btn-sm" onClick={() => window.print()}>
+                        <i className="fa-solid fa-print"></i> {currentLang === 'en' ? 'Print Stickers Sheet' : 'طباعة كشف الملصقات'}
+                      </button>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px' }}>
+                      {barcodeBulkLabels.map((lbl: any, idx: number) => (
+                        <div
+                          key={idx}
+                          className="barcode-sticker-tag"
+                          style={{
+                            background: '#FFFFFF',
+                            color: '#111827',
+                            borderRadius: '8px',
+                            border: '1.5px solid #d4af37',
+                            padding: '12px',
+                            boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                          }}
+                        >
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 75px', gap: '8px', alignItems: 'center' }}>
+                            <div>
+                              <div style={{ fontSize: '10px', fontWeight: 800, color: '#009B4E' }}>
+                                📍 {lbl.locationDescription || 'Vault Stage'}
+                              </div>
+                              <div style={{ fontSize: '9px', color: '#4B5563', marginTop: '2px' }}>
+                                <strong>GTIN-14:</strong> {lbl.gtin14}
+                              </div>
+                              <div style={{ fontSize: '9px', color: '#4B5563' }}>
+                                <strong>Batch / Lot:</strong> {lbl.lotNumber || 'N/A'}
+                              </div>
+                              <div style={{ fontSize: '9px', fontWeight: 700, color: '#111827', marginTop: '2px' }}>
+                                {lbl.productLabel}
+                              </div>
+                            </div>
+                            <div
+                              style={{ width: '70px', height: '70px', margin: '0 auto', background: '#fff', padding: '2px' }}
+                              dangerouslySetInnerHTML={{ __html: lbl.qrCodeSvg }}
+                            />
+                          </div>
+                          <div style={{ textAlign: 'center', borderTop: '1px dashed #d1d5db', paddingTop: '6px', marginTop: '6px' }}>
+                            <div
+                              style={{ maxWidth: '100%', height: '36px', margin: '0 auto', display: 'flex', justifyContent: 'center' }}
+                              dangerouslySetInnerHTML={{ __html: lbl.barcodeSvg }}
+                            />
+                            <div style={{ fontFamily: 'monospace', fontSize: '9px', fontWeight: 'bold', color: '#111827', letterSpacing: '0.5px' }}>
+                              {lbl.gs1HumanReadable}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 )}
               </div>
-
-              <div className="form-group">
-                <label style={{ fontSize: '12px', fontWeight: 600 }}>
-                  {currentLang === 'en' ? 'Paste Serials (comma, semicolon, or newline separated)' : 'أدخل الأرقام التسلسلية (مفصولة بفواصل أو أسطر)'}
-                </label>
-                <textarea
-                  className="form-control"
-                  rows={3}
-                  value={barcodeBulkInput}
-                  onChange={e => setBarcodeBulkInput(e.target.value)}
-                  style={{ fontFamily: 'monospace', fontSize: '13px' }}
-                />
-              </div>
-
-              <button
-                className="btn btn-outline"
-                style={{ marginBottom: '20px', borderColor: 'var(--accent-gold)', color: 'var(--accent-gold)' }}
-                onClick={handleBulkGenerateLabels}
-                disabled={barcodeBulkLoading}
-              >
-                <i className={`fa-solid ${barcodeBulkLoading ? 'fa-spinner fa-spin' : 'fa-wand-magic-sparkles'}`}></i>
-                <span>{currentLang === 'en' ? 'Generate Batch Label Sheet' : 'توليد كشف الملصقات الجماعي'}</span>
-              </button>
-
-              {/* Multi-Label Sheet Grid */}
-              {barcodeBulkLabels.length > 0 && (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px' }}>
-                  {barcodeBulkLabels.map((lbl: any, idx: number) => (
-                    <div
-                      key={idx}
-                      style={{
-                        background: '#FFFFFF',
-                        color: '#111827',
-                        borderRadius: '6px',
-                        border: '1px solid #009B4E',
-                        padding: '12px',
-                        fontSize: '11px',
-                        boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
-                      }}
-                    >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #009B4E', paddingBottom: '4px', marginBottom: '8px' }}>
-                        <span style={{ fontWeight: 'bold', color: '#009B4E' }}>KFH GOLD & SILVER</span>
-                        <span style={{ fontFamily: 'monospace', fontWeight: 'bold' }}>{lbl.serialNumber}</span>
-                      </div>
-                      <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontWeight: 'bold', fontSize: '12px' }}>{lbl.productLabel}</div>
-                          <div style={{ color: '#4B5563', fontSize: '10px' }}>Lot: {lbl.lotNumber || 'LOT-2026'}</div>
-                          <div style={{ color: '#059669', fontSize: '9px', fontWeight: 'bold', marginTop: '4px' }}>VERIFIED GS1-128</div>
-                        </div>
-                        <div style={{ width: '70px', height: '70px', background: '#fff', padding: '2px', border: '1px solid #E5E7EB', borderRadius: '4px' }} dangerouslySetInnerHTML={{ __html: lbl.qrCodeSvg }} />
-                      </div>
-                      <div style={{ marginTop: '8px', borderTop: '1px dashed #E5E7EB', paddingTop: '6px', textAlign: 'center' }}>
-                        <div style={{ height: '32px', margin: '0 auto' }} dangerouslySetInnerHTML={{ __html: lbl.barcodeSvg }} />
-                        <span style={{ fontSize: '9px', fontFamily: 'monospace' }}>{lbl.gs1HumanReadable}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+            );
+          })()}
         </section>
 
         {/* SCREEN VIEWPORT: STOCK THRESHOLDS & ALERTS (operational -- master_data module) */}

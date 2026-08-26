@@ -849,6 +849,31 @@ html[dir="rtl"] .modal-header {
     display: none !important;
   }
 
+  #printable-label-card {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  #printable-label-card > div:not(.barcode-sticker-tag) {
+    display: none !important;
+  }
+
+  .barcode-sticker-tag, #printable-barcode-sticker {
+    display: block !important;
+    background: #ffffff !important;
+    color: #111827 !important;
+    border: 1.5px solid #d4af37 !important;
+    border-radius: 8px !important;
+    padding: 10px 12px !important;
+    max-width: 380px !important;
+    margin: 0 auto !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
   .barcode-label-card {
     break-inside: avoid;
     page-break-inside: avoid;
