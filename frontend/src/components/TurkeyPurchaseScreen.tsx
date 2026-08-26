@@ -273,8 +273,9 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
   };
 
   // Apply OCR or Paste Matches to Selected Serials in Turkey Inventory
-  const handleApplyExtractedMatches = (serialsToSelect: string[], targetProd?: string) => {
-    const productToFilter = targetProd !== undefined ? targetProd : (showSmartModal ? smartProduct : filterProduct);
+  const handleApplyExtractedMatches = (serialsToSelect: string[], targetProd?: string | any) => {
+    const explicitProd = typeof targetProd === 'string' && targetProd.trim() ? targetProd.trim() : undefined;
+    const productToFilter = explicitProd !== undefined ? explicitProd : (showSmartModal ? smartProduct : filterProduct);
     let pool = availableItems;
     if (productToFilter) {
       pool = pool.filter(i => i.product_code === productToFilter || String(i.product_id) === String(productToFilter));
@@ -296,9 +297,9 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
       }
     });
 
-    const prodObj = turkeyInventory?.summary?.by_product?.find(p => p.product_code === productToFilter);
-    const prodLabel = productToFilter ? ` for product [${prodObj?.denomination || productToFilter}]` : '';
-    const prodLabelAr = productToFilter ? ` للمنتج [${prodObj?.denomination || productToFilter}]` : '';
+    const prodObj = turkeyInventory?.summary?.by_product?.find(p => p.product_code === productToFilter || String(p.product_id) === String(productToFilter));
+    const prodLabel = productToFilter ? ` for product [${prodObj?.denomination || (typeof productToFilter === 'string' ? productToFilter : '')}]` : '';
+    const prodLabelAr = productToFilter ? ` للمنتج [${prodObj?.denomination || (typeof productToFilter === 'string' ? productToFilter : '')}]` : '';
 
     if (matchedSerials.length === 0) {
       alert(currentLang === 'en' 
@@ -345,10 +346,11 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
   };
 
   // Handle Range Selection (Complete Numeric & Exact Padding Sequence Matching)
-  const handleApplyRangeSelect = (targetProd?: string) => {
+  const handleApplyRangeSelect = (targetProd?: string | any) => {
     const rawStart = rangeStart.trim().toUpperCase();
     const rawEnd = (rangeEnd.trim() || rangeStart.trim()).toUpperCase();
-    const productToFilter = targetProd !== undefined ? targetProd : (showSmartModal ? smartProduct : filterProduct);
+    const explicitProd = typeof targetProd === 'string' && targetProd.trim() ? targetProd.trim() : undefined;
+    const productToFilter = explicitProd !== undefined ? explicitProd : (showSmartModal ? smartProduct : filterProduct);
 
     if (!rawStart) {
       alert(currentLang === 'en' ? 'Please enter Start and End serial numbers.' : 'يرجى إدخال رقم البداية والنهاية.');
@@ -410,9 +412,9 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
       }
     });
 
-    const prodObj = turkeyInventory?.summary?.by_product?.find(p => p.product_code === productToFilter);
-    const prodLabel = productToFilter ? ` for product [${prodObj?.denomination || productToFilter}]` : '';
-    const prodLabelAr = productToFilter ? ` للمنتج [${prodObj?.denomination || productToFilter}]` : '';
+    const prodObj = turkeyInventory?.summary?.by_product?.find(p => p.product_code === productToFilter || String(p.product_id) === String(productToFilter));
+    const prodLabel = productToFilter ? ` for product [${prodObj?.denomination || (typeof productToFilter === 'string' ? productToFilter : '')}]` : '';
+    const prodLabelAr = productToFilter ? ` للمنتج [${prodObj?.denomination || (typeof productToFilter === 'string' ? productToFilter : '')}]` : '';
 
     if (matchedSerials.length === 0) {
       if (expectedSerials.length === 1) {
@@ -670,7 +672,7 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
                     <button
                       type="button"
                       className="btn btn-secondary"
-                      onClick={handleApplyRangeSelect}
+                      onClick={() => handleApplyRangeSelect()}
                       style={{ fontSize: '12px', padding: '6px 14px' }}
                     >
                       <i className="fa-solid fa-plus"></i> {currentLang === 'en' ? 'Add Range' : 'إضافة النطاق'}
@@ -1131,7 +1133,7 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
                   <button type="button" className="btn" onClick={() => setShowSmartModal(false)}>
                     {currentLang === 'en' ? 'Cancel' : 'إلغاء'}
                   </button>
-                  <button type="button" className="btn btn-primary" onClick={handleApplyRangeSelect}>
+                  <button type="button" className="btn btn-primary" onClick={() => handleApplyRangeSelect()}>
                     <i className="fa-solid fa-check-double"></i> {currentLang === 'en' ? 'Select Range from Inventory' : 'تحديد النطاق من المخزون'}
                   </button>
                 </div>
