@@ -786,6 +786,18 @@ public class PMIMSTests
         });
         await setup.Context.SaveChangesAsync();
 
+        setup.Context.InventoryItems.Add(new InventoryItem
+        {
+            ItemId = 101,
+            SerialNumber = "DEPOSIT-WF-01",
+            ProductId = 1,
+            LotId = 1,
+            LocationId = null,
+            OwnershipType = "CUSTOMER_OWNED",
+            StatusCode = "WITHDRAWN"
+        });
+        await setup.Context.SaveChangesAsync();
+
         var repo = new InventoryRepository(setup.Context);
         string serials = "[{\"serial\":\"DEPOSIT-WF-01\",\"product_id\":1}]";
         var pending = await repo.InitiateWorkflowIntakeAsync(null, "LOT-WF-01", 1, "maker_user", serials,
@@ -1102,6 +1114,23 @@ public class PMIMSTests
     {
         using var setup = CreateContext();
         await SeedBasicDataAsync(setup.Context);
+        await DbSeeder.EnsureWorkflowTemplatesAsync(setup.Context);
+
+        var groupMaker = new PrivilegeGroup { GroupName = "Treasury Operations (Maker)", Description = "Maker group", IsSystem = true };
+        var groupChecker = new PrivilegeGroup { GroupName = "Treasury Operations (Checker)", Description = "Checker group", IsSystem = true };
+        setup.Context.PrivilegeGroups.AddRange(groupMaker, groupChecker);
+        await setup.Context.SaveChangesAsync();
+
+        var userMaker = new AppUser { Username = "treasury-maker", DisplayName = "Maker", Email = "maker@test.local", PasswordHash = "test-hash" };
+        var userChecker = new AppUser { Username = "treasury-checker", DisplayName = "Checker", Email = "checker@test.local", PasswordHash = "test-hash" };
+        setup.Context.AppUsers.AddRange(userMaker, userChecker);
+        await setup.Context.SaveChangesAsync();
+
+        setup.Context.UserGroupMemberships.AddRange(
+            new UserGroupMembership { UserId = userMaker.UserId, GroupId = groupMaker.GroupId, AssignedBy = "TEST" },
+            new UserGroupMembership { UserId = userChecker.UserId, GroupId = groupChecker.GroupId, AssignedBy = "TEST" }
+        );
+        await setup.Context.SaveChangesAsync();
 
         var item = new InventoryItem
         {
@@ -1118,14 +1147,31 @@ public class PMIMSTests
 
         var repo = new InventoryRepository(setup.Context);
 
-        // 1. Create Home Delivery Request (UC07)
+        // 1. Create Home Delivery Request (UC07) - Initiates Maker-Checker HOME_DELIVERY workflow
         var hd = await repo.CreateHomeDeliveryRequestAsync(
             "HD-KFH-2026-9001", 205, "KWD-902910-101", "290011501239",
             "Fatima Al-Kandari", "+96590001234", "Hawalli", "Jabriya", "4", "Street 10", "House 12", "Flat 3", "Call before arrival", "maker-user");
 
         Assert.NotNull(hd);
-        Assert.Equal("PENDING_DISPATCH", hd.Status);
+        Assert.Equal("PENDING_APPROVAL", hd.Status);
         Assert.False(string.IsNullOrWhiteSpace(hd.VerificationOtp));
+
+        var barReserved = await setup.Context.InventoryItems.FindAsync(205);
+        Assert.Equal("RESERVED", barReserved!.StatusCode);
+
+        // 1.1 Checker Approves Home Delivery Workflow
+        var wfs = await repo.GetActiveWorkflowInstancesAsync();
+        var wfInstance = wfs.FirstOrDefault(w => w.WorkflowType == "HOME_DELIVERY" && w.EntityId == hd.RequestId);
+        if (wfInstance != null)
+        {
+            var step1 = await repo.ProcessWorkflowActionAsync(wfInstance.InstanceId, "treasury-maker", "APPROVED", "Maker verification");
+            Assert.Equal("SUCCESS", step1);
+            var step2 = await repo.ProcessWorkflowActionAsync(wfInstance.InstanceId, "treasury-checker", "APPROVED", "Checker authorization");
+            Assert.Equal("SUCCESS", step2);
+        }
+
+        var hdApproved = await repo.GetHomeDeliveryRequestByIdAsync(hd.RequestId);
+        Assert.Equal("PENDING_DISPATCH", hdApproved!.Status);
 
         // 2. Dispatch Home Delivery to Courier
         var dispatchResult = await repo.DispatchHomeDeliveryAsync(
@@ -2087,6 +2133,88 @@ public class PMIMSTests
         var bulk = await barcodeService.GenerateBulkLabelsAsync(new[] { "KFH-AU-1KG-009", "KFH-AU-1KG-010", "KFH-AU-1KG-011" });
         Assert.Equal(3, bulk.Count);
         Assert.All(bulk, b => Assert.False(string.IsNullOrEmpty(b.QrCodeSvg)));
+    }
+
+    [Fact]
+    public async Task TestBarPassportAndChronologicalMovementHistory()
+    {
+        using var setup = CreateContext();
+        await SeedBasicDataAsync(setup.Context);
+
+        var item = new InventoryItem
+        {
+            ItemId = 777,
+            SerialNumber = "AU-PASSPORT-TEST-001",
+            ProductId = 1,
+            LotId = 1,
+            LocationId = 1,
+            OwnershipType = "KFH_OWNED",
+            StatusCode = "READY",
+            AveragePurchaseCost = 21500m
+        };
+        setup.Context.InventoryItems.Add(item);
+
+        // Add 2 chronological transactions
+        var tx1 = new InventoryTransaction
+        {
+            TransactionNumber = "RCPT-LOT-01-777",
+            ItemId = 777,
+            TransactionType = "RECEIPT",
+            SourceLocationId = null,
+            DestinationLocationId = 1,
+            SourceOwnership = "TURKEY_OWNED",
+            DestinationOwnership = "TURKEY_OWNED",
+            InitiatedBy = "supplier-agent",
+            TransactionTimestamp = DateTime.UtcNow.AddHours(-10)
+        };
+        var tx2 = new InventoryTransaction
+        {
+            TransactionNumber = "TX-PUR-777-001",
+            ItemId = 777,
+            TransactionType = "PURCHASE",
+            SourceLocationId = 1,
+            DestinationLocationId = 1,
+            SourceOwnership = "TURKEY_OWNED",
+            DestinationOwnership = "KFH_OWNED",
+            InitiatedBy = "treasury-maker",
+            ApprovedBy = "treasury-checker",
+            TransactionTimestamp = DateTime.UtcNow.AddHours(-2)
+        };
+        setup.Context.InventoryTransactions.AddRange(tx1, tx2);
+
+        var coc = new ChainOfCustodyEvent
+        {
+            ItemId = 777,
+            EventType = "RECEIVED",
+            RecordedBy = "treasury-maker",
+            LocationId = 1,
+            RecordedAt = DateTime.UtcNow.AddHours(-10),
+            Notes = "Intake into vault ledger"
+        };
+        setup.Context.ChainOfCustodyEvents.Add(coc);
+        await setup.Context.SaveChangesAsync();
+
+        var repo = new InventoryRepository(setup.Context);
+
+        // Query by serial
+        var passport = await repo.GetBarPassportAndHistoryAsync("AU-PASSPORT-TEST-001");
+        Assert.NotNull(passport);
+
+        // Verify bar details
+        var barProp = passport.GetType().GetProperty("bar")?.GetValue(passport);
+        Assert.NotNull(barProp);
+        var serialProp = barProp.GetType().GetProperty("serial_number")?.GetValue(barProp)?.ToString();
+        Assert.Equal("AU-PASSPORT-TEST-001", serialProp);
+        var ownerProp = barProp.GetType().GetProperty("ownership_type")?.GetValue(barProp)?.ToString();
+        Assert.Equal("KFH_OWNED", ownerProp);
+        var statusProp = barProp.GetType().GetProperty("status")?.GetValue(barProp)?.ToString();
+        Assert.Equal("READY", statusProp);
+
+        // Verify movements
+        var movsProp = passport.GetType().GetProperty("movements")?.GetValue(passport) as System.Collections.IEnumerable;
+        Assert.NotNull(movsProp);
+        var movList = movsProp.Cast<object>().ToList();
+        Assert.Equal(2, movList.Count);
     }
 }
 

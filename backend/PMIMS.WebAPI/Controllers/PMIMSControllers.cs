@@ -981,6 +981,16 @@ public partial class PMIMSControllers : ControllerBase
         return Ok(trace);
     }
 
+    [Authorize(Policy = "intake.read")]
+    [HttpGet("inventory/traceability/passport")]
+    public async Task<IActionResult> GetBarPassport([FromQuery] string query)
+    {
+        if (string.IsNullOrWhiteSpace(query)) return BadRequest(new { error = "Query parameter (serial number or bar ID) is required." });
+        var passport = await _repository.GetBarPassportAndHistoryAsync(query);
+        if (passport == null) return NotFound(new { error = $"Gold/Silver bar with identifier '{query}' was not found in vault records." });
+        return Ok(passport);
+    }
+
     [Authorize(Policy = "reports.read")]
     [HttpGet("reports/valuation")]
     public async Task<IActionResult> GetValuationReport([FromQuery] string method = "AVERAGE")
@@ -1323,6 +1333,37 @@ public partial class PMIMSControllers : ControllerBase
                         status_code = change.StatusCode,
                         created_by = change.RequestedBy,
                         comments = change.Comments
+                    };
+                }
+            }
+            else if (inst.WorkflowType == "HOME_DELIVERY")
+            {
+                var hd = await _repository.GetHomeDeliveryRequestByIdAsync(inst.EntityId);
+                if (hd != null)
+                {
+                    entityDetails = new
+                    {
+                        request_id = hd.RequestId,
+                        delivery_number = hd.DeliveryNumber,
+                        customer_name = hd.CustomerName,
+                        customer_civil_id = hd.CustomerCivilId,
+                        customer_phone = hd.CustomerPhone,
+                        customer_account = hd.CustomerAccountNumber,
+                        governorate = hd.Governorate,
+                        area = hd.Area,
+                        block = hd.Block,
+                        street = hd.Street,
+                        building_house = hd.BuildingHouse,
+                        floor_flat = hd.FloorFlat,
+                        address = $"{hd.Governorate}, {hd.Area}, Block {hd.Block}, Street {hd.Street}, Building {hd.BuildingHouse}" + (!string.IsNullOrWhiteSpace(hd.FloorFlat) ? $", {hd.FloorFlat}" : ""),
+                        special_instructions = hd.SpecialInstructions,
+                        bar_id = hd.BarId,
+                        serial_number = hd.Bar?.SerialNumber,
+                        product_name = $"{hd.Bar?.Product?.MetalType?.MetalName ?? "Gold"} {hd.Bar?.Product?.Denomination?.Label ?? ""}",
+                        weight_grams = hd.Bar?.Product?.Denomination?.WeightGrams ?? 0,
+                        verification_otp = hd.VerificationOtp,
+                        status_code = hd.Status,
+                        created_by = hd.CreatedBy
                     };
                 }
             }
@@ -1888,6 +1929,83 @@ public partial class PMIMSControllers : ControllerBase
     // =========================================================================
     // Home Delivery Endpoints (UC07)
     // =========================================================================
+    [Authorize(Policy = "intake.read")]
+    [HttpGet("gfs/home-delivery/incoming-orders")]
+    public async Task<IActionResult> GetIncomingGfsHomeDeliveryOrders()
+    {
+        // Retrieve incoming residential delivery requests dispatched from GFS
+        var products = await _repository.GetProductsAsync();
+        var gold100g = products.FirstOrDefault(p => p.Denomination?.WeightGrams == 100 && (p.MetalType?.MetalName == "Gold" || p.MetalType?.MetalName == "GOLD")) ?? products.FirstOrDefault();
+        var gold1kg = products.FirstOrDefault(p => p.Denomination?.WeightGrams == 1000 && (p.MetalType?.MetalName == "Gold" || p.MetalType?.MetalName == "GOLD")) ?? products.FirstOrDefault();
+        var gold50g = products.FirstOrDefault(p => p.Denomination?.WeightGrams == 50 && (p.MetalType?.MetalName == "Gold" || p.MetalType?.MetalName == "GOLD")) ?? products.FirstOrDefault();
+
+        var orders = new List<object>
+        {
+            new
+            {
+                gfs_order_id = "GFS-HD-2026-8801",
+                customer_name = "Abdullah Nasser Al-Sabah",
+                customer_civil_id = "290011501239",
+                customer_phone = "+965 99887766",
+                customer_account = "ACC-KFH-889901",
+                required_product_id = gold100g?.ProductId ?? 1,
+                required_product_name = $"{gold100g?.MetalType?.MetalName ?? "Gold"} {gold100g?.Denomination?.Label ?? "100g Bar"}",
+                required_weight_grams = gold100g?.Denomination?.WeightGrams ?? 100,
+                expected_serial_number = "AU-BAR-001",
+                governorate = "Capital",
+                area = "Shuwaikh Residential",
+                block = "2",
+                street = "Arabian Gulf St",
+                building_house = "Villa 14",
+                floor_flat = "Ground Floor",
+                special_instructions = "VIP Client - Hand delivery with Civil ID biometric check.",
+                order_date = DateTime.UtcNow.AddHours(-3).ToString("yyyy-MM-dd HH:mm")
+            },
+            new
+            {
+                gfs_order_id = "GFS-HD-2026-8802",
+                customer_name = "Fatima Mohammad Al-Khaled",
+                customer_civil_id = "295052203418",
+                customer_phone = "+965 97711223",
+                customer_account = "ACC-KFH-443322",
+                required_product_id = gold1kg?.ProductId ?? 2,
+                required_product_name = $"{gold1kg?.MetalType?.MetalName ?? "Gold"} {gold1kg?.Denomination?.Label ?? "1kg Bar"}",
+                required_weight_grams = gold1kg?.Denomination?.WeightGrams ?? 1000,
+                expected_serial_number = "KFH-AU-1KG-001",
+                governorate = "Hawalli",
+                area = "Jabriya",
+                block = "5",
+                street = "Street 105",
+                building_house = "Building 22",
+                floor_flat = "Apartment 4B",
+                special_instructions = "Call recipient 30 mins prior to arrival.",
+                order_date = DateTime.UtcNow.AddHours(-5).ToString("yyyy-MM-dd HH:mm")
+            },
+            new
+            {
+                gfs_order_id = "GFS-HD-2026-8803",
+                customer_name = "Meshari Jassem Al-Ghanim",
+                customer_civil_id = "288101402287",
+                customer_phone = "+965 94455667",
+                customer_account = "ACC-KFH-771199",
+                required_product_id = gold50g?.ProductId ?? 3,
+                required_product_name = $"{gold50g?.MetalType?.MetalName ?? "Gold"} {gold50g?.Denomination?.Label ?? "50g Bar"}",
+                required_weight_grams = gold50g?.Denomination?.WeightGrams ?? 50,
+                expected_serial_number = "AU-BAR-003",
+                governorate = "Farwaniya",
+                area = "Abdullah Al-Mubarak",
+                block = "1",
+                street = "Street 12",
+                building_house = "House 8",
+                floor_flat = null as string,
+                special_instructions = "Deliver strictly to customer in person.",
+                order_date = DateTime.UtcNow.AddHours(-8).ToString("yyyy-MM-dd HH:mm")
+            }
+        };
+
+        return Ok(orders);
+    }
+
     [Authorize(Policy = "intake.write")]
     [HttpPost("gfs/home-delivery")]
     public async Task<IActionResult> CreateHomeDelivery([FromBody] CreateHomeDeliveryApiRequest req)

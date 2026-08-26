@@ -239,6 +239,10 @@ public interface IInventoryRepository
     // detail if it's a TRANSFER, and the full chain-of-custody timeline for the item.
     Task<dynamic?> GetTransactionTraceAsync(int transactionId);
 
+    // Assembles full Piece Traceability / Bar Passport: current status, ownership, location,
+    // product specs, plus chronological movement history & chain of custody events.
+    Task<dynamic?> GetBarPassportAndHistoryAsync(string query);
+
     // =========================================================================
     // IFRS Valuation Disclosures (IAS 2 lower-of-cost-or-NRV, IFRS 13 fair value)
     // =========================================================================

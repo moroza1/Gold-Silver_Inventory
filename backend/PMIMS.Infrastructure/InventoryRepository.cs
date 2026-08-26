@@ -446,6 +446,34 @@ public class InventoryRepository : IInventoryRepository
                 bool isDamaged = (element.TryGetProperty("is_damaged", out var idm) && (idm.ValueKind is JsonValueKind.True || (idm.ValueKind is JsonValueKind.String && idm.GetString()?.ToLower() == "true")));
                 string? damageReason = element.TryGetProperty("damage_reason", out var dr) ? dr.GetString() : null;
 
+                if (isCustomerReceipt)
+                {
+                    var existingItem = await _dbContext.InventoryItems.FirstOrDefaultAsync(i => i.ProductId == productId && i.SerialNumber.ToUpper() == serial.ToUpper());
+                    if (existingItem != null)
+                    {
+                        existingItem.LocationId = locationId;
+                        existingItem.LotId = lot.LotId;
+                        existingItem.OwnershipType = finalOwnershipType;
+                        existingItem.StatusCode = receiptReason == "CUSTODY_DEPOSIT" ? "HELD_IN_CUSTODY" : "READY";
+                        if (isDamaged)
+                        {
+                            existingItem.IsDamaged = true;
+                            existingItem.DamageReason = damageReason ?? "Damaged upon receipt from customer";
+                            existingItem.InspectionDate = DateTime.UtcNow;
+                        }
+                        if (hasLbmaData)
+                        {
+                            if (!string.IsNullOrWhiteSpace(refinerName)) existingItem.RefinerName = refinerName;
+                            if (!string.IsNullOrWhiteSpace(refinerLbmaId)) existingItem.RefinerLbmaId = refinerLbmaId;
+                            if (!string.IsNullOrWhiteSpace(assayCert)) existingItem.AssayCertificateNumber = assayCert;
+                            if (fineness.HasValue) existingItem.FinenessPpt = fineness;
+                            if (!string.IsNullOrWhiteSpace(hallmark)) existingItem.HallmarkNumber = hallmark;
+                        }
+                        newItems.Add(existingItem);
+                        continue;
+                    }
+                }
+
                 var item = new InventoryItem
                 {
                     SerialNumber = serial,
@@ -455,7 +483,7 @@ public class InventoryRepository : IInventoryRepository
                     OwnershipType = finalOwnershipType,
                     StatusCode = "READY",
                     IsDamaged = isDamaged,
-                    DamageReason = isDamaged ? (damageReason ?? "Damaged upon receipt from supplier") : null,
+                    DamageReason = isDamaged ? (damageReason ?? (isCustomerReceipt ? "Damaged upon receipt from customer" : "Damaged upon receipt from supplier")) : null,
                     InspectionDate = isDamaged ? DateTime.UtcNow : null,
                     RefinerName = refinerName,
                     RefinerLbmaId = refinerLbmaId,
@@ -1905,6 +1933,16 @@ public class InventoryRepository : IInventoryRepository
                 var change = await _dbContext.PendingThresholdChanges.FindAsync(instance.EntityId);
                 if (change != null) change.StatusCode = "REJECTED";
             }
+            else if (instance.WorkflowType == "HOME_DELIVERY")
+            {
+                var hd = await _dbContext.HomeDeliveryRequests.FindAsync(instance.EntityId);
+                if (hd != null)
+                {
+                    hd.Status = "REJECTED";
+                    var bar = await _dbContext.InventoryItems.FindAsync(hd.BarId);
+                    if (bar != null && bar.StatusCode == "RESERVED") bar.StatusCode = "READY";
+                }
+            }
         }
         else if (action == "RETURNED")
         {
@@ -1942,6 +1980,11 @@ public class InventoryRepository : IInventoryRepository
             {
                 var change = await _dbContext.PendingThresholdChanges.FindAsync(instance.EntityId);
                 if (change != null) change.StatusCode = "PENDING_APPROVAL";
+            }
+            else if (instance.WorkflowType == "HOME_DELIVERY")
+            {
+                var hd = await _dbContext.HomeDeliveryRequests.FindAsync(instance.EntityId);
+                if (hd != null) hd.Status = "PENDING_APPROVAL";
             }
         }
         else if (action == "APPROVED")
@@ -2113,6 +2156,14 @@ public class InventoryRepository : IInventoryRepository
                                 }
                             }
                         }
+                    }
+                }
+                else if (instance.WorkflowType == "HOME_DELIVERY")
+                {
+                    var hd = await _dbContext.HomeDeliveryRequests.FindAsync(instance.EntityId);
+                    if (hd != null)
+                    {
+                        hd.Status = "PENDING_DISPATCH";
                     }
                 }
             }
@@ -2932,42 +2983,42 @@ public class InventoryRepository : IInventoryRepository
             throw new ArgumentException("sourceType must be SUPPLIER or CUSTOMER.");
         }
 
-        // UC03 E1: Duplicate serial number validation (combined Product Type + Serial Number)
-        if (!string.IsNullOrWhiteSpace(serialsJsonList))
+        if (sourceType == "SUPPLIER")
         {
-            using var jsonDoc = JsonDocument.Parse(serialsJsonList);
-            var serialsSet = new HashSet<(int productId, string serial)>();
-            foreach (var element in jsonDoc.RootElement.EnumerateArray())
+            // UC03 E1: Duplicate serial number validation (combined Product Type + Serial Number)
+            if (!string.IsNullOrWhiteSpace(serialsJsonList))
             {
-                string? serial = element.TryGetProperty("serial", out var s) ? s.GetString() : (element.TryGetProperty("serial_number", out var sn) ? sn.GetString() : null);
-                int productId = element.TryGetProperty("product_id", out var p) ? p.GetInt32() : (element.TryGetProperty("productId", out var p2) ? p2.GetInt32() : 0);
-
-                if (!string.IsNullOrWhiteSpace(serial))
+                using var jsonDoc = JsonDocument.Parse(serialsJsonList);
+                var serialsSet = new HashSet<(int productId, string serial)>();
+                foreach (var element in jsonDoc.RootElement.EnumerateArray())
                 {
-                    if (productId > 0)
+                    string? serial = element.TryGetProperty("serial", out var s) ? s.GetString() : (element.TryGetProperty("serial_number", out var sn) ? sn.GetString() : null);
+                    int productId = element.TryGetProperty("product_id", out var p) ? p.GetInt32() : (element.TryGetProperty("productId", out var p2) ? p2.GetInt32() : 0);
+
+                    if (!string.IsNullOrWhiteSpace(serial))
                     {
-                        if (!serialsSet.Add((productId, serial.Trim().ToUpperInvariant())))
+                        if (productId > 0)
                         {
-                            throw new InvalidOperationException($"Duplicate Serial Number in shipment batch: '{serial}' for the same product type. Each bar of the same product must have a unique serial number.");
+                            if (!serialsSet.Add((productId, serial.Trim().ToUpperInvariant())))
+                            {
+                                throw new InvalidOperationException($"Duplicate Serial Number in shipment batch: '{serial}' for the same product type. Each bar of the same product must have a unique serial number.");
+                            }
+                            if (await _dbContext.InventoryItems.AnyAsync(i => i.ProductId == productId && i.SerialNumber == serial))
+                            {
+                                throw new InvalidOperationException($"Duplicate Serial Number: '{serial}' already exists in inventory records for this product type. (UC03 Exception E1)");
+                            }
                         }
-                        if (await _dbContext.InventoryItems.AnyAsync(i => i.ProductId == productId && i.SerialNumber == serial))
+                        else
                         {
-                            throw new InvalidOperationException($"Duplicate Serial Number: '{serial}' already exists in inventory records for this product type. (UC03 Exception E1)");
-                        }
-                    }
-                    else
-                    {
-                        if (await _dbContext.InventoryItems.AnyAsync(i => i.SerialNumber == serial))
-                        {
-                            throw new InvalidOperationException($"Duplicate Serial Number: '{serial}' already exists in inventory records. (UC03 Exception E1)");
+                            if (await _dbContext.InventoryItems.AnyAsync(i => i.SerialNumber == serial))
+                            {
+                                throw new InvalidOperationException($"Duplicate Serial Number: '{serial}' already exists in inventory records. (UC03 Exception E1)");
+                            }
                         }
                     }
                 }
             }
-        }
 
-        if (sourceType == "SUPPLIER")
-        {
             if (poId != null)
             {
                 var po = await _dbContext.PurchaseOrders.FindAsync(poId.Value);
@@ -3005,6 +3056,49 @@ public class InventoryRepository : IInventoryRepository
             if (receiptReason == "CUSTODY_DEPOSIT" && accountId == null)
             {
                 throw new InvalidOperationException("A customer account is required to hold a custody deposit.");
+            }
+
+            // Customer Receipt Validation:
+            // 1. We can only accept Product Type and Serial Number that previously existed in out stock records.
+            // 2. Bar status must NOT currently be active KFH_OWNED or TURKEY_OWNED in vault.
+            if (!string.IsNullOrWhiteSpace(serialsJsonList))
+            {
+                using var jsonDoc = JsonDocument.Parse(serialsJsonList);
+                var serialsSet = new HashSet<(int productId, string serial)>();
+                foreach (var element in jsonDoc.RootElement.EnumerateArray())
+                {
+                    string? serial = element.TryGetProperty("serial", out var s) ? s.GetString() : (element.TryGetProperty("serial_number", out var sn) ? sn.GetString() : null);
+                    int productId = element.TryGetProperty("product_id", out var p) ? p.GetInt32() : (element.TryGetProperty("productId", out var p2) ? p2.GetInt32() : 0);
+
+                    if (string.IsNullOrWhiteSpace(serial))
+                    {
+                        throw new InvalidOperationException("Serial number is required for customer receipt.");
+                    }
+
+                    serial = serial.Trim();
+
+                    if (!serialsSet.Add((productId, serial.ToUpperInvariant())))
+                    {
+                        throw new InvalidOperationException($"Duplicate Serial Number in customer receipt batch: '{serial}'.");
+                    }
+
+                    var existingItem = productId > 0
+                        ? await _dbContext.InventoryItems.FirstOrDefaultAsync(i => i.ProductId == productId && i.SerialNumber.ToUpper() == serial.ToUpper())
+                        : await _dbContext.InventoryItems.FirstOrDefaultAsync(i => i.SerialNumber.ToUpper() == serial.ToUpper());
+
+                    if (existingItem == null)
+                    {
+                        throw new InvalidOperationException($"Cannot receive bar '{serial}' from customer: This product and serial number was never recorded in KFH stock history. Only precious metals previously existing in stock records can be received from customers.");
+                    }
+
+                    // Validate that it's NOT currently active KFH_OWNED or TURKEY_OWNED in vault
+                    bool isKfhOrTurkeyOwned = existingItem.OwnershipType.Equals("KFH_OWNED", StringComparison.OrdinalIgnoreCase) || 
+                                              existingItem.OwnershipType.Equals("TURKEY_OWNED", StringComparison.OrdinalIgnoreCase);
+                    if (isKfhOrTurkeyOwned && (existingItem.StatusCode == "READY" || existingItem.StatusCode == "RESERVED" || existingItem.StatusCode == "IN_TRANSFER"))
+                    {
+                        throw new InvalidOperationException($"Cannot receive bar '{serial}' from customer: This bar is currently active in vault inventory as '{existingItem.OwnershipType}' (Status: {existingItem.StatusCode}). Customer receipt is not permitted while actively owned by KFH or Turkey supplier.");
+                    }
+                }
             }
         }
 
@@ -3619,6 +3713,145 @@ public class InventoryRepository : IInventoryRepository
         };
     }
 
+    public async Task<dynamic?> GetBarPassportAndHistoryAsync(string query)
+    {
+        if (string.IsNullOrWhiteSpace(query)) return null;
+
+        var cleanQuery = query.Trim();
+        bool isNumericId = int.TryParse(cleanQuery, out int parsedId);
+
+        var item = await _dbContext.InventoryItems
+            .Include(i => i.Product).ThenInclude(p => p!.MetalType)
+            .Include(i => i.Product).ThenInclude(p => p!.Denomination)
+            .Include(i => i.Product).ThenInclude(p => p!.Purity)
+            .Include(i => i.Product).ThenInclude(p => p!.Brand)
+            .Include(i => i.Location).ThenInclude(l => l!.Vault)
+            .Include(i => i.Location).ThenInclude(l => l!.Branch)
+            .Include(i => i.Lot).ThenInclude(lot => lot!.Vendor)
+            .FirstOrDefaultAsync(i =>
+                (isNumericId && i.ItemId == parsedId) ||
+                i.SerialNumber.ToLower() == cleanQuery.ToLower()
+            );
+
+        if (item == null) return null;
+
+        // 1. Transactions / Movements for this bar
+        var transactions = await _dbContext.InventoryTransactions
+            .Include(t => t.SourceLocation).ThenInclude(l => l!.Vault)
+            .Include(t => t.DestinationLocation).ThenInclude(l => l!.Vault)
+            .Where(t => t.ItemId == item.ItemId)
+            .OrderByDescending(t => t.TransactionTimestamp)
+            .ToListAsync();
+
+        // 2. Chain of custody events
+        var custodyEvents = await _dbContext.ChainOfCustodyEvents
+            .Include(e => e.Location)
+            .Where(e => e.ItemId == item.ItemId)
+            .OrderByDescending(e => e.RecordedAt)
+            .ToListAsync();
+
+        // 3. Customer holding if any
+        var holding = await _dbContext.CustomerHoldings
+            .Include(h => h.Customer)
+            .Include(h => h.Account)
+            .FirstOrDefaultAsync(h => h.ItemId == item.ItemId && h.StatusCode == "HELD_IN_CUSTODY");
+
+        // 3.1 Reservation if any
+        var activeReservation = await _dbContext.ReservationRequests
+            .Include(r => r.Customer)
+            .FirstOrDefaultAsync(r => r.ItemId == item.ItemId && r.StatusCode == "ACTIVE" && r.ExpiresAt > DateTime.UtcNow);
+
+        // 4. Linked movements
+        var txIds = transactions.Select(t => t.TransactionId).ToList();
+        var movements = await _dbContext.MovementTransactions
+            .Where(m => txIds.Contains(m.TransactionId))
+            .ToListAsync();
+
+        return new
+        {
+            bar = new
+            {
+                item_id = item.ItemId,
+                serial_number = item.SerialNumber,
+                product_id = item.ProductId,
+                product_code = item.Product?.ProductCode,
+                metal_name = item.Product?.MetalType?.MetalName ?? "Gold",
+                denomination = item.Product?.Denomination?.Label,
+                weight_grams = item.Product?.Denomination?.WeightGrams ?? 0,
+                weight_ounces = item.Product?.Denomination?.WeightOunces ?? 0,
+                purity_value = item.Product?.Purity?.PurityValue ?? 99.99m,
+                purity_desc = item.Product?.Purity?.Description ?? "999.9 Fine Purity (24K)",
+                brand_name = item.Product?.Brand?.BrandName ?? item.Product?.OriginCountry ?? "Valcambi Suisse",
+                origin_country = item.Product?.Brand?.CountryOfOrigin ?? item.Product?.OriginCountry ?? "Switzerland",
+                is_lbma_certified = item.Product?.Brand?.IsLbmaCertified ?? true,
+                status = item.StatusCode,
+                is_damaged = item.IsDamaged,
+                damage_reason = item.DamageReason,
+                damage_approval_status = item.DamageApprovalStatus,
+                damage_doc_number = item.DamageEvidenceDocId,
+                is_reserved = activeReservation != null || item.StatusCode == "RESERVED",
+                reserved_by = activeReservation?.Customer?.CustomerName ?? (item.StatusCode == "RESERVED" ? "Operations" : null),
+                reservation_expires_at = activeReservation?.ExpiresAt,
+                ownership_type = item.OwnershipType,
+                customer_holding = holding == null ? null : new
+                {
+                    customer_id = holding.CustomerId,
+                    customer_name = holding.Customer?.CustomerName ?? holding.CustomerName,
+                    civil_id = holding.Customer?.CivilId,
+                    mobile = holding.Customer?.MobileNumber,
+                    account_number = holding.Account?.AccountNumber,
+                    holding_status = holding.StatusCode
+                },
+                location_id = item.LocationId,
+                vault_name = item.Location?.Vault?.VaultName ?? "Main Vault",
+                branch_name = item.Location?.Branch?.BranchName ?? "HQ Vault",
+                zone_room = item.Location?.ZoneRoom,
+                shelf_row = item.Location?.ShelfRow,
+                slot_bin = item.Location?.SlotBin,
+                location_description = item.Location?.Description,
+                lot_id = item.LotId,
+                lot_number = item.Lot?.LotNumber,
+                acquisition_date = item.Lot?.AcquisitionDate ?? item.Lot?.CreatedAt ?? DateTime.UtcNow,
+                vendor_name = item.Lot?.Vendor?.VendorName ?? "Valcambi Suisse",
+                average_purchase_cost = item.AveragePurchaseCost,
+                created_at = item.Lot?.CreatedAt ?? DateTime.UtcNow
+            },
+            movements = transactions.Select(t =>
+            {
+                var mov = movements.FirstOrDefault(m => m.TransactionId == t.TransactionId);
+                return new
+                {
+                    transaction_id = t.TransactionId,
+                    transaction_number = t.TransactionNumber,
+                    transaction_type = t.TransactionType,
+                    source_vault = t.SourceLocation?.Vault?.VaultName,
+                    source_location = t.SourceLocation?.Description,
+                    destination_vault = t.DestinationLocation?.Vault?.VaultName,
+                    destination_location = t.DestinationLocation?.Description,
+                    source_ownership = t.SourceOwnership,
+                    destination_ownership = t.DestinationOwnership,
+                    rate_used = t.RateUsed,
+                    fees_applied = t.FeesApplied,
+                    initiated_by = t.InitiatedBy,
+                    approved_by = t.ApprovedBy,
+                    timestamp = t.TransactionTimestamp,
+                    courier_details = mov?.CourierDetails,
+                    shipment_ref = mov?.ShipmentRefNumber
+                };
+            }),
+            custody_events = custodyEvents.Select(e => new
+            {
+                custody_event_id = e.CustodyEventId,
+                event_type = e.EventType,
+                location = e.Location?.Description,
+                recorded_by = e.RecordedBy,
+                recorded_at = e.RecordedAt,
+                reference_number = e.ReferenceNumber,
+                notes = e.Notes
+            })
+        };
+    }
+
     // =========================================================================
     // IFRS Valuation Disclosures (IAS 2 lower-of-cost-or-NRV, IFRS 13 fair value)
     // =========================================================================
@@ -4168,6 +4401,22 @@ public class InventoryRepository : IInventoryRepository
         var item = await _dbContext.InventoryItems.FindAsync(itemId);
         if (item == null) throw new InvalidOperationException("Item not found.");
 
+        if (item.IsDamaged || item.StatusCode == "DAMAGED" || item.DamageApprovalStatus == "APPROVED")
+        {
+            throw new InvalidOperationException($"Gold bar '{item.SerialNumber}' is already confirmed as DAMAGED / Quarantined and cannot be reported again.");
+        }
+
+        if (item.DamageApprovalStatus == "PENDING_APPROVAL")
+        {
+            throw new InvalidOperationException($"Gold bar '{item.SerialNumber}' already has an active damage report awaiting Maker-Checker approval and cannot be reported again.");
+        }
+
+        var hasActiveWf = await _dbContext.WorkflowInstances.AnyAsync(w => w.WorkflowType == "DAMAGE_BAR" && w.EntityId == itemId && w.StatusCode == "PENDING_MAKER");
+        if (hasActiveWf)
+        {
+            throw new InvalidOperationException($"Gold bar '{item.SerialNumber}' already has a pending DAMAGE_BAR workflow in progress.");
+        }
+
         // Invariant: IsDamaged flag must NOT become effective until Maker-Checker authorization
         item.IsDamaged = false;
         item.DamageApprovalStatus = "PENDING_APPROVAL";
@@ -4434,6 +4683,13 @@ public class InventoryRepository : IInventoryRepository
         string customerName, string customerPhone, string governorate, string area, string block,
         string street, string buildingHouse, string? floorFlat, string? specialInstructions, string createdBy)
     {
+        var bar = await _dbContext.InventoryItems.Include(b => b.Product).FirstOrDefaultAsync(b => b.ItemId == barId);
+        if (bar == null) throw new InvalidOperationException("Gold bar not found in inventory.");
+        if (bar.IsDamaged || bar.StatusCode == "DAMAGED") throw new InvalidOperationException($"Gold bar '{bar.SerialNumber}' is marked as damaged and cannot be selected for delivery.");
+        if (bar.StatusCode != "READY") throw new InvalidOperationException($"Gold bar '{bar.SerialNumber}' is currently in status '{bar.StatusCode}'. Only READY bars can be dispatched.");
+
+        bar.StatusCode = "RESERVED";
+
         // Generate a 6-digit verification OTP
         string otp = new Random().Next(100000, 999999).ToString();
 
@@ -4453,13 +4709,25 @@ public class InventoryRepository : IInventoryRepository
             FloorFlat = floorFlat,
             SpecialInstructions = specialInstructions,
             VerificationOtp = otp,
-            Status = "PENDING_DISPATCH",
+            Status = "PENDING_APPROVAL",
             CreatedAt = DateTime.UtcNow,
             CreatedBy = createdBy
         };
 
         _dbContext.HomeDeliveryRequests.Add(hd);
         await _dbContext.SaveChangesAsync();
+
+        try
+        {
+            await StartWorkflowInstanceAsync("HOME_DELIVERY", hd.RequestId, createdBy);
+        }
+        catch (Exception)
+        {
+            // Fallback
+        }
+
+        await SaveAuditLogAsync(createdBy, "SYSTEM", "HOME_DELIVERY", $"Initiated Home Delivery Workflow for bar '{bar.SerialNumber}' to {customerName} (Delivery #{deliveryNumber})", entityType: "HomeDeliveryRequest", entityId: deliveryNumber);
+
         return hd;
     }
 

@@ -385,9 +385,10 @@ const Translations: Record<string, Record<string, string>> = {
     th_history: "Workflow Audit History",
     th_po_details: "Transaction Details",
     btn_sign_off: "Sign Off / Approve",
-    btn_reject: "Reject Operation",
-    lbl_comments: "Action Comments",
     menu_pending_requests: "My Pending Actions",
+    menu_bar_traceability: "Bar Passport & Traceability",
+    title_bar_traceability: "Serialized Bar Passport & Movement History",
+    bar_traceability_subtitle: "Instant piece verification via barcode/QR scan or product/serial selection with comprehensive bar specifications, ownership, coordinate location, and chronological movement ledger.",
     title_pending_requests: "Pending Requests Dashboard",
     pending_requests_subtitle: "Double click on any request to view details and process approvals.",
     th_assigned_role: "Assigned Authority",
@@ -699,9 +700,10 @@ const Translations: Record<string, Record<string, string>> = {
     th_history: "سجل التدقيق التاريخي للمسار",
     th_po_details: "تفاصيل العملية",
     btn_sign_off: "توقيع واعتماد",
-    btn_reject: "رفض المعاملة",
-    lbl_comments: "ملاحظات القرار",
     menu_user_admin: "إدارة المستخدمين والمجموعات",
+    menu_bar_traceability: "جواز السبيكة وسجل حركاتها",
+    title_bar_traceability: "جواز السبيكة ومسار الحركات التاريخية",
+    bar_traceability_subtitle: "الاستعلام الفوري عن السبيكة بمسح الباركود أو باختيار الصنف والرقم التسلسلي مع عرض مواصفات السبيكة والملكية والموقع ومسار الحركات بالكامل مرتباً بالوقت والتاريخ.",
     menu_notifications: "الإشعارات",
     title_notifications: "إشعارات البريد الإلكتروني الإدارية وتنبيهات الأحداث",
     notifications_subtitle: "إعداد القوائم البريدية للتقارير المجدولة (رصيد المخزون، المخزون المنخفض، الحركات عالية القيمة) والتنبيهات الفورية التي تُطلق فور وقوع حدث رئيسي (اكتمال حركة تحويل، اكتشاف فرق في الجرد).",
@@ -1466,6 +1468,11 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   // UC07: Home Delivery states (KFH Kuwait Door-to-Door Fulfillment)
   const [homeDeliveries, setHomeDeliveries] = useState<any[]>([]);
   const [showCreateHomeDeliveryModal, setShowCreateHomeDeliveryModal] = useState(false);
+  const [incomingGfsOrders, setIncomingGfsOrders] = useState<any[]>([]);
+  const [selectedGfsOrderId, setSelectedGfsOrderId] = useState<string>('');
+  const [hdScanSerial, setHdScanSerial] = useState('');
+  const [hdMatchedBar, setHdMatchedBar] = useState<any | null>(null);
+  const [hdScanError, setHdScanError] = useState<string | null>(null);
   const [newHdBarId, setNewHdBarId] = useState('');
   const [newHdAccount, setNewHdAccount] = useState('');
   const [newHdCivilId, setNewHdCivilId] = useState('');
@@ -1479,6 +1486,107 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   const [newHdFlat, setNewHdFlat] = useState('');
   const [newHdInstructions, setNewHdInstructions] = useState('');
   const [civilIdValidationResult, setCivilIdValidationResult] = useState<{ isValid: boolean; message: string } | null>(null);
+
+  const fetchIncomingGfsOrders = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/gfs/home-delivery/incoming-orders`);
+      if (res.ok) {
+        const data = await res.json();
+        setIncomingGfsOrders(data);
+        if (data.length > 0 && !selectedGfsOrderId) {
+          applyGfsOrderToHdModal(data[0]);
+        }
+      }
+    } catch (_) {}
+  };
+
+  const applyGfsOrderToHdModal = (order: any) => {
+    setSelectedGfsOrderId(order.gfs_order_id);
+    setNewHdAccount(order.customer_account || '');
+    setNewHdCivilId(order.customer_civil_id || '');
+    setNewHdName(order.customer_name || '');
+    setNewHdPhone(order.customer_phone || '');
+    setNewHdGovernorate(order.governorate || 'Capital');
+    setNewHdArea(order.area || '');
+    setNewHdBlock(order.block || '1');
+    setNewHdStreet(order.street || '');
+    setNewHdBuilding(order.building_house || '');
+    setNewHdFlat(order.floor_flat || '');
+    setNewHdInstructions(order.special_instructions || '');
+    setHdScanSerial(order.expected_serial_number || '');
+    setHdMatchedBar(null);
+    setHdScanError(null);
+    setNewHdBarId('');
+    setCivilIdValidationResult({ isValid: true, message: 'Valid Kuwait PACI Civil ID format' });
+  };
+
+  const handleHdVerifyScannedBar = (scannedInput: string) => {
+    const raw = (scannedInput || hdScanSerial).trim();
+    if (!raw) {
+      setHdMatchedBar(null);
+      setHdScanError(null);
+      setNewHdBarId('');
+      return;
+    }
+    const parsed = parseGs1Barcode(raw);
+    const serial = (parsed.serial || raw).toUpperCase();
+
+    const selectedOrder = incomingGfsOrders.find(o => o.gfs_order_id === selectedGfsOrderId);
+
+    // 1. Look up serial in inventory
+    const bar = inventoryList.find((i: any) => i.serial_number?.toUpperCase() === serial);
+    if (!bar) {
+      setHdMatchedBar(null);
+      setNewHdBarId('');
+      setHdScanError(currentLang === 'en'
+        ? `Serial number '${serial}' was not found in vault inventory.`
+        : `الرقم التسلسلي '${serial}' غير موجود في سجلات الخزينة.`);
+      return;
+    }
+
+    // 2. Validate product type & denomination match
+    if (selectedOrder) {
+      const matchProdId = bar.product_id && selectedOrder.required_product_id && bar.product_id === selectedOrder.required_product_id;
+      const matchWeight = bar.weight_grams && selectedOrder.required_weight_grams && Math.abs(bar.weight_grams - selectedOrder.required_weight_grams) < 0.01;
+      const matchDenom = selectedOrder.required_product_name && (
+        String(bar.denomination || '').toLowerCase().includes(String(selectedOrder.required_product_name || '').toLowerCase()) ||
+        String(selectedOrder.required_product_name || '').toLowerCase().includes(String(bar.denomination || '').toLowerCase())
+      );
+
+      if (!matchProdId && !matchWeight && !matchDenom) {
+        setHdMatchedBar(null);
+        setNewHdBarId('');
+        setHdScanError(currentLang === 'en'
+          ? `Product mismatch: Scanned bar '${serial}' is a '${bar.metal} ${bar.denomination || bar.product_code}' (${bar.weight_grams}g), but this GFS order requires '${selectedOrder.required_product_name}' (${selectedOrder.required_weight_grams}g).`
+          : `عدم تطابق في فئة المنتج: السبيكة الممسوحة '${serial}' هي '${bar.metal} ${bar.denomination || bar.product_code}' (${bar.weight_grams} جرام)، بينما يتطلب طلب GFS فئة '${selectedOrder.required_product_name}' (${selectedOrder.required_weight_grams} جرام).`);
+        return;
+      }
+    }
+
+    // 3. Validate status
+    if (bar.is_damaged || bar.status === 'DAMAGED') {
+      setHdMatchedBar(null);
+      setNewHdBarId('');
+      setHdScanError(currentLang === 'en'
+        ? `Bar '${serial}' is marked as DAMAGED and cannot be dispatched.`
+        : `السبيكة '${serial}' مصنفة كتالفة ولا يمكن تجهيزها للتوصيل.`);
+      return;
+    }
+
+    if (bar.status !== 'READY') {
+      setHdMatchedBar(null);
+      setNewHdBarId('');
+      setHdScanError(currentLang === 'en'
+        ? `Bar '${serial}' is currently in status '${bar.status}'. Only READY bars can be dispatched.`
+        : `السبيكة '${serial}' حالتها الحالية '${bar.status}'. فقط السبائك الجاهزة (READY) يمكن تجهيزها.`);
+      return;
+    }
+
+    // Match success!
+    setHdMatchedBar(bar);
+    setNewHdBarId(bar.item_id.toString());
+    setHdScanError(null);
+  };
 
   // Home Delivery Dispatch & Handover modals
   const [showDispatchHdModal, setShowDispatchHdModal] = useState(false);
@@ -1528,6 +1636,53 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   const [receiveScannedSerial, setReceiveScannedSerial] = useState('');
   const [receiveBranchId, setReceiveBranchId] = useState(1);
   const [receiveValidationPassed, setReceiveValidationPassed] = useState(true);
+
+  // Bar Traceability & Passport state (Piece Verification & Movement History)
+  const [traceScanInput, setTraceScanInput] = useState('');
+  const [traceSelectedProduct, setTraceSelectedProduct] = useState<string>('');
+  const [traceSelectedSerial, setTraceSelectedSerial] = useState<string>('');
+  const [barPassportData, setBarPassportData] = useState<any>(null);
+  const [loadingPassport, setLoadingPassport] = useState(false);
+  const [passportError, setPassportError] = useState<string | null>(null);
+
+  const fetchBarPassport = async (query: string) => {
+    const raw = (query || '').trim();
+    if (!raw) {
+      setPassportError(currentLang === 'en' ? 'Please enter a serial number or scan a barcode.' : 'يرجى إدخال الرقم التسلسلي أو مسح الباركود.');
+      setBarPassportData(null);
+      return;
+    }
+    const parsed = parseGs1Barcode(raw);
+    const serial = (parsed.serial || raw).toUpperCase();
+
+    setLoadingPassport(true);
+    setPassportError(null);
+    try {
+      const res = await fetch(`${API_BASE}/inventory/traceability/passport?query=${encodeURIComponent(serial)}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setBarPassportData(data);
+        setPassportError(null);
+        if (data.bar?.product_id) {
+          setTraceSelectedProduct(String(data.bar.product_id));
+        }
+        if (data.bar?.serial_number) {
+          setTraceSelectedSerial(data.bar.serial_number);
+        }
+      } else {
+        const err = await res.json();
+        setBarPassportData(null);
+        setPassportError(err.error || (currentLang === 'en' ? `Bar with serial '${serial}' was not found in vault records.` : `السبيكة بالرقم التسلسلي '${serial}' غير موجودة في سجلات الخزينة.`));
+      }
+    } catch (e) {
+      setBarPassportData(null);
+      setPassportError(currentLang === 'en' ? 'Network error fetching bar passport.' : 'خطأ في الاتصال أثناء جلب بيانات السبيكة.');
+    } finally {
+      setLoadingPassport(false);
+    }
+  };
 
   // User permissions from login (group-based access control)
   const [userPermissions, setUserPermissions] = useState<Record<string, string>>({});
@@ -1819,6 +1974,14 @@ const [migrationApproved, setMigrationApproved] = useState(false);
           checkerStep: 'Threshold Configuration Checker Authorization',
           makerDesc: 'Maker configures product denomination, vendor, min stock cut-off, reorder level, and active state.',
           checkerDesc: 'Checker reviews threshold parameters against enterprise stock policy and authorizes threshold activation or removal.'
+        },
+        'HOME_DELIVERY': {
+          name: 'Default Home Delivery Fulfillment Workflow',
+          desc: 'Standard Maker-Checker verification for client residential gold home delivery dispatch.',
+          makerStep: 'Home Delivery Maker Verification & Bar Scanning',
+          checkerStep: 'Home Delivery Checker Authorization',
+          makerDesc: 'Maker selects GFS delivery request, scans matching gold bar serial number and product type, and initiates dispatch authorization.',
+          checkerDesc: 'Checker verifies customer PACI Civil ID, delivery address, scanned bar serial/product match, and authorizes armored courier dispatch.'
         }
       };
 
@@ -2032,6 +2195,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
       '1 Kilogram Bar': 'سبيكة 1 كيلوجرام',
       '1 Ounce Bar': 'سبيكة 1 أونصة',
       'KFH_OWNED': 'بيت التمويل الكويتي',
+      'TURKEY_OWNED': 'أمانات تركيا',
       'CUSTOMER_OWNED': 'أمانات العملاء'
     };
     return dbMap[val] || val;
@@ -4700,7 +4864,10 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     } else if (reportType === 'transactions') {
       csvContent += "Transaction Number,Serial Number,Transaction Type,Source,Destination,Ownership,Initiated By,Approved By,Timestamp\n";
       reportData.forEach(row => {
-        csvContent += `"${row.transaction_number}","${row.serial_number}","${row.transaction_type}","${row.source_vault || ''} ${row.source_location ? '(' + row.source_location + ')' : ''}","${row.destination_vault || ''} ${row.destination_location ? '(' + row.destination_location + ')' : ''}","${row.source_ownership}","${row.initiated_by}","${row.approved_by || ''}","${new Date(row.timestamp).toLocaleString()}"\n`;
+        const ownershipStr = row.source_ownership === row.destination_ownership || !row.destination_ownership
+          ? (row.destination_ownership || row.source_ownership)
+          : `${row.source_ownership} -> ${row.destination_ownership}`;
+        csvContent += `"${row.transaction_number}","${row.serial_number}","${row.transaction_type}","${row.source_vault || ''} ${row.source_location ? '(' + row.source_location + ')' : ''}","${row.destination_vault || ''} ${row.destination_location ? '(' + row.destination_location + ')' : ''}","${ownershipStr}","${row.initiated_by}","${row.approved_by || ''}","${new Date(row.timestamp).toLocaleString()}"\n`;
       });
     } else if (reportType === 'inventory_balance') {
       csvContent += "Vault,Metal Type,Denomination,Ready Qty,Total Weight (g)\n";
@@ -5014,6 +5181,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     { type: 'item', key: 'screen-home-delivery', label: currentLang === 'en' ? 'Home Delivery' : 'توصيل المنازل', icon: 'fa-solid fa-house-chimney-user', permission: 'intake', onClick: () => { setActiveTab('screen-home-delivery'); fetchHomeDeliveries(); } },
     { type: 'item', key: 'screen-damaged-bars', label: currentLang === 'en' ? 'Damaged Bar Approvals' : 'اعتماد السبائك التالفة', icon: 'fa-solid fa-triangle-exclamation', permission: 'custody', onClick: () => { setActiveTab('screen-damaged-bars'); fetchDamagedBars(); } },
     { type: 'item', key: 'screen-barcode-labeling', label: currentLang === 'en' ? 'Barcode & QR Labeling' : 'طباعة وتتبع الباركود و QR', icon: 'fa-solid fa-barcode', permission: 'barcode_qr_labeling', onClick: () => { setActiveTab('screen-barcode-labeling'); fetchInventory(); fetchLocations(); } },
+    { type: 'item', key: 'screen-bar-traceability', label: t('menu_bar_traceability'), icon: 'fa-solid fa-passport', permission: 'dashboard', onClick: () => { setActiveTab('screen-bar-traceability'); fetchInventory(); fetchProducts(); } },
 
     // 3. Stock Limits & Enterprise Thresholds
     { type: 'item', key: 'screen-stock-thresholds', label: currentLang === 'en' ? 'Stock Limits & Thresholds' : 'حدود المخزون وإعادة الطلب', icon: 'fa-solid fa-gauge-high', permission: 'master_data', onClick: () => { setActiveTab('screen-admin'); setSettingsTab('stocklimits'); fetchReorderThresholds(); fetchPendingThresholdChanges(); fetchProducts(); } },
@@ -6279,55 +6447,13 @@ const [migrationApproved, setMigrationApproved] = useState(false);
               <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--kfh-green)' }}>
                 <i className="fa-solid fa-barcode"></i> {currentLang === 'ar' ? 'محاكي جهاز مسح الباركود / الرقم التسلسلي' : 'Barcode / Serial Scanner Input'}
               </h4>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <input
-                  type="text"
-                  className="form-control"
-                  placeholder={currentLang === 'ar' ? 'امسح الباركود للقطعة أو أدخل الرقم التسلسلي واضغط Enter...' : 'Scan piece barcode or enter serial number & hit Enter...'}
-                  value={currentReceiptScanSerial}
-                  onChange={e => setCurrentReceiptScanSerial(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      if (currentReceiptScanSerial.trim()) {
-                        const parsed = parseGs1Barcode(currentReceiptScanSerial.trim());
-                        const isDup = receiptScannedSerials.some(s => s.serial === parsed.serial && s.product_id === receiptSelectedProductId);
-                        if (isDup) {
-                          alert(currentLang === 'en' ? 'This barcode/serial has already been scanned for this product type.' : 'هذا الباركود/الرقم التسلسلي تم مسحه مسبقاً لنفس فئة المنتج.');
-                          return;
-                        }
-                        setReceiptScannedSerials([...receiptScannedSerials, { serial: parsed.serial, product_id: receiptSelectedProductId }]);
-                        setCurrentReceiptScanSerial('');
-                      }
-                    }
-                  }}
-                />
-                <button
-                  className="btn btn-primary"
-                  type="button"
-                  onClick={() => {
-                    if (currentReceiptScanSerial.trim()) {
-                      const parsed = parseGs1Barcode(currentReceiptScanSerial.trim());
-                      const isDup = receiptScannedSerials.some(s => s.serial === parsed.serial && s.product_id === receiptSelectedProductId);
-                      if (isDup) {
-                        alert(currentLang === 'en' ? 'This barcode/serial has already been scanned for this product type.' : 'هذا الباركود/الرقم التسلسلي تم مسحه مسبقاً لنفس فئة المنتج.');
-                        return;
-                      }
-                      setReceiptScannedSerials([...receiptScannedSerials, { serial: parsed.serial, product_id: receiptSelectedProductId }]);
-                      setCurrentReceiptScanSerial('');
-                    }
-                  }}
-                >
-                  {currentLang === 'ar' ? 'إضافة' : 'Add'}
-                </button>
-              </div>
 
-              <div className="form-group" style={{ marginTop: '10px', marginBottom: 0 }}>
-                <label style={{ fontSize: '11px' }}>{currentLang === 'ar' ? 'صنف وسبيكة المنتج / العلامة' : 'Product Denomination & Refiner Brand'}</label>
+              <div className="form-group" style={{ marginBottom: '10px' }}>
+                <label style={{ fontSize: '11px', fontWeight: 600 }}>{currentLang === 'ar' ? 'صنف وسبيكة المنتج / العلامة (اختر الفئة أولاً)' : 'Product Denomination & Refiner Brand (Select First)'}</label>
                 <select
                   value={receiptSelectedProductId}
                   onChange={e => setReceiptSelectedProductId(parseInt(e.target.value))}
-                  style={{ padding: '4px', fontSize: '12px', height: '30px', color: '#000' }}
+                  style={{ padding: '4px 8px', fontSize: '12px', height: '32px', color: '#000', width: '100%' }}
                 >
                   {products
                     .filter((p: any) => p.is_active !== false)
@@ -6337,6 +6463,83 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       </option>
                     ))}
                 </select>
+              </div>
+
+              {(() => {
+                const handleAddCustomerReceiptPiece = () => {
+                  if (!currentReceiptScanSerial.trim()) return;
+                  const parsed = parseGs1Barcode(currentReceiptScanSerial.trim());
+                  const serial = (parsed.serial || currentReceiptScanSerial.trim()).toUpperCase();
+
+                  // 1. Check duplicate in current batch
+                  const isDup = receiptScannedSerials.some(s => s.serial.toUpperCase() === serial && s.product_id === receiptSelectedProductId);
+                  if (isDup) {
+                    alert(currentLang === 'en' ? 'This barcode/serial has already been scanned for this product type.' : 'هذا الباركود/الرقم التسلسلي تم مسحه مسبقاً لنفس فئة المنتج.');
+                    return;
+                  }
+
+                  // 2. Validate that serial existed in stock history before
+                  const existing = inventoryList.find((i: any) => {
+                    const matchSerial = i.serial_number?.toUpperCase() === serial;
+                    if (!matchSerial) return false;
+                    if (receiptSelectedProductId && i.product_id) {
+                      return i.product_id === receiptSelectedProductId;
+                    }
+                    return true;
+                  });
+
+                  if (!existing) {
+                    alert(currentLang === 'en'
+                      ? `Cannot receive bar '${serial}': This product and serial number was never registered in KFH stock records. Customer receipts only accept precious metals that previously existed in stock.`
+                      : `لا يمكن استلام السبيكة '${serial}': هذا الرقم التسلسلي لم يتم تسجيله مسبقاً في سجلات البنك. يُقبل استلام المعادن التي كانت مسجلة في المخزون سابقاً فقط.`);
+                    return;
+                  }
+
+                  // 3. Validate ownership status (cannot be active KFH_OWNED or TURKEY_OWNED in vault)
+                  const isKfhOrTurkey = (existing.ownership_type === 'KFH_OWNED' || existing.ownership_type === 'TURKEY_OWNED');
+                  const isActiveInVault = (existing.status === 'READY' || existing.status === 'RESERVED' || existing.status === 'IN_TRANSFER');
+                  if (isKfhOrTurkey && isActiveInVault) {
+                    alert(currentLang === 'en'
+                      ? `Cannot receive bar '${serial}' from customer: This bar is currently active in vault inventory as '${existing.ownership_type}' (Status: ${existing.status}). Customer receipt is not permitted while actively owned by KFH or Turkey supplier.`
+                      : `لا يمكن استلام السبيكة '${serial}': هذه السبيكة مسجلة حالياً داخل الخزينة كملك لـ '${existing.ownership_type}' (الحالة: ${existing.status}). استلام العملاء متاح فقط للمعادن التي يملكها العميل أو التي تم بيعها.`);
+                    return;
+                  }
+
+                  setReceiptScannedSerials([...receiptScannedSerials, { serial: parsed.serial || serial, product_id: receiptSelectedProductId }]);
+                  setCurrentReceiptScanSerial('');
+                };
+
+                return (
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder={currentLang === 'ar' ? 'امسح الباركود للقطعة أو أدخل الرقم التسلسلي واضغط Enter...' : 'Scan piece barcode or enter serial number & hit Enter...'}
+                      value={currentReceiptScanSerial}
+                      onChange={e => setCurrentReceiptScanSerial(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleAddCustomerReceiptPiece();
+                        }
+                      }}
+                    />
+                    <button
+                      className="btn btn-primary"
+                      type="button"
+                      onClick={handleAddCustomerReceiptPiece}
+                    >
+                      {currentLang === 'ar' ? 'إضافة' : 'Add'}
+                    </button>
+                  </div>
+                );
+              })()}
+
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '8px' }}>
+                <i className="fa-solid fa-circle-info" style={{ marginRight: '4px' }}></i>
+                {currentLang === 'en'
+                  ? 'Only bars previously recorded in KFH stock and not actively owned by KFH/Turkey can be received from customers.'
+                  : 'يُقبل فقط استلام السبائك التي كانت مسجلة مسبقاً في مخزون البنك وليست حالياً مملوكة لبيت التمويل الكويتي أو المورد التركي.'}
               </div>
 
               {receiptScannedSerials.length > 0 && (
@@ -6684,8 +6887,9 @@ const [migrationApproved, setMigrationApproved] = useState(false);
               <button className="btn btn-primary" onClick={() => {
                 setShowCreateHomeDeliveryModal(true);
                 setCivilIdValidationResult(null);
+                fetchIncomingGfsOrders();
               }}>
-                <i className="fa-solid fa-plus"></i> {currentLang === 'en' ? 'New Home Delivery Request' : 'طلب توصيل منزلي جديد'}
+                <i className="fa-solid fa-plus"></i> {currentLang === 'en' ? 'Fulfill GFS Home Delivery' : 'تنفيذ طلب توصيل منزلي من GFS'}
               </button>
             </div>
 
@@ -7974,6 +8178,404 @@ const [migrationApproved, setMigrationApproved] = useState(false);
           })()}
         </section>
 
+        {/* SCREEN VIEWPORT: PIECE TRACEABILITY & SERIALIZED BAR PASSPORT */}
+        <section className={`screen-viewport ${activeTab === 'screen-bar-traceability' ? 'active' : ''}`}>
+          {/* 1. SEARCH & SCAN CONTROL PANEL */}
+          <div className="glass-card" style={{ marginBottom: '20px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '15px', marginBottom: '18px' }}>
+              <div>
+                <h3 style={{ display: 'flex', alignItems: 'center', gap: '10px', margin: '0 0 6px 0' }}>
+                  <i className="fa-solid fa-passport" style={{ color: 'var(--accent-gold)' }}></i>
+                  {currentLang === 'en' ? 'Serialized Bar Passport & Movement Traceability' : 'جواز السبيكة ومسار الحركات التاريخية الكامل'}
+                </h3>
+                <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: 0 }}>
+                  {currentLang === 'en'
+                    ? 'Scan barcode / QR code or select product denomination and serial number to inspect real-time vault location, current ownership status, and complete chronological movement ledger.'
+                    : 'امسح الباركود أو رمز QR أو اختر صنف ورقم السبيكة للاستعلام الفوري عن موقعها بالخزينة وملكيتها وحالتها الحالية وسجل حركاتها بالكامل مرتباً بالتاريخ والوقت.'}
+                </p>
+              </div>
+
+              {barPassportData && (
+                <button
+                  className="btn btn-outline"
+                  onClick={() => {
+                    setBarPassportData(null);
+                    setTraceScanInput('');
+                    setTraceSelectedProduct('');
+                    setTraceSelectedSerial('');
+                    setPassportError(null);
+                  }}
+                  style={{ fontSize: '12px', padding: '6px 12px' }}
+                >
+                  <i className="fa-solid fa-arrows-rotate"></i> {currentLang === 'en' ? 'Reset / New Search' : 'بحث جديد'}
+                </button>
+              )}
+            </div>
+
+            {/* Selection Grid: Mode A (Scan / Direct Input) & Mode B (Product Type + Serial Dropdowns) */}
+            <div className="split-grid-2" style={{ gap: '20px', background: 'rgba(255,255,255,0.02)', padding: '16px', borderRadius: '8px', border: '1px solid var(--surface-border)' }}>
+              {/* Mode A: Scan Barcode / QR / Enter Serial */}
+              <div>
+                <label style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--accent-gold)', display: 'block', marginBottom: '6px' }}>
+                  <i className="fa-solid fa-barcode" style={{ marginRight: '6px' }}></i>
+                  {currentLang === 'en' ? 'Mode 1: Scan Barcode / QR or Enter Serial Number' : 'الطريقة الأولى: مسح الباركود أو إدخال الرقم التسلسلي مباشرة'}
+                </label>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder={currentLang === 'en' ? 'Scan piece barcode or enter serial (e.g. AU-BAR-001)...' : 'امسح باركود السبيكة أو أدخل الرقم التسلسلي...'}
+                    value={traceScanInput}
+                    onChange={e => setTraceScanInput(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        fetchBarPassport(traceScanInput);
+                      }
+                    }}
+                    style={{ fontSize: '13px', fontWeight: 600, fontFamily: 'monospace' }}
+                  />
+                  <button
+                    className="btn btn-primary"
+                    type="button"
+                    disabled={loadingPassport || !traceScanInput.trim()}
+                    onClick={() => fetchBarPassport(traceScanInput)}
+                  >
+                    {loadingPassport ? <i className="fa-solid fa-spinner fa-spin"></i> : <i className="fa-solid fa-magnifying-glass"></i>}{' '}
+                    {currentLang === 'en' ? 'Search' : 'استعلام'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Mode B: Product Type Filter + Serial Dropdown */}
+              <div>
+                <label style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--kfh-green)', display: 'block', marginBottom: '6px' }}>
+                  <i className="fa-solid fa-list-check" style={{ marginRight: '6px' }}></i>
+                  {currentLang === 'en' ? 'Mode 2: Select Product Type & Pick Serial' : 'الطريقة الثانية: اختيار فئة السبيكة ثم اختيار الرقم التسلسلي'}
+                </label>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                  <select
+                    className="form-control"
+                    style={{ color: '#000', fontSize: '12px', fontWeight: 600 }}
+                    value={traceSelectedProduct}
+                    onChange={e => {
+                      const prodId = e.target.value;
+                      setTraceSelectedProduct(prodId);
+                      setTraceSelectedSerial('');
+                    }}
+                  >
+                    <option value="">-- {currentLang === 'en' ? 'Select Product Type' : 'اختر فئة السبيكة'} --</option>
+                    {products.map((p: any, idx: number) => (
+                      <option key={idx} value={p.product_id || p.productId}>
+                        {p.product_code || p.productCode} — {p.metal_type || p.metalName || 'Gold'} ({p.denomination || (p.weight_grams ? `${p.weight_grams}g` : '')})
+                      </option>
+                    ))}
+                  </select>
+
+                  <select
+                    className="form-control"
+                    style={{ color: '#000', fontSize: '12px', fontWeight: 600 }}
+                    value={traceSelectedSerial}
+                    disabled={!traceSelectedProduct}
+                    onChange={e => {
+                      const ser = e.target.value;
+                      setTraceSelectedSerial(ser);
+                      if (ser) {
+                        setTraceScanInput(ser);
+                        fetchBarPassport(ser);
+                      }
+                    }}
+                  >
+                    <option value="">-- {currentLang === 'en' ? 'Select Serial' : 'اختر السبيكة'} --</option>
+                    {inventoryList
+                      .filter((i: any) => !traceSelectedProduct || String(i.product_id) === String(traceSelectedProduct))
+                      .map((item: any, idx: number) => (
+                        <option key={idx} value={item.serial_number}>
+                          {item.serial_number} ({item.status})
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Error Message */}
+            {passportError && (
+              <div style={{ marginTop: '15px', padding: '12px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid var(--accent-red)', borderRadius: '6px', color: 'var(--accent-red)', fontSize: '13px' }}>
+                <i className="fa-solid fa-triangle-exclamation" style={{ marginRight: '6px' }}></i>
+                {passportError}
+              </div>
+            )}
+          </div>
+
+          {/* 2. BAR PASSPORT & CURRENT STATUS SUMMARY CARD */}
+          {barPassportData?.bar && (() => {
+            const b = barPassportData.bar;
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', marginBottom: '25px' }}>
+                <div className="glass-card" style={{ border: '1px solid rgba(234, 179, 8, 0.3)', background: 'linear-gradient(135deg, rgba(234, 179, 8, 0.05) 0%, rgba(0, 90, 62, 0.08) 100%)' }}>
+                  {/* Top Bar Header Badge */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', paddingBottom: '12px', borderBottom: '1px solid var(--surface-border)', marginBottom: '15px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <div style={{ width: '40px', height: '40px', borderRadius: '8px', background: 'var(--accent-gold)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#000', fontSize: '20px', fontWeight: 'bold' }}>
+                        <i className="fa-solid fa-gem"></i>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                          {currentLang === 'en' ? 'Serial Number (Unique Bar ID)' : 'الرقم التسلسلي المميز للسبيكة'}
+                        </div>
+                        <div style={{ fontSize: '18px', fontWeight: 'bold', fontFamily: 'monospace', color: 'var(--accent-gold)' }}>
+                          {b.serial_number}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                      {/* Status Badge */}
+                      <span className={`badge ${
+                        b.status === 'READY' ? 'badge-ready' :
+                        b.status === 'RESERVED' ? 'badge-reserved' :
+                        b.status === 'DAMAGED' ? 'badge-quarantined' :
+                        b.status === 'IN_TRANSFER' ? 'badge-transfer' : 'badge-sold'
+                      }`} style={{ fontSize: '12px', padding: '6px 12px' }}>
+                        <i className={`fa-solid ${b.status === 'READY' ? 'fa-circle-check' : b.status === 'DAMAGED' ? 'fa-triangle-exclamation' : 'fa-clock'}`} style={{ marginRight: '6px' }}></i>
+                        {translateDb(b.status)}
+                      </span>
+
+                      {/* Ownership Badge */}
+                      <span className={`badge ${b.ownership_type === 'KFH_OWNED' ? 'badge-ready' : b.ownership_type === 'TURKEY_OWNED' ? 'badge-quarantined' : 'badge-reserved'}`} style={{ fontSize: '12px', padding: '6px 12px' }}>
+                        <i className="fa-solid fa-building-columns" style={{ marginRight: '6px' }}></i>
+                        {translateDb(b.ownership_type)}
+                      </span>
+
+                      {/* LBMA Certification Badge */}
+                      {b.is_lbma_certified && (
+                        <span className="badge badge-ready" style={{ fontSize: '11px', padding: '6px 10px' }} title="LBMA Good Delivery Certified">
+                          <i className="fa-solid fa-certificate" style={{ marginRight: '4px' }}></i> LBMA Certified
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 4-Column Attribute Grid */}
+                  <div className="split-grid-4" style={{ gap: '16px', fontSize: '12px' }}>
+                    {/* Col 1: Product Specs */}
+                    <div style={{ background: 'rgba(255,255,255,0.03)', padding: '12px', borderRadius: '6px', border: '1px solid var(--surface-border)' }}>
+                      <div style={{ fontWeight: 'bold', color: 'var(--accent-gold)', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <i className="fa-solid fa-scale-balanced"></i> {currentLang === 'en' ? 'Metal & Specification' : 'مواصفات المعدن والوزن'}
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        <div><strong>{currentLang === 'en' ? 'Product:' : 'الصنف:'}</strong> {b.metal_name} ({b.denomination})</div>
+                        <div><strong>{currentLang === 'en' ? 'Product Code:' : 'رمز المنتج:'}</strong> <span style={{ fontFamily: 'monospace' }}>{b.product_code}</span></div>
+                        <div><strong>{currentLang === 'en' ? 'Exact Weight:' : 'الوزن الدقيق:'}</strong> {b.weight_grams}g ({b.weight_ounces} oz)</div>
+                        <div><strong>{currentLang === 'en' ? 'Fineness / Purity:' : 'العيار والنقاء:'}</strong> 24K ({b.purity_value}%)</div>
+                        <div><strong>{currentLang === 'en' ? 'Refiner / Brand:' : 'المصفاة والمصدر:'}</strong> {b.brand_name} ({b.origin_country})</div>
+                      </div>
+                    </div>
+
+                    {/* Col 2: Current Physical Location */}
+                    <div style={{ background: 'rgba(255,255,255,0.03)', padding: '12px', borderRadius: '6px', border: '1px solid var(--surface-border)' }}>
+                      <div style={{ fontWeight: 'bold', color: 'var(--kfh-green)', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <i className="fa-solid fa-location-dot"></i> {currentLang === 'en' ? 'Current Physical Location' : 'الموقع المكاني بالخزينة'}
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        <div><strong>{currentLang === 'en' ? 'Vault:' : 'الخزينة:'}</strong> {translateDb(b.vault_name)}</div>
+                        <div><strong>{currentLang === 'en' ? 'Branch:' : 'الفرع:'}</strong> {b.branch_name}</div>
+                        <div><strong>{currentLang === 'en' ? 'Zone / Room:' : 'المنطقة:'}</strong> {b.zone_room || 'Zone Alpha'}</div>
+                        <div><strong>{currentLang === 'en' ? 'Shelf / Row:' : 'الرف:'}</strong> {translateDb(b.shelf_row || 'Shelf Row 1')}</div>
+                        <div><strong>{currentLang === 'en' ? 'Slot / Bin:' : 'الخانة:'}</strong> <span className="badge badge-ready" style={{ fontSize: '10px' }}>{b.slot_bin || 'Slot 1'}</span></div>
+                      </div>
+                    </div>
+
+                    {/* Col 3: Ownership & Customer Custody */}
+                    <div style={{ background: 'rgba(255,255,255,0.03)', padding: '12px', borderRadius: '6px', border: '1px solid var(--surface-border)' }}>
+                      <div style={{ fontWeight: 'bold', color: 'var(--text-main)', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <i className="fa-solid fa-user-shield"></i> {currentLang === 'en' ? 'Ownership & Custody' : 'الملكية وحساب العميل'}
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        <div><strong>{currentLang === 'en' ? 'Legal Owner:' : 'المالك القانوني:'}</strong> {translateDb(b.ownership_type)}</div>
+                        {b.customer_holding ? (
+                          <>
+                            <div><strong>{currentLang === 'en' ? 'Customer:' : 'اسم العميل:'}</strong> {b.customer_holding.customer_name}</div>
+                            <div><strong>{currentLang === 'en' ? 'Civil ID:' : 'الرقم المدني:'}</strong> <span style={{ fontFamily: 'monospace' }}>{b.customer_holding.civil_id}</span></div>
+                            <div><strong>{currentLang === 'en' ? 'Account #:' : 'رقم الحساب:'}</strong> {b.customer_holding.account_number}</div>
+                            <div><strong>{currentLang === 'en' ? 'Mobile:' : 'الهاتف:'}</strong> {b.customer_holding.mobile}</div>
+                          </>
+                        ) : (
+                          <div style={{ color: 'var(--text-muted)', marginTop: '4px' }}>
+                            <i className="fa-solid fa-shield-halved" style={{ color: 'var(--kfh-green)', marginRight: '4px' }}></i>
+                            {currentLang === 'en' ? 'Institutional Treasury Asset' : 'أصل مباشر للخزينة المؤسسية'}
+                          </div>
+                        )}
+                        {b.is_reserved && (
+                          <div style={{ marginTop: '4px', color: 'var(--accent-gold)' }}>
+                            <i className="fa-solid fa-lock" style={{ marginRight: '4px' }}></i>
+                            <strong>{currentLang === 'en' ? 'Reserved By:' : 'محجوز بواسطة:'}</strong> {b.reserved_by || 'Operations'}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Col 4: Acquisition & Cost Basis */}
+                    <div style={{ background: 'rgba(255,255,255,0.03)', padding: '12px', borderRadius: '6px', border: '1px solid var(--surface-border)' }}>
+                      <div style={{ fontWeight: 'bold', color: 'var(--text-main)', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <i className="fa-solid fa-file-invoice-dollar"></i> {currentLang === 'en' ? 'Acquisition & Cost' : 'التكلفة وسجل التوريد'}
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        <div><strong>{currentLang === 'en' ? 'Lot Number:' : 'رقم الدفعة:'}</strong> <span style={{ fontFamily: 'monospace' }}>{b.lot_number || 'N/A'}</span></div>
+                        <div><strong>{currentLang === 'en' ? 'Supplier:' : 'المورد:'}</strong> {b.vendor_name}</div>
+                        <div><strong>{currentLang === 'en' ? 'Acquisition Date:' : 'تاريخ التوريد:'}</strong> {b.acquisition_date ? new Date(b.acquisition_date).toLocaleDateString() : 'N/A'}</div>
+                        <div><strong>{currentLang === 'en' ? 'Unit Cost (KWD):' : 'تكلفة السبيكة:'}</strong> <span style={{ color: 'var(--accent-gold)', fontWeight: 'bold' }}>{b.average_purchase_cost ? `${b.average_purchase_cost.toFixed(3)} KWD` : 'N/A'}</span></div>
+                        {b.is_damaged && (
+                          <div style={{ marginTop: '4px', color: 'var(--accent-red)' }}>
+                            <i className="fa-solid fa-triangle-exclamation" style={{ marginRight: '4px' }}></i>
+                            <strong>{currentLang === 'en' ? 'Damaged:' : 'تالفة:'}</strong> {b.damage_reason}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 3. CHRONOLOGICAL MOVEMENT & TRANSACTION HISTORY BY DATE/TIME */}
+                <div className="glass-card">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                    <div>
+                      <h4 style={{ margin: '0 0 4px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <i className="fa-solid fa-timeline" style={{ color: 'var(--kfh-green)' }}></i>
+                        {currentLang === 'en' ? 'Chronological Movement & Ledger History' : 'سجل حركة السبيكة والمعاملات التاريخية (مرتبة بالتاريخ والوقت)'}
+                      </h4>
+                      <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-muted)' }}>
+                        {currentLang === 'en'
+                          ? `Complete audit trail of ${barPassportData.movements?.length || 0} lifecycle event(s) and physical location transitions for bar ${b.serial_number}.`
+                          : `مسار التدقيق الكامل لجميع الحركات (${barPassportData.movements?.length || 0} حركة) وانتقالات الموقع للسبيكة ${b.serial_number}.`}
+                      </p>
+                    </div>
+
+                    <span className="badge badge-ready" style={{ fontSize: '11px' }}>
+                      {barPassportData.movements?.length || 0} {currentLang === 'en' ? 'Total Movements' : 'إجمالي الحركات'}
+                    </span>
+                  </div>
+
+                  {(!barPassportData.movements || barPassportData.movements.length === 0) ? (
+                    <div style={{ padding: '30px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
+                      <i className="fa-solid fa-box-open" style={{ fontSize: '28px', marginBottom: '10px', display: 'block' }}></i>
+                      {currentLang === 'en' ? 'No movement transactions recorded for this piece yet.' : 'لا توجد حركات مسجلة لهذه السبيكة بعد.'}
+                    </div>
+                  ) : (
+                    <div className="table-responsive">
+                      <table className="custom-table" style={{ width: '100%', fontSize: '12px' }}>
+                        <thead>
+                          <tr>
+                            <th>{currentLang === 'en' ? 'Date & Time (Timestamp)' : 'التاريخ والوقت'}</th>
+                            <th>{currentLang === 'en' ? 'Tx Reference #' : 'رقم الحركة'}</th>
+                            <th>{currentLang === 'en' ? 'Movement Type' : 'نوع الحركة'}</th>
+                            <th>{currentLang === 'en' ? 'Origin Location' : 'الموقع السابق'}</th>
+                            <th>{currentLang === 'en' ? 'Destination Location' : 'الموقع الجديد'}</th>
+                            <th>{currentLang === 'en' ? 'Ownership Transition' : 'تحول الملكية'}</th>
+                            <th>{currentLang === 'en' ? 'Initiated By' : 'أنشأها'}</th>
+                            <th>{currentLang === 'en' ? 'Approved By' : 'اعتمدها'}</th>
+                            <th>{currentLang === 'en' ? 'Trace / Details' : 'التفاصيل'}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {barPassportData.movements.map((mov: any, mIdx: number) => (
+                            <tr key={mIdx}>
+                              <td>
+                                <div style={{ fontWeight: 600, color: 'var(--text-main)' }}>
+                                  {new Date(mov.timestamp).toLocaleDateString()}
+                                </div>
+                                <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                                  {new Date(mov.timestamp).toLocaleTimeString()}
+                                </div>
+                              </td>
+                              <td>
+                                <span style={{ fontFamily: 'monospace', fontSize: '11px', color: 'var(--accent-gold)', fontWeight: 'bold' }}>
+                                  {mov.transaction_number}
+                                </span>
+                              </td>
+                              <td>
+                                <span className={`badge ${
+                                  mov.transaction_type === 'RECEIPT' ? 'badge-ready' :
+                                  mov.transaction_type === 'TRANSFER' ? 'badge-transfer' :
+                                  mov.transaction_type === 'PURCHASE' ? 'badge-ready' :
+                                  mov.transaction_type === 'HOME_DELIVERY_DISPATCH' ? 'badge-sold' : 'badge-reserved'
+                                }`}>
+                                  {translateDb(mov.transaction_type)}
+                                </span>
+                              </td>
+                              <td>
+                                {translateDb(mov.source_vault || 'External Origin / Supplier')} {mov.source_location ? `(${translateDb(mov.source_location)})` : ''}
+                              </td>
+                              <td>
+                                {translateDb(mov.destination_vault || 'N/A')} {mov.destination_location ? `(${translateDb(mov.destination_location)})` : ''}
+                              </td>
+                              <td>
+                                {mov.source_ownership === mov.destination_ownership || !mov.destination_ownership ? (
+                                  <span className={`badge ${mov.destination_ownership === 'KFH_OWNED' || mov.source_ownership === 'KFH_OWNED' ? 'badge-ready' : (mov.destination_ownership === 'TURKEY_OWNED' || mov.source_ownership === 'TURKEY_OWNED') ? 'badge-transfer' : 'badge-reserved'}`} style={{ fontSize: '10px' }}>
+                                    {translateDb(mov.destination_ownership || mov.source_ownership)}
+                                  </span>
+                                ) : (
+                                  <div style={{ fontSize: '10px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                    <span className="badge badge-transfer" style={{ fontSize: '9px' }}>{translateDb(mov.source_ownership)}</span>
+                                    <span>➔</span>
+                                    <span className="badge badge-ready" style={{ fontSize: '9px' }}>{translateDb(mov.destination_ownership)}</span>
+                                  </div>
+                                )}
+                              </td>
+                              <td>
+                                <span style={{ fontWeight: 600 }}>{mov.initiated_by || 'SYSTEM'}</span>
+                              </td>
+                              <td>
+                                <span style={{ color: mov.approved_by ? 'var(--kfh-green)' : 'var(--text-muted)' }}>
+                                  {mov.approved_by || '—'}
+                                </span>
+                              </td>
+                              <td>
+                                <button
+                                  className="btn"
+                                  style={{ fontSize: '11px', padding: '3px 8px' }}
+                                  onClick={() => fetchTransactionTrace(mov.transaction_id)}
+                                >
+                                  <i className="fa-solid fa-diagram-project"></i> {currentLang === 'en' ? 'Trace' : 'تتبع'}
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+                {/* 4. CHAIN OF CUSTODY SECURITY EVENTS (If any) */}
+                {barPassportData.custody_events && barPassportData.custody_events.length > 0 && (
+                  <div className="glass-card">
+                    <h4 style={{ margin: '0 0 10px 0', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' }}>
+                      <i className="fa-solid fa-shield-halved" style={{ color: 'var(--accent-gold)' }}></i>
+                      {currentLang === 'en' ? 'Physical Chain-of-Custody & Handling Security Log' : 'سجل استلام وتسليم وحفظ الأمانات الفيزيائي'}
+                    </h4>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      {barPassportData.custody_events.map((evt: any, cIdx: number) => (
+                        <div key={cIdx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'rgba(255,255,255,0.02)', borderRadius: '6px', border: '1px solid var(--surface-border)', fontSize: '12px' }}>
+                          <div>
+                            <span className="badge badge-ready" style={{ marginRight: '8px', fontSize: '10px' }}>{evt.event_type}</span>
+                            <span style={{ fontWeight: 600 }}>{evt.notes || 'Custody logged'}</span>
+                            {evt.reference_number && <span style={{ marginLeft: '8px', color: 'var(--text-muted)', fontFamily: 'monospace' }}>({evt.reference_number})</span>}
+                          </div>
+                          <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                            {evt.recorded_by} — {new Date(evt.recorded_at).toLocaleString()}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+        </section>
+
         {/* SCREEN VIEWPORT: STOCK THRESHOLDS & ALERTS (operational -- master_data module) */}
         <section className={`screen-viewport ${activeTab === 'screen-stock-thresholds' ? 'active' : ''}`}>
           <div className="split-grid-3">
@@ -9235,7 +9837,19 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                               <td><span className="badge">{translateDb(row.transaction_type)}</span></td>
                               <td>{translateDb(row.source_vault || 'N/A')} {row.source_location ? `(${translateDb(row.source_location)})` : ''}</td>
                               <td>{translateDb(row.destination_vault || 'N/A')} {row.destination_location ? `(${translateDb(row.destination_location)})` : ''}</td>
-                              <td>{translateDb(row.source_ownership)}</td>
+                              <td>
+                                {row.source_ownership === row.destination_ownership || !row.destination_ownership ? (
+                                  <span className={`badge ${row.destination_ownership === 'KFH_OWNED' || row.source_ownership === 'KFH_OWNED' ? 'badge-ready' : (row.destination_ownership === 'TURKEY_OWNED' || row.source_ownership === 'TURKEY_OWNED') ? 'badge-transfer' : 'badge-reserved'}`}>
+                                    {translateDb(row.destination_ownership || row.source_ownership)}
+                                  </span>
+                                ) : (
+                                  <div style={{ fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                    <span className="badge badge-transfer" style={{ fontSize: '10px' }}>{translateDb(row.source_ownership)}</span>
+                                    <span>➔</span>
+                                    <span className="badge badge-ready" style={{ fontSize: '10px' }}>{translateDb(row.destination_ownership)}</span>
+                                  </div>
+                                )}
+                              </td>
                               <td>{row.initiated_by}</td>
                               <td>{row.approved_by || '—'}</td>
                               <td>{new Date(row.timestamp).toLocaleString()}</td>
@@ -11734,6 +12348,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                   <option value="DAMAGE_BAR">{currentLang === 'en' ? '⚠️ Damaged Bar Quarantine (DAMAGE_BAR)' : '⚠️ إثبات وإحالة السبائك التالفة (DAMAGE_BAR)'}</option>
                   <option value="CUSTODY_WITHDRAWAL">{currentLang === 'en' ? '🔒 Custody Withdrawal & Handover (CUSTODY_WITHDRAWAL)' : '🔒 سحب أمانات عميل وتسليم (CUSTODY_WITHDRAWAL)'}</option>
                   <option value="THRESHOLD_CONFIG">{currentLang === 'en' ? '⚙️ Cut-Off Threshold Config (THRESHOLD_CONFIG)' : '⚙️ إعداد حدود المخزون التنبيهية (THRESHOLD_CONFIG)'}</option>
+                  <option value="HOME_DELIVERY">{currentLang === 'en' ? '🏡 Home Delivery Fulfillment (HOME_DELIVERY)' : '🏡 توصيل منزلي للعملاء (HOME_DELIVERY)'}</option>
                 </select>
               </div>
 
@@ -11959,6 +12574,13 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                                   <strong>[{inst.details.change_type}] {inst.details.product_name || inst.details.product_code || `Threshold #${inst.details.threshold_id || inst.entity_id}`}</strong><br/>
                                   <span style={{ color: 'var(--accent-gold)' }}>
                                     {currentLang === 'en' ? 'Min Stock:' : 'الحد الأدنى:'} {inst.details.min_stock_qty} pcs | {currentLang === 'en' ? 'Reorder:' : 'إعادة الطلب:'} {inst.details.reorder_qty} pcs | {inst.details.vendor_name || 'Vendor'}
+                                  </span>
+                                </div>
+                              ) : inst.workflow_type === 'HOME_DELIVERY' ? (
+                                <div style={{ fontSize: '12px' }}>
+                                  <strong>{inst.details.delivery_number || `Delivery #${inst.entity_id}`} ➔ {inst.details.customer_name}</strong><br/>
+                                  <span style={{ color: 'var(--accent-gold)' }}>
+                                    {inst.details.product_name} ({inst.details.weight_grams}g) | {currentLang === 'en' ? 'Serial:' : 'السبيكة:'} {inst.details.serial_number} | {inst.details.governorate}, {inst.details.area}
                                   </span>
                                 </div>
                               ) : (
@@ -12415,6 +13037,30 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                             </div>
                           )}
                         </div>
+                      ) : selectedWfInstance.workflow_type === "HOME_DELIVERY" ? (
+                        <div className="split-grid-2" style={{ gap: '10px 20px' }}>
+                          <div><strong>{currentLang === 'en' ? 'Delivery Reference:' : 'رقم مرجع التوصيل:'}</strong> <span className="badge badge-ready">{selectedWfInstance.details.delivery_number}</span></div>
+                          <div><strong>{currentLang === 'en' ? 'Recipient Customer:' : 'العميل المستلم:'}</strong> {selectedWfInstance.details.customer_name}</div>
+                          <div><strong>{currentLang === 'en' ? 'PACI Civil ID:' : 'الرقم المدني (PACI):'}</strong> <span style={{ fontFamily: 'monospace', fontWeight: 'bold', color: 'var(--accent-gold)' }}>{selectedWfInstance.details.customer_civil_id}</span></div>
+                          <div><strong>{currentLang === 'en' ? 'Contact Mobile:' : 'رقم الهاتف:'}</strong> {selectedWfInstance.details.customer_phone}</div>
+                          <div><strong>{currentLang === 'en' ? 'GFS Account #:' : 'رقم حساب GFS:'}</strong> {selectedWfInstance.details.customer_account}</div>
+                          <div><strong>{currentLang === 'en' ? 'Scanned Gold Bar Serial:' : 'الرقم التسلسلي للسبيكة:'}</strong> <span style={{ fontFamily: 'monospace', fontWeight: 'bold', color: 'var(--kfh-green)' }}>{selectedWfInstance.details.serial_number}</span></div>
+                          <div><strong>{currentLang === 'en' ? 'Product Type & Weight:' : 'صنف ووزن السبيكة:'}</strong> {selectedWfInstance.details.product_name} ({selectedWfInstance.details.weight_grams}g)</div>
+                          <div><strong>{currentLang === 'en' ? '6-Digit Handover OTP:' : 'رمز التحقق (OTP):'}</strong> <span className="badge badge-reserved" style={{ fontSize: '13px', letterSpacing: '2px' }}>{selectedWfInstance.details.verification_otp}</span></div>
+                          <div style={{ gridColumn: '1 / -1' }}>
+                            <strong>{currentLang === 'en' ? 'Residential Delivery Address (Kuwait):' : 'عنوان التوصيل المنزلي (الكويت):'}</strong>
+                            <div style={{ padding: '8px', background: 'rgba(0, 155, 78, 0.06)', borderRadius: '4px', border: '1px solid rgba(0, 155, 78, 0.2)', marginTop: '4px', fontSize: '12px' }}>
+                              <i className="fa-solid fa-location-dot" style={{ color: 'var(--kfh-green)', marginRight: '6px' }}></i>
+                              {selectedWfInstance.details.address}
+                            </div>
+                          </div>
+                          {selectedWfInstance.details.special_instructions && (
+                            <div style={{ gridColumn: '1 / -1' }}>
+                              <strong>{currentLang === 'en' ? 'Delivery Special Instructions:' : 'تعليمات التسليم الخاصة:'}</strong>
+                              <p style={{ margin: '4px 0 0 0', color: 'var(--text-muted)', fontSize: '12px' }}>{selectedWfInstance.details.special_instructions}</p>
+                            </div>
+                          )}
+                        </div>
                       ) : (
                         <div className="split-grid-2" style={{ gap: '10px 20px' }}>
                           <div><strong>{currentLang === 'en' ? 'P.O. Number:' : 'رقم طلب الشراء:'}</strong> {selectedWfInstance.details.po_number}</div>
@@ -12771,163 +13417,201 @@ const [migrationApproved, setMigrationApproved] = useState(false);
         {/* CREATE HOME DELIVERY REQUEST MODAL (UC07) */}
         {showCreateHomeDeliveryModal && (
           <div className="modal-overlay active" onClick={() => setShowCreateHomeDeliveryModal(false)}>
-            <div className="glass-card modal-content-box" onClick={e => e.stopPropagation()} style={{ maxWidth: '600px', width: '90%' }}>
+            <div className="glass-card modal-content-box" onClick={e => e.stopPropagation()} style={{ maxWidth: '680px', width: '92%', maxHeight: '90vh', overflowY: 'auto' }}>
               <div className="modal-header">
-                <h3>{currentLang === 'en' ? 'New Home Delivery Fulfillment Request' : 'طلب توصيل منزلي جديد (بيت التمويل الكويتي)'}</h3>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <i className="fa-solid fa-house-chimney-user" style={{ color: 'var(--kfh-green)', fontSize: '18px' }}></i>
+                  <h3 style={{ margin: 0 }}>{currentLang === 'en' ? 'Fulfill GFS Home Delivery Request' : 'تنفيذ ومطابقة طلب التوصيل المنزلي من GFS'}</h3>
+                </div>
                 <span className="modal-close-btn" onClick={() => setShowCreateHomeDeliveryModal(false)}>&times;</span>
               </div>
+              
               <div style={{ padding: '15px 0' }}>
-                <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '15px' }}>
-                  {currentLang === 'en'
-                    ? 'Create door-to-door residential delivery order in Kuwait. Requires PACI-compliant 12-digit Civil ID.'
-                    : 'إنشاء طلب توصيل منزلي داخل الكويت. يتطلب رقماً مدنياً صالحاً وفق خوارزمية الهيئة العامة للمعلومات المدنية.'}
-                </p>
+                {/* 1. SELECT INCOMING GFS ORDER */}
+                <div className="glass-card" style={{ padding: '12px', background: 'rgba(0, 155, 78, 0.05)', border: '1px solid rgba(0, 155, 78, 0.25)', marginBottom: '15px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <label style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--kfh-green)', margin: 0 }}>
+                      <i className="fa-solid fa-inbox" style={{ marginRight: '6px' }}></i>
+                      {currentLang === 'en' ? '1. Select Incoming GFS Order (All Data Retrieved Automatically)' : '١. اختيار طلب التوصيل الوارد من GFS (استرجاع تلقائي لبيانات العميل والعنوان)'}
+                    </label>
+                    <span className="badge badge-ready" style={{ fontSize: '10px' }}>
+                      {incomingGfsOrders.length} {currentLang === 'en' ? 'Pending Order(s)' : 'طلب(ات) واردة'}
+                    </span>
+                  </div>
 
-                <div className="split-grid-2" style={{ gap: '12px' }}>
-                  <div className="form-group">
-                    <label>{currentLang === 'en' ? 'Recipient Civil ID (PACI 12-digits)' : 'الرقم المدني للمستلم (12 رقماً)'}</label>
-                    <div style={{ display: 'flex', gap: '6px' }}>
-                      <input 
-                        type="text" 
-                        maxLength={12}
-                        className="form-control" 
-                        placeholder="e.g. 290011501239" 
-                        value={newHdCivilId} 
-                        onChange={e => {
-                          const val = e.target.value;
-                          setNewHdCivilId(val);
-                          if (val.length === 12) {
-                            handleValidateCivilIdApi(val);
-                          } else {
-                            setCivilIdValidationResult(null);
-                          }
-                        }} 
-                      />
-                      <button className="btn btn-secondary btn-sm" type="button" onClick={() => handleValidateCivilIdApi(newHdCivilId)}>
-                        {currentLang === 'en' ? 'Verify' : 'تحقق'}
-                      </button>
-                    </div>
-                    {civilIdValidationResult && (
-                      <div style={{ fontSize: '11px', marginTop: '4px', color: civilIdValidationResult.isValid ? 'var(--accent-green)' : 'var(--accent-red)' }}>
-                        <i className={`fa-solid ${civilIdValidationResult.isValid ? 'fa-circle-check' : 'fa-circle-xmark'}`}></i> {civilIdValidationResult.message}
+                  <select
+                    className="form-control"
+                    style={{ color: '#000', fontWeight: 600 }}
+                    value={selectedGfsOrderId}
+                    onChange={e => {
+                      const sel = incomingGfsOrders.find(o => o.gfs_order_id === e.target.value);
+                      if (sel) applyGfsOrderToHdModal(sel);
+                    }}
+                  >
+                    {incomingGfsOrders.map((o: any, idx: number) => (
+                      <option key={idx} value={o.gfs_order_id}>
+                        {o.gfs_order_id} — {o.customer_name} ({o.required_product_name}) — {o.governorate}, {o.area}
+                      </option>
+                    ))}
+                  </select>
+
+                  {/* Summary of Retrieved GFS Order Details */}
+                  {(() => {
+                    const currentOrder = incomingGfsOrders.find(o => o.gfs_order_id === selectedGfsOrderId);
+                    if (!currentOrder) return null;
+                    return (
+                      <div style={{ marginTop: '12px', padding: '10px', background: 'rgba(255,255,255,0.03)', borderRadius: '6px', border: '1px solid var(--surface-border)', fontSize: '12px' }}>
+                        <div className="split-grid-2" style={{ gap: '8px 16px', marginBottom: '8px' }}>
+                          <div><strong>{currentLang === 'en' ? 'Recipient Customer:' : 'العميل المستلم:'}</strong> {currentOrder.customer_name}</div>
+                          <div><strong>{currentLang === 'en' ? 'Civil ID (PACI):' : 'الرقم المدني:'}</strong> <span style={{ fontFamily: 'monospace', color: 'var(--accent-gold)' }}>{currentOrder.customer_civil_id}</span></div>
+                          <div><strong>{currentLang === 'en' ? 'Contact Mobile:' : 'رقم الهاتف:'}</strong> {currentOrder.customer_phone}</div>
+                          <div><strong>{currentLang === 'en' ? 'GFS Account #:' : 'رقم حساب GFS:'}</strong> {currentOrder.customer_account}</div>
+                        </div>
+
+                        <div style={{ padding: '6px 10px', background: 'rgba(0, 155, 78, 0.08)', borderRadius: '4px', border: '1px solid rgba(0, 155, 78, 0.2)', marginBottom: '8px' }}>
+                          <strong>{currentLang === 'en' ? 'Required Product Denomination:' : 'فئة ووزن السبيكة المطلوبة للتسليم:'}</strong>{' '}
+                          <span className="badge badge-ready" style={{ fontSize: '12px', marginLeft: '6px' }}>
+                            <i className="fa-solid fa-gem" style={{ marginRight: '4px' }}></i>
+                            {currentOrder.required_product_name} ({currentOrder.required_weight_grams}g)
+                          </span>
+                        </div>
+
+                        <div>
+                          <strong>{currentLang === 'en' ? 'Kuwait Residential Address:' : 'عنوان التوصيل السكني:'}</strong>
+                          <div style={{ color: 'var(--text-muted)', marginTop: '2px' }}>
+                            <i className="fa-solid fa-location-dot" style={{ color: 'var(--kfh-green)', marginRight: '4px' }}></i>
+                            {currentOrder.governorate}, {currentOrder.area}, Block {currentOrder.block}, Street {currentOrder.street}, {currentOrder.building_house} {currentOrder.floor_flat ? `, ${currentOrder.floor_flat}` : ''}
+                          </div>
+                        </div>
                       </div>
-                    )}
-                  </div>
-
-                  <div className="form-group">
-                    <label>{currentLang === 'en' ? 'Recipient Full Name' : 'اسم المستلم الثلاثي'}</label>
-                    <input type="text" className="form-control" placeholder="e.g. Abdullah Al-Sabah" value={newHdName} onChange={e => setNewHdName(e.target.value)} />
-                  </div>
-
-                  <div className="form-group">
-                    <label>{currentLang === 'en' ? 'Contact Phone (Kuwait Mobile)' : 'رقم الهاتف المتنقل'}</label>
-                    <input type="text" className="form-control" placeholder="+965 99887766" value={newHdPhone} onChange={e => setNewHdPhone(e.target.value)} />
-                  </div>
-
-                  <div className="form-group">
-                    <label>{currentLang === 'en' ? 'Customer GFS Account #' : 'رقم حساب العميل بـ GFS'}</label>
-                    <input type="text" className="form-control" placeholder="e.g. ACC-KFH-889900" value={newHdAccount} onChange={e => setNewHdAccount(e.target.value)} />
-                  </div>
-
-                  <div className="form-group" style={{ gridColumn: '1 / -1' }}>
-                    <label>{currentLang === 'en' ? 'Select 24K Gold Bar from Vault (Ready)' : 'اختر سبيكة الذهب 24 قيراط الجاهزة من الخزينة'}</label>
-                    <select className="form-control" style={{ color: '#000' }} value={newHdBarId} onChange={e => setNewHdBarId(e.target.value)}>
-                      <option value="">-- {currentLang === 'en' ? 'Select Bar' : 'اختر السبيكة'} --</option>
-                      {inventoryList.filter((i: any) => i.status === 'READY').map((item: any, idx: number) => (
-                        <option key={idx} value={item.item_id}>
-                          {item.serial_number} - {item.metal} ({item.denomination}) - 24K (999.9)
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {/* Kuwait Address Elements */}
-                  <div className="form-group">
-                    <label>{currentLang === 'en' ? 'Governorate' : 'المحافظة'}</label>
-                    <select className="form-control" style={{ color: '#000' }} value={newHdGovernorate} onChange={e => setNewHdGovernorate(e.target.value)}>
-                      <option value="Capital">{currentLang === 'en' ? 'Capital (Al-Asimah)' : 'العاصمة'}</option>
-                      <option value="Hawalli">{currentLang === 'en' ? 'Hawalli' : 'حولي'}</option>
-                      <option value="Farwaniya">{currentLang === 'en' ? 'Farwaniya' : 'الفروانية'}</option>
-                      <option value="Ahmadi">{currentLang === 'en' ? 'Ahmadi' : 'الأحمدي'}</option>
-                      <option value="Jahra">{currentLang === 'en' ? 'Jahra' : 'الجهراء'}</option>
-                      <option value="Mubarak Al-Kabeer">{currentLang === 'en' ? 'Mubarak Al-Kabeer' : 'مبارك الكبير'}</option>
-                    </select>
-                  </div>
-
-                  <div className="form-group">
-                    <label>{currentLang === 'en' ? 'Area / City' : 'المنطقة'}</label>
-                    <input type="text" className="form-control" placeholder="e.g. Shuwaikh / Jabriya" value={newHdArea} onChange={e => setNewHdArea(e.target.value)} />
-                  </div>
-
-                  <div className="form-group">
-                    <label>{currentLang === 'en' ? 'Block #' : 'القطعة'}</label>
-                    <input type="text" className="form-control" placeholder="e.g. 1" value={newHdBlock} onChange={e => setNewHdBlock(e.target.value)} />
-                  </div>
-
-                  <div className="form-group">
-                    <label>{currentLang === 'en' ? 'Street #' : 'الشارع'}</label>
-                    <input type="text" className="form-control" placeholder="e.g. Street 10" value={newHdStreet} onChange={e => setNewHdStreet(e.target.value)} />
-                  </div>
-
-                  <div className="form-group">
-                    <label>{currentLang === 'en' ? 'Building / House #' : 'المبنى / المنزل'}</label>
-                    <input type="text" className="form-control" placeholder="e.g. Building 5" value={newHdBuilding} onChange={e => setNewHdBuilding(e.target.value)} />
-                  </div>
-
-                  <div className="form-group">
-                    <label>{currentLang === 'en' ? 'Floor / Flat (Optional)' : 'الدور / الشقة (اختياري)'}</label>
-                    <input type="text" className="form-control" placeholder="e.g. Flat 3" value={newHdFlat} onChange={e => setNewHdFlat(e.target.value)} />
-                  </div>
-
-                  <div className="form-group" style={{ gridColumn: '1 / -1' }}>
-                    <label>{currentLang === 'en' ? 'Delivery Special Instructions' : 'تعليمات خاصة للتسليم'}</label>
-                    <input type="text" className="form-control" placeholder="e.g. Call before arrival, VIP client" value={newHdInstructions} onChange={e => setNewHdInstructions(e.target.value)} />
-                  </div>
+                    );
+                  })()}
                 </div>
 
-                <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
-                  <button className="btn btn-primary" style={{ flex: 1 }} onClick={async () => {
-                    if (!newHdBarId || !newHdCivilId || !newHdName || !newHdPhone) {
-                      alert(currentLang === 'en' ? 'Please fill in all mandatory fields.' : 'يرجى استكمال جميع الحقول الإلزامية.');
-                      return;
-                    }
-                    try {
-                      const res = await fetch(`${API_BASE}/gfs/home-delivery`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                          barId: parseInt(newHdBarId),
-                          customerAccountNumber: newHdAccount,
-                          recipientCivilId: newHdCivilId,
-                          recipientName: newHdName,
-                          recipientPhone: newHdPhone,
-                          governorate: newHdGovernorate,
-                          area: newHdArea,
-                          block: newHdBlock,
-                          street: newHdStreet,
-                          building: newHdBuilding,
-                          flat: newHdFlat,
-                          deliveryInstructions: newHdInstructions,
-                          createdBy: username || 'SYSTEM'
-                        })
-                      });
-                      if (res.ok) {
-                        const data = await res.json();
-                        alert(currentLang === 'en' 
-                          ? `Home delivery created! Ref: ${data.deliveryReferenceNumber}\n6-Digit Verification OTP: ${data.verificationOtp}` 
-                          : `تم إنشاء طلب التوصيل المنزلي! المرجع: ${data.deliveryReferenceNumber}\nرمز التحقق (OTP): ${data.verificationOtp}`);
-                        setShowCreateHomeDeliveryModal(false);
-                        fetchHomeDeliveries();
-                        fetchInventory();
-                      } else {
-                        const err = await res.json();
-                        alert(err.error || 'Creation failed');
+                {/* 2. SCAN BARCODE / ENTER SERIAL NUMBER & VALIDATE */}
+                <div className="glass-card" style={{ padding: '14px', background: 'rgba(234, 179, 8, 0.05)', border: '1px solid rgba(234, 179, 8, 0.25)', marginBottom: '15px' }}>
+                  <label style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--accent-gold)', display: 'block', marginBottom: '6px' }}>
+                    <i className="fa-solid fa-barcode" style={{ marginRight: '6px' }}></i>
+                    {currentLang === 'en' ? '2. Scan Barcode or Enter Serial Number (Vault Piece Verification)' : '٢. مسح الباركود أو إدخال الرقم التسلسلي (مطابقة السبيكة مع طلب العميل)'}
+                  </label>
+                  <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: '0 0 10px 0' }}>
+                    {currentLang === 'en'
+                      ? 'System strictly validates that the scanned bar exists in vault, matches the exact product type and denomination, and is ready for dispatch.'
+                      : 'يقوم النظام بالتحقق الصارم من وجود السبيكة في الخزينة ومطابقتها تماماً لفئة المنتج والوزن المطلوب بطلب GFS.'}
+                  </p>
+
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder={currentLang === 'en' ? 'Scan piece barcode or enter serial number (e.g. AU-BAR-001)...' : 'امسح باركود السبيكة أو أدخل الرقم التسلسلي...'}
+                      value={hdScanSerial}
+                      onChange={e => {
+                        setHdScanSerial(e.target.value);
+                        setHdMatchedBar(null);
+                        setHdScanError(null);
+                        setNewHdBarId('');
+                      }}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleHdVerifyScannedBar(hdScanSerial);
+                        }
+                      }}
+                      style={{ fontSize: '13px', fontWeight: 600, fontFamily: 'monospace' }}
+                    />
+                    <button
+                      className="btn btn-primary"
+                      type="button"
+                      onClick={() => handleHdVerifyScannedBar(hdScanSerial)}
+                    >
+                      <i className="fa-solid fa-check-double"></i> {currentLang === 'en' ? 'Verify Bar' : 'مطابقة والتحقق'}
+                    </button>
+                  </div>
+
+                  {/* Verification Error Alert */}
+                  {hdScanError && (
+                    <div style={{ marginTop: '10px', padding: '10px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid var(--accent-red)', borderRadius: '6px', color: 'var(--accent-red)', fontSize: '12px' }}>
+                      <i className="fa-solid fa-triangle-exclamation" style={{ marginRight: '6px' }}></i>
+                      {hdScanError}
+                    </div>
+                  )}
+
+                  {/* Verified Bar Success Banner */}
+                  {hdMatchedBar && (
+                    <div style={{ marginTop: '10px', padding: '12px', background: 'rgba(0, 155, 78, 0.12)', border: '1px solid var(--kfh-green)', borderRadius: '6px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                        <span style={{ color: 'var(--kfh-green)', fontWeight: 'bold', fontSize: '13px' }}>
+                          <i className="fa-solid fa-circle-check" style={{ marginRight: '6px' }}></i>
+                          {currentLang === 'en' ? 'Bar Verified & Matched Successfully!' : 'تم التحقق ومطابقة السبيكة بنجاح!'}
+                        </span>
+                        <span className="badge badge-ready">{hdMatchedBar.status}</span>
+                      </div>
+                      <div className="split-grid-3" style={{ fontSize: '11px', gap: '6px' }}>
+                        <div><strong>{currentLang === 'en' ? 'Serial:' : 'الرقم التسلسلي:'}</strong> <span style={{ fontFamily: 'monospace', color: 'var(--accent-gold)' }}>{hdMatchedBar.serial_number}</span></div>
+                        <div><strong>{currentLang === 'en' ? 'Product:' : 'الصنف:'}</strong> {hdMatchedBar.metal} ({hdMatchedBar.denomination || hdMatchedBar.product_code})</div>
+                        <div><strong>{currentLang === 'en' ? 'Weight:' : 'الوزن:'}</strong> {hdMatchedBar.weight_grams}g</div>
+                        <div><strong>{currentLang === 'en' ? 'Fineness:' : 'العيار:'}</strong> 24K (999.9)</div>
+                        <div><strong>{currentLang === 'en' ? 'Location:' : 'موقع الخزينة:'}</strong> {hdMatchedBar.location || 'Main Vault'}</div>
+                        <div><strong>{currentLang === 'en' ? 'Refiner:' : 'المصفاة:'}</strong> {hdMatchedBar.refiner || hdMatchedBar.brand_name || 'Valcambi'}</div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Submit Action */}
+                <div style={{ display: 'flex', gap: '10px', marginTop: '15px' }}>
+                  <button
+                    className="btn btn-primary"
+                    style={{ flex: 1, padding: '10px 16px', fontSize: '13px', fontWeight: 'bold' }}
+                    disabled={!hdMatchedBar}
+                    onClick={async () => {
+                      if (!hdMatchedBar) {
+                        alert(currentLang === 'en' ? 'Please scan and verify a matching gold bar first.' : 'يرجى مسح ومطابقة سبيكة الذهب أولاً.');
+                        return;
                       }
-                    } catch (e) {
-                      alert('Error submitting home delivery request');
-                    }
-                  }}>
-                    <i className="fa-solid fa-paper-plane"></i> {currentLang === 'en' ? 'Create Order' : 'إنشاء الطلب'}
+                      try {
+                        const res = await fetch(`${API_BASE}/gfs/home-delivery`, {
+                          method: 'POST',
+                          headers: { 
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`
+                          },
+                          body: JSON.stringify({
+                            barId: hdMatchedBar.item_id,
+                            customerAccountNumber: newHdAccount,
+                            customerCivilId: newHdCivilId,
+                            customerName: newHdName,
+                            customerPhone: newHdPhone,
+                            governorate: newHdGovernorate,
+                            area: newHdArea,
+                            block: newHdBlock,
+                            street: newHdStreet,
+                            buildingHouse: newHdBuilding,
+                            floorFlat: newHdFlat,
+                            specialInstructions: newHdInstructions,
+                            createdBy: username || 'treasury-maker'
+                          })
+                        });
+                        if (res.ok) {
+                          const data = await res.json();
+                          alert(currentLang === 'en' 
+                            ? `Home Delivery Workflow Initiated Successfully!\nDelivery Ref: ${data.deliveryNumber || data.deliveryReferenceNumber}\nBar Serial: ${hdMatchedBar.serial_number}\nStatus: Submitted to Treasury Operations (Checker) for 4-Eyes Authorization.`
+                            : `تم بدء مسار اعتماد التوصيل المنزلي بنجاح!\nالمرجع: ${data.deliveryNumber || data.deliveryReferenceNumber}\nسبيكة: ${hdMatchedBar.serial_number}\nالحالة: أُحيل إلى معتمد العمليات للموافقة وفق مبدأ الرقابة الثنائية.`);
+                          setShowCreateHomeDeliveryModal(false);
+                          fetchHomeDeliveries();
+                          fetchInventory();
+                          fetchWorkflowInstances();
+                        } else {
+                          const err = await res.json();
+                          alert(err.error || 'Creation failed');
+                        }
+                      } catch (e) {
+                        alert('Error submitting home delivery request');
+                      }
+                    }}
+                  >
+                    <i className="fa-solid fa-paper-plane"></i> {currentLang === 'en' ? 'Initiate Home Delivery Workflow (Maker-Checker)' : 'بدء مسار طلب التوصيل (صانع - معتمد)'}
                   </button>
                   <button className="btn" onClick={() => setShowCreateHomeDeliveryModal(false)}>
                     {currentLang === 'en' ? 'Cancel' : 'إلغاء'}
@@ -13301,7 +13985,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       </div>
                       <div>
                         <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10px' }}>{currentLang === 'en' ? 'Quality / Damage Status' : 'حالة الجودة / التلف'}</span>
-                        {damageMatchedBar.is_damaged ? (
+                        {damageMatchedBar.is_damaged || damageMatchedBar.status === 'DAMAGED' || damageMatchedBar.damage_status === 'APPROVED' ? (
                           <span className="badge badge-quarantined" style={{ fontSize: '11px' }}>
                             <i className="fa-solid fa-triangle-exclamation"></i> {currentLang === 'en' ? 'DAMAGED (Quarantined)' : 'تالفة (محظورة)'}
                           </span>
@@ -13316,6 +14000,28 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                         )}
                       </div>
                     </div>
+
+                    {/* ALREADY REPORTED / DAMAGED WARNING BLOCK */}
+                    {(damageMatchedBar.is_damaged || damageMatchedBar.status === 'DAMAGED' || damageMatchedBar.damage_status === 'APPROVED') && (
+                      <div style={{ marginTop: '12px', padding: '8px 12px', background: 'rgba(220, 38, 38, 0.1)', border: '1px solid #DC2626', borderRadius: '6px', color: '#DC2626', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <i className="fa-solid fa-ban"></i>
+                        <span>
+                          {currentLang === 'en'
+                            ? `This gold bar (${damageMatchedBar.serial_number}) is already confirmed as DAMAGED. It cannot be reported again.`
+                            : `هذه السبيكة (${damageMatchedBar.serial_number}) مسجلة ومعتمدة بالفعل كتالفة/معزولة. لا يمكن الإبلاغ عنها مرة أخرى.`}
+                        </span>
+                      </div>
+                    )}
+                    {damageMatchedBar.damage_status === 'PENDING_APPROVAL' && (
+                      <div style={{ marginTop: '12px', padding: '8px 12px', background: 'rgba(245, 158, 11, 0.1)', border: '1px solid #F59E0B', borderRadius: '6px', color: '#B45309', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <i className="fa-solid fa-hourglass-half"></i>
+                        <span>
+                          {currentLang === 'en'
+                            ? `This gold bar (${damageMatchedBar.serial_number}) already has a pending damage report awaiting Maker-Checker review. It cannot be reported again.`
+                            : `هذه السبيكة (${damageMatchedBar.serial_number}) تم الإبلاغ عنها مسبقاً وتنتظر قرار المراجع في الإجراءات المعلقة. لا يمكن الإبلاغ عنها مرة أخرى.`}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -13366,50 +14072,78 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                   <input type="text" className="form-control" value={damageDocId} onChange={e => setDamageDocId(e.target.value)} />
                 </div>
 
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  style={{ width: '100%', marginTop: '15px', background: '#dc3545', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', cursor: 'pointer' }}
-                  onClick={async () => {
-                    if (!damageItemId) {
-                      alert(currentLang === 'en' ? 'Please scan or select a gold bar from the vault first.' : 'الرجاء مسح أو اختيار سبيكة من الخزينة أولاً.');
-                      return;
-                    }
-                    const finalDesc = (damageDesc && damageDesc.trim()) ? damageDesc.trim() : 'Physical inspection defect identified. Requesting Maker-Checker quarantine.';
-                    const finalDocId = (damageDocId && damageDocId.trim()) ? damageDocId.trim() : `DOC-MOCI-${Date.now().toString().slice(-4)}`;
-                    try {
-                      const res = await fetch(`${API_BASE}/inventory/items/${damageItemId}/mark-damaged`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                        body: JSON.stringify({
-                          reason: damageReason || 'SCRATCHED_HALLMARK',
-                          description: finalDesc,
-                          evidenceDocId: finalDocId,
-                          reportedBy: username || 'treasury-maker'
-                        })
-                      });
-                      if (res.ok) {
-                        alert(currentLang === 'en' ? 'Damage report submitted! Maker-Checker workflow initiated.' : 'تم إرسال تقرير التلف وبدء مسار الاعتماد الثنائي بنجاح.');
-                        setShowDamageModal(false);
-                        setDamageItemId(null);
-                        setDamageMatchedBar(null);
-                        setDamageScanSerial('');
-                        setDamageScanStatus('idle');
-                        setDamageDesc('');
-                        fetchInventory();
-                        fetchDamagedBars();
-                        fetchWorkflows();
-                      } else {
-                        alert(await describeApiError(res, currentLang, 'Failed to mark damaged', 'فشل تقديم تقرير التلف'));
-                      }
-                    } catch (e) {
-                      alert(currentLang === 'en' ? 'Error submitting damage report. Please check server.' : 'حدث خطأ أثناء إرسال تقرير التلف.');
-                    }
-                  }}
-                >
-                  <i className="fa-solid fa-paper-plane"></i>
-                  <span>{currentLang === 'ar' ? 'إرسال تقرير التلف وبدء مسار الاعتماد (Maker-Checker)' : 'Submit Damage Report & Start Maker-Checker Workflow'}</span>
-                </button>
+                {(() => {
+                  const isAlreadyDamaged = damageMatchedBar && (damageMatchedBar.is_damaged || damageMatchedBar.status === 'DAMAGED' || damageMatchedBar.damage_status === 'APPROVED');
+                  const isAlreadyPending = damageMatchedBar && damageMatchedBar.damage_status === 'PENDING_APPROVAL';
+                  const isBlocked = !damageItemId || isAlreadyDamaged || isAlreadyPending;
+
+                  return (
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      disabled={isBlocked}
+                      style={{
+                        width: '100%',
+                        marginTop: '15px',
+                        background: isBlocked ? 'var(--text-muted)' : '#dc3545',
+                        borderColor: isBlocked ? 'var(--text-muted)' : '#dc3545',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '8px',
+                        cursor: isBlocked ? 'not-allowed' : 'pointer',
+                        opacity: isBlocked ? 0.6 : 1
+                      }}
+                      onClick={async () => {
+                        if (!damageItemId) {
+                          alert(currentLang === 'en' ? 'Please scan or select a gold bar from the vault first.' : 'الرجاء مسح أو اختيار سبيكة من الخزينة أولاً.');
+                          return;
+                        }
+                        if (isAlreadyDamaged) {
+                          alert(currentLang === 'en' ? 'This gold bar is already confirmed as DAMAGED. It cannot be reported again.' : 'هذه السبيكة معتمدة بالفعل كتالفة. لا يمكن الإبلاغ عنها مرة أخرى.');
+                          return;
+                        }
+                        if (isAlreadyPending) {
+                          alert(currentLang === 'en' ? 'This gold bar already has a pending damage report awaiting review. It cannot be reported again.' : 'هذه السبيكة بانتظار قرار المراجع بالفعل. لا يمكن الإبلاغ عنها مرة أخرى.');
+                          return;
+                        }
+                        const finalDesc = (damageDesc && damageDesc.trim()) ? damageDesc.trim() : 'Physical inspection defect identified. Requesting Maker-Checker quarantine.';
+                        const finalDocId = (damageDocId && damageDocId.trim()) ? damageDocId.trim() : `DOC-MOCI-${Date.now().toString().slice(-4)}`;
+                        try {
+                          const res = await fetch(`${API_BASE}/inventory/items/${damageItemId}/mark-damaged`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                            body: JSON.stringify({
+                              reason: damageReason || 'SCRATCHED_HALLMARK',
+                              description: finalDesc,
+                              evidenceDocId: finalDocId,
+                              reportedBy: username || 'treasury-maker'
+                            })
+                          });
+                          if (res.ok) {
+                            alert(currentLang === 'en' ? 'Damage report submitted! Maker-Checker workflow initiated.' : 'تم إرسال تقرير التلف وبدء مسار الاعتماد الثنائي بنجاح.');
+                            setShowDamageModal(false);
+                            setDamageItemId(null);
+                            setDamageMatchedBar(null);
+                            setDamageScanSerial('');
+                            setDamageScanStatus('idle');
+                            setDamageDesc('');
+                            fetchInventory();
+                            fetchDamagedBars();
+                            fetchWorkflows();
+                          } else {
+                            alert(await describeApiError(res, currentLang, 'Failed to mark damaged', 'فشل تقديم تقرير التلف'));
+                          }
+                        } catch (e) {
+                          alert(currentLang === 'en' ? 'Error submitting damage report. Please check server.' : 'حدث خطأ أثناء إرسال تقرير التلف.');
+                        }
+                      }}
+                    >
+                      <i className="fa-solid fa-paper-plane"></i>
+                      <span>{currentLang === 'ar' ? 'إرسال تقرير التلف وبدء مسار الاعتماد (Maker-Checker)' : 'Submit Damage Report & Start Maker-Checker Workflow'}</span>
+                    </button>
+                  );
+                })()}
               </div>
             </div>
           </div>

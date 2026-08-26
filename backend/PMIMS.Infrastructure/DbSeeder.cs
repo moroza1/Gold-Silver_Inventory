@@ -412,6 +412,16 @@ public static class DbSeeder
                 MakerDesc = "Maker configures product denomination, vendor, min stock cut-off, reorder level, and active state.",
                 CheckerStepName = "Threshold Configuration Checker Authorization",
                 CheckerDesc = "Checker reviews threshold parameters against enterprise stock policy and authorizes threshold activation or removal."
+            },
+            new
+            {
+                WorkflowType = "HOME_DELIVERY",
+                Name = "Default Home Delivery Fulfillment Workflow",
+                Description = "Standard Maker-Checker verification for client residential gold home delivery dispatch.",
+                MakerStepName = "Home Delivery Maker Verification & Bar Scanning",
+                MakerDesc = "Maker selects GFS delivery request, scans matching gold bar serial number and product type, and initiates dispatch authorization.",
+                CheckerStepName = "Home Delivery Checker Authorization",
+                CheckerDesc = "Checker verifies customer PACI Civil ID, delivery address, scanned bar serial/product match, and authorizes armored courier dispatch."
             }
         };
 
