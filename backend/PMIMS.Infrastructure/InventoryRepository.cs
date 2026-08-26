@@ -1321,6 +1321,7 @@ public class InventoryRepository : IInventoryRepository
                 ActionDescription = $"Completed data migration run ID: {migrationLogID}",
                 Timestamp = DateTime.UtcNow
             };
+            log.RowHash = ComputeAuditRowHash(log);
             _dbContext.AuditLogs.Add(log);
             await _dbContext.SaveChangesAsync();
 
@@ -1676,8 +1677,9 @@ public class InventoryRepository : IInventoryRepository
     // detects in-place edits, not deletions -- pair with normal DB access controls for that.
     internal static string ComputeAuditRowHash(AuditLog log)
     {
+        var utc = DateTime.SpecifyKind(log.Timestamp, DateTimeKind.Utc);
         string material = string.Join("|",
-            log.Timestamp.ToString("O"), log.Username, log.IpAddress, log.ModuleName,
+            utc.ToString("O"), log.Username, log.IpAddress, log.ModuleName,
             log.ActionDescription, log.SqlExecuted ?? "", log.EntityType ?? "", log.EntityId ?? "");
         using var sha = System.Security.Cryptography.SHA256.Create();
         var bytes = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(material));
@@ -3207,8 +3209,28 @@ public class InventoryRepository : IInventoryRepository
     private static AuditLogSearchResultItem MapAuditLogSearchResultItem(AuditLog log)
     {
         string tamperStatus;
-        if (string.IsNullOrEmpty(log.RowHash)) tamperStatus = "Unverified";
-        else tamperStatus = ComputeAuditRowHash(log) == log.RowHash ? "Verified" : "Tampered";
+        if (string.IsNullOrEmpty(log.RowHash))
+        {
+            tamperStatus = "Unverified";
+        }
+        else
+        {
+            var computed = ComputeAuditRowHash(log);
+            if (computed == log.RowHash)
+            {
+                tamperStatus = "Verified";
+            }
+            else
+            {
+                // Fallback check against raw ToString("O") in case row was hashed before UTC normalization
+                string rawMaterial = string.Join("|",
+                    log.Timestamp.ToString("O"), log.Username, log.IpAddress, log.ModuleName,
+                    log.ActionDescription, log.SqlExecuted ?? "", log.EntityType ?? "", log.EntityId ?? "");
+                using var sha = System.Security.Cryptography.SHA256.Create();
+                var rawHash = Convert.ToHexString(sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(rawMaterial))).ToLowerInvariant();
+                tamperStatus = rawHash == log.RowHash ? "Verified" : "Tampered";
+            }
+        }
 
         return new AuditLogSearchResultItem
         {
