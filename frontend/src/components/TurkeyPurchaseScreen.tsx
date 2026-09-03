@@ -275,7 +275,7 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
   // Apply OCR or Paste Matches to Selected Serials in Turkey Inventory
   const handleApplyExtractedMatches = (serialsToSelect: string[], targetProd?: string | any) => {
     const explicitProd = typeof targetProd === 'string' && targetProd.trim() ? targetProd.trim() : undefined;
-    const productToFilter = explicitProd !== undefined ? explicitProd : (showSmartModal ? smartProduct : filterProduct);
+    const productToFilter = explicitProd !== undefined ? explicitProd : (showSmartModal ? smartProduct : '');
     let pool = availableItems;
     if (productToFilter) {
       pool = pool.filter(i => i.product_code === productToFilter || String(i.product_id) === String(productToFilter));
@@ -350,7 +350,7 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
     const rawStart = rangeStart.trim().toUpperCase();
     const rawEnd = (rangeEnd.trim() || rangeStart.trim()).toUpperCase();
     const explicitProd = typeof targetProd === 'string' && targetProd.trim() ? targetProd.trim() : undefined;
-    const productToFilter = explicitProd !== undefined ? explicitProd : (showSmartModal ? smartProduct : filterProduct);
+    const productToFilter = explicitProd !== undefined ? explicitProd : (showSmartModal ? smartProduct : '');
 
     if (!rawStart) {
       alert(currentLang === 'en' ? 'Please enter Start and End serial numbers.' : 'يرجى إدخال رقم البداية والنهاية.');
