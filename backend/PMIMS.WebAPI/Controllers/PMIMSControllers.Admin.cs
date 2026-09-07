@@ -223,23 +223,74 @@ public partial class PMIMSControllers
         return Ok(new { message = "Branch deleted successfully." });
     }
 
+    [Authorize(Policy = "master_data.write")]
+    [HttpPost("catalog/vendors")]
+    public async Task<IActionResult> CreateVendor([FromBody] SaveVendorRequest req)
+    {
+        if (string.IsNullOrWhiteSpace(req.VendorCode) || string.IsNullOrWhiteSpace(req.VendorName))
+            return BadRequest(new { error = "VendorCode and VendorName are required." });
+
+        var vendor = await _repository.CreateVendorAsync(req.VendorCode, req.VendorName, req.CountryOfOrigin, req.IsShariaCompliant, req.ContactEmail);
+        return Ok(new {
+            vendor_id = vendor.VendorId,
+            code = vendor.VendorCode,
+            name = vendor.VendorName,
+            country = vendor.CountryOfOrigin,
+            sharia = vendor.IsShariaCompliant,
+            email = vendor.ContactEmail,
+            message = "Vendor created successfully."
+        });
+    }
+
+    [Authorize(Policy = "master_data.write")]
+    [HttpPut("catalog/vendors/{id}")]
+    public async Task<IActionResult> UpdateVendor(int id, [FromBody] SaveVendorRequest req)
+    {
+        if (string.IsNullOrWhiteSpace(req.VendorCode) || string.IsNullOrWhiteSpace(req.VendorName))
+            return BadRequest(new { error = "VendorCode and VendorName are required." });
+
+        var vendor = await _repository.UpdateVendorAsync(id, req.VendorCode, req.VendorName, req.CountryOfOrigin, req.IsShariaCompliant, req.ContactEmail);
+        if (vendor == null) return NotFound(new { error = "Vendor not found." });
+
+        return Ok(new {
+            vendor_id = vendor.VendorId,
+            code = vendor.VendorCode,
+            name = vendor.VendorName,
+            country = vendor.CountryOfOrigin,
+            sharia = vendor.IsShariaCompliant,
+            email = vendor.ContactEmail,
+            message = "Vendor updated successfully."
+        });
+    }
+
+    [Authorize(Policy = "master_data.write")]
+    [HttpDelete("catalog/vendors/{id}")]
+    public async Task<IActionResult> DeleteVendor(int id)
+    {
+        var result = await _repository.DeleteVendorAsync(id);
+        if (!result) return NotFound(new { error = "Vendor not found." });
+        return Ok(new { message = "Vendor deleted successfully." });
+    }
+
     // =========================================================================
     // STOCK REORDER THRESHOLDS
     // =========================================================================
 
     [Authorize(Policy = "master_data.read")]
     [HttpGet("inventory/reorder-thresholds")]
-    public async Task<IActionResult> GetReorderThresholds()
+    public async Task<IActionResult> GetReorderThresholds([FromQuery] string? type = null)
     {
-        var thresholds = await _repository.GetReorderThresholdsAsync();
+        var thresholds = await _repository.GetReorderThresholdsAsync(type);
         return Ok(thresholds.Select(t => new {
             threshold_id = t.ThresholdId,
+            threshold_type = t.ThresholdType,
             product_id = t.ProductId,
             product_code = t.Product?.ProductCode ?? "",
             product_name = $"{t.Product?.MetalType?.MetalName ?? ""} {t.Product?.Denomination?.Label ?? ""}",
             vendor_id = t.VendorId,
             vendor_name = t.Vendor?.VendorName ?? "",
             min_stock_qty = t.MinStockQty,
+            max_stock_qty = t.MaxStockQty ?? (t.ThresholdType == "HIGH_STOCK" ? t.MinStockQty : (int?)null),
             reorder_qty = t.ReorderQty,
             is_active = t.IsActive
         }));
@@ -249,17 +300,23 @@ public partial class PMIMSControllers
     [HttpPost("inventory/reorder-thresholds")]
     public async Task<IActionResult> SaveReorderThreshold([FromBody] SaveReorderThresholdRequest req)
     {
-        var threshold = await _repository.SaveReorderThresholdAsync(req.ThresholdId, req.ProductId, req.VendorId, req.MinStockQty, req.ReorderQty, req.IsActive);
+        string username = User.Identity?.Name ?? "system-admin";
+        var pending = await _repository.SubmitThresholdChangeRequestAsync(req.ThresholdType, req.ThresholdId, req.ProductId, req.VendorId, req.MinStockQty, req.MaxStockQty, req.ReorderQty, req.IsActive, username);
         return Ok(new {
-            threshold_id = threshold.ThresholdId,
-            product_id = threshold.ProductId,
-            product_code = threshold.Product?.ProductCode ?? "",
-            vendor_id = threshold.VendorId,
-            vendor_name = threshold.Vendor?.VendorName ?? "",
-            min_stock_qty = threshold.MinStockQty,
-            reorder_qty = threshold.ReorderQty,
-            is_active = threshold.IsActive,
-            message = "Threshold saved successfully."
+            pending_change_id = pending.PendingChangeId,
+            change_type = pending.ChangeType,
+            threshold_type = pending.ThresholdType,
+            threshold_id = pending.ThresholdId,
+            product_id = pending.ProductId,
+            product_code = pending.Product?.ProductCode ?? "",
+            vendor_id = pending.VendorId,
+            vendor_name = pending.Vendor?.VendorName ?? "",
+            min_stock_qty = pending.MinStockQty,
+            max_stock_qty = pending.MaxStockQty,
+            reorder_qty = pending.ReorderQty,
+            is_active = pending.IsActive,
+            status_code = pending.StatusCode,
+            message = $"{pending.ThresholdType} cut-off threshold configuration submitted for Maker-Checker approval."
         });
     }
 
@@ -267,16 +324,57 @@ public partial class PMIMSControllers
     [HttpDelete("inventory/reorder-thresholds/{id}")]
     public async Task<IActionResult> DeleteReorderThreshold(int id)
     {
-        var result = await _repository.DeleteReorderThresholdAsync(id);
-        if (!result) return NotFound();
-        return Ok(new { message = "Threshold deleted successfully." });
+        string username = User.Identity?.Name ?? "system-admin";
+        var pending = await _repository.SubmitThresholdDeleteRequestAsync(id, username);
+        return Ok(new {
+            pending_change_id = pending.PendingChangeId,
+            change_type = pending.ChangeType,
+            threshold_type = pending.ThresholdType,
+            threshold_id = pending.ThresholdId,
+            status_code = pending.StatusCode,
+            message = "Cut-off threshold deletion request submitted for Maker-Checker approval."
+        });
+    }
+
+    [Authorize(Policy = "master_data.read")]
+    [HttpGet("inventory/pending-threshold-changes")]
+    public async Task<IActionResult> GetPendingThresholdChanges([FromQuery] string? type = null)
+    {
+        var changes = await _repository.GetPendingThresholdChangesAsync(type);
+        return Ok(changes.Select(c => new {
+            pending_change_id = c.PendingChangeId,
+            change_type = c.ChangeType,
+            threshold_type = c.ThresholdType,
+            threshold_id = c.ThresholdId,
+            product_id = c.ProductId,
+            product_code = c.Product?.ProductCode ?? "",
+            product_name = $"{c.Product?.MetalType?.MetalName ?? ""} {c.Product?.Denomination?.Label ?? ""}",
+            vendor_id = c.VendorId,
+            vendor_name = c.Vendor?.VendorName ?? "",
+            min_stock_qty = c.MinStockQty,
+            max_stock_qty = c.MaxStockQty,
+            reorder_qty = c.ReorderQty,
+            is_active = c.IsActive,
+            status_code = c.StatusCode,
+            requested_by = c.RequestedBy,
+            created_at = c.CreatedAt,
+            comments = c.Comments
+        }));
     }
 
     [Authorize(Policy = "dashboard.read")]
     [HttpGet("inventory/low-stock-alerts")]
     public async Task<IActionResult> GetLowStockAlerts()
     {
-        var alerts = await _repository.CheckLowStockAlertsAsync();
+        var alerts = await _repository.CheckStockAlertsAsync();
+        return Ok(alerts);
+    }
+
+    [Authorize(Policy = "dashboard.read")]
+    [HttpGet("inventory/stock-alerts")]
+    public async Task<IActionResult> GetStockAlerts()
+    {
+        var alerts = await _repository.CheckStockAlertsAsync();
         return Ok(alerts);
     }
 
@@ -521,6 +619,28 @@ public partial class PMIMSControllers
             updated_at = setting.UpdatedAt,
             updated_by = setting.UpdatedBy,
             message = "Reservation TTL updated successfully."
+        });
+    }
+
+    // =========================================================================
+    // PRESENTATION MODE / ZERO-STATE RESET
+    // ------------------------------------------------------------------------
+    // Wipes all transactional store data, physical inventory items, lots,
+    // transactions, orders, workflows, and audit logs to start from zero for
+    // demonstrations, while keeping all configuration, master products,
+    // locations, users, and rules.
+    // =========================================================================
+    [Authorize(Policy = "user_admin.write")]
+    [HttpPost("admin/system/reset-store-data")]
+    public async Task<IActionResult> ResetStoreDataAndAuditTrail()
+    {
+        string username = User?.Identity?.Name ?? "system-admin";
+        await _repository.ResetStoreDataAndAuditTrailAsync(username);
+        return Ok(new {
+            success = true,
+            message = "All store inventory, transactions, orders, workflows, and audit trail records have been cleared. System configuration and master data preserved for clean presentation.",
+            resetBy = username,
+            timestamp = DateTime.UtcNow
         });
     }
 }

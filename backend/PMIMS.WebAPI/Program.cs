@@ -312,6 +312,11 @@ try
             await DbSeeder.EnsureModulePermissionsAsync(context);
             Console.WriteLine("✅ Module permissions verified");
 
+            // Ensure all 6 core workflows have active Maker-Checker template definitions
+            Console.WriteLine("🔄 Ensuring workflow templates are up to date...");
+            await DbSeeder.EnsureWorkflowTemplatesAsync(context);
+            Console.WriteLine("✅ Workflow templates verified");
+
             // Create the General Ledger tables (gl_journal_*, gl_config_versions) in the
             // same database, seed the initial ACTIVE config version from the JSON file, and
             // load it into the hot config provider. Dev/SQLite convenience; production SQL

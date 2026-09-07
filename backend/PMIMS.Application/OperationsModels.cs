@@ -102,11 +102,23 @@ public class BarcodeLabelDto
     public int ItemId { get; set; }
     public string SerialNumber { get; set; } = null!;
     public string ProductLabel { get; set; } = null!;
+    public string MetalName { get; set; } = "Gold";
+    public decimal WeightGrams { get; set; }
+    public decimal PurityValue { get; set; } = 999.9m;
+    public string? Denomination { get; set; }
+    public string? RefinerBrand { get; set; }
     public string Gtin14 { get; set; } = null!;
     public string? LotNumber { get; set; }
     public string OwnershipType { get; set; } = null!;
     public string StatusCode { get; set; } = null!;
     public string? LocationDescription { get; set; }
+    public bool IsDamaged { get; set; }
+    public string? DamageApprovalStatus { get; set; }
+    public string? DamageReason { get; set; }
+    public string? DamageDescription { get; set; }
+    public string? DamageReportedBy { get; set; }
+    public string? DamageApprovedBy { get; set; }
+    public DateTime? DamageApprovedAt { get; set; }
     // Machine-encoded content actually stored in the symbols (contains the raw FNC1
     // control character for the barcode's GS1-128 encoding).
     public string Gs1ElementString { get; set; } = null!;
@@ -125,11 +137,25 @@ public class LotLabelSheetDto
     public List<BarcodeLabelDto> Labels { get; set; } = new();
 }
 
+public class CustomBarcodeLabelRequest
+{
+    public string SerialNumber { get; set; } = null!;
+    public string MetalName { get; set; } = "Gold";
+    public decimal WeightGrams { get; set; } = 1000m;
+    public decimal PurityValue { get; set; } = 999.9m;
+    public string? DenominationLabel { get; set; }
+    public string? LotNumber { get; set; }
+    public string? RefinerBrand { get; set; }
+    public string OwnershipType { get; set; } = "KFH_OWNED";
+}
+
 public interface IBarcodeLabelService
 {
     Task<BarcodeLabelDto?> GenerateItemLabelAsync(string serialNumber);
     Task<BarcodeLabelDto?> GenerateItemLabelByIdAsync(int itemId);
     Task<LotLabelSheetDto?> GenerateLotLabelSheetAsync(string lotNumber);
+    Task<(bool valid, string? error, BarcodeLabelDto? label)> GenerateCustomLabelAsync(CustomBarcodeLabelRequest req);
+    Task<List<BarcodeLabelDto>> GenerateBulkLabelsAsync(IEnumerable<string> serialNumbers);
 }
 
 // ============================================================

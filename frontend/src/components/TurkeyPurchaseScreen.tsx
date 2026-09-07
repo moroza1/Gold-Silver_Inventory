@@ -43,6 +43,7 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
   // Smart Tools Modal state (Range, Paste, OCR Scanner)
   const [showSmartModal, setShowSmartModal] = useState(false);
   const [smartTab, setSmartTab] = useState<'RANGE' | 'PASTE' | 'OCR'>('RANGE');
+  const [smartProduct, setSmartProduct] = useState<string>('');
 
   // Range tool state
   const [rangeStart, setRangeStart] = useState('');
@@ -272,23 +273,54 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
   };
 
   // Apply OCR or Paste Matches to Selected Serials in Turkey Inventory
-  const handleApplyExtractedMatches = (serialsToSelect: string[]) => {
-    const availableSet = new Set(availableItems.map(i => i.serial_number.toUpperCase()));
-    const matched = serialsToSelect
-      .map(s => s.trim().toUpperCase())
-      .filter(s => availableSet.has(s));
+  const handleApplyExtractedMatches = (serialsToSelect: string[], targetProd?: string | any) => {
+    const explicitProd = typeof targetProd === 'string' && targetProd.trim() ? targetProd.trim() : undefined;
+    const productToFilter = explicitProd !== undefined ? explicitProd : (showSmartModal ? smartProduct : '');
+    let pool = availableItems;
+    if (productToFilter) {
+      pool = pool.filter(i => i.product_code === productToFilter || String(i.product_id) === String(productToFilter));
+    }
 
-    if (matched.length === 0) {
+    const poolMap = new Map<string, any>();
+    pool.forEach(i => poolMap.set(i.serial_number.trim().toUpperCase(), i));
+
+    const matchedSerials: string[] = [];
+    const missingSerials: string[] = [];
+
+    serialsToSelect.forEach(raw => {
+      const s = raw.trim().toUpperCase();
+      if (!s) return;
+      if (poolMap.has(s)) {
+        matchedSerials.push(poolMap.get(s).serial_number);
+      } else {
+        missingSerials.push(raw);
+      }
+    });
+
+    const prodObj = turkeyInventory?.summary?.by_product?.find(p => p.product_code === productToFilter || String(p.product_id) === String(productToFilter));
+    const prodLabel = productToFilter ? ` for product [${prodObj?.denomination || (typeof productToFilter === 'string' ? productToFilter : '')}]` : '';
+    const prodLabelAr = productToFilter ? ` للمنتج [${prodObj?.denomination || (typeof productToFilter === 'string' ? productToFilter : '')}]` : '';
+
+    if (matchedSerials.length === 0) {
       alert(currentLang === 'en' 
-        ? `None of the scanned serials (${serialsToSelect.join(', ')}) were found in active Turkey inventory.` 
-        : `لم يتم العثور على الأرقام (${serialsToSelect.join(', ')}) في مخزون تركيا الحالي.`);
+        ? `None of the requested serials (${serialsToSelect.slice(0, 5).join(', ')}${serialsToSelect.length > 5 ? '...' : ''}) were found in active Turkey inventory${prodLabel}. Please verify the serial numbers and selected product.` 
+        : `لم يتم العثور على الأرقام التسلسلية (${serialsToSelect.slice(0, 5).join(', ')}${serialsToSelect.length > 5 ? '...' : ''}) في مخزون تركيا الحالي${prodLabelAr}. يرجى التحقق من صحة الأرقام والمنتج المختار.`);
       return;
     }
 
-    const newSet = new Set([...selectedSerials, ...matched]);
+    const newSet = new Set([...selectedSerials, ...matchedSerials]);
     setSelectedSerials(Array.from(newSet));
     setShowSmartModal(false);
-    alert(currentLang === 'en' ? `Selected ${matched.length} matching Turkey bar(s).` : `تم تحديد ${matched.length} سبيكة تركية مطابقة.`);
+
+    if (missingSerials.length > 0) {
+      alert(currentLang === 'en'
+        ? `Selected ${matchedSerials.length} matching Turkey bar(s)${prodLabel}. Note: ${missingSerials.length} serial(s) do not exist in inventory (${missingSerials.slice(0, 3).join(', ')}${missingSerials.length > 3 ? '...' : ''}).`
+        : `تم تحديد ${matchedSerials.length} سبيكة مطابقة${prodLabelAr}. تنبيه: ${missingSerials.length} رقم تسلسلي غير موجود في المخزون (${missingSerials.slice(0, 3).join(', ')}${missingSerials.length > 3 ? '...' : ''}).`);
+    } else {
+      alert(currentLang === 'en'
+        ? `Selected ${matchedSerials.length} matching Turkey bar(s)${prodLabel}.`
+        : `تم تحديد ${matchedSerials.length} سبيكة تركية مطابقة${prodLabelAr}.`);
+    }
   };
 
   // Handle Bulk Paste Select
@@ -301,29 +333,115 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
     handleApplyExtractedMatches(lines);
   };
 
-  // Handle Range Selection
-  const handleApplyRangeSelect = () => {
-    if (!rangeStart.trim() || !rangeEnd.trim()) {
+  const splitSerial = (s: string) => {
+    const match = s.trim().toUpperCase().match(/^([A-Za-z0-9_-]*?)(\d+)([A-Za-z0-9_-]*)$/);
+    if (!match) return null;
+    return {
+      prefix: match[1],
+      numStr: match[2],
+      num: parseInt(match[2], 10),
+      padLen: match[2].length,
+      suffix: match[3]
+    };
+  };
+
+  // Handle Range Selection (Complete Numeric & Exact Padding Sequence Matching)
+  const handleApplyRangeSelect = (targetProd?: string | any) => {
+    const rawStart = rangeStart.trim().toUpperCase();
+    const rawEnd = (rangeEnd.trim() || rangeStart.trim()).toUpperCase();
+    const explicitProd = typeof targetProd === 'string' && targetProd.trim() ? targetProd.trim() : undefined;
+    const productToFilter = explicitProd !== undefined ? explicitProd : (showSmartModal ? smartProduct : '');
+
+    if (!rawStart) {
       alert(currentLang === 'en' ? 'Please enter Start and End serial numbers.' : 'يرجى إدخال رقم البداية والنهاية.');
       return;
     }
 
-    const start = rangeStart.trim().toUpperCase();
-    const end = rangeEnd.trim().toUpperCase();
+    // Filter available pool by product if chosen
+    let pool = availableItems;
+    if (productToFilter) {
+      pool = pool.filter(i => i.product_code === productToFilter || String(i.product_id) === String(productToFilter));
+    }
 
-    const matched = availableItems.filter(i => {
-      const s = i.serial_number.toUpperCase();
-      return s >= start && s <= end;
-    }).map(i => i.serial_number);
+    const startSplit = splitSerial(rawStart);
+    const endSplit = splitSerial(rawEnd);
 
-    if (matched.length === 0) {
-      alert(currentLang === 'en' ? 'No available Turkey bars found in the specified range.' : 'لم يتم العثور على سبائك تركية متاحة ضمن النطاق المحدد.');
+    let expectedSerials: string[] = [];
+
+    if (rawStart === rawEnd) {
+      expectedSerials = [rawStart];
+    } else if (startSplit && endSplit && startSplit.prefix === endSplit.prefix && startSplit.suffix === endSplit.suffix) {
+      if (startSplit.padLen !== endSplit.padLen) {
+        alert(currentLang === 'en' 
+          ? `Mismatched padding in range: "${rawStart}" has ${startSplit.padLen} digits while "${rawEnd}" has ${endSplit.padLen} digits. Please specify matching zero-padding.` 
+          : `اختلاف في عدد خانات الأرقام: "${rawStart}" يحتوي على ${startSplit.padLen} أرقام بينما "${rawEnd}" يحتوي على ${endSplit.padLen} أرقام. يرجى استخدام نفس عدد الخانات.`);
+        return;
+      }
+
+      const minNum = Math.min(startSplit.num, endSplit.num);
+      const maxNum = Math.max(startSplit.num, endSplit.num);
+      const count = maxNum - minNum + 1;
+
+      if (count > 5000) {
+        alert(currentLang === 'en' ? 'Range is too large (maximum 5,000 items at once).' : 'النطاق كبير جداً (الحد الأقصى 5000 سبيكة في المرة الواحدة).');
+        return;
+      }
+
+      for (let n = minNum; n <= maxNum; n++) {
+        const numFormatted = String(n).padStart(startSplit.padLen, '0');
+        expectedSerials.push(`${startSplit.prefix}${numFormatted}${startSplit.suffix}`);
+      }
+    } else {
+      alert(currentLang === 'en'
+        ? `Invalid serial range format. Start ("${rawStart}") and End ("${rawEnd}") must share the same prefix, suffix, and structure.`
+        : `صيغة نطاق الأرقام التسلسلية غير صحيحة. يجب أن يتطابق رقم البداية ("${rawStart}") ورقم النهاية ("${rawEnd}") في البادئة واللاحقة والبنية.`);
       return;
     }
 
-    const newSet = new Set([...selectedSerials, ...matched]);
+    const poolMap = new Map<string, any>();
+    pool.forEach(i => poolMap.set(i.serial_number.trim().toUpperCase(), i));
+
+    const matchedSerials: string[] = [];
+    const missingSerials: string[] = [];
+
+    expectedSerials.forEach(s => {
+      if (poolMap.has(s)) {
+        matchedSerials.push(poolMap.get(s).serial_number);
+      } else {
+        missingSerials.push(s);
+      }
+    });
+
+    const prodObj = turkeyInventory?.summary?.by_product?.find(p => p.product_code === productToFilter || String(p.product_id) === String(productToFilter));
+    const prodLabel = productToFilter ? ` for product [${prodObj?.denomination || (typeof productToFilter === 'string' ? productToFilter : '')}]` : '';
+    const prodLabelAr = productToFilter ? ` للمنتج [${prodObj?.denomination || (typeof productToFilter === 'string' ? productToFilter : '')}]` : '';
+
+    if (matchedSerials.length === 0) {
+      if (expectedSerials.length === 1) {
+        alert(currentLang === 'en'
+          ? `Serial number "${expectedSerials[0]}" does not exist in active Turkey inventory${prodLabel}. Please verify the serial number and selected product.`
+          : `الرقم التسلسلي "${expectedSerials[0]}" غير موجود في مخزون تركيا الحالي${prodLabelAr}. يرجى التحقق من صحة الرقم والمنتج المختار.`);
+      } else {
+        alert(currentLang === 'en'
+          ? `None of the requested serial numbers in range ${rawStart}..${rawEnd} (${expectedSerials.length} items) exist in active Turkey inventory${prodLabel}. Please verify the exact serial numbers.`
+          : `جميع الأرقام التسلسلية المحددة في النطاق ${rawStart}..${rawEnd} (${expectedSerials.length} قطعة) غير موجودة في مخزون تركيا الحالي${prodLabelAr}. يرجى التأكد من دقة الأرقام.`);
+      }
+      return;
+    }
+
+    const newSet = new Set([...selectedSerials, ...matchedSerials]);
     setSelectedSerials(Array.from(newSet));
     setShowSmartModal(false);
+
+    if (missingSerials.length > 0) {
+      alert(currentLang === 'en'
+        ? `Selected ${matchedSerials.length} matching Turkey bar(s) in range ${rawStart}..${rawEnd}${prodLabel}. Note: ${missingSerials.length} serial(s) do not exist in inventory (${missingSerials.slice(0, 3).join(', ')}${missingSerials.length > 3 ? '...' : ''}).`
+        : `تم تحديد ${matchedSerials.length} سبيكة مطابقة ضمن النطاق ${rawStart}..${rawEnd}${prodLabelAr}. تنبيه: ${missingSerials.length} رقم تسلسلي غير موجود في المخزون (${missingSerials.slice(0, 3).join(', ')}${missingSerials.length > 3 ? '...' : ''}).`);
+    } else {
+      alert(currentLang === 'en'
+        ? `Successfully selected all ${matchedSerials.length} Turkey bar(s) in range ${rawStart}..${rawEnd}${prodLabel}.`
+        : `تم بنجاح تحديد جميع السبائك (${matchedSerials.length} قطعة) ضمن النطاق ${rawStart}..${rawEnd}${prodLabelAr}.`);
+    }
   };
 
   // Toggle single item
@@ -516,7 +634,10 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
                     <button
                       type="button"
                       className="btn btn-primary"
-                      onClick={() => setShowSmartModal(true)}
+                      onClick={() => {
+                        setSmartProduct(filterProduct);
+                        setShowSmartModal(true);
+                      }}
                       style={{ fontSize: '11px', padding: '5px 12px' }}
                     >
                       <i className="fa-solid fa-wand-magic-sparkles"></i> {currentLang === 'en' ? 'Smart Scanner & Tools (OCR)' : 'الماسح الضوئي والأدوات الذكية'}
@@ -551,7 +672,7 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
                     <button
                       type="button"
                       className="btn btn-secondary"
-                      onClick={handleApplyRangeSelect}
+                      onClick={() => handleApplyRangeSelect()}
                       style={{ fontSize: '12px', padding: '6px 14px' }}
                     >
                       <i className="fa-solid fa-plus"></i> {currentLang === 'en' ? 'Add Range' : 'إضافة النطاق'}
@@ -559,13 +680,13 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
                   </div>
 
                   {/* Row 2: Denomination Select & Bulk Actions */}
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center', paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
-                    <div style={{ display: 'flex', gap: '6px', flex: 1, minWidth: '220px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '12px', alignItems: 'center', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center', minWidth: 0 }}>
                       <select
                         className="form-control"
                         value={filterProduct}
                         onChange={e => setFilterProduct(e.target.value)}
-                        style={{ fontSize: '12px', padding: '6px 8px' }}
+                        style={{ fontSize: '12px', padding: '6px 8px', flex: 1, minWidth: 0 }}
                       >
                         <option value="">{currentLang === 'en' ? '-- Select Denomination to Add --' : '-- اختر الفئة للإضافة --'}</option>
                         {turkeyInventory?.summary?.by_product?.map(p => (
@@ -580,18 +701,18 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
                         className="btn btn-secondary"
                         onClick={handleAddByDenomination}
                         disabled={!filterProduct}
-                        style={{ fontSize: '11px', padding: '6px 10px', whiteSpace: 'nowrap' }}
+                        style={{ fontSize: '11px', padding: '6px 12px', whiteSpace: 'nowrap', flexShrink: 0 }}
                       >
                         <i className="fa-solid fa-plus"></i> {currentLang === 'en' ? 'Add Denomination' : 'إضافة الفئة'}
                       </button>
                     </div>
 
-                    <div style={{ display: 'flex', gap: '6px', marginLeft: 'auto' }}>
+                    <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', flexWrap: 'wrap', alignItems: 'center' }}>
                       <button
                         type="button"
                         className="btn"
                         onClick={handleSelectAllAvailable}
-                        style={{ fontSize: '11px', padding: '6px 12px', background: 'rgba(255,255,255,0.05)' }}
+                        style={{ fontSize: '11px', padding: '6px 12px', background: 'rgba(255,255,255,0.05)', whiteSpace: 'nowrap', flexShrink: 0 }}
                       >
                         <i className="fa-solid fa-check-double"></i> {currentLang === 'en' ? `Select All Available (${availableItems.length})` : `تحديد الكل المتاح (${availableItems.length})`}
                       </button>
@@ -601,7 +722,7 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
                           type="button"
                           className="btn btn-danger"
                           onClick={handleClearSelection}
-                          style={{ fontSize: '11px', padding: '6px 12px' }}
+                          style={{ fontSize: '11px', padding: '6px 12px', whiteSpace: 'nowrap', flexShrink: 0 }}
                         >
                           <i className="fa-solid fa-trash-can"></i> {currentLang === 'en' ? 'Clear Selection' : 'إلغاء التحديد'}
                         </button>
@@ -926,6 +1047,32 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
               </button>
             </div>
 
+            {/* Product / Denomination Filter in Smart Tools Modal */}
+            <div style={{ marginBottom: '14px', background: 'rgba(255,255,255,0.02)', padding: '10px 14px', borderRadius: '6px', border: '1px solid var(--surface-border)' }}>
+              <label style={{ fontSize: '12px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px', color: 'var(--kfh-green)' }}>
+                <i className="fa-solid fa-boxes-stacked"></i>
+                {currentLang === 'en' ? 'Target Product / Denomination (Mandatory for Unique Serial Match):' : 'المنتج / فئة السبيكة (ضروري لضمان مطابقة الرقم الفريد للفئة):'}
+              </label>
+              <select
+                className="form-control"
+                value={smartProduct}
+                onChange={e => setSmartProduct(e.target.value)}
+                style={{ fontSize: '12px', padding: '6px 10px' }}
+              >
+                <option value="">{currentLang === 'en' ? '-- Select Product / Denomination --' : '-- اختر فئة المنتج --'}</option>
+                {turkeyInventory?.summary?.by_product?.map(p => (
+                  <option key={p.product_code} value={p.product_code}>
+                    {p.denomination} - {p.metal_name} ({p.weight_grams}g) — {p.count} {currentLang === 'en' ? 'available' : 'متاح'}
+                  </option>
+                ))}
+              </select>
+              <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px', display: 'block' }}>
+                {currentLang === 'en'
+                  ? 'Serials are unique within their specific denomination. Select the target product to prevent matching duplicate serials from other denominations.'
+                  : 'الأرقام التسلسلية فريدة لكل فئة سبيكة. اختر فئة المنتج لمنع مطابقة أرقام مكررة من فئات أخرى.'}
+              </span>
+            </div>
+
             {/* Navigation Tabs */}
             <div style={{ display: 'flex', gap: '8px', borderBottom: '1px solid var(--surface-border)', paddingBottom: '10px', marginBottom: '16px' }}>
               <button
@@ -986,7 +1133,7 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
                   <button type="button" className="btn" onClick={() => setShowSmartModal(false)}>
                     {currentLang === 'en' ? 'Cancel' : 'إلغاء'}
                   </button>
-                  <button type="button" className="btn btn-primary" onClick={handleApplyRangeSelect}>
+                  <button type="button" className="btn btn-primary" onClick={() => handleApplyRangeSelect()}>
                     <i className="fa-solid fa-check-double"></i> {currentLang === 'en' ? 'Select Range from Inventory' : 'تحديد النطاق من المخزون'}
                   </button>
                 </div>

@@ -849,6 +849,31 @@ html[dir="rtl"] .modal-header {
     display: none !important;
   }
 
+  #printable-label-card {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  #printable-label-card > div:not(.barcode-sticker-tag) {
+    display: none !important;
+  }
+
+  .barcode-sticker-tag, #printable-barcode-sticker {
+    display: block !important;
+    background: #ffffff !important;
+    color: #111827 !important;
+    border: 1.5px solid #d4af37 !important;
+    border-radius: 8px !important;
+    padding: 10px 12px !important;
+    max-width: 380px !important;
+    margin: 0 auto !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
   .barcode-label-card {
     break-inside: avoid;
     page-break-inside: avoid;
@@ -889,14 +914,14 @@ html[dir="rtl"] .modal-header {
    ============================================================================ */
 .node-canvas {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 20px;
-  padding: 28px;
+  padding: 24px;
   background: radial-gradient(circle at center, rgba(0, 155, 78, 0.04) 0%, transparent 70%), #FAFAFA;
   border: 1px solid var(--surface-border);
   border-radius: 12px;
   overflow-x: auto;
-  min-height: 260px;
+  min-height: 380px;
   margin-bottom: 28px;
   position: relative;
 }
@@ -907,7 +932,8 @@ html[dir="rtl"] .node-canvas {
 
 .step-node {
   flex-shrink: 0;
-  width: 250px;
+  width: 280px;
+  min-height: 320px;
   background: #FFFFFF;
   border: 2px solid var(--surface-border);
   border-radius: 12px;
@@ -917,7 +943,7 @@ html[dir="rtl"] .node-canvas {
   box-shadow: var(--shadow-card);
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 
 .step-node:hover {
@@ -968,7 +994,8 @@ html[dir="rtl"] .node-canvas {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  margin-top: 8px;
+  margin-top: auto;
+  padding-top: 8px;
 }
 
 .step-node-controls button {
@@ -1002,6 +1029,7 @@ html[dir="rtl"] .node-canvas {
   height: 2px;
   background: linear-gradient(90deg, var(--kfh-green), rgba(0,155,78,0.2));
   position: relative;
+  align-self: center;
 }
 
 .connector-line::after {
@@ -1025,8 +1053,8 @@ html[dir="rtl"] .connector-line::after {
 
 .add-step-card {
   flex-shrink: 0;
-  width: 190px;
-  height: 210px;
+  width: 200px;
+  min-height: 320px;
   border: 2px dashed #CBD5E0;
   border-radius: 12px;
   display: flex;
@@ -1037,6 +1065,7 @@ html[dir="rtl"] .connector-line::after {
   color: var(--text-muted);
   transition: var(--transition-smooth);
   gap: 10px;
+  background: #FAFAFA;
 }
 
 .add-step-card:hover {

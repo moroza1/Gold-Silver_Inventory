@@ -120,6 +120,8 @@ public class AppDbContext : DbContext
     public DbSet<BranchTransfer> BranchTransfers { get; set; } = null!;
     public DbSet<PendingIntake> PendingIntakes { get; set; } = null!;
     public DbSet<PendingTurkeyPurchase> PendingTurkeyPurchases { get; set; } = null!;
+    public DbSet<PendingThresholdChange> PendingThresholdChanges { get; set; } = null!;
+    public DbSet<PendingCustomsTransfer> PendingCustomsTransfers { get; set; } = null!;
     public DbSet<SystemSetting> SystemSettings { get; set; } = null!;
 
     // FIM Integration Module
@@ -177,6 +179,13 @@ public class AppDbContext : DbContext
         {
             entity.HasKey(e => e.ReasonCode);
             entity.ToTable("reason_codes");
+        });
+
+        // PendingCustomsTransfer Configuration
+        modelBuilder.Entity<PendingCustomsTransfer>(entity =>
+        {
+            entity.HasKey(e => e.PendingTransferId);
+            entity.ToTable("pending_customs_transfers");
         });
 
         // MetalType Configuration
@@ -330,7 +339,7 @@ public class AppDbContext : DbContext
         {
             entity.HasKey(e => e.ItemId);
             entity.ToTable("inventory_items");
-            entity.HasIndex(e => e.SerialNumber).IsUnique();
+            entity.HasIndex(e => new { e.ProductId, e.SerialNumber }).IsUnique();
             entity.HasOne(e => e.Product).WithMany().HasForeignKey(e => e.ProductId);
             entity.HasOne(e => e.Lot).WithMany().HasForeignKey(e => e.LotId);
             entity.HasOne(e => e.Location).WithMany().HasForeignKey(e => e.LocationId);
@@ -692,6 +701,16 @@ public class AppDbContext : DbContext
             entity.HasOne(e => e.PurchaseOrder).WithMany().HasForeignKey(e => e.PoId).IsRequired(false);
             entity.HasOne(e => e.Location).WithMany().HasForeignKey(e => e.LocationId);
             entity.HasOne(e => e.Customer).WithMany().HasForeignKey(e => e.CustomerId).IsRequired(false);
+        });
+
+        // PendingThresholdChange Configuration
+        modelBuilder.Entity<PendingThresholdChange>(entity =>
+        {
+            entity.HasKey(e => e.PendingChangeId);
+            entity.ToTable("pending_threshold_changes");
+            entity.HasOne(e => e.Product).WithMany().HasForeignKey(e => e.ProductId);
+            entity.HasOne(e => e.Vendor).WithMany().HasForeignKey(e => e.VendorId);
+            entity.HasOne(e => e.Threshold).WithMany().HasForeignKey(e => e.ThresholdId).IsRequired(false);
         });
 
         // ============================================================

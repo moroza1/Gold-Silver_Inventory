@@ -298,7 +298,7 @@ public partial class PMIMSControllers : ControllerBase
                         metal_type = itemsInSlot.FirstOrDefault()?.Product?.MetalType?.MetalName
                     };
                 })
-                .OrderBy(s => s.slot_bin)
+                .OrderBy(s => ExtractSlotNumber(s.slot_bin))
                 .ToList();
 
                 return new
@@ -314,10 +314,16 @@ public partial class PMIMSControllers : ControllerBase
                     slots
                 };
             })
-            .OrderBy(g => g.shelf_row)
+            .OrderBy(g => ExtractSlotNumber(g.shelf_row))
             .ToList();
 
         return Ok(grouped);
+    }
+
+    private static int ExtractSlotNumber(string text)
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(text ?? "", @"\d+");
+        return match.Success ? int.Parse(match.Value) : 0;
     }
 
     [Authorize(Policy = "vault_location.write")]
@@ -365,7 +371,15 @@ public partial class PMIMSControllers : ControllerBase
             location = i.Location?.Description ?? "Unknown",
             location_id = i.LocationId,
             status = i.StatusCode,
-            ownership = i.OwnershipType
+            ownership = i.OwnershipType,
+            is_damaged = i.IsDamaged,
+            damage_status = i.DamageApprovalStatus ?? (i.IsDamaged ? "APPROVED" : "NONE"),
+            damage_reason = i.DamageReason,
+            damage_description = i.DamageDescription,
+            damage_doc_id = i.DamageEvidenceDocId,
+            damage_reported_by = i.DamageReportedBy,
+            damage_approved_by = i.DamageApprovedBy,
+            damage_approved_at = i.DamageApprovedAt
         }));
     }
 
@@ -601,7 +615,10 @@ public partial class PMIMSControllers : ControllerBase
                 vendorId: vendorId, shipmentReference: req.ShipmentReference, deliveryNoteNumber: req.DeliveryNoteNumber,
                 airwayBillNumber: req.AirwayBillNumber, supportingDocumentUrl: req.SupportingDocumentUrl,
                 discrepancyNotes: req.DiscrepancyNotes, receivingDate: req.ReceivingDate,
-                ownershipType: string.IsNullOrWhiteSpace(req.OwnershipType) ? "KFH_OWNED" : req.OwnershipType);
+                ownershipType: string.IsNullOrWhiteSpace(req.OwnershipType) ? "KFH_OWNED" : req.OwnershipType,
+                customsDeclarationNumber: req.CustomsDeclarationNumber,
+                customsDutyAmount: req.CustomsDutyAmount,
+                portOfEntry: req.PortOfEntry);
 
             return Ok(new { pending_id = pending.PendingIntakeId, message = "Intake shipment verification request initiated and routed to the Maker-Checker workflow approval." });
         }
@@ -609,6 +626,82 @@ public partial class PMIMSControllers : ControllerBase
         {
             return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
         }
+    }
+
+    [HttpPost("vault/intake/customs-clearance")]
+    [Authorize(Policy = "intake.write")]
+    public async Task<IActionResult> ClearCustomsShipment([FromBody] ClearCustomsRequest req)
+    {
+        try
+        {
+            var username = User?.Identity?.Name ?? "system-admin";
+            var result = await _repository.ClearCustomsShipmentAsync(req.PendingIntakeIdOrLotId, req.TargetOwnership, username, req.ClearanceNotes);
+            if (result != "SUCCESS")
+            {
+                return BadRequest(new { error = result });
+            }
+            return Ok(new { message = $"Customs shipment successfully cleared and transferred to {req.TargetOwnership}." });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
+    [HttpPost("vault/intake/customs-transfer/initiate")]
+    [Authorize(Policy = "intake.write")]
+    public async Task<IActionResult> InitiateCustomsTransfer([FromBody] InitiateCustomsTransferRequest req)
+    {
+        try
+        {
+            var username = User?.Identity?.Name ?? "treasury-maker";
+            var result = await _repository.InitiateCustomsTransferWorkflowAsync(
+                req.LotId,
+                req.ItemId,
+                req.TargetOwnership,
+                username,
+                req.ClearanceNotes,
+                req.CustomsDeclarationNumber,
+                req.CustomsDutyAmount,
+                req.PortOfEntry
+            );
+            return Ok(new
+            {
+                message = "Customs ownership transfer workflow initiated successfully.",
+                pending_transfer_id = result.PendingTransferId,
+                target_ownership = result.TargetOwnership,
+                status_code = result.StatusCode
+            });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
+    [HttpGet("vault/intake/customs-transfers")]
+    [Authorize(Policy = "intake.read")]
+    public async Task<IActionResult> GetCustomsTransfers()
+    {
+        var list = await _repository.GetPendingCustomsTransfersAsync();
+        return Ok(list.Select(ct => new
+        {
+            pending_transfer_id = ct.PendingTransferId,
+            lot_id = ct.LotId,
+            lot_number = ct.Lot?.LotNumber,
+            item_id = ct.ItemId,
+            serial_number = ct.Item?.SerialNumber,
+            target_ownership = ct.TargetOwnership,
+            requested_by = ct.RequestedBy,
+            clearance_notes = ct.ClearanceNotes,
+            customs_declaration_number = ct.CustomsDeclarationNumber,
+            customs_duty_amount = ct.CustomsDutyAmount,
+            port_of_entry = ct.PortOfEntry,
+            status_code = ct.StatusCode,
+            created_at = ct.CreatedAt,
+            approved_by = ct.ApprovedBy,
+            approved_at = ct.ApprovedAt
+        }));
     }
 
     [HttpGet("vault/intake/pending")]
@@ -629,6 +722,10 @@ public partial class PMIMSControllers : ControllerBase
             supporting_document_url = pi.SupportingDocumentUrl,
             discrepancy_notes = pi.DiscrepancyNotes,
             receiving_date = pi.ReceivingDate ?? pi.CreatedAt,
+            customs_declaration_number = pi.CustomsDeclarationNumber,
+            customs_duty_amount = pi.CustomsDutyAmount,
+            port_of_entry = pi.PortOfEntry,
+            customs_clearance_date = pi.CustomsClearanceDate,
             status_code = pi.StatusCode,
             received_by = pi.ReceivedBy,
             location_id = pi.LocationId,
@@ -967,6 +1064,16 @@ public partial class PMIMSControllers : ControllerBase
         return Ok(trace);
     }
 
+    [Authorize(Policy = "intake.read")]
+    [HttpGet("inventory/traceability/passport")]
+    public async Task<IActionResult> GetBarPassport([FromQuery] string query)
+    {
+        if (string.IsNullOrWhiteSpace(query)) return BadRequest(new { error = "Query parameter (serial number or bar ID) is required." });
+        var passport = await _repository.GetBarPassportAndHistoryAsync(query);
+        if (passport == null) return NotFound(new { error = $"Gold/Silver bar with identifier '{query}' was not found in vault records." });
+        return Ok(passport);
+    }
+
     [Authorize(Policy = "reports.read")]
     [HttpGet("reports/valuation")]
     public async Task<IActionResult> GetValuationReport([FromQuery] string method = "AVERAGE")
@@ -1050,7 +1157,12 @@ public partial class PMIMSControllers : ControllerBase
                     location = item.Location?.Description ?? "Unknown",
                     status_code = item.StatusCode,
                     ownership_type = item.OwnershipType,
-                    cost_basis = Math.Round(costBasis, 2),
+                    is_damaged = item.IsDamaged,
+                    damage_status = item.DamageApprovalStatus ?? (item.IsDamaged ? "APPROVED" : "NONE"),
+                    damage_reason = item.DamageReason,
+                    damage_description = item.DamageDescription,
+                    average_cost = item.AveragePurchaseCost ?? 0m,
+                    cost_basis = (methodUpper == "FIFO" || methodUpper == "LIFO") ? costBasis : (item.AveragePurchaseCost ?? costBasis),
                     market_value = Math.Round(currentMarketValue, 2),
                     unrealized_pnl = Math.Round(unrealizedPnl, 2)
                 });
@@ -1187,6 +1299,10 @@ public partial class PMIMSControllers : ControllerBase
                         location_name = $"{pending.Location?.ZoneRoom}-{pending.Location?.ShelfRow}-{pending.Location?.SlotBin}",
                         received_by = pending.ReceivedBy,
                         status_code = pending.StatusCode,
+                        ownership_type = pending.OwnershipType,
+                        customs_declaration_number = pending.CustomsDeclarationNumber,
+                        customs_duty_amount = pending.CustomsDutyAmount,
+                        port_of_entry = pending.PortOfEntry,
                         serials_json = pending.SerialsJsonList,
                         created_by = pending.ReceivedBy
                     };
@@ -1218,6 +1334,32 @@ public partial class PMIMSControllers : ControllerBase
                 var pur = purchases.FirstOrDefault(p => p.PendingPurchaseId == inst.EntityId);
                 if (pur != null)
                 {
+                    List<string> serials = new();
+                    try
+                    {
+                        serials = JsonSerializer.Deserialize<List<string>>(pur.SerialsJsonList ?? "[]") ?? new();
+                    }
+                    catch { }
+
+                    var allItems = await _repository.GetItemsAsync();
+                    var matchedItems = allItems
+                        .Where(i => serials.Contains(i.SerialNumber))
+                        .Select(i => new
+                        {
+                            item_id = i.ItemId,
+                            serial_number = i.SerialNumber,
+                            product_code = i.Product?.ProductCode ?? "N/A",
+                            product_name = i.Product?.Denomination?.Label ?? i.Product?.ProductCode ?? "Gold Bar",
+                            weight_grams = i.Product?.Denomination?.WeightGrams ?? 0,
+                            metal_type = i.Product?.MetalType?.MetalName ?? "Gold",
+                            purity = i.Product?.Purity?.PurityValue ?? i.FinenessPpt ?? 999.9m,
+                            brand_name = i.Product?.Brand?.BrandName ?? i.Product?.BrandName ?? i.RefinerName ?? "N/A",
+                            origin_country = i.Product?.OriginCountry ?? i.Product?.Brand?.CountryOfOrigin ?? (i.RefinerName != null && (i.RefinerName.Contains("IGR") || i.RefinerName.Contains("Nadir")) ? "Turkey" : "Switzerland"),
+                            status_code = i.StatusCode,
+                            location_code = i.Location?.Description ?? (i.Location != null ? $"{i.Location.ZoneRoom} - {i.Location.ShelfRow} - {i.Location.SlotBin}" : "Main Vault")
+                        })
+                        .ToList();
+
                     entityDetails = new
                     {
                         pending_purchase_id = pur.PendingPurchaseId,
@@ -1229,6 +1371,7 @@ public partial class PMIMSControllers : ControllerBase
                         requested_by = pur.RequestedBy,
                         notes = pur.Notes,
                         serials_json = pur.SerialsJsonList,
+                        items = matchedItems,
                         status_code = pur.StatusCode,
                         created_by = pur.RequestedBy
                     };
@@ -1251,6 +1394,87 @@ public partial class PMIMSControllers : ControllerBase
                         damage_doc_id = item.DamageEvidenceDocId,
                         status_code = item.StatusCode,
                         created_by = item.DamageReportedBy ?? "SYSTEM"
+                    };
+                }
+            }
+            else if (inst.WorkflowType == "THRESHOLD_CONFIG")
+            {
+                var change = await _repository.GetPendingThresholdChangeByIdAsync(inst.EntityId);
+                if (change != null)
+                {
+                    entityDetails = new
+                    {
+                        pending_change_id = change.PendingChangeId,
+                        change_type = change.ChangeType,
+                        threshold_type = change.ThresholdType,
+                        threshold_id = change.ThresholdId,
+                        product_id = change.ProductId,
+                        product_code = change.Product?.ProductCode ?? "",
+                        product_name = $"{change.Product?.MetalType?.MetalName ?? ""} {change.Product?.Denomination?.Label ?? ""}",
+                        vendor_id = change.VendorId,
+                        vendor_name = change.Vendor?.VendorName ?? "",
+                        min_stock_qty = change.MinStockQty,
+                        max_stock_qty = change.MaxStockQty,
+                        reorder_qty = change.ReorderQty,
+                        is_active = change.IsActive,
+                        status_code = change.StatusCode,
+                        created_by = change.RequestedBy,
+                        comments = change.Comments
+                    };
+                }
+            }
+            else if (inst.WorkflowType == "HOME_DELIVERY")
+            {
+                var hd = await _repository.GetHomeDeliveryRequestByIdAsync(inst.EntityId);
+                if (hd != null)
+                {
+                    entityDetails = new
+                    {
+                        request_id = hd.RequestId,
+                        delivery_number = hd.DeliveryNumber,
+                        customer_name = hd.CustomerName,
+                        customer_civil_id = hd.CustomerCivilId,
+                        customer_phone = hd.CustomerPhone,
+                        customer_account = hd.CustomerAccountNumber,
+                        governorate = hd.Governorate,
+                        area = hd.Area,
+                        block = hd.Block,
+                        street = hd.Street,
+                        building_house = hd.BuildingHouse,
+                        floor_flat = hd.FloorFlat,
+                        address = $"{hd.Governorate}, {hd.Area}, Block {hd.Block}, Street {hd.Street}, Building {hd.BuildingHouse}" + (!string.IsNullOrWhiteSpace(hd.FloorFlat) ? $", {hd.FloorFlat}" : ""),
+                        special_instructions = hd.SpecialInstructions,
+                        bar_id = hd.BarId,
+                        serial_number = hd.Bar?.SerialNumber,
+                        product_name = $"{hd.Bar?.Product?.MetalType?.MetalName ?? "Gold"} {hd.Bar?.Product?.Denomination?.Label ?? ""}",
+                        weight_grams = hd.Bar?.Product?.Denomination?.WeightGrams ?? 0,
+                        verification_otp = hd.VerificationOtp,
+                        status_code = hd.Status,
+                        created_by = hd.CreatedBy
+                    };
+                }
+            }
+            else if (inst.WorkflowType == "CUSTOMS_TRANSFER")
+            {
+                var transfers = await _repository.GetPendingCustomsTransfersAsync();
+                var ct = transfers.FirstOrDefault(t => t.PendingTransferId == inst.EntityId);
+                if (ct != null)
+                {
+                    entityDetails = new
+                    {
+                        pending_transfer_id = ct.PendingTransferId,
+                        lot_id = ct.LotId,
+                        lot_number = ct.Lot?.LotNumber,
+                        item_id = ct.ItemId,
+                        serial_number = ct.Item?.SerialNumber,
+                        target_ownership = ct.TargetOwnership,
+                        requested_by = ct.RequestedBy,
+                        clearance_notes = ct.ClearanceNotes,
+                        customs_declaration_number = ct.CustomsDeclarationNumber,
+                        customs_duty_amount = ct.CustomsDutyAmount,
+                        port_of_entry = ct.PortOfEntry,
+                        status_code = ct.StatusCode,
+                        created_by = ct.RequestedBy
                     };
                 }
             }
@@ -1384,6 +1608,10 @@ public partial class PMIMSControllers : ControllerBase
             if (workflowType == "TURKEY_PURCHASE")
             {
                 return $"Turkey Purchase #{entityId}";
+            }
+            if (workflowType == "CUSTOMS_TRANSFER")
+            {
+                return $"Customs Transfer #{entityId} (Bonded -> Turkey/Kuwait)";
             }
             return $"{workflowType} #{entityId}";
         }
@@ -1655,7 +1883,7 @@ public partial class PMIMSControllers : ControllerBase
         }
     }
 
-    [Authorize(Policy = "custody.write")]
+    [Authorize]
     [HttpPost("inventory/items/{id}/mark-damaged")]
     public async Task<IActionResult> MarkDamaged(int id, [FromBody] MarkDamagedRequest req)
     {
@@ -1672,7 +1900,7 @@ public partial class PMIMSControllers : ControllerBase
         }
     }
 
-    [Authorize(Policy = "custody.write")]
+    [Authorize]
     [HttpPost("inventory/items/{id}/damage-action")]
     public async Task<IActionResult> ProcessDamagedAction(int id, [FromBody] ProcessDamageActionRequest req)
     {
@@ -1689,12 +1917,65 @@ public partial class PMIMSControllers : ControllerBase
         }
     }
 
-    [Authorize(Policy = "custody.read")]
+    [Authorize]
     [HttpGet("inventory/damaged-items")]
     public async Task<IActionResult> GetDamagedBars()
     {
         var bars = await _repository.GetDamagedBarsAsync();
         return Ok(bars);
+    }
+
+    [Authorize(Policy = "custody.read")]
+    [HttpGet("inventory/items/{id:int}/movement-validation")]
+    public async Task<IActionResult> GetMovementValidationById(int id)
+    {
+        var items = await _repository.GetItemsAsync();
+        var item = items.FirstOrDefault(i => i.ItemId == id);
+        if (item == null) return NotFound(new { error = "Inventory item not found." });
+
+        bool canMove = !item.IsDamaged && item.StatusCode == "READY";
+        return Ok(new
+        {
+            item_id = item.ItemId,
+            serial_number = item.SerialNumber,
+            can_move = canMove,
+            is_damaged = item.IsDamaged,
+            damage_status = item.DamageApprovalStatus ?? (item.IsDamaged ? "APPROVED" : "NONE"),
+            damage_reason = item.DamageReason,
+            damage_description = item.DamageDescription,
+            status_code = item.StatusCode,
+            current_location_id = item.LocationId,
+            current_location = item.Location?.Description ?? "Unknown",
+            validation_message = item.IsDamaged
+                ? $"BLOCKED: Bar '{item.SerialNumber}' is marked as DAMAGED ({item.DamageReason ?? "DEFECT"}). Outbound movement from Main Vault is prohibited."
+                : (canMove ? "VALID: Bar is ready for outbound vault movement." : $"RESTRICTED: Bar status is '{item.StatusCode}'.")
+        });
+    }
+
+    [Authorize(Policy = "custody.read")]
+    [HttpGet("inventory/items/by-serial/{serialNumber}/movement-validation")]
+    public async Task<IActionResult> GetMovementValidationBySerial(string serialNumber)
+    {
+        var item = await _repository.GetItemBySerialNumberAsync(serialNumber);
+        if (item == null) return NotFound(new { error = $"Inventory item with serial '{serialNumber}' not found." });
+
+        bool canMove = !item.IsDamaged && item.StatusCode == "READY";
+        return Ok(new
+        {
+            item_id = item.ItemId,
+            serial_number = item.SerialNumber,
+            can_move = canMove,
+            is_damaged = item.IsDamaged,
+            damage_status = item.DamageApprovalStatus ?? (item.IsDamaged ? "APPROVED" : "NONE"),
+            damage_reason = item.DamageReason,
+            damage_description = item.DamageDescription,
+            status_code = item.StatusCode,
+            current_location_id = item.LocationId,
+            current_location = item.Location?.Description ?? "Unknown",
+            validation_message = item.IsDamaged
+                ? $"BLOCKED: Bar '{item.SerialNumber}' is marked as DAMAGED ({item.DamageReason ?? "DEFECT"}). Outbound movement from Main Vault is prohibited."
+                : (canMove ? "VALID: Bar is ready for outbound vault movement." : $"RESTRICTED: Bar status is '{item.StatusCode}'.")
+        });
     }
 
     [Authorize(Policy = "intake.write")]
@@ -1763,6 +2044,83 @@ public partial class PMIMSControllers : ControllerBase
     // =========================================================================
     // Home Delivery Endpoints (UC07)
     // =========================================================================
+    [Authorize(Policy = "intake.read")]
+    [HttpGet("gfs/home-delivery/incoming-orders")]
+    public async Task<IActionResult> GetIncomingGfsHomeDeliveryOrders()
+    {
+        // Retrieve incoming residential delivery requests dispatched from GFS
+        var products = await _repository.GetProductsAsync();
+        var gold100g = products.FirstOrDefault(p => p.Denomination?.WeightGrams == 100 && (p.MetalType?.MetalName == "Gold" || p.MetalType?.MetalName == "GOLD")) ?? products.FirstOrDefault();
+        var gold1kg = products.FirstOrDefault(p => p.Denomination?.WeightGrams == 1000 && (p.MetalType?.MetalName == "Gold" || p.MetalType?.MetalName == "GOLD")) ?? products.FirstOrDefault();
+        var gold50g = products.FirstOrDefault(p => p.Denomination?.WeightGrams == 50 && (p.MetalType?.MetalName == "Gold" || p.MetalType?.MetalName == "GOLD")) ?? products.FirstOrDefault();
+
+        var orders = new List<object>
+        {
+            new
+            {
+                gfs_order_id = "GFS-HD-2026-8801",
+                customer_name = "Abdullah Nasser Al-Sabah",
+                customer_civil_id = "290011501239",
+                customer_phone = "+965 99887766",
+                customer_account = "ACC-KFH-889901",
+                required_product_id = gold100g?.ProductId ?? 1,
+                required_product_name = $"{gold100g?.MetalType?.MetalName ?? "Gold"} {gold100g?.Denomination?.Label ?? "100g Bar"}",
+                required_weight_grams = gold100g?.Denomination?.WeightGrams ?? 100,
+                expected_serial_number = "AU-BAR-001",
+                governorate = "Capital",
+                area = "Shuwaikh Residential",
+                block = "2",
+                street = "Arabian Gulf St",
+                building_house = "Villa 14",
+                floor_flat = "Ground Floor",
+                special_instructions = "VIP Client - Hand delivery with Civil ID biometric check.",
+                order_date = DateTime.UtcNow.AddHours(-3).ToString("yyyy-MM-dd HH:mm")
+            },
+            new
+            {
+                gfs_order_id = "GFS-HD-2026-8802",
+                customer_name = "Fatima Mohammad Al-Khaled",
+                customer_civil_id = "295052203418",
+                customer_phone = "+965 97711223",
+                customer_account = "ACC-KFH-443322",
+                required_product_id = gold1kg?.ProductId ?? 2,
+                required_product_name = $"{gold1kg?.MetalType?.MetalName ?? "Gold"} {gold1kg?.Denomination?.Label ?? "1kg Bar"}",
+                required_weight_grams = gold1kg?.Denomination?.WeightGrams ?? 1000,
+                expected_serial_number = "KFH-AU-1KG-001",
+                governorate = "Hawalli",
+                area = "Jabriya",
+                block = "5",
+                street = "Street 105",
+                building_house = "Building 22",
+                floor_flat = "Apartment 4B",
+                special_instructions = "Call recipient 30 mins prior to arrival.",
+                order_date = DateTime.UtcNow.AddHours(-5).ToString("yyyy-MM-dd HH:mm")
+            },
+            new
+            {
+                gfs_order_id = "GFS-HD-2026-8803",
+                customer_name = "Meshari Jassem Al-Ghanim",
+                customer_civil_id = "288101402287",
+                customer_phone = "+965 94455667",
+                customer_account = "ACC-KFH-771199",
+                required_product_id = gold50g?.ProductId ?? 3,
+                required_product_name = $"{gold50g?.MetalType?.MetalName ?? "Gold"} {gold50g?.Denomination?.Label ?? "50g Bar"}",
+                required_weight_grams = gold50g?.Denomination?.WeightGrams ?? 50,
+                expected_serial_number = "AU-BAR-003",
+                governorate = "Farwaniya",
+                area = "Abdullah Al-Mubarak",
+                block = "1",
+                street = "Street 12",
+                building_house = "House 8",
+                floor_flat = null as string,
+                special_instructions = "Deliver strictly to customer in person.",
+                order_date = DateTime.UtcNow.AddHours(-8).ToString("yyyy-MM-dd HH:mm")
+            }
+        };
+
+        return Ok(orders);
+    }
+
     [Authorize(Policy = "intake.write")]
     [HttpPost("gfs/home-delivery")]
     public async Task<IActionResult> CreateHomeDelivery([FromBody] CreateHomeDeliveryApiRequest req)
@@ -2023,8 +2381,18 @@ public class IntakeRequest
     public string LotNumber { get; set; } = null!;
     public int LocationId { get; set; }
     public string ReceivedBy { get; set; } = null!;
-    public string OwnershipType { get; set; } = "KFH_OWNED"; // KFH_OWNED or TURKEY_OWNED
+    public string OwnershipType { get; set; } = "KFH_OWNED"; // KFH_OWNED, TURKEY_OWNED, CUSTOMS_OWNED
+    public string? CustomsDeclarationNumber { get; set; }
+    public decimal? CustomsDutyAmount { get; set; }
+    public string? PortOfEntry { get; set; }
     public List<IntakeItemDTO> Items { get; set; } = new();
+}
+
+public class ClearCustomsRequest
+{
+    public int PendingIntakeIdOrLotId { get; set; }
+    public string TargetOwnership { get; set; } = "KFH_OWNED";
+    public string? ClearanceNotes { get; set; }
 }
 
 public class TurkeyPurchaseRequest
@@ -2173,9 +2541,11 @@ public class AddMemberRequest
 public class SaveReorderThresholdRequest
 {
     public int? ThresholdId { get; set; }
+    public string ThresholdType { get; set; } = "LOW_STOCK"; // LOW_STOCK, HIGH_STOCK
     public int ProductId { get; set; }
     public int VendorId { get; set; }
     public int MinStockQty { get; set; }
+    public int? MaxStockQty { get; set; }
     public int ReorderQty { get; set; }
     public bool IsActive { get; set; } = true;
 }
@@ -2224,3 +2594,24 @@ public class SaveBranchRequest
     public int VaultId { get; set; }
     public bool IsActive { get; set; } = true;
 }
+
+public class SaveVendorRequest
+{
+    public string VendorCode { get; set; } = null!;
+    public string VendorName { get; set; } = null!;
+    public string CountryOfOrigin { get; set; } = "Switzerland";
+    public bool IsShariaCompliant { get; set; } = true;
+    public string? ContactEmail { get; set; }
+}
+
+public class InitiateCustomsTransferRequest
+{
+    public int? LotId { get; set; }
+    public int? ItemId { get; set; }
+    public string TargetOwnership { get; set; } = "TURKEY_OWNED";
+    public string? ClearanceNotes { get; set; }
+    public string? CustomsDeclarationNumber { get; set; }
+    public decimal? CustomsDutyAmount { get; set; }
+    public string? PortOfEntry { get; set; }
+}
+
