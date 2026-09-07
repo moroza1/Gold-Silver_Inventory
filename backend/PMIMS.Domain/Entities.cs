@@ -1020,6 +1020,27 @@ public class PendingThresholdChange
     public ReorderThreshold? Threshold { get; set; }
 }
 
+public class PendingCustomsTransfer
+{
+    public int PendingTransferId { get; set; }
+    public int? LotId { get; set; }
+    public int? ItemId { get; set; }
+    public string TargetOwnership { get; set; } = "TURKEY_OWNED"; // TURKEY_OWNED or KFH_OWNED
+    public string RequestedBy { get; set; } = null!;
+    public string? ClearanceNotes { get; set; }
+    public string? CustomsDeclarationNumber { get; set; }
+    public decimal? CustomsDutyAmount { get; set; }
+    public string? PortOfEntry { get; set; }
+    public string StatusCode { get; set; } = "PENDING_APPROVAL"; // PENDING_APPROVAL, APPROVED, REJECTED
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public string? ApprovedBy { get; set; }
+    public DateTime? ApprovedAt { get; set; }
+
+    public InventoryLot? Lot { get; set; }
+    public InventoryItem? Item { get; set; }
+}
+
+
 // ============================================================
 // FIM (Forefront Identity Manager) Integration Module
 // ------------------------------------------------------------

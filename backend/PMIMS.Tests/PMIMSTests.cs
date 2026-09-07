@@ -2305,5 +2305,124 @@ public class PMIMSTests
         Assert.NotNull(clrTx);
         Assert.Equal("ADJUSTMENT", clrTx.TransactionType);
     }
+
+    [Fact]
+    public async Task CustomsOwnershipTransfer_MakerCheckerWorkflow_TransfersToTurkeyOwned()
+    {
+        // Arrange
+        using var setup = CreateContext();
+        await SeedBasicDataAsync(setup.Context);
+
+        // Seed groups and users
+        var makerGroup = new PrivilegeGroup { GroupName = "Treasury Operations (Maker)", Description = "Maker", IsSystem = true };
+        var checkerGroup = new PrivilegeGroup { GroupName = "Treasury Operations (Checker)", Description = "Checker", IsSystem = true };
+        setup.Context.PrivilegeGroups.AddRange(makerGroup, checkerGroup);
+        await setup.Context.SaveChangesAsync();
+
+        var makerUser = new AppUser { Username = "maker-xfr", DisplayName = "Maker User", Email = "maker@kfh.com", PasswordHash = "test-hash", IsActive = true };
+        var checkerUser = new AppUser { Username = "checker-xfr", DisplayName = "Checker User", Email = "checker@kfh.com", PasswordHash = "test-hash", IsActive = true };
+        setup.Context.AppUsers.AddRange(makerUser, checkerUser);
+        await setup.Context.SaveChangesAsync();
+
+        setup.Context.UserGroupMemberships.AddRange(
+            new UserGroupMembership { UserId = makerUser.UserId, GroupId = makerGroup.GroupId, AssignedBy = "TEST" },
+            new UserGroupMembership { UserId = checkerUser.UserId, GroupId = checkerGroup.GroupId, AssignedBy = "TEST" }
+        );
+        await setup.Context.SaveChangesAsync();
+
+        // Seed CUSTOMS_TRANSFER workflow template
+        var transferWf = new WorkflowTemplate
+        {
+            WorkflowType = "CUSTOMS_TRANSFER",
+            Name = "Customs Transfer Workflow",
+            Description = "Maker-Checker customs clearance to Turkey ownership",
+            IsActive = true
+        };
+        setup.Context.WorkflowTemplates.Add(transferWf);
+        await setup.Context.SaveChangesAsync();
+
+        var step1 = new WorkflowStep
+        {
+            TemplateId = transferWf.TemplateId,
+            StepOrder = 1,
+            StepName = "Customs Transfer Maker Verification",
+            RequiredRole = "Treasury Operations (Maker)",
+            Description = "Maker verification"
+        };
+        var step2 = new WorkflowStep
+        {
+            TemplateId = transferWf.TemplateId,
+            StepOrder = 2,
+            StepName = "Customs Transfer Checker Authorization",
+            RequiredRole = "Treasury Operations (Checker)",
+            Description = "Checker authorization"
+        };
+        setup.Context.WorkflowSteps.AddRange(step1, step2);
+        await setup.Context.SaveChangesAsync();
+
+        var repo = new InventoryRepository(setup.Context);
+
+        // Intake items directly with CUSTOMS_OWNED
+        string serialsJson = "[{\"serial\":\"TR-CUSTOMS-BAR-01\",\"product_id\":1},{\"serial\":\"TR-CUSTOMS-BAR-02\",\"product_id\":1}]";
+        var intakeRes = await repo.IntakeInventoryItemsAsync(
+            null, "LOT-BONDED-TR-99", 1, "customs_agent", serialsJson,
+            sourceType: "SUPPLIER", vendorId: 1, ownershipType: "CUSTOMS_OWNED",
+            customsDeclarationNumber: "BAYAN-TR-2026-110",
+            portOfEntry: "Shuwaikh Port Customs");
+        Assert.Equal("SUCCESS", intakeRes);
+
+        var lot = await setup.Context.InventoryLots.FirstOrDefaultAsync(l => l.LotNumber == "LOT-BONDED-TR-99");
+        Assert.NotNull(lot);
+
+        // Act 1: Maker initiates customs transfer targeting TURKEY_OWNED
+        var pendingTransfer = await repo.InitiateCustomsTransferWorkflowAsync(
+            lotId: lot.LotId,
+            itemId: null,
+            targetOwnership: "TURKEY_OWNED",
+            requestedBy: "maker-xfr",
+            clearanceNotes: "Duty paid, transferring bonded gold to Kuveyt Turk portfolio",
+            customsDeclarationNumber: "BAYAN-TR-2026-110",
+            customsDutyAmount: 450.500m,
+            portOfEntry: "Shuwaikh Port Customs"
+        );
+
+        Assert.NotNull(pendingTransfer);
+        Assert.Equal("PENDING_APPROVAL", pendingTransfer.StatusCode);
+        Assert.Equal("TURKEY_OWNED", pendingTransfer.TargetOwnership);
+
+        // Find active workflow instance
+        var instances = await repo.GetActiveWorkflowInstancesAsync();
+        var wfInstance = instances.FirstOrDefault(i => i.WorkflowType == "CUSTOMS_TRANSFER" && i.EntityId == pendingTransfer.PendingTransferId);
+        Assert.NotNull(wfInstance);
+        Assert.Equal(1, wfInstance.CurrentStepOrder);
+
+        // Act 2: Step 1 maker sign-off
+        var step1Result = await repo.ProcessWorkflowActionAsync(wfInstance.InstanceId, "maker-xfr", "APPROVED", "Maker docs verified");
+        Assert.Equal("SUCCESS", step1Result);
+
+        // Act 3: Step 2 checker authorization
+        var step2Result = await repo.ProcessWorkflowActionAsync(wfInstance.InstanceId, "checker-xfr", "APPROVED", "Checker duty receipt verified and transfer authorized");
+        Assert.Equal("SUCCESS", step2Result);
+
+        // Assert: Items transferred from CUSTOMS_OWNED to TURKEY_OWNED
+        var updatedItems = await setup.Context.InventoryItems
+            .Where(i => i.SerialNumber == "TR-CUSTOMS-BAR-01" || i.SerialNumber == "TR-CUSTOMS-BAR-02")
+            .ToListAsync();
+        Assert.Equal(2, updatedItems.Count);
+        Assert.All(updatedItems, item => Assert.Equal("TURKEY_OWNED", item.OwnershipType));
+
+        // Assert: Pending customs transfer marked APPROVED
+        var finalTransfer = await setup.Context.PendingCustomsTransfers.FindAsync(pendingTransfer.PendingTransferId);
+        Assert.NotNull(finalTransfer);
+        Assert.Equal("APPROVED", finalTransfer.StatusCode);
+        Assert.Equal("checker-xfr", finalTransfer.ApprovedBy);
+
+        // Assert: Inventory transactions recorded
+        var txList = await setup.Context.InventoryTransactions
+            .Where(t => t.SourceOwnership == "CUSTOMS_OWNED" && t.DestinationOwnership == "TURKEY_OWNED")
+            .ToListAsync();
+        Assert.Equal(2, txList.Count);
+    }
 }
+
 

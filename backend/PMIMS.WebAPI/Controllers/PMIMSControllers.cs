@@ -648,6 +648,62 @@ public partial class PMIMSControllers : ControllerBase
         }
     }
 
+    [HttpPost("vault/intake/customs-transfer/initiate")]
+    [Authorize(Policy = "intake.write")]
+    public async Task<IActionResult> InitiateCustomsTransfer([FromBody] InitiateCustomsTransferRequest req)
+    {
+        try
+        {
+            var username = User?.Identity?.Name ?? "treasury-maker";
+            var result = await _repository.InitiateCustomsTransferWorkflowAsync(
+                req.LotId,
+                req.ItemId,
+                req.TargetOwnership,
+                username,
+                req.ClearanceNotes,
+                req.CustomsDeclarationNumber,
+                req.CustomsDutyAmount,
+                req.PortOfEntry
+            );
+            return Ok(new
+            {
+                message = "Customs ownership transfer workflow initiated successfully.",
+                pending_transfer_id = result.PendingTransferId,
+                target_ownership = result.TargetOwnership,
+                status_code = result.StatusCode
+            });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
+    [HttpGet("vault/intake/customs-transfers")]
+    [Authorize(Policy = "intake.read")]
+    public async Task<IActionResult> GetCustomsTransfers()
+    {
+        var list = await _repository.GetPendingCustomsTransfersAsync();
+        return Ok(list.Select(ct => new
+        {
+            pending_transfer_id = ct.PendingTransferId,
+            lot_id = ct.LotId,
+            lot_number = ct.Lot?.LotNumber,
+            item_id = ct.ItemId,
+            serial_number = ct.Item?.SerialNumber,
+            target_ownership = ct.TargetOwnership,
+            requested_by = ct.RequestedBy,
+            clearance_notes = ct.ClearanceNotes,
+            customs_declaration_number = ct.CustomsDeclarationNumber,
+            customs_duty_amount = ct.CustomsDutyAmount,
+            port_of_entry = ct.PortOfEntry,
+            status_code = ct.StatusCode,
+            created_at = ct.CreatedAt,
+            approved_by = ct.ApprovedBy,
+            approved_at = ct.ApprovedAt
+        }));
+    }
+
     [HttpGet("vault/intake/pending")]
     [Authorize(Policy = "intake.read")]
     public async Task<IActionResult> GetPendingIntakes()
@@ -1398,6 +1454,30 @@ public partial class PMIMSControllers : ControllerBase
                     };
                 }
             }
+            else if (inst.WorkflowType == "CUSTOMS_TRANSFER")
+            {
+                var transfers = await _repository.GetPendingCustomsTransfersAsync();
+                var ct = transfers.FirstOrDefault(t => t.PendingTransferId == inst.EntityId);
+                if (ct != null)
+                {
+                    entityDetails = new
+                    {
+                        pending_transfer_id = ct.PendingTransferId,
+                        lot_id = ct.LotId,
+                        lot_number = ct.Lot?.LotNumber,
+                        item_id = ct.ItemId,
+                        serial_number = ct.Item?.SerialNumber,
+                        target_ownership = ct.TargetOwnership,
+                        requested_by = ct.RequestedBy,
+                        clearance_notes = ct.ClearanceNotes,
+                        customs_declaration_number = ct.CustomsDeclarationNumber,
+                        customs_duty_amount = ct.CustomsDutyAmount,
+                        port_of_entry = ct.PortOfEntry,
+                        status_code = ct.StatusCode,
+                        created_by = ct.RequestedBy
+                    };
+                }
+            }
 
             var lastAction = approvalActions.OrderByDescending(a => a.ActionTimestamp).ThenByDescending(a => a.ActionId).FirstOrDefault();
             string? stepName = currentStep?.StepName;
@@ -1528,6 +1608,10 @@ public partial class PMIMSControllers : ControllerBase
             if (workflowType == "TURKEY_PURCHASE")
             {
                 return $"Turkey Purchase #{entityId}";
+            }
+            if (workflowType == "CUSTOMS_TRANSFER")
+            {
+                return $"Customs Transfer #{entityId} (Bonded -> Turkey/Kuwait)";
             }
             return $"{workflowType} #{entityId}";
         }
@@ -2519,3 +2603,15 @@ public class SaveVendorRequest
     public bool IsShariaCompliant { get; set; } = true;
     public string? ContactEmail { get; set; }
 }
+
+public class InitiateCustomsTransferRequest
+{
+    public int? LotId { get; set; }
+    public int? ItemId { get; set; }
+    public string TargetOwnership { get; set; } = "TURKEY_OWNED";
+    public string? ClearanceNotes { get; set; }
+    public string? CustomsDeclarationNumber { get; set; }
+    public decimal? CustomsDutyAmount { get; set; }
+    public string? PortOfEntry { get; set; }
+}
+

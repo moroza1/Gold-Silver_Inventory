@@ -1952,6 +1952,11 @@ public class InventoryRepository : IInventoryRepository
                     if (bar != null && bar.StatusCode == "RESERVED") bar.StatusCode = "READY";
                 }
             }
+            else if (instance.WorkflowType == "CUSTOMS_TRANSFER")
+            {
+                var ct = await _dbContext.PendingCustomsTransfers.FindAsync(instance.EntityId);
+                if (ct != null) ct.StatusCode = "REJECTED";
+            }
         }
         else if (action == "RETURNED")
         {
@@ -1994,6 +1999,11 @@ public class InventoryRepository : IInventoryRepository
             {
                 var hd = await _dbContext.HomeDeliveryRequests.FindAsync(instance.EntityId);
                 if (hd != null) hd.Status = "PENDING_APPROVAL";
+            }
+            else if (instance.WorkflowType == "CUSTOMS_TRANSFER")
+            {
+                var ct = await _dbContext.PendingCustomsTransfers.FindAsync(instance.EntityId);
+                if (ct != null) ct.StatusCode = "PENDING_APPROVAL";
             }
         }
         else if (action == "APPROVED")
@@ -2174,6 +2184,92 @@ public class InventoryRepository : IInventoryRepository
                     if (hd != null)
                     {
                         hd.Status = "PENDING_DISPATCH";
+                    }
+                }
+                else if (instance.WorkflowType == "CUSTOMS_TRANSFER")
+                {
+                    var ct = await _dbContext.PendingCustomsTransfers.FindAsync(instance.EntityId);
+                    if (ct != null)
+                    {
+                        ct.StatusCode = "APPROVED";
+                        ct.ApprovedBy = username;
+                        ct.ApprovedAt = DateTime.UtcNow;
+
+                        List<InventoryItem> itemsToTransfer = new List<InventoryItem>();
+                        if (ct.ItemId.HasValue)
+                        {
+                            var item = await _dbContext.InventoryItems.FindAsync(ct.ItemId.Value);
+                            if (item != null && item.OwnershipType == "CUSTOMS_OWNED")
+                            {
+                                itemsToTransfer.Add(item);
+                            }
+                        }
+                        else if (ct.LotId.HasValue)
+                        {
+                            var lot = await _dbContext.InventoryLots.FindAsync(ct.LotId.Value);
+                            if (lot == null)
+                            {
+                                var pendingIntake = await _dbContext.PendingIntakes.FindAsync(ct.LotId.Value);
+                                if (pendingIntake != null)
+                                {
+                                    lot = await _dbContext.InventoryLots.FirstOrDefaultAsync(l => l.LotNumber == pendingIntake.LotNumber);
+                                }
+                            }
+                            if (lot != null)
+                            {
+                                itemsToTransfer = await _dbContext.InventoryItems
+                                    .Where(i => i.LotId == lot.LotId && i.OwnershipType == "CUSTOMS_OWNED")
+                                    .ToListAsync();
+                            }
+                        }
+
+                        var affectedLocations = new HashSet<int>();
+                        var affectedProducts = new HashSet<int>();
+
+                        foreach (var item in itemsToTransfer)
+                        {
+                            item.OwnershipType = ct.TargetOwnership;
+                            if (item.LocationId.HasValue) affectedLocations.Add(item.LocationId.Value);
+                            affectedProducts.Add(item.ProductId);
+
+                            var tx = new InventoryTransaction
+                            {
+                                TransactionNumber = $"TX-CUSTOMS-XFR-{Guid.NewGuid().ToString().Substring(0, 8).ToUpper()}",
+                                ItemId = item.ItemId,
+                                TransactionType = "ADJUSTMENT",
+                                SourceLocationId = item.LocationId,
+                                DestinationLocationId = item.LocationId,
+                                SourceOwnership = "CUSTOMS_OWNED",
+                                DestinationOwnership = ct.TargetOwnership,
+                                InitiatedBy = ct.RequestedBy,
+                                ApprovedBy = username,
+                                TransactionTimestamp = DateTime.UtcNow
+                            };
+                            _dbContext.InventoryTransactions.Add(tx);
+                        }
+
+                        if (ct.LotId.HasValue)
+                        {
+                            var pendingIntake = await _dbContext.PendingIntakes.FindAsync(ct.LotId.Value);
+                            if (pendingIntake != null)
+                            {
+                                pendingIntake.OwnershipType = ct.TargetOwnership;
+                                pendingIntake.CustomsClearanceDate = DateTime.UtcNow;
+                            }
+                        }
+
+                        await _dbContext.SaveChangesAsync();
+
+                        foreach (var locId in affectedLocations)
+                        {
+                            foreach (var prodId in affectedProducts)
+                            {
+                                await RecalculateInventoryBalanceAsync(locId, prodId, "CUSTOMS_OWNED");
+                                await RecalculateInventoryBalanceAsync(locId, prodId, ct.TargetOwnership);
+                            }
+                        }
+
+                        await SaveAuditLogAsync(username, "VAULT", "CUSTOMS", $"Workflow customs transfer completed for request #{ct.PendingTransferId}: {itemsToTransfer.Count} items transferred from CUSTOMS_OWNED to {ct.TargetOwnership}");
                     }
                 }
             }
@@ -3299,6 +3395,85 @@ public class InventoryRepository : IInventoryRepository
         await _dbContext.SaveChangesAsync();
 
         return "SUCCESS";
+    }
+
+    public async Task<PendingCustomsTransfer> InitiateCustomsTransferWorkflowAsync(int? lotId, int? itemId, string targetOwnership, string requestedBy,
+        string? clearanceNotes = null, string? customsDeclarationNumber = null, decimal? customsDutyAmount = null, string? portOfEntry = null)
+    {
+        targetOwnership = string.IsNullOrWhiteSpace(targetOwnership) ? "TURKEY_OWNED" : targetOwnership.Trim().ToUpperInvariant();
+        if (targetOwnership != "TURKEY_OWNED" && targetOwnership != "KFH_OWNED")
+        {
+            throw new ArgumentException("targetOwnership must be TURKEY_OWNED or KFH_OWNED.");
+        }
+
+        if (!lotId.HasValue && !itemId.HasValue)
+        {
+            throw new ArgumentException("Either lotId or itemId must be specified for customs transfer.");
+        }
+
+        if (itemId.HasValue)
+        {
+            var item = await _dbContext.InventoryItems.FindAsync(itemId.Value);
+            if (item == null) throw new InvalidOperationException($"Inventory item {itemId.Value} not found.");
+            if (item.OwnershipType != "CUSTOMS_OWNED")
+            {
+                throw new InvalidOperationException($"Item {item.SerialNumber} ownership is '{item.OwnershipType}', not 'CUSTOMS_OWNED'.");
+            }
+            if (item.IsDamaged)
+            {
+                throw new InvalidOperationException($"Cannot transfer damaged bar {item.SerialNumber} from customs.");
+            }
+        }
+        else if (lotId.HasValue)
+        {
+            var lot = await _dbContext.InventoryLots.FindAsync(lotId.Value);
+            if (lot == null)
+            {
+                var pendingIntake = await _dbContext.PendingIntakes.FindAsync(lotId.Value);
+                if (pendingIntake != null)
+                {
+                    lot = await _dbContext.InventoryLots.FirstOrDefaultAsync(l => l.LotNumber == pendingIntake.LotNumber);
+                }
+            }
+            if (lot == null) throw new InvalidOperationException($"Customs lot or intake {lotId.Value} not found.");
+
+            var customsCount = await _dbContext.InventoryItems.CountAsync(i => i.LotId == lot.LotId && i.OwnershipType == "CUSTOMS_OWNED");
+            if (customsCount == 0)
+            {
+                throw new InvalidOperationException($"No CUSTOMS_OWNED items found in lot {lot.LotNumber}.");
+            }
+        }
+
+        var pendingTransfer = new PendingCustomsTransfer
+        {
+            LotId = lotId,
+            ItemId = itemId,
+            TargetOwnership = targetOwnership,
+            RequestedBy = requestedBy,
+            ClearanceNotes = clearanceNotes,
+            CustomsDeclarationNumber = customsDeclarationNumber,
+            CustomsDutyAmount = customsDutyAmount,
+            PortOfEntry = portOfEntry,
+            StatusCode = "PENDING_APPROVAL",
+            CreatedAt = DateTime.UtcNow
+        };
+
+        _dbContext.PendingCustomsTransfers.Add(pendingTransfer);
+        await _dbContext.SaveChangesAsync();
+
+        // Start CUSTOMS_TRANSFER workflow instance
+        await StartWorkflowInstanceAsync("CUSTOMS_TRANSFER", pendingTransfer.PendingTransferId, requestedBy);
+
+        return pendingTransfer;
+    }
+
+    public async Task<IEnumerable<PendingCustomsTransfer>> GetPendingCustomsTransfersAsync()
+    {
+        return await _dbContext.PendingCustomsTransfers
+            .Include(p => p.Lot)
+            .Include(p => p.Item)
+            .OrderByDescending(p => p.CreatedAt)
+            .ToListAsync();
     }
 
     // =========================================================================

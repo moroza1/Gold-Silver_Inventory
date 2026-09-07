@@ -492,6 +492,16 @@ public static class DbSeeder
                 MakerDesc = "Maker selects GFS delivery request, scans matching gold bar serial number and product type, and initiates dispatch authorization.",
                 CheckerStepName = "Home Delivery Checker Authorization",
                 CheckerDesc = "Checker verifies customer PACI Civil ID, delivery address, scanned bar serial/product match, and authorizes armored courier dispatch."
+            },
+            new
+            {
+                WorkflowType = "CUSTOMS_TRANSFER",
+                Name = "Default Customs-Held Ownership Transfer Workflow",
+                Description = "Maker-Checker verification for releasing bonded customs gold and transferring ownership to Turkey or Kuwait portfolio.",
+                MakerStepName = "Customs Transfer Maker Submission",
+                MakerDesc = "Maker verifies Bayan customs declaration number, port entry clearance documents, and submits ownership transfer request.",
+                CheckerStepName = "Customs Transfer Checker Authorization",
+                CheckerDesc = "Checker reviews customs clearance documents, duty receipts, and authorizes ownership transfer to Turkey/Kuwait inventory."
             }
         };
 

@@ -1781,6 +1781,59 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   const [barcodeBulkLabels, setBarcodeBulkLabels] = useState<any[]>([]);
   const [barcodeBulkLoading, setBarcodeBulkLoading] = useState(false);
 
+  // Customs Transfer Workflow States
+  const [showCustomsTransferModal, setShowCustomsTransferModal] = useState(false);
+  const [customsTransferLotId, setCustomsTransferLotId] = useState('');
+  const [customsTransferTargetOwnership, setCustomsTransferTargetOwnership] = useState<'TURKEY_OWNED' | 'KFH_OWNED'>('TURKEY_OWNED');
+  const [customsTransferNotes, setCustomsTransferNotes] = useState('');
+  const [customsTransferBayan, setCustomsTransferBayan] = useState('');
+  const [customsTransferDuty, setCustomsTransferDuty] = useState<number | ''>('');
+  const [customsTransferPort, setCustomsTransferPort] = useState('');
+  const [customsTransferSubmitting, setCustomsTransferSubmitting] = useState(false);
+
+  const handleInitiateCustomsTransfer = async () => {
+    if (!customsTransferLotId) {
+      alert(currentLang === 'en' ? 'Please select or enter a customs Lot ID.' : 'يرجى اختيار أو إدخال رقم دفعة الجمارك.');
+      return;
+    }
+    setCustomsTransferSubmitting(true);
+    try {
+      const res = await fetch(`${API_BASE}/vault/intake/customs-transfer/initiate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({
+          lotId: parseInt(customsTransferLotId) || null,
+          targetOwnership: customsTransferTargetOwnership,
+          clearanceNotes: customsTransferNotes,
+          customsDeclarationNumber: customsTransferBayan,
+          customsDutyAmount: customsTransferDuty ? Number(customsTransferDuty) : null,
+          portOfEntry: customsTransferPort
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        alert(currentLang === 'en' 
+          ? `✓ Customs transfer workflow #${data.pending_transfer_id} initiated successfully for Maker-Checker sign-off!` 
+          : `✓ تم إنشاء مسار تحويل الجمارك رقم #${data.pending_transfer_id} بنجاح بانتظار اعتماد المعتمد!`);
+        setShowCustomsTransferModal(false);
+        setCustomsTransferLotId('');
+        setCustomsTransferNotes('');
+        setCustomsTransferBayan('');
+        setCustomsTransferDuty('');
+        setCustomsTransferPort('');
+        fetchWorkflows();
+        fetchInventory();
+      } else {
+        const err = await res.json();
+        alert(err.error || (currentLang === 'en' ? 'Failed to initiate customs transfer.' : 'فشل بدء مسار تحويل الجمارك.'));
+      }
+    } catch (e: any) {
+      alert(e.message || (currentLang === 'en' ? 'Network error initiating transfer.' : 'خطأ في الاتصال بالخادم.'));
+    } finally {
+      setCustomsTransferSubmitting(false);
+    }
+  };
+
   const canAccess = (moduleKey: string) => {
     if (!isLoggedIn) return false;
     if (Object.keys(userPermissions).length === 0) return false; // No permissions loaded yet = deny
@@ -1985,6 +2038,14 @@ const [migrationApproved, setMigrationApproved] = useState(false);
           checkerStep: 'Home Delivery Checker Authorization',
           makerDesc: 'Maker selects GFS delivery request, scans matching gold bar serial number and product type, and initiates dispatch authorization.',
           checkerDesc: 'Checker verifies customer PACI Civil ID, delivery address, scanned bar serial/product match, and authorizes armored courier dispatch.'
+        },
+        'CUSTOMS_TRANSFER': {
+          name: 'Default Customs-Held Ownership Transfer Workflow',
+          desc: 'Maker-Checker verification for releasing bonded customs gold and transferring ownership to Turkey or Kuwait portfolio.',
+          makerStep: 'Customs Transfer Maker Submission',
+          checkerStep: 'Customs Transfer Checker Authorization',
+          makerDesc: 'Maker verifies Bayan customs declaration number, port entry clearance documents, and submits ownership transfer request.',
+          checkerDesc: 'Checker reviews customs clearance documents, duty receipts, and authorizes ownership transfer to Turkey/Kuwait inventory.'
         }
       };
 
@@ -6105,6 +6166,16 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     : 'التحقق من بيان الشحنة، تسجيل الأرقام التسلسلية والوزن، وإرسالها لاعتماد مراجع الخزينة.'}
                 </p>
               </div>
+              {canModify('intake') && (
+                <button
+                  className="btn"
+                  style={{ background: 'linear-gradient(135deg, #D97706 0%, #B45309 100%)', color: '#fff', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 16px', borderRadius: '8px', border: 'none', cursor: 'pointer' }}
+                  onClick={() => setShowCustomsTransferModal(true)}
+                >
+                  <i className="fa-solid fa-passport"></i>
+                  {currentLang === 'en' ? 'Transfer Customs to Turkey/Kuwait (Maker-Checker)' : 'تحويل الجمارك لتركيا/الكويت (صانع/معتمد)'}
+                </button>
+              )}
             </div>
 
             {!canModify('intake') && (
@@ -13132,6 +13203,33 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                             </div>
                           )}
                         </div>
+                      ) : selectedWfInstance.workflow_type === "CUSTOMS_TRANSFER" ? (
+                        <div className="split-grid-2" style={{ gap: '10px 20px' }}>
+                          <div><strong>{currentLang === 'en' ? 'Transfer Request ID:' : 'رقم طلب التحويل:'}</strong> #{selectedWfInstance.details.pending_transfer_id}</div>
+                          <div>
+                            <strong>{currentLang === 'en' ? 'Target Portfolio Ownership:' : 'الملكية المستهدفة:'}</strong>{' '}
+                            <span className="badge" style={{ background: selectedWfInstance.details.target_ownership === 'TURKEY_OWNED' ? 'rgba(225, 29, 72, 0.15)' : 'rgba(0, 155, 78, 0.15)', color: selectedWfInstance.details.target_ownership === 'TURKEY_OWNED' ? '#E11D48' : 'var(--kfh-green)', border: '1px solid currentColor' }}>
+                              {selectedWfInstance.details.target_ownership === 'TURKEY_OWNED' ? '🇹🇷 Turkey (Kuveyt Turk)' : '🇰🇼 Kuwait (KFH)'}
+                            </span>
+                          </div>
+                          {selectedWfInstance.details.lot_number && (
+                            <div><strong>{currentLang === 'en' ? 'Customs Lot #:' : 'رقم دفعة الجمارك:'}</strong> <span style={{ fontFamily: 'monospace' }}>{selectedWfInstance.details.lot_number}</span></div>
+                          )}
+                          {selectedWfInstance.details.serial_number && (
+                            <div><strong>{currentLang === 'en' ? 'Bar Serial Number:' : 'الرقم التسلسلي للسبيكة:'}</strong> <span style={{ fontFamily: 'monospace', color: 'var(--accent-gold)' }}>{selectedWfInstance.details.serial_number}</span></div>
+                          )}
+                          <div><strong>{currentLang === 'en' ? 'Customs Bayan No:' : 'رقم البيان الجمركي:'}</strong> {selectedWfInstance.details.customs_declaration_number || 'N/A'}</div>
+                          <div><strong>{currentLang === 'en' ? 'Customs Duty Paid (KWD):' : 'الرسوم الجمركية المسددة:'}</strong> {selectedWfInstance.details.customs_duty_amount ? `${selectedWfInstance.details.customs_duty_amount.toFixed(3)} KWD` : '—'}</div>
+                          <div><strong>{currentLang === 'en' ? 'Port of Entry:' : 'منفذ الدخول:'}</strong> {selectedWfInstance.details.port_of_entry || '—'}</div>
+                          <div><strong>{currentLang === 'en' ? 'Requested By (Maker):' : 'مقدم الطلب (المنشئ):'}</strong> {selectedWfInstance.details.requested_by || selectedWfInstance.details.created_by}</div>
+                          <div><strong>{currentLang === 'en' ? 'Status Code:' : 'حالة الاعتماد:'}</strong> <span className="badge badge-reserved">{selectedWfInstance.details.status_code}</span></div>
+                          {selectedWfInstance.details.clearance_notes && (
+                            <div style={{ gridColumn: '1 / -1' }}>
+                              <strong>{currentLang === 'en' ? 'Clearance Notes:' : 'ملاحظات التخليص الجمركي:'}</strong>
+                              <p style={{ margin: '4px 0 0 0', color: 'var(--text-muted)', fontSize: '12px' }}>{selectedWfInstance.details.clearance_notes}</p>
+                            </div>
+                          )}
+                        </div>
                       ) : (
                         <div className="split-grid-2" style={{ gap: '10px 20px' }}>
                           <div><strong>{currentLang === 'en' ? 'P.O. Number:' : 'رقم طلب الشراء:'}</strong> {selectedWfInstance.details.po_number}</div>
@@ -13270,6 +13368,126 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       </span>
                     </div>
                   )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* CUSTOMS-TO-TURKEY TRANSFER MAKER MODAL */}
+        {showCustomsTransferModal && (
+          <div className="modal-overlay active" onClick={() => setShowCustomsTransferModal(false)}>
+            <div className="glass-card modal-content-box" style={{ width: '640px', maxWidth: '95%' }} onClick={e => e.stopPropagation()}>
+              <div className="modal-header">
+                <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#F59E0B' }}>
+                  <i className="fa-solid fa-passport"></i>
+                  {currentLang === 'en' ? 'Initiate Customs Ownership Transfer Workflow' : 'بدء مسار تحويل ملكية بضاعة جمركية (Maker-Checker)'}
+                </h3>
+                <span className="modal-close-btn" onClick={() => setShowCustomsTransferModal(false)}>&times;</span>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginTop: '10px' }}>
+                <div style={{ padding: '10px 14px', background: 'rgba(217, 119, 6, 0.08)', border: '1px solid rgba(217, 119, 6, 0.3)', borderRadius: '6px', fontSize: '12px', color: '#F59E0B' }}>
+                  <i className="fa-solid fa-shield-halved" style={{ marginRight: '6px' }}></i>
+                  {currentLang === 'en'
+                    ? 'Submitting this form initiates a 4-eyes Maker-Checker workflow. Upon final Checker approval, customs bonded inventory is released and ownership is transferred.'
+                    : 'إرسال هذا النموذج ينشئ مسار تدقيق صانع/معتمد. فور اعتماد المراجع النهائي، يتم فك حجز الجمارك ونقل الملكية رسمياً.'}
+                </div>
+
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Customs Lot / Shipment ID' : 'معرف لوت أو شحنة الجمارك'}</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder={currentLang === 'en' ? 'e.g., Lot ID (e.g. 1) or Lot Number' : 'مثال: رقم اللوت أو المعرف'}
+                    value={customsTransferLotId}
+                    onChange={e => setCustomsTransferLotId(e.target.value)}
+                  />
+                </div>
+
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Target Portfolio Ownership' : 'جهة الملكية المستهدفة'}</label>
+                  <select
+                    className="form-control"
+                    value={customsTransferTargetOwnership}
+                    onChange={e => setCustomsTransferTargetOwnership(e.target.value as 'TURKEY_OWNED' | 'KFH_OWNED')}
+                    style={{ fontWeight: 'bold' }}
+                  >
+                    <option value="TURKEY_OWNED">🇹🇷 {currentLang === 'en' ? 'Turkey Portfolio (Kuveyt Turk Consignment)' : 'محفظة تركيا (كويت ترك)'}</option>
+                    <option value="KFH_OWNED">🇰🇼 {currentLang === 'en' ? 'Kuwait Portfolio (KFH Institutional Owned)' : 'محفظة الكويت (بيت التمويل الكويتي)'}</option>
+                  </select>
+                </div>
+
+                <div className="split-grid-2" style={{ gap: '12px' }}>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Customs Declaration No. (Bayan)' : 'رقم البيان الجمركي'}</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder="e.g., BAYAN-2026-TR-8812"
+                      value={customsTransferBayan}
+                      onChange={e => setCustomsTransferBayan(e.target.value)}
+                    />
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Customs Duty Paid (KWD)' : 'الرسوم الجمركية المسددة (د.ك)'}</label>
+                    <input
+                      type="number"
+                      step="0.001"
+                      className="form-control"
+                      placeholder="0.000"
+                      value={customsTransferDuty || ''}
+                      onChange={e => setCustomsTransferDuty(parseFloat(e.target.value) || '')}
+                    />
+                  </div>
+                </div>
+
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Port of Entry / Customs Post' : 'منفذ الدخول / المحطة الجمركية'}</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder="e.g., Kuwait Int'l Airport Cargo / Shuwaikh Port"
+                    value={customsTransferPort}
+                    onChange={e => setCustomsTransferPort(e.target.value)}
+                  />
+                </div>
+
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Clearance & Transfer Justification Notes' : 'ملاحظات وتبرير التخليص والتحويل'}</label>
+                  <textarea
+                    rows={2}
+                    className="form-control"
+                    placeholder={currentLang === 'en' ? 'Duty receipt details, inspection approval notes...' : 'بيانات إيصال السداد، نتائج المعاينة...'}
+                    value={customsTransferNotes}
+                    onChange={e => setCustomsTransferNotes(e.target.value)}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
+                  <button
+                    className="btn btn-primary"
+                    style={{ flex: 1, padding: '12px', background: 'linear-gradient(135deg, #D97706 0%, #B45309 100%)', borderColor: '#D97706', fontWeight: 'bold' }}
+                    onClick={handleInitiateCustomsTransfer}
+                    disabled={customsTransferSubmitting}
+                  >
+                    {customsTransferSubmitting ? (
+                      <i className="fa-solid fa-spinner fa-spin"></i>
+                    ) : (
+                      <>
+                        <i className="fa-solid fa-paper-plane" style={{ marginRight: '6px' }}></i>
+                        {currentLang === 'en' ? 'Submit Transfer Request for Checker Sign-Off' : 'إرسال طلب التحويل لاعتماد المعتمد'}
+                      </>
+                    )}
+                  </button>
+                  <button
+                    className="btn"
+                    style={{ padding: '12px 20px' }}
+                    onClick={() => setShowCustomsTransferModal(false)}
+                    disabled={customsTransferSubmitting}
+                  >
+                    {t('btn_close')}
+                  </button>
                 </div>
               </div>
             </div>

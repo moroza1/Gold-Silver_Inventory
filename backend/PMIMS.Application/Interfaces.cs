@@ -148,6 +148,9 @@ public interface IInventoryRepository
         string? supportingDocumentUrl = null, string? discrepancyNotes = null, DateTime? receivingDate = null, string ownershipType = "KFH_OWNED",
         string? customsDeclarationNumber = null, decimal? customsDutyAmount = null, string? portOfEntry = null);
     Task<string> ClearCustomsShipmentAsync(int pendingIntakeIdOrLotId, string targetOwnership, string approvedBy, string? clearanceNotes = null);
+    Task<PendingCustomsTransfer> InitiateCustomsTransferWorkflowAsync(int? lotId, int? itemId, string targetOwnership, string requestedBy,
+        string? clearanceNotes = null, string? customsDeclarationNumber = null, decimal? customsDutyAmount = null, string? portOfEntry = null);
+    Task<IEnumerable<PendingCustomsTransfer>> GetPendingCustomsTransfersAsync();
     Task<string> NotifyBranchesOfReceivedInventoryAsync(int lotId, string lotNumber, int totalItemsReceived, decimal totalWeightGrams, string metalType, DateTime acquisitionDate, string notifiedBy);
     Task<IEnumerable<PendingIntake>> GetPendingIntakesAsync();
 

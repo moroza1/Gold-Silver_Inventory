@@ -121,6 +121,7 @@ public class AppDbContext : DbContext
     public DbSet<PendingIntake> PendingIntakes { get; set; } = null!;
     public DbSet<PendingTurkeyPurchase> PendingTurkeyPurchases { get; set; } = null!;
     public DbSet<PendingThresholdChange> PendingThresholdChanges { get; set; } = null!;
+    public DbSet<PendingCustomsTransfer> PendingCustomsTransfers { get; set; } = null!;
     public DbSet<SystemSetting> SystemSettings { get; set; } = null!;
 
     // FIM Integration Module
@@ -178,6 +179,13 @@ public class AppDbContext : DbContext
         {
             entity.HasKey(e => e.ReasonCode);
             entity.ToTable("reason_codes");
+        });
+
+        // PendingCustomsTransfer Configuration
+        modelBuilder.Entity<PendingCustomsTransfer>(entity =>
+        {
+            entity.HasKey(e => e.PendingTransferId);
+            entity.ToTable("pending_customs_transfers");
         });
 
         // MetalType Configuration
