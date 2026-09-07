@@ -276,7 +276,8 @@ public class InventoryRepository : IInventoryRepository
     public async Task<string> IntakeInventoryItemsAsync(int? poId, string lotNumber, int locationId, string receivedBy, string serialsJsonList,
         string sourceType = "SUPPLIER", int? customerId = null, int? accountId = null, string? receiptReason = null,
         int? vendorId = null, string? shipmentReference = null, string? deliveryNoteNumber = null, string? airwayBillNumber = null,
-        string? supportingDocumentUrl = null, string? discrepancyNotes = null, DateTime? receivingDate = null, string ownershipType = "KFH_OWNED")
+        string? supportingDocumentUrl = null, string? discrepancyNotes = null, DateTime? receivingDate = null, string ownershipType = "KFH_OWNED",
+        string? customsDeclarationNumber = null, string? portOfEntry = null)
     {
         sourceType = string.IsNullOrWhiteSpace(sourceType) ? "SUPPLIER" : sourceType.Trim().ToUpperInvariant();
         bool isCustomerReceipt = sourceType == "CUSTOMER";
@@ -367,7 +368,9 @@ public class InventoryRepository : IInventoryRepository
                     AirwayBillNumber = airwayBillNumber,
                     SupportingDocumentUrl = supportingDocumentUrl,
                     DiscrepancyNotes = discrepancyNotes,
-                    ReceivingDate = receivingDate ?? DateTime.UtcNow
+                    ReceivingDate = receivingDate ?? DateTime.UtcNow,
+                    CustomsDeclarationNumber = customsDeclarationNumber,
+                    PortOfEntry = portOfEntry
                 };
 
                 // SAFEGUARD: Ensure AcquisitionDate is NEVER null -- required for dashboard filtering
@@ -388,13 +391,19 @@ public class InventoryRepository : IInventoryRepository
                 if (!string.IsNullOrWhiteSpace(deliveryNoteNumber)) lot.DeliveryNoteNumber = deliveryNoteNumber;
                 if (!string.IsNullOrWhiteSpace(airwayBillNumber)) lot.AirwayBillNumber = airwayBillNumber;
                 if (receivingDate.HasValue) lot.ReceivingDate = receivingDate.Value;
+                if (!string.IsNullOrWhiteSpace(customsDeclarationNumber)) lot.CustomsDeclarationNumber = customsDeclarationNumber;
+                if (!string.IsNullOrWhiteSpace(portOfEntry)) lot.PortOfEntry = portOfEntry;
                 await _dbContext.SaveChangesAsync();
             }
 
-            // A customer custody deposit stays CUSTOMER_OWNED; Turkey consignment stays TURKEY_OWNED; other supplier receipt is KFH_OWNED.
+            // A customer custody deposit stays CUSTOMER_OWNED; Turkey consignment stays TURKEY_OWNED; Customs-bonded stays CUSTOMS_OWNED; other supplier receipt is KFH_OWNED.
             string finalOwnershipType = isCustomerReceipt && receiptReason == "CUSTODY_DEPOSIT" 
                 ? "CUSTOMER_OWNED" 
-                : (!string.IsNullOrWhiteSpace(ownershipType) && ownershipType.Equals("TURKEY_OWNED", StringComparison.OrdinalIgnoreCase) ? "TURKEY_OWNED" : "KFH_OWNED");
+                : (!string.IsNullOrWhiteSpace(ownershipType) && ownershipType.Equals("TURKEY_OWNED", StringComparison.OrdinalIgnoreCase) 
+                    ? "TURKEY_OWNED" 
+                    : (!string.IsNullOrWhiteSpace(ownershipType) && ownershipType.Equals("CUSTOMS_OWNED", StringComparison.OrdinalIgnoreCase)
+                        ? "CUSTOMS_OWNED"
+                        : "KFH_OWNED"));
 
             var affectedProducts = new HashSet<int>();
             var newItems = new List<InventoryItem>();
@@ -2071,7 +2080,8 @@ public class InventoryRepository : IInventoryRepository
                         string result = await IntakeInventoryItemsAsync(pending.PoId, pending.LotNumber, pending.LocationId, pending.ReceivedBy, pending.SerialsJsonList,
                             pending.SourceType, pending.CustomerId, pending.AccountId, pending.ReceiptReason,
                             pending.VendorId, pending.ShipmentReference, pending.DeliveryNoteNumber, pending.AirwayBillNumber,
-                            pending.SupportingDocumentUrl, pending.DiscrepancyNotes, pending.ReceivingDate, pending.OwnershipType);
+                            pending.SupportingDocumentUrl, pending.DiscrepancyNotes, pending.ReceivingDate, pending.OwnershipType,
+                            pending.CustomsDeclarationNumber, pending.PortOfEntry);
                         if (result != "SUCCESS")
                         {
                             throw new InvalidOperationException($"Intake execution failed: {result}");
@@ -2975,7 +2985,8 @@ public class InventoryRepository : IInventoryRepository
     public async Task<PendingIntake> InitiateWorkflowIntakeAsync(int? poId, string lotNumber, int locationId, string receivedBy, string serialsJsonList,
         string sourceType = "SUPPLIER", int? customerId = null, int? accountId = null, string? receiptReason = null,
         int? vendorId = null, string? shipmentReference = null, string? deliveryNoteNumber = null, string? airwayBillNumber = null,
-        string? supportingDocumentUrl = null, string? discrepancyNotes = null, DateTime? receivingDate = null, string ownershipType = "KFH_OWNED")
+        string? supportingDocumentUrl = null, string? discrepancyNotes = null, DateTime? receivingDate = null, string ownershipType = "KFH_OWNED",
+        string? customsDeclarationNumber = null, decimal? customsDutyAmount = null, string? portOfEntry = null)
     {
         sourceType = string.IsNullOrWhiteSpace(sourceType) ? "SUPPLIER" : sourceType.Trim().ToUpperInvariant();
         if (sourceType != "SUPPLIER" && sourceType != "CUSTOMER")
@@ -3128,6 +3139,9 @@ public class InventoryRepository : IInventoryRepository
             ReceivedBy = receivedBy,
             SerialsJsonList = serialsJsonList,
             OwnershipType = string.IsNullOrWhiteSpace(ownershipType) ? "KFH_OWNED" : ownershipType.Trim(),
+            CustomsDeclarationNumber = customsDeclarationNumber,
+            CustomsDutyAmount = customsDutyAmount,
+            PortOfEntry = portOfEntry,
             StatusCode = "PENDING_APPROVAL",
             CreatedAt = DateTime.UtcNow
         };
@@ -3189,6 +3203,102 @@ public class InventoryRepository : IInventoryRepository
             .Include(pi => pi.Customer)
             .Include(pi => pi.Vendor)
             .ToListAsync();
+    }
+
+    public async Task<string> ClearCustomsShipmentAsync(int pendingIntakeIdOrLotId, string targetOwnership, string approvedBy, string? clearanceNotes = null)
+    {
+        targetOwnership = string.IsNullOrWhiteSpace(targetOwnership) ? "KFH_OWNED" : targetOwnership.Trim().ToUpperInvariant();
+        if (targetOwnership != "KFH_OWNED" && targetOwnership != "TURKEY_OWNED")
+        {
+            throw new ArgumentException("targetOwnership must be KFH_OWNED or TURKEY_OWNED.");
+        }
+
+        // Try to find pending intake first
+        var pending = await _dbContext.PendingIntakes.FindAsync(pendingIntakeIdOrLotId);
+        InventoryLot? lot = null;
+        if (pending != null)
+        {
+            lot = await _dbContext.InventoryLots.FirstOrDefaultAsync(l => l.LotNumber == pending.LotNumber);
+        }
+
+        // If not found via pending intake, try as direct LotId
+        if (lot == null)
+        {
+            lot = await _dbContext.InventoryLots.FindAsync(pendingIntakeIdOrLotId);
+            if (lot != null && pending == null)
+            {
+                pending = await _dbContext.PendingIntakes.FirstOrDefaultAsync(p => p.LotNumber == lot.LotNumber);
+            }
+        }
+
+        if (lot == null)
+        {
+            throw new InvalidOperationException("Customs shipment or lot not found.");
+        }
+
+        // Find all items in lot that are CUSTOMS_OWNED
+        var items = await _dbContext.InventoryItems
+            .Where(i => i.LotId == lot.LotId && i.OwnershipType == "CUSTOMS_OWNED")
+            .ToListAsync();
+
+        if (items.Count == 0)
+        {
+            return "NO_CUSTOMS_ITEMS_FOUND";
+        }
+
+        var affectedLocations = new HashSet<int>();
+        var affectedProducts = new HashSet<int>();
+
+        foreach (var item in items)
+        {
+            item.OwnershipType = targetOwnership;
+            if (item.LocationId.HasValue) affectedLocations.Add(item.LocationId.Value);
+            affectedProducts.Add(item.ProductId);
+
+            var tx = new InventoryTransaction
+            {
+                TransactionNumber = $"TX-CUSTOMS-CLR-{Guid.NewGuid().ToString().Substring(0, 8).ToUpper()}",
+                ItemId = item.ItemId,
+                TransactionType = "ADJUSTMENT",
+                SourceLocationId = item.LocationId,
+                DestinationLocationId = item.LocationId,
+                SourceOwnership = "CUSTOMS_OWNED",
+                DestinationOwnership = targetOwnership,
+                InitiatedBy = approvedBy,
+                ApprovedBy = approvedBy,
+                TransactionTimestamp = DateTime.UtcNow
+            };
+            _dbContext.InventoryTransactions.Add(tx);
+        }
+
+        if (pending != null)
+        {
+            pending.OwnershipType = targetOwnership;
+            pending.CustomsClearanceDate = DateTime.UtcNow;
+            if (!string.IsNullOrWhiteSpace(clearanceNotes))
+            {
+                pending.DiscrepancyNotes = string.IsNullOrWhiteSpace(pending.DiscrepancyNotes)
+                    ? $"[Cleared: {clearanceNotes}]"
+                    : $"{pending.DiscrepancyNotes} | [Cleared: {clearanceNotes}]";
+            }
+        }
+
+        await _dbContext.SaveChangesAsync();
+
+        // Recalculate balances
+        foreach (var locId in affectedLocations)
+        {
+            foreach (var prodId in affectedProducts)
+            {
+                await RecalculateInventoryBalanceAsync(locId, prodId, "CUSTOMS_OWNED");
+                await RecalculateInventoryBalanceAsync(locId, prodId, targetOwnership);
+            }
+        }
+
+        await SaveAuditLogAsync(approvedBy, "VAULT", "CUSTOMS", $"Customs clearance executed for lot {lot.LotNumber}: {items.Count} items transferred from CUSTOMS_OWNED to {targetOwnership}");
+        await _dbContext.SaveChangesAsync();
+
+        return "SUCCESS";
     }
 
     // =========================================================================

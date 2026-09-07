@@ -926,7 +926,10 @@ export default function App() {
     refiner_name: string;
     assay_certificate_number?: string;
   }[]>([]);
-  const [intakeOwnershipType, setIntakeOwnershipType] = useState<'TURKEY_OWNED' | 'KFH_OWNED'>('TURKEY_OWNED');
+  const [intakeOwnershipType, setIntakeOwnershipType] = useState<'TURKEY_OWNED' | 'KFH_OWNED' | 'CUSTOMS_OWNED'>('TURKEY_OWNED');
+  const [intakeCustomsDeclarationNo, setIntakeCustomsDeclarationNo] = useState<string>('');
+  const [intakeCustomsDuty, setIntakeCustomsDuty] = useState<number>(0);
+  const [intakePortOfEntry, setIntakePortOfEntry] = useState<string>("Kuwait Int'l Airport Cargo");
   const [showSerialToolsModal, setShowSerialToolsModal] = useState<boolean>(false);
   const [turkeyInventory, setTurkeyInventory] = useState<{
     summary: { total_bars: number; total_weight_grams: number; total_weight_kg: number; by_product: any[] };
@@ -2144,6 +2147,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     fetchProducts();
     fetchTurkeyInventory();
     fetchPendingTurkeyPurchases();
+    fetchPendingIntakes();
 
     const interval = setInterval(() => {
       setGoldRate(prev => parseFloat((prev + (Math.random() - 0.5) * 1.5).toFixed(2)));
@@ -2196,7 +2200,8 @@ const [migrationApproved, setMigrationApproved] = useState(false);
       '1 Ounce Bar': 'سبيكة 1 أونصة',
       'KFH_OWNED': 'بيت التمويل الكويتي',
       'TURKEY_OWNED': 'أمانات تركيا',
-      'CUSTOMER_OWNED': 'أمانات العملاء'
+      'CUSTOMER_OWNED': 'أمانات العملاء',
+      'CUSTOMS_OWNED': 'أمانات الجمارك (تحت التخليص)'
     };
     return dbMap[val] || val;
   };
@@ -4548,6 +4553,9 @@ const [migrationApproved, setMigrationApproved] = useState(false);
         locationId: intakeSelectedLocation || 1,
         receivedBy: displayName,
         ownershipType: intakeOwnershipType,
+        customsDeclarationNumber: intakeOwnershipType === 'CUSTOMS_OWNED' ? (intakeCustomsDeclarationNo.trim() || null) : null,
+        customsDutyAmount: intakeOwnershipType === 'CUSTOMS_OWNED' ? intakeCustomsDuty : null,
+        portOfEntry: intakeOwnershipType === 'CUSTOMS_OWNED' ? (intakePortOfEntry.trim() || null) : null,
         items: intakeBars.map(b => ({
           serial: b.serial.trim(),
           product_id: b.product_id,
@@ -6112,13 +6120,16 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                   const totalBarsCount = intakeBars.length;
                   const totalGrossWeightG = intakeBars.reduce((sum, b) => sum + (b.weight_grams || 0), 0);
                   const totalKg = (totalGrossWeightG / 1000).toFixed(3);
+                  const damagedBars = intakeBars.filter(b => b.is_damaged);
+                  const damagedCount = damagedBars.length;
+                  const damagedWeightG = damagedBars.reduce((sum, b) => sum + (b.weight_grams || 0), 0);
 
                   return (
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px' }}>
-                      <div className="glass-card" style={{ padding: '14px', borderLeft: `4px solid ${intakeOwnershipType === 'TURKEY_OWNED' ? '#E11D48' : 'var(--kfh-green)'}` }}>
+                      <div className="glass-card" style={{ padding: '14px', borderLeft: `4px solid ${intakeOwnershipType === 'TURKEY_OWNED' ? '#E11D48' : intakeOwnershipType === 'CUSTOMS_OWNED' ? '#D97706' : 'var(--kfh-green)'}` }}>
                         <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Shipment Owner' : 'جهة ملكية الشحنة'}</div>
-                        <div style={{ fontSize: '16px', fontWeight: 'bold', marginTop: '4px', color: intakeOwnershipType === 'TURKEY_OWNED' ? '#E11D48' : 'var(--kfh-green)' }}>
-                          {intakeOwnershipType === 'TURKEY_OWNED' ? '🇹🇷 Turkey' : '🇰🇼 Kuwait'}
+                        <div style={{ fontSize: '16px', fontWeight: 'bold', marginTop: '4px', color: intakeOwnershipType === 'TURKEY_OWNED' ? '#E11D48' : intakeOwnershipType === 'CUSTOMS_OWNED' ? '#D97706' : 'var(--kfh-green)' }}>
+                          {intakeOwnershipType === 'TURKEY_OWNED' ? '🇹🇷 Turkey' : intakeOwnershipType === 'CUSTOMS_OWNED' ? '🛃 Customs (Bonded)' : '🇰🇼 Kuwait'}
                         </div>
                       </div>
 
@@ -6139,6 +6150,19 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                         </div>
                         <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
                           {currentLang === 'en' ? 'Pending Maker-Checker sign-off' : 'بانتظار اعتماد المراجع قبل الإيداع'}
+                        </div>
+                      </div>
+
+                      <div className="glass-card" style={{ padding: '14px', borderLeft: `4px solid ${damagedCount > 0 ? 'var(--accent-red)' : 'var(--surface-border)'}` }}>
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Damaged / Discrepant Bars' : 'سبائك معيبة / تالفة'}</div>
+                        <div style={{ fontSize: '18px', fontWeight: 'bold', marginTop: '4px', color: damagedCount > 0 ? 'var(--accent-red)' : 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          {damagedCount > 0 && <i className="fa-solid fa-triangle-exclamation"></i>}
+                          {damagedCount} <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'bars flagged' : 'سبيكة معلّمة'}</span>
+                        </div>
+                        <div style={{ fontSize: '11px', color: damagedCount > 0 ? 'var(--accent-red)' : 'var(--text-muted)', marginTop: '2px' }}>
+                          {damagedCount > 0
+                            ? (currentLang === 'en' ? `${(damagedWeightG / 1000).toFixed(3)} KG quarantined on receipt` : `${(damagedWeightG / 1000).toFixed(3)} كجم محجوزة عند الاستلام`)
+                            : (currentLang === 'en' ? 'No damage reported' : 'لا يوجد ضرر مسجل')}
                         </div>
                       </div>
                     </div>
@@ -6174,11 +6198,12 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       <select 
                         className="form-control" 
                         value={intakeOwnershipType} 
-                        onChange={e => setIntakeOwnershipType(e.target.value as 'TURKEY_OWNED' | 'KFH_OWNED')}
+                        onChange={e => setIntakeOwnershipType(e.target.value as 'TURKEY_OWNED' | 'KFH_OWNED' | 'CUSTOMS_OWNED')}
                         style={{ fontSize: '12px', padding: '6px 8px', fontWeight: 'bold' }}
                       >
                         <option value="TURKEY_OWNED">🇹🇷 {currentLang === 'en' ? 'Turkey' : 'تركيا'}</option>
                         <option value="KFH_OWNED">🇰🇼 {currentLang === 'en' ? 'Kuwait' : 'الكويت'}</option>
+                        <option value="CUSTOMS_OWNED">🛃 {currentLang === 'en' ? 'Customs (Bonded)' : 'الجمارك (تحت التخليص)'}</option>
                       </select>
                     </div>
 
@@ -6213,6 +6238,52 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       </select>
                     </div>
                   </div>
+
+                  {/* CUSTOMS CLEARANCE SECTION */}
+                  {intakeOwnershipType === 'CUSTOMS_OWNED' && (
+                    <div style={{ backgroundColor: 'rgba(217, 119, 6, 0.08)', padding: '14px', borderRadius: '8px', border: '1px solid rgba(217, 119, 6, 0.3)', marginTop: '14px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px', color: '#F59E0B', fontWeight: 600, fontSize: '13px' }}>
+                        <i className="fa-solid fa-passport"></i>
+                        {currentLang === 'en' ? 'Customs & Port Clearance Details' : 'بيانات التخليص والمنفذ الجمركي'}
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Customs Declaration No. (Bayan)' : 'رقم البيان الجمركي'}</label>
+                          <input 
+                            type="text" 
+                            className="form-control" 
+                            placeholder="e.g., BAYAN-2026-KW-8841"
+                            value={intakeCustomsDeclarationNo}
+                            onChange={e => setIntakeCustomsDeclarationNo(e.target.value)}
+                            style={{ fontSize: '12px', padding: '6px 8px' }}
+                          />
+                        </div>
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Customs Duty (KWD)' : 'رسوم الجمارك (د.ك)'}</label>
+                          <input 
+                            type="number" 
+                            step="0.001"
+                            className="form-control" 
+                            placeholder="0.000"
+                            value={intakeCustomsDuty || ''}
+                            onChange={e => setIntakeCustomsDuty(parseFloat(e.target.value) || 0)}
+                            style={{ fontSize: '12px', padding: '6px 8px' }}
+                          />
+                        </div>
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Port of Entry / Customs Post' : 'منفذ الدخول / المحطة الجمركية'}</label>
+                          <input 
+                            type="text" 
+                            className="form-control" 
+                            placeholder="e.g., Kuwait Int'l Airport Cargo"
+                            value={intakePortOfEntry}
+                            onChange={e => setIntakePortOfEntry(e.target.value)}
+                            style={{ fontSize: '12px', padding: '6px 8px' }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* SECTION 2: PHYSICAL BARS REGISTRY */}
@@ -8343,8 +8414,8 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       </span>
 
                       {/* Ownership Badge */}
-                      <span className={`badge ${b.ownership_type === 'KFH_OWNED' ? 'badge-ready' : b.ownership_type === 'TURKEY_OWNED' ? 'badge-quarantined' : 'badge-reserved'}`} style={{ fontSize: '12px', padding: '6px 12px' }}>
-                        <i className="fa-solid fa-building-columns" style={{ marginRight: '6px' }}></i>
+                      <span className={`badge ${b.ownership_type === 'KFH_OWNED' ? 'badge-ready' : b.ownership_type === 'TURKEY_OWNED' ? 'badge-quarantined' : b.ownership_type === 'CUSTOMS_OWNED' ? 'badge-transfer' : 'badge-reserved'}`} style={{ fontSize: '12px', padding: '6px 12px', ...(b.ownership_type === 'CUSTOMS_OWNED' ? { background: 'rgba(217,119,6,0.15)', color: '#F59E0B', border: '1px solid rgba(217,119,6,0.3)' } : {}) }}>
+                        <i className={`fa-solid ${b.ownership_type === 'CUSTOMS_OWNED' ? 'fa-passport' : 'fa-building-columns'}`} style={{ marginRight: '6px' }}></i>
                         {translateDb(b.ownership_type)}
                       </span>
 

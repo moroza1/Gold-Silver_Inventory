@@ -2216,5 +2216,94 @@ public class PMIMSTests
         var movList = movsProp.Cast<object>().ToList();
         Assert.Equal(2, movList.Count);
     }
+
+    [Fact]
+    public async Task TestCustomsOwnerIntakeStage_CreatesCustomsOwnedItems_AndClearsToKfhOwned()
+    {
+        using var setup = CreateContext();
+        await SeedBasicDataAsync(setup.Context);
+
+        var intakeWorkflow = new WorkflowTemplate
+        {
+            WorkflowType = "INTAKE_SHIPMENT",
+            Name = "Intake Workflow",
+            Description = "Intake verification",
+            IsActive = true
+        };
+        setup.Context.WorkflowTemplates.Add(intakeWorkflow);
+        await setup.Context.SaveChangesAsync();
+
+        setup.Context.WorkflowSteps.Add(
+            new WorkflowStep { TemplateId = intakeWorkflow.TemplateId, StepOrder = 1, StepName = "Intake Verification", RequiredRole = "Operations Checker", Description = "Verify serials" }
+        );
+        await setup.Context.SaveChangesAsync();
+
+        var groupChecker = new PrivilegeGroup { GroupName = "Operations Checker", Description = "Test checker group", IsSystem = true };
+        setup.Context.PrivilegeGroups.Add(groupChecker);
+        await setup.Context.SaveChangesAsync();
+
+        var checkerUser = new AppUser { Username = "checker-customs", DisplayName = "Customs Checker", Email = "checker@customs.test", PasswordHash = "test-hash" };
+        setup.Context.AppUsers.Add(checkerUser);
+        await setup.Context.SaveChangesAsync();
+
+        setup.Context.UserGroupMemberships.Add(new UserGroupMembership { UserId = checkerUser.UserId, GroupId = groupChecker.GroupId, AssignedBy = "TEST" });
+        await setup.Context.SaveChangesAsync();
+
+        var repo = new InventoryRepository(setup.Context);
+
+        // 1. Intake shipment with OwnershipType = "CUSTOMS_OWNED" and Customs metadata
+        string serialsJson = "[{\"serial\":\"CUSTOMS-AU-001\",\"product_id\":1},{\"serial\":\"CUSTOMS-AU-002\",\"product_id\":1}]";
+        var pendingIntake = await repo.InitiateWorkflowIntakeAsync(
+            null, "LOT-CUSTOMS-2026-001", 1, "customs_maker", serialsJson,
+            sourceType: "SUPPLIER", vendorId: 1, ownershipType: "CUSTOMS_OWNED",
+            customsDeclarationNumber: "BAYAN-KWT-2026-9912",
+            customsDutyAmount: 1250.50m,
+            portOfEntry: "Kuwait Int'l Airport Cargo");
+
+        Assert.Equal("CUSTOMS_OWNED", pendingIntake.OwnershipType);
+        Assert.Equal("BAYAN-KWT-2026-9912", pendingIntake.CustomsDeclarationNumber);
+        Assert.Equal(1250.50m, pendingIntake.CustomsDutyAmount);
+        Assert.Equal("Kuwait Int'l Airport Cargo", pendingIntake.PortOfEntry);
+
+        // 2. Approve intake via Maker-Checker workflow
+        var instances = (await repo.GetActiveWorkflowInstancesAsync()).ToList();
+        var intakeInstance = instances.First(i => i.WorkflowType == "INTAKE_SHIPMENT" && i.EntityId == pendingIntake.PendingIntakeId);
+        var intakeResult = await repo.ProcessWorkflowActionAsync(intakeInstance.InstanceId, "checker-customs", "APPROVED", "Approved customs bonded shipment");
+        Assert.Equal("SUCCESS", intakeResult);
+
+        // Verify items created with CUSTOMS_OWNED
+        var customsItems = await setup.Context.InventoryItems
+            .Where(i => i.SerialNumber == "CUSTOMS-AU-001" || i.SerialNumber == "CUSTOMS-AU-002")
+            .ToListAsync();
+        Assert.Equal(2, customsItems.Count);
+        Assert.All(customsItems, item => Assert.Equal("CUSTOMS_OWNED", item.OwnershipType));
+
+        // Verify lot metadata
+        var lot = await setup.Context.InventoryLots.FirstOrDefaultAsync(l => l.LotNumber == "LOT-CUSTOMS-2026-001");
+        Assert.NotNull(lot);
+        Assert.Equal("BAYAN-KWT-2026-9912", lot.CustomsDeclarationNumber);
+        Assert.Equal("Kuwait Int'l Airport Cargo", lot.PortOfEntry);
+
+        // 3. Clear customs shipment and transition ownership to KFH_OWNED
+        var clearanceResult = await repo.ClearCustomsShipmentAsync(
+            pendingIntake.PendingIntakeId,
+            "KFH_OWNED",
+            "customs_agent",
+            "Cleared by Kuwait Customs; duty paid under receipt #88192");
+        Assert.Equal("SUCCESS", clearanceResult);
+
+        // 4. Verify items transitioned to KFH_OWNED
+        var clearedItems = await setup.Context.InventoryItems
+            .Where(i => i.SerialNumber == "CUSTOMS-AU-001" || i.SerialNumber == "CUSTOMS-AU-002")
+            .ToListAsync();
+        Assert.Equal(2, clearedItems.Count);
+        Assert.All(clearedItems, item => Assert.Equal("KFH_OWNED", item.OwnershipType));
+
+        // Verify inventory transaction was logged
+        var clrTx = await setup.Context.InventoryTransactions
+            .FirstOrDefaultAsync(t => t.SourceOwnership == "CUSTOMS_OWNED" && t.DestinationOwnership == "KFH_OWNED");
+        Assert.NotNull(clrTx);
+        Assert.Equal("ADJUSTMENT", clrTx.TransactionType);
+    }
 }
 

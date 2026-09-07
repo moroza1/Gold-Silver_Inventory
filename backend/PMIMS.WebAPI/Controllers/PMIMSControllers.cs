@@ -615,9 +615,32 @@ public partial class PMIMSControllers : ControllerBase
                 vendorId: vendorId, shipmentReference: req.ShipmentReference, deliveryNoteNumber: req.DeliveryNoteNumber,
                 airwayBillNumber: req.AirwayBillNumber, supportingDocumentUrl: req.SupportingDocumentUrl,
                 discrepancyNotes: req.DiscrepancyNotes, receivingDate: req.ReceivingDate,
-                ownershipType: string.IsNullOrWhiteSpace(req.OwnershipType) ? "KFH_OWNED" : req.OwnershipType);
+                ownershipType: string.IsNullOrWhiteSpace(req.OwnershipType) ? "KFH_OWNED" : req.OwnershipType,
+                customsDeclarationNumber: req.CustomsDeclarationNumber,
+                customsDutyAmount: req.CustomsDutyAmount,
+                portOfEntry: req.PortOfEntry);
 
             return Ok(new { pending_id = pending.PendingIntakeId, message = "Intake shipment verification request initiated and routed to the Maker-Checker workflow approval." });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
+    [HttpPost("vault/intake/customs-clearance")]
+    [Authorize(Policy = "intake.write")]
+    public async Task<IActionResult> ClearCustomsShipment([FromBody] ClearCustomsRequest req)
+    {
+        try
+        {
+            var username = User?.Identity?.Name ?? "system-admin";
+            var result = await _repository.ClearCustomsShipmentAsync(req.PendingIntakeIdOrLotId, req.TargetOwnership, username, req.ClearanceNotes);
+            if (result != "SUCCESS")
+            {
+                return BadRequest(new { error = result });
+            }
+            return Ok(new { message = $"Customs shipment successfully cleared and transferred to {req.TargetOwnership}." });
         }
         catch (Exception ex)
         {
@@ -643,6 +666,10 @@ public partial class PMIMSControllers : ControllerBase
             supporting_document_url = pi.SupportingDocumentUrl,
             discrepancy_notes = pi.DiscrepancyNotes,
             receiving_date = pi.ReceivingDate ?? pi.CreatedAt,
+            customs_declaration_number = pi.CustomsDeclarationNumber,
+            customs_duty_amount = pi.CustomsDutyAmount,
+            port_of_entry = pi.PortOfEntry,
+            customs_clearance_date = pi.CustomsClearanceDate,
             status_code = pi.StatusCode,
             received_by = pi.ReceivedBy,
             location_id = pi.LocationId,
@@ -1216,6 +1243,10 @@ public partial class PMIMSControllers : ControllerBase
                         location_name = $"{pending.Location?.ZoneRoom}-{pending.Location?.ShelfRow}-{pending.Location?.SlotBin}",
                         received_by = pending.ReceivedBy,
                         status_code = pending.StatusCode,
+                        ownership_type = pending.OwnershipType,
+                        customs_declaration_number = pending.CustomsDeclarationNumber,
+                        customs_duty_amount = pending.CustomsDutyAmount,
+                        port_of_entry = pending.PortOfEntry,
                         serials_json = pending.SerialsJsonList,
                         created_by = pending.ReceivedBy
                     };
@@ -2266,8 +2297,18 @@ public class IntakeRequest
     public string LotNumber { get; set; } = null!;
     public int LocationId { get; set; }
     public string ReceivedBy { get; set; } = null!;
-    public string OwnershipType { get; set; } = "KFH_OWNED"; // KFH_OWNED or TURKEY_OWNED
+    public string OwnershipType { get; set; } = "KFH_OWNED"; // KFH_OWNED, TURKEY_OWNED, CUSTOMS_OWNED
+    public string? CustomsDeclarationNumber { get; set; }
+    public decimal? CustomsDutyAmount { get; set; }
+    public string? PortOfEntry { get; set; }
     public List<IntakeItemDTO> Items { get; set; } = new();
+}
+
+public class ClearCustomsRequest
+{
+    public int PendingIntakeIdOrLotId { get; set; }
+    public string TargetOwnership { get; set; } = "KFH_OWNED";
+    public string? ClearanceNotes { get; set; }
 }
 
 public class TurkeyPurchaseRequest

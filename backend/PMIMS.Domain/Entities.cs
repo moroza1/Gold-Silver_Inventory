@@ -218,6 +218,8 @@ public class InventoryLot
     public string? SupportingDocumentUrl { get; set; }
     public string? DiscrepancyNotes { get; set; }
     public DateTime? ReceivingDate { get; set; }
+    public string? CustomsDeclarationNumber { get; set; }
+    public string? PortOfEntry { get; set; }
 
     public PurchaseOrder? PurchaseOrder { get; set; }
     public Vendor? Vendor { get; set; }
@@ -964,7 +966,11 @@ public class PendingIntake
     public int LocationId { get; set; }
     public string ReceivedBy { get; set; } = null!;
     public string SerialsJsonList { get; set; } = null!;
-    public string OwnershipType { get; set; } = "KFH_OWNED"; // KFH_OWNED, TURKEY_OWNED, CUSTOMER_OWNED
+    public string OwnershipType { get; set; } = "KFH_OWNED"; // KFH_OWNED, TURKEY_OWNED, CUSTOMER_OWNED, CUSTOMS_OWNED
+    public string? CustomsDeclarationNumber { get; set; }
+    public decimal? CustomsDutyAmount { get; set; }
+    public string? PortOfEntry { get; set; }
+    public DateTime? CustomsClearanceDate { get; set; }
     public string StatusCode { get; set; } = "PENDING_APPROVAL"; // PENDING_APPROVAL, APPROVED, REJECTED
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 

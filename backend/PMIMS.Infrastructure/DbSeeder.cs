@@ -110,7 +110,11 @@ public static class DbSeeder
                             ("discrepancy_notes", "TEXT"),
                             ("receiving_date", "TEXT"),
                             ("customer_id", "INTEGER"),
-                            ("account_id", "INTEGER")
+                            ("account_id", "INTEGER"),
+                            ("customs_declaration_number", "TEXT"),
+                            ("customs_duty_amount", "DECIMAL(18,4)"),
+                            ("port_of_entry", "TEXT"),
+                            ("customs_clearance_date", "TEXT")
                         };
 
                         foreach (var (col, def) in colsToAdd)
@@ -128,6 +132,42 @@ public static class DbSeeder
                                 {
                                     // Ignore if already added with different casing
                                 }
+                            }
+                        }
+
+                        // Check and update inventory_lots for customs columns
+                        var lotCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                        using (var pragmaCmd = connection.CreateCommand())
+                        {
+                            pragmaCmd.CommandText = "PRAGMA table_info(inventory_lots);";
+                            using var reader = await pragmaCmd.ExecuteReaderAsync();
+                            while (await reader.ReadAsync())
+                            {
+                                var colName = reader["name"]?.ToString();
+                                if (!string.IsNullOrEmpty(colName)) lotCols.Add(colName);
+                            }
+                        }
+                        if (lotCols.Count > 0)
+                        {
+                            if (!lotCols.Contains("customs_declaration_number"))
+                            {
+                                try
+                                {
+                                    using var alterCmd = connection.CreateCommand();
+                                    alterCmd.CommandText = "ALTER TABLE inventory_lots ADD COLUMN customs_declaration_number TEXT;";
+                                    await alterCmd.ExecuteNonQueryAsync();
+                                }
+                                catch { }
+                            }
+                            if (!lotCols.Contains("port_of_entry"))
+                            {
+                                try
+                                {
+                                    using var alterCmd = connection.CreateCommand();
+                                    alterCmd.CommandText = "ALTER TABLE inventory_lots ADD COLUMN port_of_entry TEXT;";
+                                    await alterCmd.ExecuteNonQueryAsync();
+                                }
+                                catch { }
                             }
                         }
                     }
@@ -277,6 +317,36 @@ public static class DbSeeder
                         IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('pending_threshold_changes') AND name = 'max_stock_qty')
                         BEGIN
                             ALTER TABLE pending_threshold_changes ADD max_stock_qty INT NULL;
+                        END
+
+                        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('pending_intakes') AND name = 'customs_declaration_number')
+                        BEGIN
+                            ALTER TABLE pending_intakes ADD customs_declaration_number NVARCHAR(100) NULL;
+                        END
+
+                        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('pending_intakes') AND name = 'customs_duty_amount')
+                        BEGIN
+                            ALTER TABLE pending_intakes ADD customs_duty_amount DECIMAL(18,4) NULL;
+                        END
+
+                        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('pending_intakes') AND name = 'port_of_entry')
+                        BEGIN
+                            ALTER TABLE pending_intakes ADD port_of_entry NVARCHAR(100) NULL;
+                        END
+
+                        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('pending_intakes') AND name = 'customs_clearance_date')
+                        BEGIN
+                            ALTER TABLE pending_intakes ADD customs_clearance_date DATETIME2 NULL;
+                        END
+
+                        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('inventory_lots') AND name = 'customs_declaration_number')
+                        BEGIN
+                            ALTER TABLE inventory_lots ADD customs_declaration_number NVARCHAR(100) NULL;
+                        END
+
+                        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('inventory_lots') AND name = 'port_of_entry')
+                        BEGIN
+                            ALTER TABLE inventory_lots ADD port_of_entry NVARCHAR(100) NULL;
                         END
                     ");
                 }
