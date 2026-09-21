@@ -1040,6 +1040,22 @@ public class PendingCustomsTransfer
     public InventoryItem? Item { get; set; }
 }
 
+public class CustomsShipmentDto
+{
+    public int LotId { get; set; }
+    public string LotNumber { get; set; } = "";
+    public string ShipmentReference { get; set; } = "";
+    public string VendorName { get; set; } = "";
+    public string? CustomsDeclarationNumber { get; set; }
+    public decimal? CustomsDutyAmount { get; set; }
+    public decimal? PurchasingCost => CustomsDutyAmount;
+    public string? PortOfEntry { get; set; }
+    public int TotalBars { get; set; }
+    public decimal TotalWeightKg { get; set; }
+    public string StatusCode { get; set; } = "";
+    public DateTime CreatedAt { get; set; }
+}
+
 
 // ============================================================
 // FIM (Forefront Identity Manager) Integration Module

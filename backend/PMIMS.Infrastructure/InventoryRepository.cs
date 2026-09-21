@@ -277,7 +277,7 @@ public class InventoryRepository : IInventoryRepository
         string sourceType = "SUPPLIER", int? customerId = null, int? accountId = null, string? receiptReason = null,
         int? vendorId = null, string? shipmentReference = null, string? deliveryNoteNumber = null, string? airwayBillNumber = null,
         string? supportingDocumentUrl = null, string? discrepancyNotes = null, DateTime? receivingDate = null, string ownershipType = "KFH_OWNED",
-        string? customsDeclarationNumber = null, string? portOfEntry = null)
+        string? customsDeclarationNumber = null, string? portOfEntry = null, decimal? customsDutyAmount = null)
     {
         sourceType = string.IsNullOrWhiteSpace(sourceType) ? "SUPPLIER" : sourceType.Trim().ToUpperInvariant();
         bool isCustomerReceipt = sourceType == "CUSTOMER";
@@ -361,7 +361,7 @@ public class InventoryRepository : IInventoryRepository
                     VendorId = effectiveVendorId,
                     AcquisitionDate = receivingDate ?? DateTime.UtcNow,
                     TotalItems = totalItems,
-                    AverageUnitCost = avgCost,
+                    AverageUnitCost = avgCost > 0 ? avgCost : (customsDutyAmount ?? 0m),
                     CreatedAt = DateTime.UtcNow,
                     ShipmentReference = shipmentReference,
                     DeliveryNoteNumber = deliveryNoteNumber,
@@ -387,6 +387,7 @@ public class InventoryRepository : IInventoryRepository
                 lot.TotalItems += totalItems;
                 if (lot.PoId == null && !isCustomerReceipt && poId.HasValue) lot.PoId = poId;
                 if (avgCost > 0) lot.AverageUnitCost = avgCost;
+                else if (customsDutyAmount.HasValue && customsDutyAmount.Value > 0) lot.AverageUnitCost = customsDutyAmount.Value;
                 if (!string.IsNullOrWhiteSpace(shipmentReference)) lot.ShipmentReference = shipmentReference;
                 if (!string.IsNullOrWhiteSpace(deliveryNoteNumber)) lot.DeliveryNoteNumber = deliveryNoteNumber;
                 if (!string.IsNullOrWhiteSpace(airwayBillNumber)) lot.AirwayBillNumber = airwayBillNumber;
@@ -483,6 +484,24 @@ public class InventoryRepository : IInventoryRepository
                     }
                 }
 
+                decimal itemUnitCost = 0;
+                if (element.TryGetProperty("unit_cost", out var ucProp) && ucProp.ValueKind is JsonValueKind.Number)
+                {
+                    itemUnitCost = ucProp.GetDecimal();
+                }
+                else if (element.TryGetProperty("purchasing_cost", out var pcProp) && pcProp.ValueKind is JsonValueKind.Number)
+                {
+                    itemUnitCost = pcProp.GetDecimal();
+                }
+                else if (customsDutyAmount.HasValue && customsDutyAmount.Value > 0)
+                {
+                    itemUnitCost = customsDutyAmount.Value;
+                }
+                else if (avgCost > 0)
+                {
+                    itemUnitCost = avgCost;
+                }
+
                 var item = new InventoryItem
                 {
                     SerialNumber = serial,
@@ -491,6 +510,7 @@ public class InventoryRepository : IInventoryRepository
                     LocationId = locationId,
                     OwnershipType = finalOwnershipType,
                     StatusCode = "READY",
+                    AveragePurchaseCost = itemUnitCost > 0 ? itemUnitCost : (avgCost > 0 ? avgCost : null),
                     IsDamaged = isDamaged,
                     DamageReason = isDamaged ? (damageReason ?? (isCustomerReceipt ? "Damaged upon receipt from customer" : "Damaged upon receipt from supplier")) : null,
                     InspectionDate = isDamaged ? DateTime.UtcNow : null,
@@ -846,6 +866,87 @@ public class InventoryRepository : IInventoryRepository
 
         await _dbContext.SaveChangesAsync();
         return existing;
+    }
+
+    public async Task<bool> IsQrCodeRequiredForTurkeyTransferAsync()
+    {
+        try
+        {
+            var setting = await _dbContext.SystemSettings
+                .AsNoTracking()
+                .FirstOrDefaultAsync(s => s.SettingKey == "RequireQrPrintedForTurkeyTransfer");
+
+            if (setting != null && bool.TryParse(setting.SettingValue, out bool required))
+            {
+                return required;
+            }
+        }
+        catch
+        {
+            // fallback if table uninitialized
+        }
+        return false;
+    }
+
+    public async Task<SystemSetting> SetQrCodeRequiredForTurkeyTransferAsync(bool enabled, string updatedBy)
+    {
+        return await SetSystemSettingAsync(
+            "RequireQrPrintedForTurkeyTransfer",
+            enabled ? "true" : "false",
+            description: "Prevent gold bar ownership transfer from Turkey to KFH unless QR code has been printed",
+            category: "TURKEY_CONSIGNMENT",
+            updatedBy: updatedBy);
+    }
+
+    public async Task<HashSet<int>> GetPrintedLabelItemIdsAsync(IEnumerable<int> itemIds)
+    {
+        var ids = itemIds.Distinct().ToList();
+        if (ids.Count == 0) return new HashSet<int>();
+
+        var printed = await _dbContext.ChainOfCustodyEvents
+            .AsNoTracking()
+            .Where(e => ids.Contains(e.ItemId) && (e.EventType == "LABEL_PRINTED" || e.EventType == "LABEL_REPRINTED"))
+            .Select(e => e.ItemId)
+            .Distinct()
+            .ToListAsync();
+
+        return printed.ToHashSet();
+    }
+
+    public async Task<string> GetQrCodeReprintPrivilegeAsync()
+    {
+        try
+        {
+            var setting = await _dbContext.SystemSettings
+                .AsNoTracking()
+                .FirstOrDefaultAsync(s => s.SettingKey == "QrCodeReprintPrivilege");
+
+            if (setting != null && !string.IsNullOrWhiteSpace(setting.SettingValue))
+            {
+                return setting.SettingValue.Trim().ToUpperInvariant();
+            }
+        }
+        catch
+        {
+            // fallback if table uninitialized
+        }
+        return "ADMIN_ONLY";
+    }
+
+    public async Task<SystemSetting> SetQrCodeReprintPrivilegeAsync(string privilegeLevel, string updatedBy)
+    {
+        string normalized = privilegeLevel?.Trim().ToUpperInvariant() ?? "";
+        if (normalized != "ADMIN_ONLY" && normalized != "CHECKER_AND_ADMIN" && normalized != "ALL_OPERATORS" && normalized != "DISABLED")
+        {
+            throw new ArgumentException($"Invalid QR code reprint privilege level: '{privilegeLevel}'. Allowed values: ADMIN_ONLY, CHECKER_AND_ADMIN, ALL_OPERATORS, DISABLED.", nameof(privilegeLevel));
+        }
+
+        return await SetSystemSettingAsync(
+            "QrCodeReprintPrivilege",
+            normalized,
+            description: "Privilege level required to reprint physical QR code labels (ADMIN_ONLY, CHECKER_AND_ADMIN, ALL_OPERATORS, DISABLED)",
+            category: "QR_CODE_LABELS",
+            updatedBy: updatedBy);
     }
 
     // sp_ReserveStock execution / emulation
@@ -1826,6 +1927,31 @@ public class InventoryRepository : IInventoryRepository
         {
             throw new InvalidOperationException($"Cannot create request: No active workflow design (template) exists with steps defined for '{workflowType}'. Please design and activate this workflow template first.");
         }
+
+        // Maker-Checker Segregation of Duties:
+        // A user (e.g., Checker) cannot initiate a new workflow unless they hold the starting step's required role (or IT/Admin).
+        var startStep = template.Steps.OrderBy(s => s.StepOrder).FirstOrDefault();
+        if (startStep != null && !string.IsNullOrWhiteSpace(startStep.RequiredRole) && !string.IsNullOrWhiteSpace(username))
+        {
+            var userRoles = GetUserRoles(username);
+            if (userRoles.Any())
+            {
+                bool isSuperUser = userRoles.Contains("IT/Admin");
+                bool isStartPointRole = userRoles.Contains(startStep.RequiredRole);
+                if (!isSuperUser && !isStartPointRole)
+                {
+                    throw new InvalidOperationException($"User '{username}' is not authorized to initiate '{workflowType}' workflow. Starting this workflow requires '{startStep.RequiredRole}' role.");
+                }
+            }
+            else
+            {
+                var userExists = await _dbContext.AppUsers.AnyAsync(u => u.Username == username || u.Email == username || u.DisplayName == username);
+                if (userExists)
+                {
+                    throw new InvalidOperationException($"User '{username}' is not authorized to initiate '{workflowType}' workflow. Starting this workflow requires '{startStep.RequiredRole}' role.");
+                }
+            }
+        }
         
         var instance = new WorkflowInstance
         {
@@ -2091,7 +2217,7 @@ public class InventoryRepository : IInventoryRepository
                             pending.SourceType, pending.CustomerId, pending.AccountId, pending.ReceiptReason,
                             pending.VendorId, pending.ShipmentReference, pending.DeliveryNoteNumber, pending.AirwayBillNumber,
                             pending.SupportingDocumentUrl, pending.DiscrepancyNotes, pending.ReceivingDate, pending.OwnershipType,
-                            pending.CustomsDeclarationNumber, pending.PortOfEntry);
+                            pending.CustomsDeclarationNumber, pending.PortOfEntry, pending.CustomsDutyAmount);
                         if (result != "SUCCESS")
                         {
                             throw new InvalidOperationException($"Intake execution failed: {result}");
@@ -2372,7 +2498,7 @@ public class InventoryRepository : IInventoryRepository
             var user = _dbContext.AppUsers
                 .Include(u => u.Memberships)
                 .ThenInclude(m => m.Group)
-                .FirstOrDefault(u => u.Username == username || u.Email == username);
+                .FirstOrDefault(u => u.Username == username || u.Email == username || u.DisplayName == username);
             if (user != null)
             {
                 foreach (var m in user.Memberships)
@@ -3092,37 +3218,56 @@ public class InventoryRepository : IInventoryRepository
 
         if (sourceType == "SUPPLIER")
         {
-            // UC03 E1: Duplicate serial number validation (combined Product Type + Serial Number)
+            // Duplicate serial number validation: globally unique across all products & denominations
             if (!string.IsNullOrWhiteSpace(serialsJsonList))
             {
                 using var jsonDoc = JsonDocument.Parse(serialsJsonList);
-                var serialsSet = new HashSet<(int productId, string serial)>();
+                var serialsSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var element in jsonDoc.RootElement.EnumerateArray())
                 {
                     string? serial = element.TryGetProperty("serial", out var s) ? s.GetString() : (element.TryGetProperty("serial_number", out var sn) ? sn.GetString() : null);
-                    int productId = element.TryGetProperty("product_id", out var p) ? p.GetInt32() : (element.TryGetProperty("productId", out var p2) ? p2.GetInt32() : 0);
 
                     if (!string.IsNullOrWhiteSpace(serial))
                     {
-                        if (productId > 0)
+                        string trimmed = serial.Trim();
+                        if (!serialsSet.Add(trimmed))
                         {
-                            if (!serialsSet.Add((productId, serial.Trim().ToUpperInvariant())))
-                            {
-                                throw new InvalidOperationException($"Duplicate Serial Number in shipment batch: '{serial}' for the same product type. Each bar of the same product must have a unique serial number.");
-                            }
-                            if (await _dbContext.InventoryItems.AnyAsync(i => i.ProductId == productId && i.SerialNumber == serial))
-                            {
-                                throw new InvalidOperationException($"Duplicate Serial Number: '{serial}' already exists in inventory records for this product type. (UC03 Exception E1)");
-                            }
+                            throw new InvalidOperationException($"Duplicate Serial Number in shipment batch: '{trimmed}'. Every gold bar serial number must be globally unique across all products and denominations.");
                         }
-                        else
+
+                        string trimmedUpper = trimmed.ToUpper();
+                        if (await _dbContext.InventoryItems.AnyAsync(i => i.SerialNumber.ToUpper() == trimmedUpper))
                         {
-                            if (await _dbContext.InventoryItems.AnyAsync(i => i.SerialNumber == serial))
+                            throw new InvalidOperationException($"Duplicate Serial Number: '{trimmed}' already exists in inventory records. Every gold bar serial number must be globally unique across all products and denominations.");
+                        }
+                    }
+                }
+
+                // Also verify against other in-flight pending intakes
+                var inFlightPending = await _dbContext.PendingIntakes
+                    .Where(pi => pi.StatusCode == "PENDING_APPROVAL")
+                    .Select(pi => pi.SerialsJsonList)
+                    .ToListAsync();
+
+                foreach (var inFlightJson in inFlightPending)
+                {
+                    if (string.IsNullOrWhiteSpace(inFlightJson)) continue;
+                    try
+                    {
+                        using var pDoc = JsonDocument.Parse(inFlightJson);
+                        if (pDoc.RootElement.ValueKind == JsonValueKind.Array)
+                        {
+                            foreach (var el in pDoc.RootElement.EnumerateArray())
                             {
-                                throw new InvalidOperationException($"Duplicate Serial Number: '{serial}' already exists in inventory records. (UC03 Exception E1)");
+                                string? ps = el.TryGetProperty("serial", out var s) ? s.GetString() : (el.TryGetProperty("serial_number", out var sn) ? sn.GetString() : null);
+                                if (!string.IsNullOrWhiteSpace(ps) && serialsSet.Contains(ps.Trim()))
+                                {
+                                    throw new InvalidOperationException($"Duplicate Serial Number: '{ps.Trim()}' is already pending approval in another intake request.");
+                                }
                             }
                         }
                     }
+                    catch (JsonException) { }
                 }
             }
 
@@ -3171,7 +3316,7 @@ public class InventoryRepository : IInventoryRepository
             if (!string.IsNullOrWhiteSpace(serialsJsonList))
             {
                 using var jsonDoc = JsonDocument.Parse(serialsJsonList);
-                var serialsSet = new HashSet<(int productId, string serial)>();
+                var serialsSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var element in jsonDoc.RootElement.EnumerateArray())
                 {
                     string? serial = element.TryGetProperty("serial", out var s) ? s.GetString() : (element.TryGetProperty("serial_number", out var sn) ? sn.GetString() : null);
@@ -3184,7 +3329,7 @@ public class InventoryRepository : IInventoryRepository
 
                     serial = serial.Trim();
 
-                    if (!serialsSet.Add((productId, serial.ToUpperInvariant())))
+                    if (!serialsSet.Add(serial))
                     {
                         throw new InvalidOperationException($"Duplicate Serial Number in customer receipt batch: '{serial}'.");
                     }
@@ -3400,11 +3545,7 @@ public class InventoryRepository : IInventoryRepository
     public async Task<PendingCustomsTransfer> InitiateCustomsTransferWorkflowAsync(int? lotId, int? itemId, string targetOwnership, string requestedBy,
         string? clearanceNotes = null, string? customsDeclarationNumber = null, decimal? customsDutyAmount = null, string? portOfEntry = null)
     {
-        targetOwnership = string.IsNullOrWhiteSpace(targetOwnership) ? "TURKEY_OWNED" : targetOwnership.Trim().ToUpperInvariant();
-        if (targetOwnership != "TURKEY_OWNED" && targetOwnership != "KFH_OWNED")
-        {
-            throw new ArgumentException("targetOwnership must be TURKEY_OWNED or KFH_OWNED.");
-        }
+        targetOwnership = "TURKEY_OWNED";
 
         if (!lotId.HasValue && !itemId.HasValue)
         {
@@ -3427,20 +3568,46 @@ public class InventoryRepository : IInventoryRepository
         else if (lotId.HasValue)
         {
             var lot = await _dbContext.InventoryLots.FindAsync(lotId.Value);
-            if (lot == null)
+            PendingIntake? pendingIntake = null;
+
+            if (lot != null)
             {
-                var pendingIntake = await _dbContext.PendingIntakes.FindAsync(lotId.Value);
+                var customsCount = await _dbContext.InventoryItems.CountAsync(i => i.LotId == lot.LotId && i.OwnershipType == "CUSTOMS_OWNED");
+                if (customsCount == 0)
+                {
+                    var pi = await _dbContext.PendingIntakes.FindAsync(lotId.Value);
+                    if (pi != null && pi.OwnershipType == "CUSTOMS_OWNED")
+                    {
+                        pendingIntake = pi;
+                        lot = await _dbContext.InventoryLots.FirstOrDefaultAsync(l => l.LotNumber == pi.LotNumber);
+                    }
+                }
+            }
+            else
+            {
+                pendingIntake = await _dbContext.PendingIntakes.FindAsync(lotId.Value);
                 if (pendingIntake != null)
                 {
                     lot = await _dbContext.InventoryLots.FirstOrDefaultAsync(l => l.LotNumber == pendingIntake.LotNumber);
                 }
             }
-            if (lot == null) throw new InvalidOperationException($"Customs lot or intake {lotId.Value} not found.");
 
-            var customsCount = await _dbContext.InventoryItems.CountAsync(i => i.LotId == lot.LotId && i.OwnershipType == "CUSTOMS_OWNED");
-            if (customsCount == 0)
+            if (lot == null && pendingIntake == null)
             {
-                throw new InvalidOperationException($"No CUSTOMS_OWNED items found in lot {lot.LotNumber}.");
+                throw new InvalidOperationException($"Customs lot or intake {lotId.Value} not found.");
+            }
+
+            if (lot != null)
+            {
+                var customsCount = await _dbContext.InventoryItems.CountAsync(i => i.LotId == lot.LotId && i.OwnershipType == "CUSTOMS_OWNED");
+                if (customsCount == 0 && (pendingIntake == null || pendingIntake.OwnershipType != "CUSTOMS_OWNED"))
+                {
+                    throw new InvalidOperationException($"No CUSTOMS_OWNED items found in lot {lot.LotNumber}.");
+                }
+            }
+            else if (pendingIntake != null && pendingIntake.OwnershipType != "CUSTOMS_OWNED")
+            {
+                throw new InvalidOperationException($"Intake {pendingIntake.LotNumber} is '{pendingIntake.OwnershipType}', not 'CUSTOMS_OWNED'.");
             }
         }
 
@@ -3448,7 +3615,7 @@ public class InventoryRepository : IInventoryRepository
         {
             LotId = lotId,
             ItemId = itemId,
-            TargetOwnership = targetOwnership,
+            TargetOwnership = "TURKEY_OWNED",
             RequestedBy = requestedBy,
             ClearanceNotes = clearanceNotes,
             CustomsDeclarationNumber = customsDeclarationNumber,
@@ -3474,6 +3641,98 @@ public class InventoryRepository : IInventoryRepository
             .Include(p => p.Item)
             .OrderByDescending(p => p.CreatedAt)
             .ToListAsync();
+    }
+
+    public async Task<IEnumerable<CustomsShipmentDto>> GetCustomsShipmentsAsync()
+    {
+        var result = new List<CustomsShipmentDto>();
+        var seenLotNumbers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // 1. Items currently in CUSTOMS_OWNED grouped by Lot
+        var customsItems = await _dbContext.InventoryItems
+            .Include(i => i.Lot)
+                .ThenInclude(l => l!.Vendor)
+            .Include(i => i.Product)
+                .ThenInclude(p => p!.Denomination)
+            .Where(i => i.OwnershipType == "CUSTOMS_OWNED")
+            .ToListAsync();
+
+        var lotGroups = customsItems.GroupBy(i => i.LotId);
+        foreach (var group in lotGroups)
+        {
+            var firstItem = group.First();
+            var lot = firstItem.Lot;
+            if (lot == null) continue;
+
+            seenLotNumbers.Add(lot.LotNumber);
+            decimal totalGrams = group.Sum(i => i.Product?.Denomination?.WeightGrams ?? 0m);
+
+            result.Add(new CustomsShipmentDto
+            {
+                LotId = lot.LotId,
+                LotNumber = lot.LotNumber,
+                ShipmentReference = lot.ShipmentReference ?? lot.LotNumber,
+                VendorName = lot.Vendor?.VendorName ?? "Direct Supplier",
+                CustomsDeclarationNumber = lot.CustomsDeclarationNumber,
+                CustomsDutyAmount = lot.AverageUnitCost > 0 ? lot.AverageUnitCost : null,
+                PortOfEntry = lot.PortOfEntry ?? "Kuwait Int'l Airport Cargo",
+                TotalBars = group.Count(),
+                TotalWeightKg = Math.Round(totalGrams / 1000m, 3),
+                StatusCode = "IN_CUSTOMS",
+                CreatedAt = lot.CreatedAt
+            });
+        }
+
+        // 2. PendingIntakes with CUSTOMS_OWNED
+        var pendingCustoms = await _dbContext.PendingIntakes
+            .Include(p => p.Vendor)
+            .Where(p => p.OwnershipType == "CUSTOMS_OWNED")
+            .ToListAsync();
+
+        foreach (var pi in pendingCustoms)
+        {
+            if (seenLotNumbers.Contains(pi.LotNumber)) continue;
+            seenLotNumbers.Add(pi.LotNumber);
+
+            int barsCount = 0;
+            decimal totalGrams = 0m;
+            if (!string.IsNullOrWhiteSpace(pi.SerialsJsonList))
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(pi.SerialsJsonList);
+                    if (doc.RootElement.ValueKind == JsonValueKind.Array)
+                    {
+                        barsCount = doc.RootElement.GetArrayLength();
+                        foreach (var el in doc.RootElement.EnumerateArray())
+                        {
+                            if (el.TryGetProperty("weight_grams", out var wg) && wg.TryGetDecimal(out var d))
+                            {
+                                totalGrams += d;
+                            }
+                        }
+                    }
+                }
+                catch {}
+            }
+
+            result.Add(new CustomsShipmentDto
+            {
+                LotId = pi.PendingIntakeId,
+                LotNumber = pi.LotNumber,
+                ShipmentReference = pi.ShipmentReference ?? pi.LotNumber,
+                VendorName = pi.Vendor?.VendorName ?? "Direct Supplier",
+                CustomsDeclarationNumber = pi.CustomsDeclarationNumber,
+                CustomsDutyAmount = pi.CustomsDutyAmount,
+                PortOfEntry = pi.PortOfEntry ?? "Kuwait Int'l Airport Cargo",
+                TotalBars = barsCount,
+                TotalWeightKg = Math.Round(totalGrams / 1000m, 3),
+                StatusCode = pi.StatusCode,
+                CreatedAt = pi.CreatedAt
+            });
+        }
+
+        return result.OrderByDescending(r => r.CreatedAt).ToList();
     }
 
     // =========================================================================
@@ -5423,6 +5682,21 @@ public class InventoryRepository : IInventoryRepository
             throw new InvalidOperationException($"The following serial numbers are not in READY status: {string.Join(", ", invalidStatusItems.Select(i => i.SerialNumber))}");
         }
 
+        // Enforce QR code printed check if enabled in system settings
+        bool qrRequired = await IsQrCodeRequiredForTurkeyTransferAsync();
+        if (qrRequired)
+        {
+            var itemIds = items.Select(i => i.ItemId).ToList();
+            var printedItemIds = await GetPrintedLabelItemIdsAsync(itemIds);
+            var unprintedItems = items.Where(i => !printedItemIds.Contains(i.ItemId)).ToList();
+            if (unprintedItems.Any())
+            {
+                var unprintedSerials = unprintedItems.Select(i => i.SerialNumber).ToList();
+                throw new InvalidOperationException(
+                    $"Cannot transfer ownership from Turkey to KFH: QR Code has not been printed for {unprintedItems.Count} item(s): {string.Join(", ", unprintedSerials)}. Please print QR code labels in Barcode & QR Labeling before initiating transfer.");
+            }
+        }
+
         decimal totalWeightGrams = items.Sum(i => i.Product?.Denomination?.WeightGrams ?? 0);
         decimal totalCost = unitPricePerGram > 0 ? (totalWeightGrams * unitPricePerGram) : 0;
         string batchRef = $"TR-PUR-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..6].ToUpperInvariant()}";
@@ -5510,6 +5784,21 @@ public class InventoryRepository : IInventoryRepository
                 .ThenInclude(p => p.MetalType)
             .Where(i => serials.Contains(i.SerialNumber))
             .ToListAsync();
+
+        // Enforce QR code printed check if enabled in system settings
+        bool qrRequired = await IsQrCodeRequiredForTurkeyTransferAsync();
+        if (qrRequired)
+        {
+            var itemIds = items.Select(i => i.ItemId).ToList();
+            var printedItemIds = await GetPrintedLabelItemIdsAsync(itemIds);
+            var unprintedItems = items.Where(i => !printedItemIds.Contains(i.ItemId)).ToList();
+            if (unprintedItems.Any())
+            {
+                var unprintedSerials = unprintedItems.Select(i => i.SerialNumber).ToList();
+                throw new InvalidOperationException(
+                    $"Cannot approve Turkey purchase: QR Code has not been printed for {unprintedItems.Count} item(s): {string.Join(", ", unprintedSerials)}.");
+            }
+        }
 
         purchase.StatusCode = "APPROVED";
         purchase.ApprovedBy = approvedBy;

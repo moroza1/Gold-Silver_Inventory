@@ -454,7 +454,8 @@ public partial class PMIMSControllers : ControllerBase
             }
 
             string itemsJson = JsonSerializer.Serialize(req.Items);
-            var (poId, result) = await _repository.CreatePurchaseOrderAsync(req.PoNumber, req.VendorId, req.TotalWeightGrams, req.TotalCost, req.Currency, req.CreatedBy, itemsJson,
+            string creator = User?.Identity?.Name ?? req.CreatedBy;
+            var (poId, result) = await _repository.CreatePurchaseOrderAsync(req.PoNumber, req.VendorId, req.TotalWeightGrams, req.TotalCost, req.Currency, creator, itemsJson,
                 req.SupplierInvoiceNumber, req.SupplierInvoiceDate, req.FreightCost, req.InsuranceCost, req.CustomsDutyCost, req.OtherFeesCost, req.OtherFeesDescription);
 
             if (result != "SUCCESS") return BadRequest(result);
@@ -609,13 +610,15 @@ public partial class PMIMSControllers : ControllerBase
 
             string itemsJson = JsonSerializer.Serialize(req.Items);
             int? poId = (req.PoId == 0) ? null : req.PoId;
+            int locationId = req.LocationId > 0 ? req.LocationId : 1;
+            string initiator = User?.Identity?.Name ?? req.ReceivedBy;
             var pending = await _repository.InitiateWorkflowIntakeAsync(
-                poId, req.LotNumber, req.LocationId, req.ReceivedBy, itemsJson,
+                poId, req.LotNumber, locationId, initiator, itemsJson,
                 sourceType: "SUPPLIER", customerId: null, accountId: null, receiptReason: null,
                 vendorId: vendorId, shipmentReference: req.ShipmentReference, deliveryNoteNumber: req.DeliveryNoteNumber,
                 airwayBillNumber: req.AirwayBillNumber, supportingDocumentUrl: req.SupportingDocumentUrl,
                 discrepancyNotes: req.DiscrepancyNotes, receivingDate: req.ReceivingDate,
-                ownershipType: string.IsNullOrWhiteSpace(req.OwnershipType) ? "KFH_OWNED" : req.OwnershipType,
+                ownershipType: string.IsNullOrWhiteSpace(req.OwnershipType) ? "CUSTOMS_OWNED" : req.OwnershipType,
                 customsDeclarationNumber: req.CustomsDeclarationNumber,
                 customsDutyAmount: req.CustomsDutyAmount,
                 portOfEntry: req.PortOfEntry);
@@ -701,6 +704,27 @@ public partial class PMIMSControllers : ControllerBase
             created_at = ct.CreatedAt,
             approved_by = ct.ApprovedBy,
             approved_at = ct.ApprovedAt
+        }));
+    }
+
+    [HttpGet("vault/intake/customs-shipments")]
+    [Authorize(Policy = "intake.read")]
+    public async Task<IActionResult> GetCustomsShipments()
+    {
+        var list = await _repository.GetCustomsShipmentsAsync();
+        return Ok(list.Select(s => new
+        {
+            lot_id = s.LotId,
+            lot_number = s.LotNumber,
+            shipment_reference = s.ShipmentReference,
+            vendor_name = s.VendorName,
+            customs_declaration_number = s.CustomsDeclarationNumber,
+            customs_duty_amount = s.CustomsDutyAmount,
+            port_of_entry = s.PortOfEntry,
+            total_bars = s.TotalBars,
+            total_weight_kg = s.TotalWeightKg,
+            status_code = s.StatusCode,
+            created_at = s.CreatedAt
         }));
     }
 
@@ -797,8 +821,9 @@ public partial class PMIMSControllers : ControllerBase
                 }
             }
 
+            string initiator = User?.Identity?.Name ?? req.InitiatedBy;
             var transfer = await _repository.InitiateWorkflowBranchTransferAsync(
-                req.ItemId, req.DestinationBranchId, req.CourierInfo, req.InitiatedBy);
+                req.ItemId, req.DestinationBranchId, req.CourierInfo, initiator);
 
             return Ok(new { transfer_id = transfer.TransferId, message = "Branch transfer workflow initiated successfully." });
         }
@@ -1710,8 +1735,105 @@ public partial class PMIMSControllers : ControllerBase
             purchaseOrders = purchaseOrders.Where(p => p.CreatedAt < rangeEndExclusive.Value);
         var scopedPOs = purchaseOrders.ToList();
 
+        // ============================================================
+        // Breakdown categories & Summation for all precious metals:
+        // (Turkey, KFH, Pending, Damage, and Transit)
+        // ============================================================
+        var turkeyItems = scopedItems.Where(i => i.OwnershipType == "TURKEY_OWNED").ToList();
+        decimal turkeyWeightKg = WeightKg(turkeyItems);
+        int turkeyQty = turkeyItems.Count;
+
+        var kfhItems = scopedItems.Where(i => i.OwnershipType == "KFH_OWNED").ToList();
+        decimal kfhWeightKg = WeightKg(kfhItems);
+        int kfhQty = kfhItems.Count;
+
+        var transitItems = scopedItems.Where(i => i.StatusCode == "IN_TRANSFER").ToList();
+        decimal transitWeightKg = WeightKg(transitItems);
+        int transitQty = transitItems.Count;
+
+        var damagedItems = scopedItems.Where(i => i.IsDamaged || i.StatusCode == "QUARANTINED" || i.DamageApprovalStatus == "APPROVED" || i.DamageApprovalStatus == "PENDING_APPROVAL").ToList();
+        decimal damageWeightKg = WeightKg(damagedItems);
+        int damageQty = damagedItems.Count;
+
+        var pendingInvItems = scopedItems.Where(i => i.StatusCode == "PENDING_APPROVAL" || i.DamageApprovalStatus == "PENDING_APPROVAL").ToList();
+        var pendingTurkeyPurchases = (await _repository.GetPendingTurkeyPurchasesAsync())
+            .Where(p => p.StatusCode == "PENDING_APPROVAL").ToList();
+        decimal pendingTurkeyWeightGrams = pendingTurkeyPurchases.Sum(p => p.TotalWeightGrams);
+        int pendingTurkeyCount = pendingTurkeyPurchases.Sum(p => p.TotalItems);
+        decimal pendingWeightKg = Math.Round((pendingInvItems.Sum(i => i.Product?.Denomination?.WeightGrams ?? 0m) + pendingTurkeyWeightGrams) / 1000m, 3);
+        int pendingQty = pendingInvItems.Count + pendingTurkeyCount;
+
+        var allPreciousItems = scopedItems.Where(i =>
+            i.OwnershipType == "TURKEY_OWNED" ||
+            i.OwnershipType == "KFH_OWNED" ||
+            i.StatusCode == "IN_TRANSFER" ||
+            i.IsDamaged ||
+            i.StatusCode == "QUARANTINED" ||
+            i.StatusCode == "PENDING_APPROVAL" ||
+            i.StatusCode == "READY" ||
+            i.StatusCode == "RESERVED"
+        ).Distinct().ToList();
+
+        decimal totalPreciousWeightKg = Math.Round((allPreciousItems.Sum(i => i.Product?.Denomination?.WeightGrams ?? 0m) + pendingTurkeyWeightGrams) / 1000m, 3);
+        int totalPreciousQty = allPreciousItems.Count + pendingTurkeyCount;
+
+        static string DeterminePreciousType(InventoryItem i)
+        {
+            var metal = i.Product?.MetalType?.MetalName ?? "";
+            var code = i.Product?.ProductCode ?? "";
+            if (metal.Equals("Silver", StringComparison.OrdinalIgnoreCase) ||
+                code.StartsWith("AG-", StringComparison.OrdinalIgnoreCase) ||
+                code.Contains("SILVER", StringComparison.OrdinalIgnoreCase))
+            {
+                return "SILVER";
+            }
+
+            var origin = i.Product?.OriginCountry ?? "";
+            var brand = i.Product?.BrandName ?? i.Product?.Brand?.BrandName ?? "";
+            var owner = i.OwnershipType ?? "";
+
+            if (origin.Contains("Turkey", StringComparison.OrdinalIgnoreCase) ||
+                code.Contains("TURK", StringComparison.OrdinalIgnoreCase) ||
+                brand.Contains("Nadir", StringComparison.OrdinalIgnoreCase) ||
+                brand.Contains("IGR", StringComparison.OrdinalIgnoreCase) ||
+                owner.Equals("TURKEY_OWNED", StringComparison.OrdinalIgnoreCase))
+            {
+                return "TURKEY";
+            }
+
+            return "SWISS";
+        }
+
         return Ok(new
         {
+            total_precious_weight_kg = totalPreciousWeightKg,
+            total_precious_qty = totalPreciousQty,
+            damage_weight_kg = damageWeightKg,
+            damage_qty = damageQty,
+            transit_weight_kg = transitWeightKg,
+            transit_qty = transitQty,
+            pending_weight_kg = pendingWeightKg,
+            pending_qty = pendingQty,
+            turkey_weight_kg = turkeyWeightKg,
+            turkey_qty = turkeyQty,
+            kfh_weight_kg = kfhWeightKg,
+            kfh_qty = kfhQty,
+            total_precious = new
+            {
+                total_weight_kg = totalPreciousWeightKg,
+                total_weight_grams = Math.Round(totalPreciousWeightKg * 1000m, 1),
+                total_qty = totalPreciousQty,
+                turkey_weight_kg = turkeyWeightKg,
+                turkey_qty = turkeyQty,
+                kfh_weight_kg = kfhWeightKg,
+                kfh_qty = kfhQty,
+                transit_weight_kg = transitWeightKg,
+                transit_qty = transitQty,
+                damage_weight_kg = damageWeightKg,
+                damage_qty = damageQty,
+                pending_weight_kg = pendingWeightKg,
+                pending_qty = pendingQty
+            },
             total_gold_weight_kg = Math.Round(proprietaryBeforeTransferWeightGrams / 1000m, 3),
             // Dropped the old `ready_qty` field: it used to be `i.StatusCode == "READY"` with
             // no ownership check, which double-counted sold-but-still-custodied bars as
@@ -1764,12 +1886,19 @@ public partial class PMIMSControllers : ControllerBase
                 weight_grams = i.Product?.Denomination?.WeightGrams ?? 0m,
                 purity = i.Product?.Purity?.PurityValue ?? 0.9999m,
                 product_name = i.Product?.ProductCode ?? i.Product?.Denomination?.Label ?? "Gold Bar",
+                product_code = i.Product?.ProductCode ?? "",
+                brand_name = i.Product?.BrandName ?? i.Product?.Brand?.BrandName ?? "",
+                precious_type = DeterminePreciousType(i),
                 origin = i.Product?.OriginCountry ?? "Unknown",
                 location = i.Location?.Description ?? "Unknown",
                 location_id = i.LocationId,
                 status = i.StatusCode,
                 ownership = i.OwnershipType,
-                acquisition_date = i.Lot?.AcquisitionDate
+                acquisition_date = i.Lot?.AcquisitionDate,
+                is_damaged = i.IsDamaged,
+                damage_status = i.DamageApprovalStatus ?? (i.IsDamaged ? "APPROVED" : "NONE"),
+                damage_reason = i.DamageReason,
+                damage_description = i.DamageDescription
             })
         });
     }
@@ -2381,9 +2510,10 @@ public class IntakeRequest
     public string LotNumber { get; set; } = null!;
     public int LocationId { get; set; }
     public string ReceivedBy { get; set; } = null!;
-    public string OwnershipType { get; set; } = "KFH_OWNED"; // KFH_OWNED, TURKEY_OWNED, CUSTOMS_OWNED
+    public string OwnershipType { get; set; } = "CUSTOMS_OWNED"; // CUSTOMS_OWNED, TURKEY_OWNED, KFH_OWNED
     public string? CustomsDeclarationNumber { get; set; }
     public decimal? CustomsDutyAmount { get; set; }
+    public decimal? PurchasingCost { get => CustomsDutyAmount; set => CustomsDutyAmount = value; }
     public string? PortOfEntry { get; set; }
     public List<IntakeItemDTO> Items { get; set; } = new();
 }
@@ -2409,6 +2539,8 @@ public class IntakeItemDTO
     public int product_id { get; set; }
     public decimal? weight_grams { get; set; }
     public decimal? purity { get; set; }
+    public decimal? unit_cost { get; set; }
+    public decimal? purchasing_cost { get => unit_cost; set => unit_cost = value; }
     public bool is_damaged { get; set; } = false;
     public string? damage_reason { get; set; }
 
@@ -2612,6 +2744,7 @@ public class InitiateCustomsTransferRequest
     public string? ClearanceNotes { get; set; }
     public string? CustomsDeclarationNumber { get; set; }
     public decimal? CustomsDutyAmount { get; set; }
+    public decimal? PurchasingCost { get => CustomsDutyAmount; set => CustomsDutyAmount = value; }
     public string? PortOfEntry { get; set; }
 }
 

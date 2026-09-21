@@ -105,6 +105,9 @@ public class BarcodeLabelService : IBarcodeLabelService
             productLabel += $" - {req.RefinerBrand}";
         }
 
+        var origin = ResolveCustomOrigin(req);
+        var qrCodePayload = BuildQrCodePayload(req.SerialNumber.Trim(), denom, req.MetalName, origin);
+
         var label = new BarcodeLabelDto
         {
             ItemId = 0,
@@ -119,7 +122,8 @@ public class BarcodeLabelService : IBarcodeLabelService
             Gs1ElementString = elementString,
             Gs1HumanReadable = humanReadable,
             BarcodeSvg = BuildGs1BarcodeSvg(elementString),
-            QrCodeSvg = BuildQrCodeSvg(humanReadable)
+            QrCodeSvg = BuildQrCodeSvg(qrCodePayload),
+            QrCodeContent = qrCodePayload
         };
 
         return (true, null, label);
@@ -171,6 +175,9 @@ public class BarcodeLabelService : IBarcodeLabelService
         var denomLabel = item.Product?.Denomination?.Label ?? $"{weight}g";
         var brand = item.Lot?.Vendor?.VendorName ?? "KFH Mint";
 
+        var originType = ResolveProductOriginType(item);
+        var qrCodePayload = BuildQrCodePayload(item.SerialNumber, denomLabel, metal, originType);
+
         return new BarcodeLabelDto
         {
             ItemId = item.ItemId,
@@ -196,8 +203,77 @@ public class BarcodeLabelService : IBarcodeLabelService
             Gs1ElementString = elementString,
             Gs1HumanReadable = humanReadable,
             BarcodeSvg = BuildGs1BarcodeSvg(elementString),
-            QrCodeSvg = BuildQrCodeSvg(humanReadable)
+            QrCodeSvg = BuildQrCodeSvg(qrCodePayload),
+            QrCodeContent = qrCodePayload
         };
+    }
+
+    public static string BuildQrCodePayload(string serialNumber, string denomination, string metalName, string origin)
+    {
+        var originClean = origin?.Trim() ?? "";
+        var metalClean = string.IsNullOrWhiteSpace(metalName) ? "Gold" : metalName.Trim();
+        var productType = string.IsNullOrWhiteSpace(originClean) ? metalClean : $"{metalClean} {originClean}";
+        return $"Serial No: {serialNumber}\nDenomination: {denomination}\nProduct Type: {productType}";
+    }
+
+    public static string ResolveProductOriginType(InventoryItem item)
+    {
+        // 1. Turkey ownership always indicates Turkey origin consignment
+        if (string.Equals(item.OwnershipType, "TURKEY_OWNED", StringComparison.OrdinalIgnoreCase))
+            return "Turkey";
+
+        // 2. Serial number convention
+        var sn = item.SerialNumber?.ToUpperInvariant() ?? "";
+        if (sn.StartsWith("TR-") || sn.Contains("-TURK-") || sn.Contains("-TR-"))
+            return "Turkey";
+
+        // 3. Product code tags
+        var pCode = item.Product?.ProductCode?.ToUpperInvariant() ?? "";
+        if (pCode.Contains("TURK")) return "Turkey";
+        if (pCode.Contains("SWISS") || pCode.Contains("SWIS")) return "Swiss";
+
+        // 4. Product OriginCountry
+        var origin = item.Product?.OriginCountry?.Trim();
+        if (!string.IsNullOrWhiteSpace(origin))
+        {
+            if (origin.Equals("Switzerland", StringComparison.OrdinalIgnoreCase) || origin.Equals("CH", StringComparison.OrdinalIgnoreCase))
+                return "Swiss";
+            if (origin.Equals("Turkey", StringComparison.OrdinalIgnoreCase) || origin.Equals("TR", StringComparison.OrdinalIgnoreCase))
+                return "Turkey";
+            return origin;
+        }
+
+        // 5. Refiner brand or vendor
+        var brand = (item.Product?.BrandName ?? item.Product?.Brand?.BrandName ?? item.Lot?.Vendor?.VendorName ?? "").ToUpperInvariant();
+        if (brand.Contains("NADIR") || brand.Contains("TURK") || brand.Contains("IGR"))
+            return "Turkey";
+        if (brand.Contains("VALCAMBI") || brand.Contains("PAMP") || brand.Contains("ARGOR") || brand.Contains("SUISSE") || brand.Contains("SWISS"))
+            return "Swiss";
+
+        var vendorOrigin = item.Lot?.Vendor?.CountryOfOrigin?.Trim();
+        if (!string.IsNullOrWhiteSpace(vendorOrigin))
+        {
+            if (vendorOrigin.Equals("Switzerland", StringComparison.OrdinalIgnoreCase) || vendorOrigin.Equals("CH", StringComparison.OrdinalIgnoreCase))
+                return "Swiss";
+            if (vendorOrigin.Equals("Turkey", StringComparison.OrdinalIgnoreCase) || vendorOrigin.Equals("TR", StringComparison.OrdinalIgnoreCase))
+                return "Turkey";
+        }
+
+        return "Swiss";
+    }
+
+    public static string ResolveCustomOrigin(CustomBarcodeLabelRequest req)
+    {
+        var brand = (req.RefinerBrand ?? "").ToUpperInvariant();
+        var own = (req.OwnershipType ?? "").ToUpperInvariant();
+        var sn = (req.SerialNumber ?? "").ToUpperInvariant();
+
+        if (own.Contains("TURK") || sn.StartsWith("TR-") || brand.Contains("NADIR") || brand.Contains("TURK") || brand.Contains("IGR"))
+            return "Turkey";
+        if (brand.Contains("VALCAMBI") || brand.Contains("PAMP") || brand.Contains("ARGOR") || brand.Contains("SUISSE") || brand.Contains("SWISS"))
+            return "Swiss";
+
+        return "Swiss";
     }
 
     // ------------------------------------------------------------------------

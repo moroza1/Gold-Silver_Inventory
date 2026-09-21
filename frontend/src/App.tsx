@@ -30,9 +30,26 @@ const getCurrentMonthRange = () => {
 };
 
 // --- GS1 and ISO/IEC 18004 barcode/QR code parser -------------------------
-export const parseGs1Barcode = (rawInput: string): { serial: string; gtin: string; lot: string } => {
+export const parseGs1Barcode = (rawInput: string): { serial: string; gtin: string; lot: string; denomination?: string; productType?: string } => {
   if (!rawInput) return { serial: '', gtin: '', lot: '' };
-  
+
+  // Check structured QR code payload:
+  // Serial No: ...
+  // Denomination: ...
+  // Product Type: ...
+  const serialMatch = rawInput.match(/(?:Serial\s*(?:No|Number)?|SN)[\s:]+([^\r\n]+)/i);
+  if (serialMatch) {
+    const denomMatch = rawInput.match(/Denomination[\s:]+([^\r\n]+)/i);
+    const typeMatch = rawInput.match(/(?:Product(?:\s*Type)?|Type)[\s:]+([^\r\n]+)/i);
+    return {
+      gtin: '',
+      serial: serialMatch[1].trim(),
+      lot: '',
+      denomination: denomMatch ? denomMatch[1].trim() : undefined,
+      productType: typeMatch ? typeMatch[1].trim() : undefined
+    };
+  }
+
   // Standard GS1 string with parentheses e.g. (01)06291100000017(21)SN12345(10)LOT999
   const parenRegex = /^(?:\(01\)(\d{14}))?(?:\(21\)([^()]+))?(?:\(10\)([^()]+))?$/;
   let match = rawInput.match(parenRegex);
@@ -172,7 +189,9 @@ const Translations: Record<string, Record<string, string>> = {
     ticker_feed: "360T Feed",
     ticker_silver: "XAG (Silver/oz):",
     header_timezone: "GMT+3 (Kuwait)",
-    kpi_prop_gold: "Proprietary Gold Stock (Pre-Transfer)",
+    kpi_total_precious: "Total Precious Metals (All Stock)",
+    kpi_damage: "Damaged & Quarantined Stock",
+    kpi_prop_gold: "Turkey Offline",
     kpi_sync: "Turkey / Inbound Consignment",
     kpi_ready: "Ready for Sale (Transferred to KFH)",
     kpi_ready_sub: "Transferred to KFH & cleared in vault",
@@ -487,7 +506,9 @@ const Translations: Record<string, Record<string, string>> = {
     ticker_feed: "تسعير 360T",
     ticker_silver: "الفضة (أونصة):",
     header_timezone: "توقيت الكويت (GMT+3)",
-    kpi_prop_gold: "مخزون الذهب المملوك (قبل النقل)",
+    kpi_total_precious: "إجمالي المعادن الثمينة (كافة المخزون)",
+    kpi_damage: "المخزون التالف والمعزول",
+    kpi_prop_gold: "مخزون تركيا (أوفلاين)",
     kpi_sync: "مخزون تركيا قبل الشراء والنقل",
     kpi_ready: "جاهز للبيع (تم النقل لـ KFH)",
     kpi_ready_sub: "تم نقله لملكية بيتك وجاهز بالخزينة",
@@ -789,6 +810,7 @@ export default function App() {
   const [username, setUsername] = useState('treasury-maker');
   const [password, setPassword] = useState('Password123');
   const [userRole, setUserRole] = useState('Operations Maker');
+  const [userRoles, setUserRoles] = useState<string[]>(['Treasury Operations (Maker)']);
   const [displayName, setDisplayName] = useState('KFH Treasury Maker User');
 
   const [activeTab, setActiveTab] = useState('screen-exec');
@@ -836,6 +858,18 @@ export default function App() {
   const [execStartDate, setExecStartDate] = useState(() => getCurrentMonthRange().start);
   const [execEndDate, setExecEndDate] = useState(() => getCurrentMonthRange().end);
   const [execBoard, setExecBoard] = useState<{
+    total_precious_weight_kg?: number;
+    total_precious_qty?: number;
+    damage_weight_kg?: number;
+    damage_qty?: number;
+    transit_weight_kg?: number;
+    transit_qty?: number;
+    pending_weight_kg?: number;
+    pending_qty?: number;
+    turkey_weight_kg?: number;
+    turkey_qty?: number;
+    kfh_weight_kg?: number;
+    kfh_qty?: number;
     total_gold_weight_kg: number;
     available_weight_kg: number;
     reserved_weight_kg: number;
@@ -846,7 +880,8 @@ export default function App() {
     items: any[];
   } | null>(null);
   const [loadingExecBoard, setLoadingExecBoard] = useState(false);
-  const [selectedExecKpi, setSelectedExecKpi] = useState<'PROPRIETARY_GOLD' | 'READY_SALE' | 'RESERVED' | 'CUSTODY'>('PROPRIETARY_GOLD');
+  const [selectedExecKpi, setSelectedExecKpi] = useState<'TOTAL_PRECIOUS' | 'PROPRIETARY_GOLD' | 'READY_SALE' | 'RESERVED' | 'CUSTODY' | 'DAMAGED'>('TOTAL_PRECIOUS');
+  const [execPreciousFilter, setExecPreciousFilter] = useState<'ALL' | 'SWISS' | 'TURKEY' | 'SILVER'>('ALL');
 
   // Compliance Dashboard (Reporting Requirements Gap Analysis, Item 6) -- summarizes the
   // same exceptions feed the Reports screen's Exceptions Report exports, plus audit-log
@@ -926,9 +961,10 @@ export default function App() {
     refiner_name: string;
     assay_certificate_number?: string;
   }[]>([]);
-  const [intakeOwnershipType, setIntakeOwnershipType] = useState<'TURKEY_OWNED' | 'KFH_OWNED' | 'CUSTOMS_OWNED'>('TURKEY_OWNED');
+  const [intakeOwnershipType, setIntakeOwnershipType] = useState<'TURKEY_OWNED' | 'KFH_OWNED' | 'CUSTOMS_OWNED'>('CUSTOMS_OWNED');
   const [intakeCustomsDeclarationNo, setIntakeCustomsDeclarationNo] = useState<string>('');
   const [intakeCustomsDuty, setIntakeCustomsDuty] = useState<number>(0);
+  const [denominationPurchasingCosts, setDenominationPurchasingCosts] = useState<{ [productId: number]: number }>({});
   const [intakePortOfEntry, setIntakePortOfEntry] = useState<string>("Kuwait Int'l Airport Cargo");
   const [showSerialToolsModal, setShowSerialToolsModal] = useState<boolean>(false);
   const [turkeyInventory, setTurkeyInventory] = useState<{
@@ -1045,6 +1081,12 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   const [ttlInputSeconds, setTtlInputSeconds] = useState<number>(300);
   const [savingTtl, setSavingTtl] = useState(false);
   const [ttlSuccessMsg, setTtlSuccessMsg] = useState<string | null>(null);
+  const [turkeyQrRequired, setTurkeyQrRequired] = useState<boolean>(false);
+  const [savingTurkeyQr, setSavingTurkeyQr] = useState<boolean>(false);
+  const [turkeyQrSuccessMsg, setTurkeyQrSuccessMsg] = useState<string | null>(null);
+  const [qrReprintPrivilege, setQrReprintPrivilege] = useState<string>('ADMIN_ONLY');
+  const [savingQrReprint, setSavingQrReprint] = useState<boolean>(false);
+  const [qrReprintSuccessMsg, setQrReprintSuccessMsg] = useState<string | null>(null);
   const [resetLoading, setResetLoading] = useState(false);
   const [resetSuccessMsg, setResetSuccessMsg] = useState<string | null>(null);
   const [sqlQuery, setSqlQuery] = useState('');
@@ -1656,14 +1698,12 @@ const [migrationApproved, setMigrationApproved] = useState(false);
       return;
     }
     const parsed = parseGs1Barcode(raw);
-    const serial = (parsed.serial || raw).toUpperCase();
+    const serial = parsed.serial || raw;
 
     setLoadingPassport(true);
     setPassportError(null);
     try {
-      const res = await fetch(`${API_BASE}/inventory/traceability/passport?query=${encodeURIComponent(serial)}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const res = await fetch(`${API_BASE}/inventory/traceability/passport?query=${encodeURIComponent(serial)}`);
       if (res.ok) {
         const data = await res.json();
         setBarPassportData(data);
@@ -1675,13 +1715,35 @@ const [migrationApproved, setMigrationApproved] = useState(false);
           setTraceSelectedSerial(data.bar.serial_number);
         }
       } else {
-        const err = await res.json();
+        let errMsg = '';
+        try {
+          const err = await res.json();
+          errMsg = err?.error || err?.message;
+        } catch { }
         setBarPassportData(null);
-        setPassportError(err.error || (currentLang === 'en' ? `Bar with serial '${serial}' was not found in vault records.` : `السبيكة بالرقم التسلسلي '${serial}' غير موجودة في سجلات الخزينة.`));
+        if (res.status === 404) {
+          setPassportError(
+            currentLang === 'en'
+              ? `Bar with serial / identifier '${serial}' was not found in vault records. Please check the serial number or pick from Mode 2.`
+              : `السبيكة بالرقم التسلسلي / المعرف '${serial}' غير موجودة في سجلات الخزينة. يرجى التأكد من الرقم أو الاختيار من الطريقة الثانية.`
+          );
+        } else if (res.status === 401 || res.status === 403) {
+          setPassportError(
+            currentLang === 'en'
+              ? 'Access denied or session expired. Please log in again.'
+              : 'تم رفض الوصول أو انتهت صلاحية الجلسة. يرجى تسجيل الدخول مجدداً.'
+          );
+        } else {
+          setPassportError(errMsg || (currentLang === 'en' ? `Failed to fetch bar passport (HTTP ${res.status}).` : `خطأ أثناء جلب بيانات السبيكة (${res.status}).`));
+        }
       }
-    } catch (e) {
+    } catch (e: any) {
       setBarPassportData(null);
-      setPassportError(currentLang === 'en' ? 'Network error fetching bar passport.' : 'خطأ في الاتصال أثناء جلب بيانات السبيكة.');
+      setPassportError(
+        currentLang === 'en'
+          ? `Cannot connect to server (${API_BASE}). Please ensure the backend API is running on port 8080.`
+          : 'تعذر الاتصال بالخادم. يرجى التأكد من تشغيل الخادم على المنفذ 8080.'
+      );
     } finally {
       setLoadingPassport(false);
     }
@@ -1790,6 +1852,31 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   const [customsTransferDuty, setCustomsTransferDuty] = useState<number | ''>('');
   const [customsTransferPort, setCustomsTransferPort] = useState('');
   const [customsTransferSubmitting, setCustomsTransferSubmitting] = useState(false);
+  const [customsShipmentsList, setCustomsShipmentsList] = useState<any[]>([]);
+  const [loadingCustomsShipments, setLoadingCustomsShipments] = useState(false);
+
+  const fetchCustomsShipments = async () => {
+    setLoadingCustomsShipments(true);
+    try {
+      const res = await fetch(`${API_BASE}/vault/intake/customs-shipments`, {
+        headers: getAuthHeaders()
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setCustomsShipmentsList(data);
+      }
+    } catch (e) {
+      console.error('Failed to fetch customs shipments', e);
+    } finally {
+      setLoadingCustomsShipments(false);
+    }
+  };
+
+  useEffect(() => {
+    if (showCustomsTransferModal) {
+      fetchCustomsShipments();
+    }
+  }, [showCustomsTransferModal]);
 
   const handleInitiateCustomsTransfer = async () => {
     if (!customsTransferLotId) {
@@ -1803,7 +1890,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({
           lotId: parseInt(customsTransferLotId) || null,
-          targetOwnership: customsTransferTargetOwnership,
+          targetOwnership: 'TURKEY_OWNED',
           clearanceNotes: customsTransferNotes,
           customsDeclarationNumber: customsTransferBayan,
           customsDutyAmount: customsTransferDuty ? Number(customsTransferDuty) : null,
@@ -1846,6 +1933,31 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   const canModify = (moduleKey: string) => {
     const level = getAccess(moduleKey);
     return level === 'FULL' || level === 'READ_WRITE';
+  };
+
+  // Privilege gate for Low Stock Alerts: visible to operational groups (Treasury Operations,
+  // Reconciliation, IT Admin) and users holding procurement/master-data permissions, but
+  // strictly hidden from Management / Executive-only viewers.
+  const canViewLowStockAlerts = () => {
+    if (!isLoggedIn) return false;
+
+    // Check if user is in Management / Executive group or role
+    const isManagement =
+      userRoles.some(r => /management|executive|board|director/i.test(r)) ||
+      /management|executive|board|director/i.test(userRole || '') ||
+      /management|executive|board|director/i.test(displayName || '') ||
+      /management|executive|board|director/i.test(username || '');
+
+    // IT Administrators / Super Admin always have full visibility
+    const isSuperAdmin = userRole === 'IT/Admin' || userRoles.includes('IT Administrators') || username === 'system-admin';
+    if (isSuperAdmin) return true;
+
+    if (isManagement) return false;
+
+    // Show for operational groups (Treasury Operations, Reconciliation)
+    // and users holding purchase_orders, master_data, or intake permissions
+    return canAccess('purchase_orders') || canAccess('master_data') || canAccess('intake') ||
+      userRoles.some(r => /operations|maker|checker|reconciliation/i.test(r));
   };
 
   // Sidebar menu layout -- fetched once per session (any authenticated user; see
@@ -2545,6 +2657,10 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   };
 
   const fetchLowStockAlerts = async () => {
+    if (!canViewLowStockAlerts()) {
+      setLowStockAlerts([]);
+      return;
+    }
     try {
       const res = await fetch(`${API_BASE}/inventory/low-stock-alerts`);
       if (res.ok) setLowStockAlerts(await res.json());
@@ -2854,6 +2970,91 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     }
   };
 
+  const fetchTurkeyQrSetting = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/settings/turkey-qr-requirement`, {
+        headers: getAuthHeaders()
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setTurkeyQrRequired(!!data.required);
+      }
+    } catch (e) {
+      console.error('Failed to load Turkey QR requirement setting', e);
+    }
+  };
+
+  const handleSaveTurkeyQrSetting = async () => {
+    setSavingTurkeyQr(true);
+    setTurkeyQrSuccessMsg(null);
+    try {
+      const res = await fetch(`${API_BASE}/settings/turkey-qr-requirement`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({ required: turkeyQrRequired })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setTurkeyQrRequired(!!data.required);
+        setTurkeyQrSuccessMsg(currentLang === 'en'
+          ? (data.required
+              ? '✓ QR Code requirement for Turkey-to-KFH transfers ENABLED successfully!'
+              : '✓ QR Code requirement for Turkey-to-KFH transfers DISABLED successfully!')
+          : (data.required
+              ? '✓ تم تفعيل شرط طباعة رمز QR قبل نقل ملكية سبائك تركيا بنجاح!'
+              : '✓ تم إلغاء تفعيل شرط طباعة رمز QR قبل نقل ملكية سبائك تركيا بنجاح!'));
+        setTimeout(() => setTurkeyQrSuccessMsg(null), 6000);
+      } else {
+        alert(await describeApiError(res, currentLang, 'Failed to update Turkey QR requirement', 'فشل تحديث شرط طباعة QR لذهب تركيا'));
+      }
+    } catch (e: any) {
+      alert(e.message);
+    } finally {
+      setSavingTurkeyQr(false);
+    }
+  };
+
+  const fetchQrReprintPrivilege = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/settings/qrcode-reprint-privilege`, {
+        headers: getAuthHeaders()
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setQrReprintPrivilege(data.privilege_level || 'ADMIN_ONLY');
+      }
+    } catch (e) {
+      console.error('Failed to load QR reprint privilege', e);
+    }
+  };
+
+  const handleSaveQrReprintPrivilege = async (customLevel?: string) => {
+    const level = customLevel || qrReprintPrivilege;
+    setSavingQrReprint(true);
+    setQrReprintSuccessMsg(null);
+    try {
+      const res = await fetch(`${API_BASE}/settings/qrcode-reprint-privilege`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({ privilegeLevel: level })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setQrReprintPrivilege(data.privilege_level);
+        setQrReprintSuccessMsg(currentLang === 'en'
+          ? `✓ QR Code reprint privilege updated to '${data.privilege_level}' successfully!`
+          : `✓ تم تحديث صلاحية إعادة طباعة رمز QR إلى '${data.privilege_level}' بنجاح!`);
+        setTimeout(() => setQrReprintSuccessMsg(null), 6000);
+      } else {
+        alert(await describeApiError(res, currentLang, 'Failed to update reprint privilege', 'فشل تحديث صلاحية إعادة طباعة QR'));
+      }
+    } catch (e: any) {
+      alert(e.message);
+    } finally {
+      setSavingQrReprint(false);
+    }
+  };
+
   const handleResetStoreData = async () => {
     const confirmed = window.confirm(
       currentLang === 'en'
@@ -3020,122 +3221,52 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   const handlePrintBarcodeLabel = async (itemId?: number, labelObj?: any) => {
     const label = labelObj || barcodeCurrentLabel || barcodeReprintResult;
     if (label) {
-      const printWindow = window.open('', '_blank', 'width=450,height=320');
+      const printWindow = window.open('', '_blank', 'width=400,height=400');
       if (printWindow) {
-        const locText = label.locationDescription || 'Vault Stage';
-        const gtinText = label.gtin14 || 'N/A';
-        const lotText = label.lotNumber || 'N/A';
-        const hrText = label.gs1HumanReadable || '';
-
         printWindow.document.write(`<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Barcode Label Sticker</title>
+  <title>QR Code</title>
   <style>
     @page {
       size: auto;
-      margin: 3mm;
+      margin: 4mm;
     }
     * {
       box-sizing: border-box;
       margin: 0;
       padding: 0;
     }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-      background: #fff;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      padding: 4px;
-    }
-    .sticker-container {
-      width: 95mm;
-      max-width: 380px;
+    html, body {
+      width: 100%;
+      height: 100%;
       background: #ffffff;
-      color: #111827;
-      border: 1.5px solid #d4af37;
-      border-radius: 8px;
-      padding: 10px 12px;
-      box-sizing: border-box;
-    }
-    .top-meta {
       display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 8px;
-    }
-    .info-col {
-      flex: 1;
-    }
-    .loc-title {
-      font-size: 11px;
-      font-weight: 800;
-      color: #009B4E;
-      margin-bottom: 4px;
-      line-height: 1.2;
-    }
-    .meta-line {
-      font-size: 10px;
-      color: #374151;
-      margin-top: 2px;
-      line-height: 1.2;
-    }
-    .qr-col {
-      width: 72px;
-      height: 72px;
-      display: flex;
-      align-items: center;
       justify-content: center;
-      flex-shrink: 0;
+      align-items: center;
     }
-    .qr-col svg {
-      width: 70px !important;
-      height: 70px !important;
+    .qr-only-container {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      width: 100%;
+      height: 100%;
+      padding: 6px;
+    }
+    .qr-only-container svg {
+      width: 220px !important;
+      height: 220px !important;
+      max-width: 90vw !important;
+      max-height: 90vh !important;
       display: block;
-    }
-    .dashed-divider {
-      border-top: 1px dashed #d1d5db;
-      margin: 6px 0;
-    }
-    .barcode-col {
-      text-align: center;
-    }
-    .barcode-col svg {
-      max-width: 100%;
-      height: 38px;
       margin: 0 auto;
-      display: block;
-    }
-    .hr-text {
-      font-family: monospace;
-      font-size: 9.5px;
-      font-weight: bold;
-      color: #111827;
-      letter-spacing: 0.5px;
-      margin-top: 3px;
-      text-align: center;
     }
   </style>
 </head>
 <body>
-  <div class="sticker-container">
-    <div class="top-meta">
-      <div class="info-col">
-        <div class="loc-title">📍 ${locText}</div>
-        <div class="meta-line"><strong>GTIN-14:</strong> ${gtinText}</div>
-        <div class="meta-line"><strong>Batch / Lot:</strong> ${lotText}</div>
-      </div>
-      <div class="qr-col">
-        ${label.qrCodeSvg || ''}
-      </div>
-    </div>
-    <div class="dashed-divider"></div>
-    <div class="barcode-col">
-      ${label.barcodeSvg || ''}
-      <div class="hr-text">${hrText}</div>
-    </div>
+  <div class="qr-only-container">
+    ${label.qrCodeSvg || ''}
   </div>
   <script>
     window.onload = function() {
@@ -4030,6 +4161,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
         const data = await res.json();
         setAuthToken(data.token || null);
         setUserRole(data.roles[0]);
+        setUserRoles(data.roles || []);
         setDisplayName(data.displayName);
         setUserPermissions(data.permissions || {});
         setIsLoggedIn(true);
@@ -4591,13 +4723,13 @@ const [migrationApproved, setMigrationApproved] = useState(false);
       alert(currentLang === 'en' ? 'Every bar must have a Serial Number.' : 'يجب أن تحتوي كل سبيكة على رقم تسلسلي.');
       return;
     }
-    const keys = intakeBars.map(b => `${b.product_id || 0}_${b.serial.trim().toUpperCase()}`);
-    const duplicates = keys.filter((item, index) => keys.indexOf(item) !== index);
+    const serialsList = intakeBars.map(b => b.serial.trim().toUpperCase());
+    const duplicates = serialsList.filter((item, index) => serialsList.indexOf(item) !== index);
     if (duplicates.length > 0) {
-      const dupSerial = duplicates[0].split('_')[1];
+      const dupSerial = duplicates[0];
       alert(currentLang === 'en' 
-        ? `Duplicate serial detected in shipment for the same product type: ${dupSerial}.` 
-        : `تم اكتشاف رقم تسلسلي مكرر لنفس فئة المنتج في الشحنة: ${dupSerial}.`);
+        ? `Duplicate serial detected in shipment: "${dupSerial}". Every bar serial number must be globally unique across all products and denominations.` 
+        : `تم اكتشاف رقم تسلسلي مكرر في الشحنة: "${dupSerial}". يجب أن يكون الرقم التسلسلي فريداً تماماً عبر جميع المنتجات والفئات.`);
       return;
     }
 
@@ -4617,17 +4749,22 @@ const [migrationApproved, setMigrationApproved] = useState(false);
         customsDeclarationNumber: intakeOwnershipType === 'CUSTOMS_OWNED' ? (intakeCustomsDeclarationNo.trim() || null) : null,
         customsDutyAmount: intakeOwnershipType === 'CUSTOMS_OWNED' ? intakeCustomsDuty : null,
         portOfEntry: intakeOwnershipType === 'CUSTOMS_OWNED' ? (intakePortOfEntry.trim() || null) : null,
-        items: intakeBars.map(b => ({
-          serial: b.serial.trim(),
-          product_id: b.product_id,
-          weight_grams: b.weight_grams,
-          purity: b.purity,
-          is_damaged: b.is_damaged,
-          damage_reason: b.is_damaged ? (b.damage_reason || 'Damaged upon supplier receipt') : null,
-          refiner_name: b.refiner_name,
-          fineness_ppt: b.purity,
-          assay_certificate_number: b.assay_certificate_number || `CERT-${b.serial.trim()}`
-        }))
+        items: intakeBars.map(b => {
+          const cost = denominationPurchasingCosts[b.product_id] !== undefined ? denominationPurchasingCosts[b.product_id] : (intakeCustomsDuty || 0);
+          return {
+            serial: b.serial.trim(),
+            product_id: b.product_id,
+            weight_grams: b.weight_grams,
+            purity: b.purity,
+            unit_cost: cost,
+            purchasing_cost: cost,
+            is_damaged: b.is_damaged,
+            damage_reason: b.is_damaged ? (b.damage_reason || 'Damaged upon supplier receipt') : null,
+            refiner_name: b.refiner_name,
+            fineness_ppt: b.purity,
+            assay_certificate_number: b.assay_certificate_number || `CERT-${b.serial.trim()}`
+          };
+        })
       };
 
       const res = await fetch(`${API_BASE}/vault/intake`, {
@@ -5099,23 +5236,109 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     return Translations[currentLang]?.[key] || key;
   };
 
+  // Helper to classify an item into SWISS, TURKEY, or SILVER
+  const classifyPrecious = (item: any): 'SWISS' | 'TURKEY' | 'SILVER' => {
+    const pType = (item?.precious_type || '').toUpperCase();
+    if (pType === 'SILVER') return 'SILVER';
+    if (pType === 'TURKEY') return 'TURKEY';
+    if (pType === 'SWISS') return 'SWISS';
+
+    const metal = (item?.metal || '').toLowerCase();
+    const prod = (item?.product_name || item?.product_code || '').toLowerCase();
+    if (metal === 'silver' || prod.includes('silver') || prod.startsWith('ag-')) {
+      return 'SILVER';
+    }
+
+    const origin = (item?.origin || '').toLowerCase();
+    const brand = (item?.brand_name || '').toLowerCase();
+    const owner = (item?.ownership || '').toLowerCase();
+
+    if (origin.includes('turk') || prod.includes('turk') || brand.includes('nadir') || brand.includes('igr') || owner.includes('turkey')) {
+      return 'TURKEY';
+    }
+
+    return 'SWISS';
+  };
+
+  // Filtered items under the currently selected card
+  const execSelectedItems = useMemo(() => {
+    if (!execBoard?.items) return [];
+    if (selectedExecKpi === 'TOTAL_PRECIOUS') {
+      return execBoard.items.filter((i: any) =>
+        i.ownership === 'TURKEY_OWNED' ||
+        i.ownership === 'KFH_OWNED' ||
+        i.status === 'IN_TRANSFER' ||
+        i.is_damaged ||
+        i.status === 'QUARANTINED' ||
+        i.status === 'PENDING_APPROVAL' ||
+        i.status === 'READY' ||
+        i.status === 'RESERVED'
+      );
+    } else if (selectedExecKpi === 'DAMAGED') {
+      return execBoard.items.filter((i: any) =>
+        i.is_damaged ||
+        i.status === 'QUARANTINED' ||
+        i.damage_status === 'APPROVED' ||
+        i.damage_status === 'PENDING_APPROVAL'
+      );
+    } else if (selectedExecKpi === 'PROPRIETARY_GOLD') {
+      return execBoard.items.filter((i: any) => i.metal === 'Gold' && (i.ownership === 'TURKEY_OWNED' || i.ownership === 'PROPRIETARY'));
+    } else if (selectedExecKpi === 'READY_SALE') {
+      return execBoard.items.filter((i: any) => i.status === 'READY' && i.ownership === 'KFH_OWNED');
+    } else if (selectedExecKpi === 'RESERVED') {
+      return execBoard.items.filter((i: any) => i.status === 'RESERVED');
+    } else if (selectedExecKpi === 'CUSTODY') {
+      return execBoard.items.filter((i: any) => i.ownership === 'CUSTOMER_OWNED' || i.status === 'HELD_IN_CUSTODY');
+    }
+    return [];
+  }, [execBoard?.items, selectedExecKpi]);
+
+  // Executive Board: precious type statistics (Swiss, Turkey, Silver) for the active card
+  const execPreciousStats = useMemo(() => {
+    let swissCount = 0, swissGrams = 0;
+    let turkeyCount = 0, turkeyGrams = 0;
+    let silverCount = 0, silverGrams = 0;
+
+    for (const item of execSelectedItems) {
+      const pType = classifyPrecious(item);
+      const weight = (item.weight_grams && item.weight_grams > 0) ? item.weight_grams :
+        (item.denomination?.includes('1 KG') || item.denomination?.includes('1000g') ? 1000 :
+         item.denomination?.includes('100g') ? 100 :
+         item.denomination?.includes('500g') ? 500 :
+         item.denomination?.includes('10 Tola') ? 116.64 :
+         item.denomination?.includes('1 oz') ? 31.1035 :
+         item.denomination?.includes('50g') ? 50 : 1000);
+
+      if (pType === 'SWISS') {
+        swissCount += 1;
+        swissGrams += weight;
+      } else if (pType === 'TURKEY') {
+        turkeyCount += 1;
+        turkeyGrams += weight;
+      } else if (pType === 'SILVER') {
+        silverCount += 1;
+        silverGrams += weight;
+      }
+    }
+
+    return {
+      swiss: { count: swissCount, weightGrams: Math.round(swissGrams * 10) / 10, weightKg: Math.round((swissGrams / 1000) * 1000) / 1000 },
+      turkey: { count: turkeyCount, weightGrams: Math.round(turkeyGrams * 10) / 10, weightKg: Math.round((turkeyGrams / 1000) * 1000) / 1000 },
+      silver: { count: silverCount, weightGrams: Math.round(silverGrams * 10) / 10, weightKg: Math.round((silverGrams / 1000) * 1000) / 1000 },
+    };
+  }, [execSelectedItems]);
+
   // Executive Board: aggregated quantity breakdown by bar type (without individual serial numbers)
   const execKpiBreakdown = useMemo(() => {
-    if (!execBoard?.items) return [];
-    let filtered: any[] = [];
-    if (selectedExecKpi === 'PROPRIETARY_GOLD') {
-      filtered = execBoard.items.filter((i: any) => i.metal === 'Gold' && (i.ownership === 'TURKEY_OWNED' || i.ownership === 'PROPRIETARY'));
-    } else if (selectedExecKpi === 'READY_SALE') {
-      filtered = execBoard.items.filter((i: any) => i.status === 'READY' && i.ownership === 'KFH_OWNED');
-    } else if (selectedExecKpi === 'RESERVED') {
-      filtered = execBoard.items.filter((i: any) => i.status === 'RESERVED');
-    } else if (selectedExecKpi === 'CUSTODY') {
-      filtered = execBoard.items.filter((i: any) => i.ownership === 'CUSTOMER_OWNED' || i.status === 'HELD_IN_CUSTODY');
+    let filtered = execSelectedItems;
+    if (execPreciousFilter !== 'ALL') {
+      filtered = filtered.filter((i: any) => classifyPrecious(i) === execPreciousFilter);
     }
 
     const map = new Map<string, {
       denomination: string;
       metal: string;
+      preciousType: 'SWISS' | 'TURKEY' | 'SILVER';
       unitWeightGrams: number;
       count: number;
       totalWeightGrams: number;
@@ -5123,19 +5346,22 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     }>();
 
     for (const item of filtered) {
-      const key = item.denomination || 'Standard Bar';
+      const denom = item.denomination || 'Standard Bar';
+      const pType = classifyPrecious(item);
+      const key = `${denom}___${pType}`;
       const unitWeight = (item.weight_grams && item.weight_grams > 0) ? item.weight_grams :
-        (key.includes('1 KG') || key.includes('1000g') ? 1000 :
-         key.includes('100g') ? 100 :
-         key.includes('500g') ? 500 :
-         key.includes('10 Tola') ? 116.64 :
-         key.includes('1 oz') ? 31.1035 :
-         key.includes('50g') ? 50 : 1000);
+        (denom.includes('1 KG') || denom.includes('1000g') ? 1000 :
+         denom.includes('100g') ? 100 :
+         denom.includes('500g') ? 500 :
+         denom.includes('10 Tola') ? 116.64 :
+         denom.includes('1 oz') ? 31.1035 :
+         denom.includes('50g') ? 50 : 1000);
 
       if (!map.has(key)) {
         map.set(key, {
-          denomination: key,
-          metal: item.metal || 'Gold',
+          denomination: denom,
+          metal: item.metal || (pType === 'SILVER' ? 'Silver' : 'Gold'),
+          preciousType: pType,
           unitWeightGrams: unitWeight,
           count: 0,
           totalWeightGrams: 0,
@@ -5149,7 +5375,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     }
 
     return Array.from(map.values()).sort((a, b) => b.totalWeightGrams - a.totalWeightGrams);
-  }, [execBoard?.items, selectedExecKpi]);
+  }, [execSelectedItems, execPreciousFilter]);
 
   const execBreakdownTotals = useMemo(() => {
     const totalBars = execKpiBreakdown.reduce((s, x) => s + x.count, 0);
@@ -5249,7 +5475,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     { type: 'item', key: 'screen-gfs-delivery', label: currentLang === 'en' ? 'GFS Branch Delivery' : 'طلبات فروع GFS', icon: 'fa-solid fa-truck-fast', permission: 'intake', onClick: () => { setActiveTab('screen-gfs-delivery'); fetchGfsDeliveryRequests(); fetchGfsSyncLogs(); } },
     { type: 'item', key: 'screen-home-delivery', label: currentLang === 'en' ? 'Home Delivery' : 'توصيل المنازل', icon: 'fa-solid fa-house-chimney-user', permission: 'intake', onClick: () => { setActiveTab('screen-home-delivery'); fetchHomeDeliveries(); } },
     { type: 'item', key: 'screen-damaged-bars', label: currentLang === 'en' ? 'Damaged Bar Approvals' : 'اعتماد السبائك التالفة', icon: 'fa-solid fa-triangle-exclamation', permission: 'custody', onClick: () => { setActiveTab('screen-damaged-bars'); fetchDamagedBars(); } },
-    { type: 'item', key: 'screen-barcode-labeling', label: currentLang === 'en' ? 'Barcode & QR Labeling' : 'طباعة وتتبع الباركود و QR', icon: 'fa-solid fa-barcode', permission: 'barcode_qr_labeling', onClick: () => { setActiveTab('screen-barcode-labeling'); fetchInventory(); fetchLocations(); } },
+    { type: 'item', key: 'screen-barcode-labeling', label: currentLang === 'en' ? 'Barcode & QR Labeling' : 'طباعة وتتبع الباركود و QR', icon: 'fa-solid fa-barcode', permission: 'barcode_qr_labeling', onClick: () => { setActiveTab('screen-barcode-labeling'); fetchInventory(); fetchLocations(); fetchQrReprintPrivilege(); } },
     { type: 'item', key: 'screen-bar-traceability', label: t('menu_bar_traceability'), icon: 'fa-solid fa-passport', permission: 'dashboard', onClick: () => { setActiveTab('screen-bar-traceability'); fetchInventory(); fetchProducts(); } },
 
     // 3. Stock Limits & Enterprise Thresholds
@@ -5691,10 +5917,64 @@ const [migrationApproved, setMigrationApproved] = useState(false);
 
         {/* SCREEN VIEWPORT: EXECUTIVE BOARD */}
         <section className={`screen-viewport ${activeTab === 'screen-exec' ? 'active' : ''}`}>
-          <div className="kpi-row">
+          <div className="kpi-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
+            {/* 1. TOTAL PRECIOUS METALS SUMMATION CARD */}
             <div
               className="glass-card kpi-card"
-              onClick={() => setSelectedExecKpi('PROPRIETARY_GOLD')}
+              onClick={() => { setSelectedExecKpi('TOTAL_PRECIOUS'); setExecPreciousFilter('ALL'); }}
+              style={{
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                border: selectedExecKpi === 'TOTAL_PRECIOUS' ? '2px solid #D4AF37' : '1px solid rgba(212, 175, 55, 0.4)',
+                background: selectedExecKpi === 'TOTAL_PRECIOUS'
+                  ? 'linear-gradient(135deg, rgba(212, 175, 55, 0.18), rgba(0, 155, 78, 0.12))'
+                  : 'linear-gradient(135deg, rgba(212, 175, 55, 0.08), rgba(0, 155, 78, 0.04))',
+                boxShadow: selectedExecKpi === 'TOTAL_PRECIOUS' ? '0 0 20px rgba(212, 175, 55, 0.35)' : undefined,
+                transform: selectedExecKpi === 'TOTAL_PRECIOUS' ? 'translateY(-2px)' : undefined
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span className="kpi-title" style={{ color: '#D4AF37', fontWeight: 700 }}>
+                  <i className="fa-solid fa-gem" style={{ marginRight: '6px' }}></i>
+                  {t('kpi_total_precious')}
+                </span>
+                {selectedExecKpi === 'TOTAL_PRECIOUS' && (
+                  <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: '#D4AF37', color: '#000', fontWeight: 'bold' }}>
+                    <i className="fa-solid fa-chart-pie"></i> {currentLang === 'en' ? 'Active' : 'نشط'}
+                  </span>
+                )}
+              </div>
+              <span className="kpi-value gold-txt" style={{ fontSize: '28px', fontWeight: 800 }}>
+                {(execBoard?.total_precious_weight_kg ?? 0).toFixed(3)} KG
+              </span>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '4px', fontSize: '11px', color: 'var(--text-muted)' }}>
+                <span style={{ color: 'var(--accent-green)', fontWeight: 600 }}>
+                  <i className="fa-solid fa-scale-balanced"></i> {((execBoard?.total_precious_weight_kg ?? 0) * 1000).toLocaleString()} g • {execBoard?.total_precious_qty ?? 0} {currentLang === 'en' ? 'Bars Total' : 'سبيكة إجمالاً'}
+                </span>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '8px', fontSize: '10px' }}>
+                <span style={{ padding: '2px 6px', borderRadius: '4px', background: 'rgba(212, 175, 55, 0.15)', color: '#D4AF37', border: '1px solid rgba(212, 175, 55, 0.3)' }} title="Turkey Consignment">
+                  TR: {(execBoard?.turkey_weight_kg ?? 0).toFixed(1)}kg ({execBoard?.turkey_qty ?? 0})
+                </span>
+                <span style={{ padding: '2px 6px', borderRadius: '4px', background: 'rgba(0, 155, 78, 0.15)', color: 'var(--kfh-green)', border: '1px solid rgba(0, 155, 78, 0.3)' }} title="KFH Owned">
+                  KFH: {(execBoard?.kfh_weight_kg ?? 0).toFixed(1)}kg ({execBoard?.kfh_qty ?? 0})
+                </span>
+                <span style={{ padding: '2px 6px', borderRadius: '4px', background: 'rgba(147, 51, 234, 0.15)', color: '#c084fc', border: '1px solid rgba(147, 51, 234, 0.3)' }} title="In Transit">
+                  Transit: {(execBoard?.transit_weight_kg ?? 0).toFixed(1)}kg ({execBoard?.transit_qty ?? 0})
+                </span>
+                <span style={{ padding: '2px 6px', borderRadius: '4px', background: 'rgba(239, 68, 68, 0.15)', color: 'var(--accent-red)', border: '1px solid rgba(239, 68, 68, 0.3)' }} title="Damaged Stock">
+                  Damage: {(execBoard?.damage_weight_kg ?? 0).toFixed(1)}kg ({execBoard?.damage_qty ?? 0})
+                </span>
+                <span style={{ padding: '2px 6px', borderRadius: '4px', background: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', border: '1px solid rgba(59, 130, 246, 0.3)' }} title="Pending Approval">
+                  Pending: {(execBoard?.pending_weight_kg ?? 0).toFixed(1)}kg ({execBoard?.pending_qty ?? 0})
+                </span>
+              </div>
+            </div>
+
+            {/* 2. PROPRIETARY TURKEY STOCK */}
+            <div
+              className="glass-card kpi-card"
+              onClick={() => { setSelectedExecKpi('PROPRIETARY_GOLD'); setExecPreciousFilter('ALL'); }}
               style={{
                 cursor: 'pointer',
                 transition: 'all 0.2s ease',
@@ -5718,9 +5998,10 @@ const [migrationApproved, setMigrationApproved] = useState(false);
               </span>
             </div>
 
+            {/* 3. READY FOR SALE (KFH OWNED) */}
             <div
               className="glass-card kpi-card"
-              onClick={() => setSelectedExecKpi('READY_SALE')}
+              onClick={() => { setSelectedExecKpi('READY_SALE'); setExecPreciousFilter('ALL'); }}
               style={{
                 cursor: 'pointer',
                 transition: 'all 0.2s ease',
@@ -5744,9 +6025,10 @@ const [migrationApproved, setMigrationApproved] = useState(false);
               </span>
             </div>
 
+            {/* 4. RESERVED CHECKOUT LOCKS */}
             <div
               className="glass-card kpi-card"
-              onClick={() => setSelectedExecKpi('RESERVED')}
+              onClick={() => { setSelectedExecKpi('RESERVED'); setExecPreciousFilter('ALL'); }}
               style={{
                 cursor: 'pointer',
                 transition: 'all 0.2s ease',
@@ -5770,9 +6052,10 @@ const [migrationApproved, setMigrationApproved] = useState(false);
               </span>
             </div>
 
+            {/* 5. CUSTOMER CUSTODY */}
             <div
               className="glass-card kpi-card"
-              onClick={() => setSelectedExecKpi('CUSTODY')}
+              onClick={() => { setSelectedExecKpi('CUSTODY'); setExecPreciousFilter('ALL'); }}
               style={{
                 cursor: 'pointer',
                 transition: 'all 0.2s ease',
@@ -5795,10 +6078,42 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                 {((execBoard?.custody_weight_kg ?? 0) * 1000).toLocaleString()} g • <i className="fa-solid fa-hand-pointer"></i> {currentLang === 'en' ? 'Click to view' : 'انقر للعرض'}
               </span>
             </div>
+
+            {/* 6. DAMAGED & QUARANTINED STOCK CARD */}
+            <div
+              className="glass-card kpi-card"
+              onClick={() => { setSelectedExecKpi('DAMAGED'); setExecPreciousFilter('ALL'); }}
+              style={{
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                border: selectedExecKpi === 'DAMAGED' ? '2px solid var(--accent-red)' : '1px solid rgba(239, 68, 68, 0.4)',
+                background: selectedExecKpi === 'DAMAGED' ? 'rgba(239, 68, 68, 0.12)' : 'rgba(239, 68, 68, 0.04)',
+                boxShadow: selectedExecKpi === 'DAMAGED' ? '0 0 16px rgba(239, 68, 68, 0.25)' : undefined,
+                transform: selectedExecKpi === 'DAMAGED' ? 'translateY(-2px)' : undefined
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span className="kpi-title" style={{ color: 'var(--accent-red)' }}>
+                  <i className="fa-solid fa-triangle-exclamation" style={{ marginRight: '6px' }}></i>
+                  {t('kpi_damage')}
+                </span>
+                {selectedExecKpi === 'DAMAGED' && (
+                  <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: 'var(--accent-red)', color: '#fff', fontWeight: 'bold' }}>
+                    <i className="fa-solid fa-chart-pie"></i> {currentLang === 'en' ? 'Active' : 'نشط'}
+                  </span>
+                )}
+              </div>
+              <span className="kpi-value" style={{ color: 'var(--accent-red)' }}>
+                {(execBoard?.damage_weight_kg ?? 0).toFixed(3)} KG
+              </span>
+              <span className="kpi-sub" style={{ color: 'var(--accent-red)' }}>
+                <i className="fa-solid fa-circle-exclamation"></i> {((execBoard?.damage_weight_kg ?? 0) * 1000).toLocaleString()} g • {execBoard?.damage_qty ?? 0} {currentLang === 'en' ? 'Damaged Bars' : 'سبائك تالفة'} • <i className="fa-solid fa-hand-pointer"></i> {currentLang === 'en' ? 'Click to view' : 'انقر للعرض'}
+              </span>
+            </div>
           </div>
 
           {/* LOW-STOCK ALARM BANNER (COLLAPSED AS DEFAULT) */}
-          {lowStockAlerts.length > 0 && (
+          {canViewLowStockAlerts() && lowStockAlerts.length > 0 && (
             <div className="low-stock-alarm" style={{ marginBottom: '20px' }}>
               <div
                 className="alarm-header"
@@ -5843,8 +6158,12 @@ const [migrationApproved, setMigrationApproved] = useState(false);
               <div>
                 <h3 style={{ margin: 0, fontSize: '18px', color: 'var(--kfh-green)', display: 'flex', alignItems: 'center', gap: '10px' }}>
                   <i className="fa-solid fa-layer-group"></i>
-                  {selectedExecKpi === 'PROPRIETARY_GOLD'
-                    ? (currentLang === 'en' ? 'Proprietary Gold Stock — Quantity Breakdown by Bar Type' : 'مخزون الذهب الخاص — تفصيل الكميات المتاحة حسب نوع السبيكة')
+                  {selectedExecKpi === 'TOTAL_PRECIOUS'
+                    ? (currentLang === 'en' ? 'Total Precious Metals (All Stock) — Quantity Breakdown by Bar Type' : 'إجمالي المعادن الثمينة (كافة المخزون) — تفصيل الكميات حسب نوع السبيكة')
+                    : selectedExecKpi === 'DAMAGED'
+                    ? (currentLang === 'en' ? 'Damaged & Quarantined Stock — Quantity Breakdown by Bar Type' : 'المخزون التالف والمعزول — تفصيل الكميات حسب نوع السبيكة')
+                    : selectedExecKpi === 'PROPRIETARY_GOLD'
+                    ? (currentLang === 'en' ? 'Turkey Offline — Quantity Breakdown by Bar Type' : 'مخزون تركيا (أوفلاين) — تفصيل الكميات المتاحة حسب نوع السبيكة')
                     : selectedExecKpi === 'READY_SALE'
                     ? (currentLang === 'en' ? 'Ready for Sale (KFH Owned) — Quantity Breakdown by Bar Type' : 'جاهز للبيع (ملك بيتك) — تفصيل الكميات المتاحة حسب نوع السبيكة')
                     : selectedExecKpi === 'RESERVED'
@@ -5869,6 +6188,146 @@ const [migrationApproved, setMigrationApproved] = useState(false);
               </div>
             </div>
 
+            {/* PRECIOUS TYPE BREAKDOWN SUMMARY (SWISS / TURKEY / SILVER) FOR ACTIVE CARD */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '12px', marginBottom: '20px' }}>
+              {/* Swiss Gold Widget */}
+              <div
+                onClick={() => setExecPreciousFilter(prev => prev === 'SWISS' ? 'ALL' : 'SWISS')}
+                style={{
+                  padding: '12px 16px',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                  background: execPreciousFilter === 'SWISS' ? 'rgba(212, 175, 55, 0.22)' : 'rgba(212, 175, 55, 0.08)',
+                  border: execPreciousFilter === 'SWISS' ? '2px solid #D4AF37' : '1px solid rgba(212, 175, 55, 0.3)',
+                  boxShadow: execPreciousFilter === 'SWISS' ? '0 0 12px rgba(212, 175, 55, 0.25)' : undefined
+                }}
+                title={currentLang === 'en' ? 'Click to filter Swiss Gold bars' : 'انقر لتصفية سبائك الذهب السويسري'}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 700, color: '#D4AF37', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ fontSize: '14px' }}>🇨🇭</span>
+                    {currentLang === 'en' ? 'Swiss Gold' : 'ذهب سويسري'}
+                  </span>
+                  {execPreciousFilter === 'SWISS' && (
+                    <span style={{ fontSize: '9px', padding: '2px 6px', borderRadius: '4px', background: '#D4AF37', color: '#000', fontWeight: 'bold' }}>
+                      {currentLang === 'en' ? 'Active Filter' : 'محدد'}
+                    </span>
+                  )}
+                </div>
+                <div style={{ fontSize: '20px', fontWeight: 800, color: 'var(--text-primary)', marginTop: '4px' }}>
+                  {execPreciousStats.swiss.count} <span style={{ fontSize: '11px', fontWeight: 500, color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'bars' : 'سبيكة'}</span>
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                  {execPreciousStats.swiss.weightKg.toFixed(3)} KG ({execPreciousStats.swiss.weightGrams.toLocaleString()} g)
+                </div>
+              </div>
+
+              {/* Turkey Gold Widget */}
+              <div
+                onClick={() => setExecPreciousFilter(prev => prev === 'TURKEY' ? 'ALL' : 'TURKEY')}
+                style={{
+                  padding: '12px 16px',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                  background: execPreciousFilter === 'TURKEY' ? 'rgba(245, 158, 11, 0.22)' : 'rgba(245, 158, 11, 0.08)',
+                  border: execPreciousFilter === 'TURKEY' ? '2px solid var(--accent-orange)' : '1px solid rgba(245, 158, 11, 0.3)',
+                  boxShadow: execPreciousFilter === 'TURKEY' ? '0 0 12px rgba(245, 158, 11, 0.25)' : undefined
+                }}
+                title={currentLang === 'en' ? 'Click to filter Turkey Gold bars' : 'انقر لتصفية سبائك الذهب التركي'}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--accent-orange)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ fontSize: '14px' }}>🇹🇷</span>
+                    {currentLang === 'en' ? 'Turkey Gold' : 'ذهب تركي'}
+                  </span>
+                  {execPreciousFilter === 'TURKEY' && (
+                    <span style={{ fontSize: '9px', padding: '2px 6px', borderRadius: '4px', background: 'var(--accent-orange)', color: '#000', fontWeight: 'bold' }}>
+                      {currentLang === 'en' ? 'Active Filter' : 'محدد'}
+                    </span>
+                  )}
+                </div>
+                <div style={{ fontSize: '20px', fontWeight: 800, color: 'var(--text-primary)', marginTop: '4px' }}>
+                  {execPreciousStats.turkey.count} <span style={{ fontSize: '11px', fontWeight: 500, color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'bars' : 'سبيكة'}</span>
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                  {execPreciousStats.turkey.weightKg.toFixed(3)} KG ({execPreciousStats.turkey.weightGrams.toLocaleString()} g)
+                </div>
+              </div>
+
+              {/* Silver Widget */}
+              <div
+                onClick={() => setExecPreciousFilter(prev => prev === 'SILVER' ? 'ALL' : 'SILVER')}
+                style={{
+                  padding: '12px 16px',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                  background: execPreciousFilter === 'SILVER' ? 'rgba(148, 163, 184, 0.25)' : 'rgba(148, 163, 184, 0.08)',
+                  border: execPreciousFilter === 'SILVER' ? '2px solid #94a3b8' : '1px solid rgba(148, 163, 184, 0.3)',
+                  boxShadow: execPreciousFilter === 'SILVER' ? '0 0 12px rgba(148, 163, 184, 0.25)' : undefined
+                }}
+                title={currentLang === 'en' ? 'Click to filter Silver bars' : 'انقر لتصفية سبائك الفضة'}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 700, color: '#cbd5e1', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ fontSize: '14px' }}>⚪</span>
+                    {currentLang === 'en' ? 'Silver' : 'فضة'}
+                  </span>
+                  {execPreciousFilter === 'SILVER' && (
+                    <span style={{ fontSize: '9px', padding: '2px 6px', borderRadius: '4px', background: '#94a3b8', color: '#000', fontWeight: 'bold' }}>
+                      {currentLang === 'en' ? 'Active Filter' : 'محدد'}
+                    </span>
+                  )}
+                </div>
+                <div style={{ fontSize: '20px', fontWeight: 800, color: 'var(--text-primary)', marginTop: '4px' }}>
+                  {execPreciousStats.silver.count} <span style={{ fontSize: '11px', fontWeight: 500, color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'bars' : 'سبيكة'}</span>
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                  {execPreciousStats.silver.weightKg.toFixed(3)} KG ({execPreciousStats.silver.weightGrams.toLocaleString()} g)
+                </div>
+              </div>
+            </div>
+
+            {/* ACTIVE FILTER BANNER */}
+            {execPreciousFilter !== 'ALL' && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 14px', borderRadius: '6px', background: 'rgba(255,255,255,0.03)', border: '1px dashed var(--surface-border)', marginBottom: '16px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>
+                    {currentLang === 'en' ? 'Filtering details table by:' : 'تصفية جدول التفاصيل حسب:'}
+                  </span>
+                  <span style={{
+                    padding: '2px 8px',
+                    borderRadius: '4px',
+                    fontWeight: 700,
+                    fontSize: '11px',
+                    background: execPreciousFilter === 'SWISS' ? 'rgba(212,175,55,0.2)' : execPreciousFilter === 'TURKEY' ? 'rgba(245,158,11,0.2)' : 'rgba(148,163,184,0.2)',
+                    color: execPreciousFilter === 'SWISS' ? '#D4AF37' : execPreciousFilter === 'TURKEY' ? 'var(--accent-orange)' : '#cbd5e1'
+                  }}>
+                    {execPreciousFilter === 'SWISS' ? (currentLang === 'en' ? '🇨🇭 Swiss Gold' : '🇨🇭 ذهب سويسري') :
+                     execPreciousFilter === 'TURKEY' ? (currentLang === 'en' ? '🇹🇷 Turkey Gold' : '🇹🇷 ذهب تركي') :
+                     (currentLang === 'en' ? '⚪ Silver' : '⚪ فضة')}
+                  </span>
+                </div>
+                <button
+                  onClick={() => setExecPreciousFilter('ALL')}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--accent-red)',
+                    cursor: 'pointer',
+                    fontSize: '11px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}
+                >
+                  <i className="fa-solid fa-xmark"></i> {currentLang === 'en' ? 'Show All Types' : 'عرض كافة الأنواع'}
+                </button>
+              </div>
+            )}
+
             {loadingExecBoard ? (
               <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
                 <i className="fa-solid fa-spinner fa-spin fa-2x"></i>
@@ -5884,6 +6343,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                   <thead>
                     <tr>
                       <th>{currentLang === 'en' ? 'Bar Specification / Denomination' : 'نوع وفئة السبيكة'}</th>
+                      <th>{currentLang === 'en' ? 'Precious Type' : 'نوع ومصدر المعدن'}</th>
                       <th>{currentLang === 'en' ? 'Metal' : 'المعدن'}</th>
                       <th>{currentLang === 'en' ? 'Unit Weight' : 'وزن السبيكة الواحدة'}</th>
                       <th style={{ textAlign: 'center' }}>{currentLang === 'en' ? 'Available Quantity' : 'الكمية المتاحة (عدد السبائك)'}</th>
@@ -5903,8 +6363,23 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                             </strong>
                           </td>
                           <td>
+                            {row.preciousType === 'SWISS' ? (
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '2px 8px', borderRadius: '4px', background: 'rgba(212,175,55,0.15)', color: '#D4AF37', border: '1px solid rgba(212,175,55,0.3)', fontSize: '11px', fontWeight: 600 }}>
+                                <span>🇨🇭</span> {currentLang === 'en' ? 'Swiss Gold' : 'ذهب سويسري'}
+                              </span>
+                            ) : row.preciousType === 'TURKEY' ? (
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '2px 8px', borderRadius: '4px', background: 'rgba(245,158,11,0.15)', color: 'var(--accent-orange)', border: '1px solid rgba(245,158,11,0.3)', fontSize: '11px', fontWeight: 600 }}>
+                                <span>🇹🇷</span> {currentLang === 'en' ? 'Turkey Gold' : 'ذهب تركي'}
+                              </span>
+                            ) : (
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '2px 8px', borderRadius: '4px', background: 'rgba(148,163,184,0.15)', color: '#cbd5e1', border: '1px solid rgba(148,163,184,0.3)', fontSize: '11px', fontWeight: 600 }}>
+                                <span>⚪</span> {currentLang === 'en' ? 'Silver' : 'فضة'}
+                              </span>
+                            )}
+                          </td>
+                          <td>
                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                              <i className="fa-solid fa-cube" style={{ color: '#D4AF37' }}></i>
+                              <i className="fa-solid fa-cube" style={{ color: row.preciousType === 'SILVER' ? '#cbd5e1' : '#D4AF37' }}></i>
                               {translateDb(row.metal)}
                             </span>
                           </td>
@@ -5943,7 +6418,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                   </tbody>
                   <tfoot>
                     <tr style={{ background: 'rgba(0, 155, 78, 0.08)', fontWeight: 'bold' }}>
-                      <td colSpan={3} style={{ color: 'var(--kfh-green)', fontSize: '13px' }}>
+                      <td colSpan={4} style={{ color: 'var(--kfh-green)', fontSize: '13px' }}>
                         <i className="fa-solid fa-calculator"></i> {currentLang === 'en' ? 'TOTAL' : 'الإجمالي الكلي'}
                       </td>
                       <td style={{ textAlign: 'center', color: 'var(--kfh-green)', fontSize: '14px' }}>
@@ -6170,10 +6645,14 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                 <button
                   className="btn"
                   style={{ background: 'linear-gradient(135deg, #D97706 0%, #B45309 100%)', color: '#fff', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 16px', borderRadius: '8px', border: 'none', cursor: 'pointer' }}
-                  onClick={() => setShowCustomsTransferModal(true)}
+                  onClick={() => {
+                    setCustomsTransferTargetOwnership('TURKEY_OWNED');
+                    setShowCustomsTransferModal(true);
+                    fetchCustomsShipments();
+                  }}
                 >
                   <i className="fa-solid fa-passport"></i>
-                  {currentLang === 'en' ? 'Transfer Customs to Turkey/Kuwait (Maker-Checker)' : 'تحويل الجمارك لتركيا/الكويت (صانع/معتمد)'}
+                  {currentLang === 'en' ? 'Transfer Customs to Turkey (Maker-Checker)' : 'تحويل الجمارك إلى تركيا (صانع/معتمد)'}
                 </button>
               )}
             </div>
@@ -6265,16 +6744,14 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     </div>
 
                     <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Owner' : 'جهة الملكية'}</label>
+                      <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Owner / Destination' : 'جهة الملكية / الوجهة'}</label>
                       <select 
                         className="form-control" 
                         value={intakeOwnershipType} 
-                        onChange={e => setIntakeOwnershipType(e.target.value as 'TURKEY_OWNED' | 'KFH_OWNED' | 'CUSTOMS_OWNED')}
-                        style={{ fontSize: '12px', padding: '6px 8px', fontWeight: 'bold' }}
+                        onChange={e => setIntakeOwnershipType(e.target.value as 'CUSTOMS_OWNED')}
+                        style={{ fontSize: '12px', padding: '6px 8px', fontWeight: 'bold', background: 'rgba(217, 119, 6, 0.12)', color: '#D97706', border: '1px solid rgba(217, 119, 6, 0.3)' }}
                       >
-                        <option value="TURKEY_OWNED">🇹🇷 {currentLang === 'en' ? 'Turkey' : 'تركيا'}</option>
-                        <option value="KFH_OWNED">🇰🇼 {currentLang === 'en' ? 'Kuwait' : 'الكويت'}</option>
-                        <option value="CUSTOMS_OWNED">🛃 {currentLang === 'en' ? 'Customs (Bonded)' : 'الجمارك (تحت التخليص)'}</option>
+                        <option value="CUSTOMS_OWNED">🛃 {currentLang === 'en' ? 'Customs (Bonded Warehouse)' : 'الجمارك (مستودع جمركي معلق)'}</option>
                       </select>
                     </div>
 
@@ -6291,22 +6768,11 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     </div>
 
                     <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Vault Target Slot' : 'موقع التخزين الإحداثي بالخزينة'}</label>
-                      <select 
-                        className="form-control" 
-                        value={intakeSelectedLocation} 
-                        onChange={e => setIntakeSelectedLocation(parseInt(e.target.value))}
-                        style={{ fontSize: '12px', padding: '6px 8px' }}
-                      >
-                        {locations.flatMap(loc =>
-                          loc.slots ? loc.slots.map((s: any) => ({
-                            id: s.location_id,
-                            label: `${loc.vault_name || 'Main Vault'} - ${loc.zone_room} - Slot ${s.slot_bin}`
-                          })) : []
-                        ).map(item => (
-                          <option key={item.id} value={item.id}>{item.label}</option>
-                        ))}
-                      </select>
+                      <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Holding Location' : 'موقع الاستلام والحفظ'}</label>
+                      <div style={{ padding: '6px 10px', borderRadius: '4px', background: 'rgba(217, 119, 6, 0.08)', border: '1px solid rgba(217, 119, 6, 0.25)', color: '#D97706', fontSize: '12px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px', height: '31px', boxSizing: 'border-box' }}>
+                        <i className="fa-solid fa-warehouse"></i>
+                        {currentLang === 'en' ? 'Bonded Customs Staging (No Vault Slot)' : 'المنطقة الجمركية المعلقة (دون موقع خزينة)'}
+                      </div>
                     </div>
                   </div>
 
@@ -6330,14 +6796,21 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                           />
                         </div>
                         <div className="form-group" style={{ marginBottom: 0 }}>
-                          <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Customs Duty (KWD)' : 'رسوم الجمارك (د.ك)'}</label>
+                          <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Purchasing Cost (KWD)' : 'تكلفة الشراء (د.ك)'}</label>
                           <input 
                             type="number" 
                             step="0.001"
                             className="form-control" 
                             placeholder="0.000"
                             value={intakeCustomsDuty || ''}
-                            onChange={e => setIntakeCustomsDuty(parseFloat(e.target.value) || 0)}
+                            onChange={e => {
+                              const val = parseFloat(e.target.value) || 0;
+                              setIntakeCustomsDuty(val);
+                              const pids = Array.from(new Set(intakeBars.map(b => b.product_id)));
+                              if (pids.length <= 1) {
+                                pids.forEach(pid => setDenominationPurchasingCosts(prev => ({ ...prev, [pid]: val })));
+                              }
+                            }}
                             style={{ fontSize: '12px', padding: '6px 8px' }}
                           />
                         </div>
@@ -6353,6 +6826,56 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                           />
                         </div>
                       </div>
+
+                      {/* PURCHASING COST PER DENOMINATION BREAKDOWN */}
+                      {(() => {
+                        const uniquePids = Array.from(new Set(intakeBars.map(b => b.product_id)));
+                        if (uniquePids.length === 0) return null;
+                        return (
+                          <div style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px solid rgba(217, 119, 6, 0.2)' }}>
+                            <div style={{ fontSize: '11px', fontWeight: 600, color: '#F59E0B', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <i className="fa-solid fa-coins"></i>
+                              {currentLang === 'en' 
+                                ? 'Purchasing Cost per Denomination in this Shipment (KWD):' 
+                                : 'تكلفة الشراء لكل فئة في هذه الشحنة (د.ك):'}
+                            </div>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '8px' }}>
+                              {uniquePids.map(pid => {
+                                const prod = products.find((p: any) => p.product_id === pid);
+                                const label = prod ? `${prod.metal_name} ${prod.denomination_label} (${prod.weight_grams}g)` : `Product #${pid}`;
+                                const count = intakeBars.filter(b => b.product_id === pid).length;
+                                const costVal = denominationPurchasingCosts[pid] !== undefined ? denominationPurchasingCosts[pid] : (intakeCustomsDuty || '');
+                                return (
+                                  <div key={pid} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', background: 'rgba(0,0,0,0.25)', padding: '8px 12px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                      <div style={{ fontSize: '11px', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</div>
+                                      <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{count} {currentLang === 'en' ? 'bars in batch' : 'سبائك في الدفعة'}</div>
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                      <input
+                                        type="number"
+                                        step="0.001"
+                                        placeholder="0.000"
+                                        className="form-control"
+                                        style={{ width: '100px', fontSize: '11px', padding: '4px 6px', textAlign: 'right', fontWeight: 'bold', color: 'var(--kfh-green)' }}
+                                        value={costVal}
+                                        onChange={e => {
+                                          const val = parseFloat(e.target.value) || 0;
+                                          setDenominationPurchasingCosts(prev => ({ ...prev, [pid]: val }));
+                                          if (uniquePids.length === 1) {
+                                            setIntakeCustomsDuty(val);
+                                          }
+                                        }}
+                                      />
+                                      <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>KWD</span>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
                   )}
                 </div>
@@ -6371,15 +6894,84 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       </p>
                     </div>
 
-                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                      <button className="btn btn-primary" style={{ fontSize: '11px', padding: '6px 12px' }} onClick={() => setShowSerialToolsModal(true)}>
-                        <i className="fa-solid fa-arrow-down-1-9"></i> {currentLang === 'en' ? 'Add Serial Range' : 'إضافة نطاق تسلسلي'}
-                      </button>
-                      <button className="btn btn-secondary" style={{ fontSize: '11px', padding: '6px 10px' }} onClick={handleAddIntakeBar}>
-                        <i className="fa-solid fa-plus"></i> {currentLang === 'en' ? 'Add Bar' : 'إضافة سبيكة'}
-                      </button>
+                    <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                      {intakeBars.length > 0 && (() => {
+                        const totalCost = intakeBars.reduce((sum, b) => {
+                          const cost = denominationPurchasingCosts[b.product_id] !== undefined ? denominationPurchasingCosts[b.product_id] : (intakeCustomsDuty || 0);
+                          return sum + cost;
+                        }, 0);
+                        return (
+                          <div style={{
+                            padding: '6px 12px',
+                            background: 'rgba(245, 158, 11, 0.12)',
+                            border: '1px solid rgba(245, 158, 11, 0.3)',
+                            borderRadius: '6px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            fontSize: '12px'
+                          }}>
+                            <i className="fa-solid fa-coins" style={{ color: '#F59E0B' }}></i>
+                            <span style={{ color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Total Purchasing Cost:' : 'إجمالي تكلفة الشراء:'}</span>
+                            <strong style={{ color: '#F59E0B', fontWeight: 700 }}>
+                              {totalCost.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })} KWD
+                            </strong>
+                          </div>
+                        );
+                      })()}
+                      {canModify('intake') && (
+                        <button className="btn btn-primary" style={{ fontSize: '12px', padding: '7px 14px', fontWeight: 'bold' }} onClick={() => setShowSerialToolsModal(true)}>
+                          <i className="fa-solid fa-plus"></i> {currentLang === 'en' ? 'Add Serials' : 'إضافة أرقام تسلسلية'}
+                        </button>
+                      )}
                     </div>
                   </div>
+
+                  {/* PURCHASING COST BY DENOMINATION BREAKDOWN CHIPS */}
+                  {(() => {
+                    const uniquePids = Array.from(new Set(intakeBars.map(b => b.product_id)));
+                    if (uniquePids.length === 0) return null;
+                    return (
+                      <div style={{
+                        display: 'flex',
+                        flexWrap: 'wrap',
+                        gap: '8px',
+                        marginBottom: '12px',
+                        padding: '8px 12px',
+                        background: 'rgba(255, 255, 255, 0.02)',
+                        borderRadius: '6px',
+                        border: '1px solid var(--surface-border)',
+                        alignItems: 'center'
+                      }}>
+                        <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                          <i className="fa-solid fa-coins" style={{ color: 'var(--accent-gold)' }}></i>
+                          {currentLang === 'en' ? 'Purchasing Cost by Denomination:' : 'تكلفة الشراء حسب الفئة:'}
+                        </span>
+                        {uniquePids.map(pid => {
+                          const prod = products.find((p: any) => p.product_id === pid);
+                          const count = intakeBars.filter(b => b.product_id === pid).length;
+                          const cost = denominationPurchasingCosts[pid] !== undefined ? denominationPurchasingCosts[pid] : (intakeCustomsDuty || 0);
+                          const label = prod ? `${prod.metal_name} ${prod.denomination_label}` : `#${pid}`;
+                          return (
+                            <span key={pid} style={{
+                              fontSize: '11px',
+                              padding: '3px 8px',
+                              background: 'rgba(16, 185, 129, 0.1)',
+                              border: '1px solid rgba(16, 185, 129, 0.25)',
+                              borderRadius: '4px',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '6px'
+                            }}>
+                              <strong style={{ color: 'var(--text-primary)' }}>{label}</strong>
+                              <span style={{ color: 'var(--text-muted)' }}>({count} {currentLang === 'en' ? 'bars' : 'سبائك'})</span>:
+                              <strong style={{ color: 'var(--kfh-green)' }}>{Number(cost).toFixed(3)} KWD</strong>
+                            </span>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
 
                   <div className="table-responsive" style={{ maxHeight: '420px', overflowY: 'auto' }}>
                     <table>
@@ -6388,24 +6980,48 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                           <th style={{ width: '40px' }}>#</th>
                           <th style={{ minWidth: '220px' }}>{currentLang === 'en' ? 'Serial Number' : 'الرقم التسلسلي'}</th>
                           <th style={{ minWidth: '260px' }}>{currentLang === 'en' ? 'Product / Denomination' : 'نوع المنتج / الفئة'}</th>
+                          <th style={{ width: '140px' }}>{currentLang === 'en' ? 'Purchasing Cost' : 'تكلفة الشراء'}</th>
                           <th style={{ minWidth: '200px' }}>{currentLang === 'en' ? 'Refiner / Brand' : 'المصفاة / الماركة'}</th>
                           <th style={{ width: '50px' }}></th>
                         </tr>
                       </thead>
                       <tbody>
                         {intakeBars.map((bar, idx) => {
+                          const isDuplicate = bar.serial.trim() && intakeBars.filter(b => b.serial.trim().toUpperCase() === bar.serial.trim().toUpperCase()).length > 1;
                           return (
-                            <tr key={bar.id}>
+                            <tr key={bar.id} style={isDuplicate ? { backgroundColor: 'rgba(239, 68, 68, 0.08)' } : undefined}>
                               <td><span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{idx + 1}</span></td>
                               <td>
-                                <input
-                                  type="text"
-                                  className="form-control"
-                                  placeholder={currentLang === 'en' ? 'Enter / Scan Bar Serial...' : 'أدخل / امسح الرقم التسلسلي للسبيكة...'}
-                                  value={bar.serial}
-                                  onChange={e => handleUpdateIntakeBar(bar.id, 'serial', e.target.value)}
-                                  style={{ fontSize: '12px', padding: '4px 8px', fontWeight: 'bold' }}
-                                />
+                                <div style={{ position: 'relative' }}>
+                                  <input
+                                    type="text"
+                                    className="form-control"
+                                    placeholder={currentLang === 'en' ? 'Enter / Scan Bar Serial...' : 'أدخل / امسح الرقم التسلسلي للسبيكة...'}
+                                    value={bar.serial}
+                                    onChange={e => handleUpdateIntakeBar(bar.id, 'serial', e.target.value)}
+                                    style={{
+                                      fontSize: '12px',
+                                      padding: '4px 8px',
+                                      fontWeight: 'bold',
+                                      borderColor: isDuplicate ? 'var(--accent-red)' : undefined,
+                                      boxShadow: isDuplicate ? '0 0 0 1px var(--accent-red)' : undefined
+                                    }}
+                                  />
+                                  {isDuplicate && (
+                                    <span style={{
+                                      fontSize: '10px',
+                                      color: 'var(--accent-red)',
+                                      fontWeight: 600,
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '4px',
+                                      marginTop: '2px'
+                                    }}>
+                                      <i className="fa-solid fa-triangle-exclamation"></i>
+                                      {currentLang === 'en' ? 'Duplicate Serial Number!' : 'رقم تسلسلي مكرر!'}
+                                    </span>
+                                  )}
+                                </div>
                               </td>
                               <td>
                                 <select
@@ -6420,6 +7036,24 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                                     </option>
                                   ))}
                                 </select>
+                              </td>
+                              <td>
+                                <span style={{
+                                  fontSize: '11px',
+                                  fontWeight: 700,
+                                  color: 'var(--kfh-green)',
+                                  padding: '4px 8px',
+                                  background: 'rgba(16, 185, 129, 0.08)',
+                                  borderRadius: '4px',
+                                  border: '1px solid rgba(16, 185, 129, 0.25)',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  whiteSpace: 'nowrap'
+                                }}>
+                                  <i className="fa-solid fa-coins" style={{ fontSize: '10px', color: 'var(--accent-gold)' }}></i>
+                                  {Number((denominationPurchasingCosts[bar.product_id] !== undefined ? denominationPurchasingCosts[bar.product_id] : intakeCustomsDuty) || 0).toFixed(3)} KWD
+                                </span>
                               </td>
                               <td>
                                 <select
@@ -6453,8 +7087,8 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                             <td colSpan={5} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
                               <i className="fa-solid fa-boxes-stacked" style={{ fontSize: '24px', marginBottom: '8px', display: 'block', opacity: 0.4 }}></i>
                               {currentLang === 'en'
-                                ? 'No gold bars added yet. Click "+ Add Bar" or "+ Add Serial Range" above to enter shipment bars.'
-                                : 'لم يتم إضافة سبائك بعد. انقر على "+ إضافة سبيكة" أو "+ إضافة نطاق تسلسلي" أعلاه لبدء تسجيل الكشف.'}
+                                ? 'No gold bars added yet. Click "+ Add Serials" above to enter shipment bars.'
+                                : 'لم يتم إضافة سبائك بعد. انقر على "+ إضافة أرقام تسلسلية" أعلاه لبدء تسجيل الكشف.'}
                             </td>
                           </tr>
                         )}
@@ -6467,6 +7101,10 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                 {(() => {
                   const totalBarsCount = intakeBars.length;
                   const totalGrossWeightG = intakeBars.reduce((sum, b) => sum + (b.weight_grams || 0), 0);
+                  const totalPurchasingCost = intakeBars.reduce((sum, b) => {
+                    const cost = denominationPurchasingCosts[b.product_id] !== undefined ? denominationPurchasingCosts[b.product_id] : (intakeCustomsDuty || 0);
+                    return sum + cost;
+                  }, 0);
 
                   return (
                     <div style={{
@@ -6490,6 +7128,13 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                           <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Total Gross Weight' : 'إجمالي الوزن القائم'}</div>
                           <div style={{ fontSize: '18px', fontWeight: 'bold', color: 'var(--kfh-green)' }}>
                             {totalGrossWeightG.toLocaleString()} g <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>({(totalGrossWeightG / 1000).toFixed(3)} KG)</span>
+                          </div>
+                        </div>
+
+                        <div>
+                          <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Total Purchasing Cost' : 'إجمالي تكلفة الشراء'}</div>
+                          <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#F59E0B' }}>
+                            {totalPurchasingCost.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })} <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>KWD</span>
                           </div>
                         </div>
                       </div>
@@ -7347,7 +7992,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                 <button
                   className={`btn ${barcodeTab === 'reprint' ? 'btn-primary' : 'btn-outline'}`}
                   style={{ fontSize: '12px', padding: '6px 12px' }}
-                  onClick={() => setBarcodeTab('reprint')}
+                  onClick={() => { setBarcodeTab('reprint'); fetchQrReprintPrivilege(); }}
                 >
                   <i className="fa-solid fa-rotate"></i> {currentLang === 'en' ? 'Reprint (Reason Log - A1)' : 'إعادة طباعة معتمدة (A1)'}
                 </button>
@@ -7923,10 +8568,20 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                         </div>
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '8px' }}>
                           <div><strong>Serial:</strong> {barcodeCurrentLabel.serialNumber}</div>
+                          <div><strong>Denomination:</strong> {barcodeCurrentLabel.denomination || `${barcodeCurrentLabel.weightGrams}g`}</div>
                           <div><strong>Location:</strong> {barcodeCurrentLabel.locationDescription || selectedBar?.location}</div>
-                          <div><strong>GTIN-14 (AI 01):</strong> {barcodeCurrentLabel.gtin14}</div>
-                          <div><strong>Status:</strong> {barcodeCurrentLabel.statusCode || 'READY'}</div>
+                          <div><strong>Product:</strong> {barcodeCurrentLabel.productLabel || barcodeCurrentLabel.metalName}</div>
                         </div>
+                        {barcodeCurrentLabel.qrCodeContent && (
+                          <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px solid var(--surface-border)', fontSize: '11px' }}>
+                            <div style={{ fontWeight: 600, color: 'var(--accent-gold)', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <i className="fa-solid fa-qrcode"></i> {currentLang === 'en' ? 'QR Code Scanned Content' : 'البيانات المقروءة عند مسح رمز QR'}
+                            </div>
+                            <pre style={{ margin: 0, padding: '6px 10px', background: 'rgba(0,0,0,0.25)', borderRadius: '4px', whiteSpace: 'pre-wrap', fontFamily: 'monospace', fontSize: '11px', color: '#e5e7eb' }}>
+                              {barcodeCurrentLabel.qrCodeContent}
+                            </pre>
+                          </div>
+                        )}
                       </div>
                     </div>
                   ) : (
@@ -7960,56 +8615,97 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                   : 'وفقاً لتعليمات الالتزام المصرفي (BR-009 / BR-019)، تتطلب إعادة طباعة الملصق تسجيل السبب الإلزامي وتُحفظ كواقعة حيازة غير قابلة للتعديل.'}
               </p>
 
-              <div className="form-group">
-                <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Select Bar from Inventory' : 'اختر السبيكة من المخزون'}</label>
-                <select
-                  className="form-control"
-                  style={{ color: '#000' }}
-                  value={barcodeReprintItemId || ''}
-                  onChange={e => {
-                    const id = parseInt(e.target.value);
-                    setBarcodeReprintItemId(id || null);
-                    setBarcodeReprintResult(null);
-                  }}
-                >
-                  <option value="">{currentLang === 'en' ? '-- Select a Bar --' : '-- اختر السبيكة --'}</option>
-                  {inventoryList.map((b: any) => (
-                    <option key={b.item_id} value={b.item_id}>
-                      {b.serial_number} — {b.metal} {b.denomination} ({b.location || 'Vault'}) [{b.status}]
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {(() => {
+                const isAuthorizedForReprint = (() => {
+                  const r = userRole || '';
+                  if (r === 'IT/Admin' || r === 'IT Administrators' || displayName === 'system-admin') return true;
+                  if (qrReprintPrivilege === 'DISABLED') return false;
+                  if (qrReprintPrivilege === 'ADMIN_ONLY') return false;
+                  if (qrReprintPrivilege === 'CHECKER_AND_ADMIN') return r.includes('Checker');
+                  return canModify('barcode_qr_labeling');
+                })();
 
-              <div className="form-group">
-                <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Mandatory Reprint Reason' : 'سبب إعادة الطباعة الإلزامي'}</label>
-                <select className="form-control" style={{ color: '#000' }} value={barcodeReprintReason} onChange={e => setBarcodeReprintReason(e.target.value)}>
-                  <option value="LABEL_DAMAGED">{currentLang === 'en' ? 'Physical Label Damaged / Smudged' : 'تلف أو مسح في الملصق المادي'}</option>
-                  <option value="PACKAGING_REPLACED">{currentLang === 'en' ? 'Security Packaging / Blister Replaced' : 'استبدال الغلاف الأمني للسبيكة'}</option>
-                  <option value="PHYSICAL_INSPECTION">{currentLang === 'en' ? 'Assay & Inspection Re-tagging' : 'إعادة الفحص المادي وتحديث البيانات'}</option>
-                  <option value="AUDIT_DISCREPANCY_CORRECTION">{currentLang === 'en' ? 'Audit / Stocktake Reconciliation Correction' : 'تصحيح ومطابقة جرد وتدقيق'}</option>
-                </select>
-              </div>
+                return (
+                  <>
+                    {!isAuthorizedForReprint && (
+                      <div style={{ padding: '12px 16px', borderRadius: '8px', background: 'rgba(239, 68, 68, 0.12)', border: '1px solid #EF4444', color: '#EF4444', marginBottom: '18px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <i className="fa-solid fa-triangle-exclamation" style={{ fontSize: '18px' }}></i>
+                        <div>
+                          <div style={{ fontWeight: 'bold' }}>
+                            {currentLang === 'en' ? 'Label Reprint Restricted by Security Policy' : 'إعادة الطباعة مقيدة بسياسة الأمان الحالية'}
+                          </div>
+                          <div style={{ fontSize: '12px', marginTop: '2px', opacity: 0.9 }}>
+                            {currentLang === 'en'
+                              ? `Current policy requires [${qrReprintPrivilege}] privilege to re-issue QR code labels.`
+                              : `السياسة المعتمدة تتطلب صلاحية [${qrReprintPrivilege}] لإعادة إصدار ملصقات QR.`}
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
-              <div className="form-group">
-                <label style={{ fontSize: '12px' }}>{currentLang === 'en' ? 'Detailed Justification & Notes' : 'الملاحظات والتبرير التفصيلي'}</label>
-                <textarea
-                  className="form-control"
-                  rows={3}
-                  placeholder={currentLang === 'en' ? 'Enter physical inspection findings or approval ticket ref...' : 'أدخل تفاصيل التلف أو رقم تذكرة الاعتماد...'}
-                  value={barcodeReprintComments}
-                  onChange={e => setBarcodeReprintComments(e.target.value)}
-                />
-              </div>
+                    <div className="form-group">
+                      <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Select Bar from Inventory' : 'اختر السبيكة من المخزون'}</label>
+                      <select
+                        className="form-control"
+                        style={{ color: '#000' }}
+                        value={barcodeReprintItemId || ''}
+                        onChange={e => {
+                          const id = parseInt(e.target.value);
+                          setBarcodeReprintItemId(id || null);
+                          setBarcodeReprintResult(null);
+                        }}
+                      >
+                        <option value="">{currentLang === 'en' ? '-- Select a Bar --' : '-- اختر السبيكة --'}</option>
+                        {inventoryList.map((b: any) => (
+                          <option key={b.item_id} value={b.item_id}>
+                            {b.serial_number} — {b.metal} {b.denomination} ({b.location || 'Vault'}) [{b.status}]
+                          </option>
+                        ))}
+                      </select>
+                    </div>
 
-              <button
-                className="btn btn-primary"
-                style={{ width: '100%', marginTop: '10px', background: '#D97706', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
-                onClick={handleReprintDamagedLabel}
-              >
-                <i className="fa-solid fa-print"></i>
-                <span>{currentLang === 'en' ? 'Confirm & Log Controlled Reprint' : 'تأكيد وإعادة الطباعة المعتمدة'}</span>
-              </button>
+                    <div className="form-group">
+                      <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Mandatory Reprint Reason' : 'سبب إعادة الطباعة الإلزامي'}</label>
+                      <select className="form-control" style={{ color: '#000' }} value={barcodeReprintReason} onChange={e => setBarcodeReprintReason(e.target.value)}>
+                        <option value="LABEL_DAMAGED">{currentLang === 'en' ? 'Physical Label Damaged / Smudged' : 'تلف أو مسح في الملصق المادي'}</option>
+                        <option value="PACKAGING_REPLACED">{currentLang === 'en' ? 'Security Packaging / Blister Replaced' : 'استبدال الغلاف الأمني للسبيكة'}</option>
+                        <option value="PHYSICAL_INSPECTION">{currentLang === 'en' ? 'Assay & Inspection Re-tagging' : 'إعادة الفحص المادي وتحديث البيانات'}</option>
+                        <option value="AUDIT_DISCREPANCY_CORRECTION">{currentLang === 'en' ? 'Audit / Stocktake Reconciliation Correction' : 'تصحيح ومطابقة جرد وتدقيق'}</option>
+                      </select>
+                    </div>
+
+                    <div className="form-group">
+                      <label style={{ fontSize: '12px' }}>{currentLang === 'en' ? 'Detailed Justification & Notes' : 'الملاحظات والتبرير التفصيلي'}</label>
+                      <textarea
+                        className="form-control"
+                        rows={3}
+                        placeholder={currentLang === 'en' ? 'Enter physical inspection findings or approval ticket ref...' : 'أدخل تفاصيل التلف أو رقم تذكرة الاعتماد...'}
+                        value={barcodeReprintComments}
+                        onChange={e => setBarcodeReprintComments(e.target.value)}
+                      />
+                    </div>
+
+                    <button
+                      className="btn btn-primary"
+                      style={{
+                        width: '100%',
+                        marginTop: '10px',
+                        background: !isAuthorizedForReprint ? '#6B7280' : '#D97706',
+                        cursor: !isAuthorizedForReprint ? 'not-allowed' : 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '8px'
+                      }}
+                      disabled={!isAuthorizedForReprint}
+                      onClick={handleReprintDamagedLabel}
+                    >
+                      <i className="fa-solid fa-print"></i>
+                      <span>{currentLang === 'en' ? 'Confirm & Log Controlled Reprint' : 'تأكيد وإعادة الطباعة المعتمدة'}</span>
+                    </button>
+                  </>
+                );
+              })()}
 
               {barcodeReprintResult && (
                 <div style={{ marginTop: '20px', background: 'rgba(16, 185, 129, 0.08)', border: '1px solid #10B981', borderRadius: '8px', padding: '16px' }}>
@@ -10521,6 +11217,9 @@ const [migrationApproved, setMigrationApproved] = useState(false);
               <button className={`btn-tab ${settingsTab === 'ttl' ? 'active' : ''}`} onClick={() => { setSettingsTab('ttl'); fetchReservationTtl(); }}>
                 <i className="fa-solid fa-clock-rotate-left"></i> {currentLang === 'ar' ? 'مدة حجز المخزون (TTL)' : 'Checkout Lock TTL'}
               </button>
+              <button className={`btn-tab ${settingsTab === 'qrcode' || settingsTab === 'turkey_qr' ? 'active' : ''}`} onClick={() => { setSettingsTab('qrcode'); fetchTurkeyQrSetting(); fetchQrReprintPrivilege(); }}>
+                <i className="fa-solid fa-qrcode"></i> {currentLang === 'ar' ? 'إعدادات رمز QR والطباعة' : 'QR Code & Printing'}
+              </button>
               <button
                 className={`btn-tab ${settingsTab === 'reset' ? 'active' : ''}`}
                 style={{ color: '#ef4444' }}
@@ -10691,6 +11390,167 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       : 'ليس لديك صلاحية لتعديل إعدادات النظام.'}
                   </p>
                 )}
+              </div>
+            )}
+
+            {(settingsTab === 'qrcode' || settingsTab === 'turkey_qr') && (
+              <div className="settings-tab-pane active" style={{ maxWidth: '680px' }}>
+                <h4>
+                  <i className="fa-solid fa-qrcode" style={{ color: 'var(--accent-gold)', marginRight: '8px' }}></i>
+                  {currentLang === 'en' ? 'QR Code & Printing Configuration' : 'إعدادات رمز QR وسياسات الطباعة'}
+                </h4>
+                <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>
+                  {currentLang === 'en'
+                    ? 'Configure global governance for QR code label reprinting and pre-transfer verification rules.'
+                    : 'تهيئة الحوكمة العامة لإعادة طباعة ملصقات QR وقواعد التحقق الإلزامية قبل نقل الملكية.'}
+                </p>
+
+                {/* CARD 1: QR CODE REPRINT PRIVILEGE */}
+                <div className="form-card" style={{ padding: '20px', background: 'var(--bg-secondary)', borderRadius: '8px', border: '1px solid var(--surface-border)', marginBottom: '24px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+                    <div style={{ fontWeight: '600', fontSize: '15px', color: 'var(--accent-gold)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <i className="fa-solid fa-user-shield"></i>
+                      {currentLang === 'en' ? 'QR Code Label Reprint Privilege' : 'صلاحية إعادة طباعة ملصقات QR'}
+                    </div>
+                    <span className="badge" style={{
+                      backgroundColor: qrReprintPrivilege === 'DISABLED' ? 'rgba(239, 68, 68, 0.2)' : qrReprintPrivilege === 'ADMIN_ONLY' ? 'rgba(245, 158, 11, 0.2)' : 'rgba(16, 185, 129, 0.2)',
+                      color: qrReprintPrivilege === 'DISABLED' ? '#EF4444' : qrReprintPrivilege === 'ADMIN_ONLY' ? '#F59E0B' : '#10B981',
+                      border: `1px solid ${qrReprintPrivilege === 'DISABLED' ? '#EF4444' : qrReprintPrivilege === 'ADMIN_ONLY' ? '#F59E0B' : '#10B981'}`
+                    }}>
+                      {qrReprintPrivilege}
+                    </span>
+                  </div>
+
+                  <p style={{ color: 'var(--text-muted)', fontSize: '12px', marginBottom: '16px' }}>
+                    {currentLang === 'en'
+                      ? 'Controls which user role is authorized to re-issue physical QR code bar stickers after smudging, damage, or repacking.'
+                      : 'يحدد الأدوار المصرح لها بإعادة طباعة ملصقات رموز QR عند تلفها أو استبدال الغلاف الأمني.'}
+                  </p>
+
+                  {qrReprintSuccessMsg && (
+                    <div style={{ padding: '8px 12px', borderRadius: '6px', background: 'rgba(16, 185, 129, 0.15)', border: '1px solid #10B981', color: '#065F46', marginBottom: '14px', fontSize: '12px', fontWeight: 'bold' }}>
+                      {qrReprintSuccessMsg}
+                    </div>
+                  )}
+
+                  {canModify('master_data') ? (
+                    <div>
+                      <div className="form-group" style={{ marginBottom: '14px' }}>
+                        <label style={{ fontSize: '12px', fontWeight: '600', display: 'block', marginBottom: '6px' }}>
+                          {currentLang === 'en' ? 'Select Authorized Role for Label Reprint:' : 'اختر الدور المسموح له بإعادة الطباعة:'}
+                        </label>
+                        <select
+                          className="form-control"
+                          style={{ color: '#000', fontSize: '13px' }}
+                          value={qrReprintPrivilege}
+                          onChange={e => setQrReprintPrivilege(e.target.value)}
+                        >
+                          <option value="ADMIN_ONLY">
+                            {currentLang === 'en' ? 'IT / System Admin Only (Strict Security)' : 'مدراء النظام فقط (IT / System Admin)'}
+                          </option>
+                          <option value="CHECKER_AND_ADMIN">
+                            {currentLang === 'en' ? 'Treasury Checker & Admin (Maker-Checker Segregation)' : 'المدقق ومدير النظام (Checker & Admin)'}
+                          </option>
+                          <option value="ALL_OPERATORS">
+                            {currentLang === 'en' ? 'All Authorized Operators (Standard Operations)' : 'كافة مشغلي الخزنة المعتمدين'}
+                          </option>
+                          <option value="DISABLED">
+                            {currentLang === 'en' ? 'Disabled Completely (Block All Reprints)' : 'تعطيل إعادة الطباعة نهائياً'}
+                          </option>
+                        </select>
+                      </div>
+
+                      <button
+                        className="btn btn-primary"
+                        onClick={() => handleSaveQrReprintPrivilege()}
+                        disabled={savingQrReprint}
+                      >
+                        <i className="fa-solid fa-floppy-disk"></i> {savingQrReprint ? (currentLang === 'en' ? 'Saving...' : 'جاري الحفظ...') : (currentLang === 'en' ? 'Save Reprint Privilege' : 'حفظ صلاحية إعادة الطباعة')}
+                      </button>
+                    </div>
+                  ) : (
+                    <p style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
+                      {currentLang === 'en' ? 'Read-only mode. Administrator permissions required to change.' : 'للقراءة فقط. يتطلب صلاحية المشرف للتعديل.'}
+                    </p>
+                  )}
+                </div>
+
+                {/* CARD 2: TURKEY CONSIGNMENT TRANSFER RULE */}
+                <div className="form-card" style={{ padding: '20px', background: 'var(--bg-secondary)', borderRadius: '8px', border: '1px solid var(--surface-border)' }}>
+                  <div style={{ fontWeight: '600', fontSize: '15px', color: 'var(--accent-gold)', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <i className="fa-solid fa-right-left"></i>
+                    {currentLang === 'en' ? 'Turkey Consignment Transfer Rule (QR Verification)' : 'شرط تحويل أمانات تركيا (التحقق من رمز QR)'}
+                  </div>
+                  <p style={{ color: 'var(--text-muted)', fontSize: '12px', marginBottom: '16px' }}>
+                    {currentLang === 'en'
+                      ? 'Prevent transferring precious metals from Turkey ownership (TURKEY_OWNED) to KFH ownership (KFH_OWNED) if no QR code label has been printed for the items.'
+                      : 'منع نقل ملكية المعادن الثمينة من تركيا إلى بيت التمويل الكويتي (KFH) إذا لم تتم طباعة ملصق رمز QR لها مسبقاً.'}
+                  </p>
+
+                  {turkeyQrSuccessMsg && (
+                    <div style={{ padding: '8px 12px', borderRadius: '6px', background: 'rgba(16, 185, 129, 0.15)', border: '1px solid #10B981', color: '#065F46', marginBottom: '14px', fontSize: '12px', fontWeight: 'bold' }}>
+                      {turkeyQrSuccessMsg}
+                    </div>
+                  )}
+
+                  {canModify('master_data') ? (
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', padding: '14px 18px', background: 'rgba(255,255,255,0.03)', borderRadius: '6px', border: '1px solid var(--surface-border)' }}>
+                        <div>
+                          <div style={{ fontWeight: '600', fontSize: '14px', marginBottom: '4px' }}>
+                            {currentLang === 'en' ? 'Require Printed QR Code Before Transfer' : 'إلزامية طباعة رمز QR قبل نقل الملكية'}
+                          </div>
+                          <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
+                            {currentLang === 'en'
+                              ? 'When enabled, Maker and Checker cannot initiate or approve Turkey-to-KFH transfers without verified QR labels.'
+                              : 'عند التفعيل، يمنع النظام نقل أو اعتماد شراء ذهب تركيا لـ KFH إلا بعد التحقق من طباعة ملصقات QR.'}
+                          </div>
+                        </div>
+                        <label style={{ position: 'relative', display: 'inline-block', width: '50px', height: '26px', cursor: 'pointer', flexShrink: 0 }}>
+                          <input
+                            type="checkbox"
+                            checked={turkeyQrRequired}
+                            onChange={e => setTurkeyQrRequired(e.target.checked)}
+                            style={{ opacity: 0, width: 0, height: 0 }}
+                          />
+                          <span style={{
+                            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+                            backgroundColor: turkeyQrRequired ? '#10B981' : '#4B5563',
+                            borderRadius: '26px', transition: '0.3s'
+                          }}>
+                            <span style={{
+                              position: 'absolute', height: '20px', width: '20px', left: turkeyQrRequired ? '26px' : '4px',
+                              bottom: '3px', backgroundColor: 'white', borderRadius: '50%', transition: '0.3s'
+                            }} />
+                          </span>
+                        </label>
+                      </div>
+
+                      <div style={{ marginBottom: '18px' }}>
+                        <span className={`badge ${turkeyQrRequired ? 'badge-ready' : 'badge-sold'}`} style={{ fontSize: '13px', padding: '6px 14px' }}>
+                          <i className={`fa-solid ${turkeyQrRequired ? 'fa-shield-halved' : 'fa-unlock'}`} style={{ marginRight: '6px' }}></i>
+                          {turkeyQrRequired
+                            ? (currentLang === 'en' ? 'ENFORCED: QR Code Printing Required' : 'مفعل: طباعة رمز QR إلزامية')
+                            : (currentLang === 'en' ? 'DISABLED: Transfers Allowed Without Printed QR' : 'معطل: يُسمح بنقل الملكية دون طباعة QR')}
+                        </span>
+                      </div>
+
+                      <button
+                        className="btn btn-primary"
+                        onClick={() => handleSaveTurkeyQrSetting()}
+                        disabled={savingTurkeyQr}
+                      >
+                        <i className="fa-solid fa-floppy-disk"></i> {savingTurkeyQr ? (currentLang === 'en' ? 'Saving...' : 'جاري الحفظ...') : (currentLang === 'en' ? 'Save Setting' : 'حفظ الإعداد')}
+                      </button>
+                    </div>
+                  ) : (
+                    <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>
+                      {currentLang === 'en'
+                        ? 'You do not have permission to modify system settings.'
+                        : 'ليس لديك صلاحية لتعديل إعدادات النظام.'}
+                    </p>
+                  )}
+                </div>
               </div>
             )}
 
@@ -13219,7 +14079,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                             <div><strong>{currentLang === 'en' ? 'Bar Serial Number:' : 'الرقم التسلسلي للسبيكة:'}</strong> <span style={{ fontFamily: 'monospace', color: 'var(--accent-gold)' }}>{selectedWfInstance.details.serial_number}</span></div>
                           )}
                           <div><strong>{currentLang === 'en' ? 'Customs Bayan No:' : 'رقم البيان الجمركي:'}</strong> {selectedWfInstance.details.customs_declaration_number || 'N/A'}</div>
-                          <div><strong>{currentLang === 'en' ? 'Customs Duty Paid (KWD):' : 'الرسوم الجمركية المسددة:'}</strong> {selectedWfInstance.details.customs_duty_amount ? `${selectedWfInstance.details.customs_duty_amount.toFixed(3)} KWD` : '—'}</div>
+                          <div><strong>{currentLang === 'en' ? 'Purchasing Cost (KWD):' : 'تكلفة الشراء (د.ك):'}</strong> {selectedWfInstance.details.customs_duty_amount ? `${selectedWfInstance.details.customs_duty_amount.toFixed(3)} KWD` : '—'}</div>
                           <div><strong>{currentLang === 'en' ? 'Port of Entry:' : 'منفذ الدخول:'}</strong> {selectedWfInstance.details.port_of_entry || '—'}</div>
                           <div><strong>{currentLang === 'en' ? 'Requested By (Maker):' : 'مقدم الطلب (المنشئ):'}</strong> {selectedWfInstance.details.requested_by || selectedWfInstance.details.created_by}</div>
                           <div><strong>{currentLang === 'en' ? 'Status Code:' : 'حالة الاعتماد:'}</strong> <span className="badge badge-reserved">{selectedWfInstance.details.status_code}</span></div>
@@ -13395,27 +14255,84 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                 </div>
 
                 <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Customs Lot / Shipment ID' : 'معرف لوت أو شحنة الجمارك'}</label>
-                  <input
-                    type="text"
+                  <label style={{ fontSize: '12px', fontWeight: 600, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span>{currentLang === 'en' ? 'Select Customs Shipment / Lot' : 'اختر شحنة / لوت الجمارك'} <span style={{ color: '#EF4444' }}>*</span></span>
+                    {loadingCustomsShipments ? (
+                      <span style={{ fontSize: '11px', color: '#F59E0B' }}>
+                        <i className="fa-solid fa-spinner fa-spin"></i> {currentLang === 'en' ? 'Loading shipments...' : 'جاري التحميل...'}
+                      </span>
+                    ) : (
+                      <span 
+                        style={{ fontSize: '11px', color: 'var(--primary-color)', cursor: 'pointer', textDecoration: 'underline' }}
+                        onClick={fetchCustomsShipments}
+                      >
+                        <i className="fa-solid fa-rotate-right"></i> {currentLang === 'en' ? 'Refresh' : 'تحديث'}
+                      </span>
+                    )}
+                  </label>
+                  <select
                     className="form-control"
-                    placeholder={currentLang === 'en' ? 'e.g., Lot ID (e.g. 1) or Lot Number' : 'مثال: رقم اللوت أو المعرف'}
                     value={customsTransferLotId}
-                    onChange={e => setCustomsTransferLotId(e.target.value)}
-                  />
+                    onChange={e => {
+                      const selectedVal = e.target.value;
+                      setCustomsTransferLotId(selectedVal);
+                      const s = customsShipmentsList.find(x => String(x.lotId) === selectedVal);
+                      if (s) {
+                        if (s.customsDeclarationNumber) setCustomsTransferBayan(s.customsDeclarationNumber);
+                        if (s.customsDutyAmount) setCustomsTransferDuty(s.customsDutyAmount);
+                        if (s.portOfEntry) setCustomsTransferPort(s.portOfEntry);
+                        if (s.shipmentReference) {
+                          setCustomsTransferNotes(`Clearance and transfer of customs shipment ${s.shipmentReference} (${s.vendorName || 'Supplier'}) to Turkey portfolio.`);
+                        }
+                      }
+                    }}
+                    style={{ fontWeight: 500 }}
+                  >
+                    <option value="">
+                      {customsShipmentsList.length === 0 
+                        ? (loadingCustomsShipments 
+                            ? (currentLang === 'en' ? 'Loading customs shipments...' : 'جاري تحميل الشحنات...') 
+                            : (currentLang === 'en' ? '-- No shipments currently in customs --' : '-- لا توجد شحنات بالجمارك حالياً --'))
+                        : (currentLang === 'en' ? '-- Select a customs shipment --' : '-- اختر شحنة خاضعة للجمارك --')}
+                    </option>
+                    {customsShipmentsList.map((s, idx) => (
+                      <option key={s.lotId ?? idx} value={String(s.lotId)}>
+                        📦 {s.lotNumber || `Lot #${s.lotId}`} | Ref: {s.shipmentReference || 'N/A'} | {s.vendorName} ({s.totalBars} bars, {s.totalWeightKg} kg)
+                      </option>
+                    ))}
+                  </select>
                 </div>
+
+                {customsTransferLotId && (() => {
+                  const s = customsShipmentsList.find(x => String(x.lotId) === customsTransferLotId);
+                  if (!s) return null;
+                  return (
+                    <div style={{ padding: '8px 12px', background: 'rgba(16, 185, 129, 0.08)', border: '1px solid rgba(16, 185, 129, 0.3)', borderRadius: '6px', fontSize: '12px', color: '#10B981', display: 'flex', gap: '15px', flexWrap: 'wrap' }}>
+                      <span><strong>{currentLang === 'en' ? 'Bars:' : 'السبائك:'}</strong> {s.totalBars}</span>
+                      <span><strong>{currentLang === 'en' ? 'Weight:' : 'الوزن:'}</strong> {s.totalWeightKg} kg</span>
+                      <span><strong>{currentLang === 'en' ? 'Supplier:' : 'المورد:'}</strong> {s.vendorName}</span>
+                      {s.customsDutyAmount ? <span><strong>{currentLang === 'en' ? 'Purchasing Cost:' : 'تكلفة الشراء:'}</strong> {s.customsDutyAmount} KWD</span> : null}
+                      <span><strong>{currentLang === 'en' ? 'Status:' : 'الحالة:'}</strong> {s.statusCode}</span>
+                    </div>
+                  );
+                })()}
 
                 <div className="form-group" style={{ marginBottom: 0 }}>
                   <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Target Portfolio Ownership' : 'جهة الملكية المستهدفة'}</label>
                   <select
                     className="form-control"
-                    value={customsTransferTargetOwnership}
-                    onChange={e => setCustomsTransferTargetOwnership(e.target.value as 'TURKEY_OWNED' | 'KFH_OWNED')}
-                    style={{ fontWeight: 'bold' }}
+                    value="TURKEY_OWNED"
+                    disabled
+                    style={{ fontWeight: 'bold', background: 'rgba(255, 255, 255, 0.05)', cursor: 'not-allowed', color: '#10B981' }}
                   >
                     <option value="TURKEY_OWNED">🇹🇷 {currentLang === 'en' ? 'Turkey Portfolio (Kuveyt Turk Consignment)' : 'محفظة تركيا (كويت ترك)'}</option>
-                    <option value="KFH_OWNED">🇰🇼 {currentLang === 'en' ? 'Kuwait Portfolio (KFH Institutional Owned)' : 'محفظة الكويت (بيت التمويل الكويتي)'}</option>
                   </select>
+                  <small style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px', display: 'block' }}>
+                    <i className="fa-solid fa-circle-info" style={{ marginRight: '4px' }}></i>
+                    {currentLang === 'en'
+                      ? 'Customs ownership transfers are designated exclusively for the Turkey consignment portfolio.'
+                      : 'تحويلات ملكية الجمارك مخصصة حصرياً لمحفظة أمانات تركيا.'}
+                  </small>
                 </div>
 
                 <div className="split-grid-2" style={{ gap: '12px' }}>
@@ -13430,7 +14347,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     />
                   </div>
                   <div className="form-group" style={{ marginBottom: 0 }}>
-                    <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Customs Duty Paid (KWD)' : 'الرسوم الجمركية المسددة (د.ك)'}</label>
+                    <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Purchasing Cost (KWD)' : 'تكلفة الشراء (د.ك)'}</label>
                     <input
                       type="number"
                       step="0.001"
@@ -14804,8 +15721,14 @@ const [migrationApproved, setMigrationApproved] = useState(false);
         <SerialToolsModal
           isOpen={showSerialToolsModal}
           onClose={() => setShowSerialToolsModal(false)}
-          onAddSerials={(items: GeneratedSerialItem[]) => {
-            const newBars = items.map((item, idx) => ({
+          onAddSerials={(items: GeneratedSerialItem[], cost?: number) => {
+            if (cost !== undefined && cost > 0 && items.length > 0) {
+              setDenominationPurchasingCosts(prev => ({ ...prev, [items[0].product_id]: cost }));
+              setIntakeCustomsDuty(cost);
+            }
+            const existingUpper = new Set(intakeBars.map(b => b.serial.trim().toUpperCase()));
+            const nonDuplicateItems = items.filter(item => !existingUpper.has(item.serial.trim().toUpperCase()));
+            const newBars = nonDuplicateItems.map((item, idx) => ({
               id: `bar-${Date.now()}-${idx}`,
               serial: item.serial,
               product_id: item.product_id,
@@ -14821,6 +15744,12 @@ const [migrationApproved, setMigrationApproved] = useState(false);
           products={products}
           brands={brandsList}
           currentLang={currentLang}
+          existingSerials={intakeBars.map(b => b.serial.trim())}
+          denominationPurchasingCosts={denominationPurchasingCosts}
+          onUpdatePurchasingCost={(productId: number, cost: number) => {
+            setDenominationPurchasingCosts(prev => ({ ...prev, [productId]: cost }));
+            setIntakeCustomsDuty(cost);
+          }}
         />
 
       </main>

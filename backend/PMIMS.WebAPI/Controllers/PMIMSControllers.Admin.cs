@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Claims;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
@@ -366,6 +367,23 @@ public partial class PMIMSControllers
     [HttpGet("inventory/low-stock-alerts")]
     public async Task<IActionResult> GetLowStockAlerts()
     {
+        // Low-stock replenishment alerts are restricted to operational and IT groups,
+        // and hidden from Management / Executive-only viewers.
+        bool isManagementOnly = User.IsInRole("Executive Management")
+            || User.IsInRole("Management")
+            || User.IsInRole("Board")
+            || User.Claims.Any(c => c.Type == ClaimTypes.Role && c.Value.Contains("Management", StringComparison.OrdinalIgnoreCase));
+
+        bool hasOperationalGrant = User.IsInRole("IT/Admin")
+            || User.HasClaim(c => c.Type == "perm:purchase_orders" && c.Value != "HIDDEN")
+            || User.HasClaim(c => c.Type == "perm:master_data" && c.Value != "HIDDEN")
+            || User.HasClaim(c => c.Type == "perm:intake" && c.Value != "HIDDEN");
+
+        if (isManagementOnly && !User.IsInRole("IT/Admin") && !hasOperationalGrant)
+        {
+            return Ok(new List<object>());
+        }
+
         var alerts = await _repository.CheckStockAlertsAsync();
         return Ok(alerts);
     }
@@ -374,6 +392,21 @@ public partial class PMIMSControllers
     [HttpGet("inventory/stock-alerts")]
     public async Task<IActionResult> GetStockAlerts()
     {
+        bool isManagementOnly = User.IsInRole("Executive Management")
+            || User.IsInRole("Management")
+            || User.IsInRole("Board")
+            || User.Claims.Any(c => c.Type == ClaimTypes.Role && c.Value.Contains("Management", StringComparison.OrdinalIgnoreCase));
+
+        bool hasOperationalGrant = User.IsInRole("IT/Admin")
+            || User.HasClaim(c => c.Type == "perm:purchase_orders" && c.Value != "HIDDEN")
+            || User.HasClaim(c => c.Type == "perm:master_data" && c.Value != "HIDDEN")
+            || User.HasClaim(c => c.Type == "perm:intake" && c.Value != "HIDDEN");
+
+        if (isManagementOnly && !User.IsInRole("IT/Admin") && !hasOperationalGrant)
+        {
+            return Ok(new List<object>());
+        }
+
         var alerts = await _repository.CheckStockAlertsAsync();
         return Ok(alerts);
     }
@@ -622,6 +655,63 @@ public partial class PMIMSControllers
         });
     }
 
+    [Authorize(Policy = "master_data.read")]
+    [HttpGet("settings/turkey-qr-requirement")]
+    public async Task<IActionResult> GetTurkeyQrRequirementSetting()
+    {
+        bool required = await _repository.IsQrCodeRequiredForTurkeyTransferAsync();
+        return Ok(new {
+            setting_key = "RequireQrPrintedForTurkeyTransfer",
+            required,
+            description = "Prevent gold bar ownership transfer from Turkey to KFH unless QR code has been printed"
+        });
+    }
+
+    [Authorize(Policy = "master_data.write")]
+    [HttpPost("settings/turkey-qr-requirement")]
+    public async Task<IActionResult> SaveTurkeyQrRequirementSetting([FromBody] SaveTurkeyQrRequirementRequest req)
+    {
+        string username = User?.Identity?.Name ?? "SYSTEM";
+        var setting = await _repository.SetQrCodeRequiredForTurkeyTransferAsync(req.Required, username);
+        return Ok(new {
+            setting_key = setting.SettingKey,
+            required = req.Required,
+            updated_at = setting.UpdatedAt,
+            updated_by = setting.UpdatedBy,
+            message = req.Required
+                ? "QR Code requirement for Turkey-to-KFH transfers enabled successfully."
+                : "QR Code requirement for Turkey-to-KFH transfers disabled successfully."
+        });
+    }
+
+    [Authorize(Policy = "master_data.read")]
+    [HttpGet("settings/qrcode-reprint-privilege")]
+    public async Task<IActionResult> GetQrReprintPrivilegeSetting()
+    {
+        string level = await _repository.GetQrCodeReprintPrivilegeAsync();
+        return Ok(new {
+            setting_key = "QrCodeReprintPrivilege",
+            privilege_level = level,
+            description = "Privilege level required to reprint physical QR code labels (ADMIN_ONLY, CHECKER_AND_ADMIN, ALL_OPERATORS, DISABLED)"
+        });
+    }
+
+    [Authorize(Policy = "master_data.write")]
+    [HttpPost("settings/qrcode-reprint-privilege")]
+    public async Task<IActionResult> SaveQrReprintPrivilegeSetting([FromBody] SaveQrReprintPrivilegeRequest req)
+    {
+        string username = User?.Identity?.Name ?? "SYSTEM";
+        var setting = await _repository.SetQrCodeReprintPrivilegeAsync(req.PrivilegeLevel, username);
+        return Ok(new {
+            setting_key = setting.SettingKey,
+            privilege_level = setting.SettingValue,
+            updated_at = setting.UpdatedAt,
+            updated_by = setting.UpdatedBy,
+            message = $"QR Code reprint privilege updated to '{setting.SettingValue}' successfully."
+        });
+    }
+
+
     // =========================================================================
     // PRESENTATION MODE / ZERO-STATE RESET
     // ------------------------------------------------------------------------
@@ -646,5 +736,9 @@ public partial class PMIMSControllers
 }
 
 public class SaveTtlRequest { public int TtlSeconds { get; set; } public double? TtlMinutes { get; set; } }
+public class SaveTurkeyQrRequirementRequest { public bool Required { get; set; } }
+public class SaveQrReprintPrivilegeRequest { public string PrivilegeLevel { get; set; } = "ADMIN_ONLY"; }
 public class TestErrorRequest { public string? Message { get; set; } }
 public class SqlQueryRequest { public string Query { get; set; } = null!; }
+
+

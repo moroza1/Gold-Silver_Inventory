@@ -2423,6 +2423,272 @@ public class PMIMSTests
             .ToListAsync();
         Assert.Equal(2, txList.Count);
     }
+
+    [Fact]
+    public async Task TestCheckerCannotInitiateWorkflowUnlessStartPoint()
+    {
+        using var setup = CreateContext();
+        await SeedBasicDataAsync(setup.Context);
+
+        // 1. Provision real Maker and Checker groups and users
+        var groupMaker = new PrivilegeGroup { GroupName = "Treasury Operations (Maker)", Description = "Maker operations", IsSystem = true };
+        var groupChecker = new PrivilegeGroup { GroupName = "Treasury Operations (Checker)", Description = "Checker operations", IsSystem = true };
+        setup.Context.PrivilegeGroups.AddRange(groupMaker, groupChecker);
+        await setup.Context.SaveChangesAsync();
+
+        var userMaker = new AppUser { Username = "real-maker", DisplayName = "Maker Person", Email = "maker@test.local", PasswordHash = "hash" };
+        var userChecker = new AppUser { Username = "real-checker", DisplayName = "Checker Person", Email = "checker@test.local", PasswordHash = "hash" };
+        setup.Context.AppUsers.AddRange(userMaker, userChecker);
+        await setup.Context.SaveChangesAsync();
+
+        setup.Context.UserGroupMemberships.AddRange(
+            new UserGroupMembership { UserId = userMaker.UserId, GroupId = groupMaker.GroupId, AssignedBy = "TEST" },
+            new UserGroupMembership { UserId = userChecker.UserId, GroupId = groupChecker.GroupId, AssignedBy = "TEST" }
+        );
+        await setup.Context.SaveChangesAsync();
+
+        var repo = new InventoryRepository(setup.Context);
+
+        // 2. Configure workflow where Step 1 is Maker, Step 2 is Checker
+        string stepsJson = "[{\"step_name\":\"Maker Draft\",\"required_role\":\"Treasury Operations (Maker)\",\"description\":\"Maker creation\"},{\"step_name\":\"Checker Approval\",\"required_role\":\"Treasury Operations (Checker)\",\"description\":\"Checker review\"}]";
+        await repo.SaveWorkflowTemplateAsync("PURCHASE_ORDER", "PO Workflow", "Maker to Checker flow", stepsJson);
+
+        // 3. Checker tries to initiate workflow -> MUST BE REJECTED
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await repo.CreatePurchaseOrderAsync("PO-CHECKER-BLOCKED-01", 1, 1000m, 73000m, "USD", "real-checker", "[]");
+        });
+        Assert.Contains("not authorized to initiate", ex.Message);
+        Assert.Contains("Treasury Operations (Maker)", ex.Message);
+
+        // 4. Maker initiates workflow -> MUST SUCCEED (Maker IS the start point)
+        var (poId, result) = await repo.CreatePurchaseOrderAsync("PO-MAKER-ALLOWED-01", 1, 1000m, 73000m, "USD", "real-maker", "[]");
+        Assert.Equal("SUCCESS", result);
+        Assert.True(poId > 0);
+
+        // 5. Test reverse workflow where Checker IS configured as the start point (Step 1 = Checker)
+        string checkerStartSteps = "[{\"step_name\":\"Checker Audit First\",\"required_role\":\"Treasury Operations (Checker)\",\"description\":\"Checker start\"}]";
+        await repo.SaveWorkflowTemplateAsync("BRANCH_TRANSFER", "Transfer Audit Flow", "Checker starting flow", checkerStartSteps);
+
+        var item = new InventoryItem { SerialNumber = "BAR-WF-CHK-01", ProductId = 1, LocationId = 1, LotId = 1, StatusCode = "READY", OwnershipType = "KFH_OWNED" };
+        setup.Context.InventoryItems.Add(item);
+        await setup.Context.SaveChangesAsync();
+
+        // Checker CAN initiate when he IS the start point
+        var transfer = await repo.InitiateWorkflowBranchTransferAsync(item.ItemId, 2, "Escort", "real-checker");
+        Assert.NotNull(transfer);
+        Assert.True(transfer.TransferId > 0);
+    }
+
+    [Fact]
+    public async Task TurkeyConsignment_QrCodeRequirementSetting_EnforcesOrAllowsTransfer()
+    {
+        using var setup = CreateContext();
+        await SeedBasicDataAsync(setup.Context);
+        var repo = new InventoryRepository(setup.Context);
+
+        // 1. Setup TURKEY_PURCHASE workflow template and item
+        var trWorkflow = new WorkflowTemplate
+        {
+            WorkflowType = "TURKEY_PURCHASE",
+            Name = "Turkey Purchase Workflow",
+            Description = "Consignment purchase verification",
+            IsActive = true
+        };
+        setup.Context.WorkflowTemplates.Add(trWorkflow);
+        await setup.Context.SaveChangesAsync();
+
+        setup.Context.WorkflowSteps.Add(
+            new WorkflowStep { TemplateId = trWorkflow.TemplateId, StepOrder = 1, StepName = "Purchase Approval", RequiredRole = "Operations Checker", Description = "Approve Turkey purchase" }
+        );
+        await setup.Context.SaveChangesAsync();
+
+        var trItem = new InventoryItem
+        {
+            SerialNumber = "TR-BAR-TEST-001",
+            ProductId = 1,
+            LotId = 1,
+            LocationId = 1,
+            OwnershipType = "TURKEY_OWNED",
+            StatusCode = "READY"
+        };
+        setup.Context.InventoryItems.Add(trItem);
+        await setup.Context.SaveChangesAsync();
+
+        // 2. By default or when disabled, transfer should succeed even without QR printed
+        await repo.SetQrCodeRequiredForTurkeyTransferAsync(false, "admin");
+        Assert.False(await repo.IsQrCodeRequiredForTurkeyTransferAsync());
+
+        var pending1 = await repo.InitiateTurkeyPurchaseWorkflowAsync(
+            new List<string> { "TR-BAR-TEST-001" },
+            24.50m,
+            "maker1",
+            "Initial test purchase");
+        Assert.NotNull(pending1);
+        Assert.Equal("PENDING_APPROVAL", pending1.StatusCode);
+
+        // Clean up pending for next test
+        setup.Context.PendingTurkeyPurchases.Remove(pending1);
+        await setup.Context.SaveChangesAsync();
+
+        // 3. Enable QR requirement setting
+        await repo.SetQrCodeRequiredForTurkeyTransferAsync(true, "admin");
+        Assert.True(await repo.IsQrCodeRequiredForTurkeyTransferAsync());
+
+        // 4. Maker attempts to initiate transfer without QR printed -> MUST THROW
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await repo.InitiateTurkeyPurchaseWorkflowAsync(
+                new List<string> { "TR-BAR-TEST-001" },
+                24.50m,
+                "maker1",
+                "Purchase blocked without QR");
+        });
+        Assert.Contains("QR Code has not been printed", ex.Message);
+        Assert.Contains("TR-BAR-TEST-001", ex.Message);
+
+        // 5. Print the QR label (record ChainOfCustodyEvent LABEL_PRINTED)
+        await repo.RecordChainOfCustodyEventAsync(trItem.ItemId, "LABEL_PRINTED", "operator", notes: "QR printed for testing");
+
+        // 6. Maker attempts to initiate transfer after QR printed -> MUST SUCCEED
+        var pending2 = await repo.InitiateTurkeyPurchaseWorkflowAsync(
+            new List<string> { "TR-BAR-TEST-001" },
+            24.50m,
+            "maker1",
+            "Purchase after QR printed");
+        Assert.NotNull(pending2);
+        Assert.Equal("PENDING_APPROVAL", pending2.StatusCode);
+
+        // 7. Checker approves -> ownership changes to KFH_OWNED
+        var approveResult = await repo.ApproveTurkeyPurchaseAsync(pending2.PendingPurchaseId, "checker1");
+        Assert.Equal("SUCCESS", approveResult);
+
+        var updatedItem = await setup.Context.InventoryItems.FindAsync(trItem.ItemId);
+        Assert.NotNull(updatedItem);
+        Assert.Equal("KFH_OWNED", updatedItem.OwnershipType);
+
+        // 8. Can disable setting again
+        await repo.SetQrCodeRequiredForTurkeyTransferAsync(false, "admin");
+        Assert.False(await repo.IsQrCodeRequiredForTurkeyTransferAsync());
+    }
+
+    [Fact]
+    public async Task QrCodeReprintPrivilege_SettingsAndValidation_WorkCorrectly()
+    {
+        using var setup = CreateContext();
+        await SeedBasicDataAsync(setup.Context);
+        var repo = new InventoryRepository(setup.Context);
+
+        // 1. Defaults to ADMIN_ONLY
+        var defaultPriv = await repo.GetQrCodeReprintPrivilegeAsync();
+        Assert.Equal("ADMIN_ONLY", defaultPriv);
+
+        // 2. Set to valid levels
+        await repo.SetQrCodeReprintPrivilegeAsync("CHECKER_AND_ADMIN", "admin");
+        Assert.Equal("CHECKER_AND_ADMIN", await repo.GetQrCodeReprintPrivilegeAsync());
+
+        await repo.SetQrCodeReprintPrivilegeAsync("ALL_OPERATORS", "admin");
+        Assert.Equal("ALL_OPERATORS", await repo.GetQrCodeReprintPrivilegeAsync());
+
+        await repo.SetQrCodeReprintPrivilegeAsync("DISABLED", "admin");
+        Assert.Equal("DISABLED", await repo.GetQrCodeReprintPrivilegeAsync());
+
+        await repo.SetQrCodeReprintPrivilegeAsync("ADMIN_ONLY", "admin");
+        Assert.Equal("ADMIN_ONLY", await repo.GetQrCodeReprintPrivilegeAsync());
+
+        // 3. Invalid level throws ArgumentException
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+        {
+            await repo.SetQrCodeReprintPrivilegeAsync("SUPERUSER_ONLY", "admin");
+        });
+    }
+
+    [Fact]
+    public async Task QrCodeContent_ContainsDenomination_SerialNo_AndProductTypeSwissOrTurkey()
+    {
+        using var setup = CreateContext();
+        await SeedBasicDataAsync(setup.Context);
+        var repo = new InventoryRepository(setup.Context);
+        var barcodeService = new BarcodeLabelService(repo);
+
+        // 1. Swiss Gold Bar (p1 seeded with AU-1KG-SWISS, Switzerland, 1kg)
+        var swissItem = new InventoryItem
+        {
+            ItemId = 881,
+            SerialNumber = "KFH-AU-SWISS-001",
+            ProductId = 1, // AU-1KG-SWISS, Switzerland
+            LotId = 1,
+            LocationId = 1,
+            OwnershipType = "KFH_OWNED",
+            StatusCode = "READY"
+        };
+        setup.Context.InventoryItems.Add(swissItem);
+
+        // 2. Turkey Gold Bar (AU-100G-TURK, Turkey, 100g)
+        var d100g = new MetalDenomination { DenominationId = 2, Label = "100g", WeightGrams = 100m, WeightOunces = 3.215m, MetalTypeId = 1 };
+        setup.Context.MetalDenominations.Add(d100g);
+
+        var pTurk = new MetalProduct
+        {
+            ProductId = 92,
+            ProductCode = "AU-100G-TURK",
+            MetalTypeId = 1,
+            DenominationId = 2, // 100g
+            PurityId = 1,
+            OriginCountry = "Turkey",
+            BrandName = "Nadir Gold Refinery"
+        };
+        setup.Context.MetalProducts.Add(pTurk);
+
+        var turkItem = new InventoryItem
+        {
+            ItemId = 882,
+            SerialNumber = "TR-BAR-TEST-777",
+            ProductId = 92,
+            LotId = 1,
+            LocationId = 1,
+            OwnershipType = "TURKEY_OWNED",
+            StatusCode = "READY"
+        };
+        setup.Context.InventoryItems.Add(turkItem);
+        await setup.Context.SaveChangesAsync();
+
+        // 3. Generate Label for Swiss Bar
+        var swissLabel = await barcodeService.GenerateItemLabelAsync("KFH-AU-SWISS-001");
+        Assert.NotNull(swissLabel);
+        Assert.Equal("KFH-AU-SWISS-001", swissLabel.SerialNumber);
+        Assert.NotNull(swissLabel.QrCodeContent);
+        Assert.Contains("Serial No: KFH-AU-SWISS-001", swissLabel.QrCodeContent);
+        Assert.Contains("Denomination: 1 Kilogram Bar", swissLabel.QrCodeContent);
+        Assert.Contains("Product Type: Gold Swiss", swissLabel.QrCodeContent);
+        Assert.Contains("<svg", swissLabel.QrCodeSvg);
+
+        // 4. Generate Label for Turkey Bar
+        var turkLabel = await barcodeService.GenerateItemLabelAsync("TR-BAR-TEST-777");
+        Assert.NotNull(turkLabel);
+        Assert.Equal("TR-BAR-TEST-777", turkLabel.SerialNumber);
+        Assert.NotNull(turkLabel.QrCodeContent);
+        Assert.Contains("Serial No: TR-BAR-TEST-777", turkLabel.QrCodeContent);
+        Assert.Contains("Denomination: 100g", turkLabel.QrCodeContent);
+        Assert.Contains("Product Type: Gold Turkey", turkLabel.QrCodeContent);
+        Assert.Contains("<svg", turkLabel.QrCodeSvg);
+
+        // 5. Custom Barcode Label with Turkey origin
+        var (valid, _, customLabel) = await barcodeService.GenerateCustomLabelAsync(new CustomBarcodeLabelRequest
+        {
+            SerialNumber = "CUSTOM-TR-001",
+            MetalName = "Gold",
+            WeightGrams = 50,
+            DenominationLabel = "50g",
+            RefinerBrand = "Nadir Turkey",
+            OwnershipType = "TURKEY_OWNED"
+        });
+        Assert.True(valid);
+        Assert.NotNull(customLabel);
+        Assert.Contains("Serial No: CUSTOM-TR-001", customLabel.QrCodeContent);
+        Assert.Contains("Denomination: 50g", customLabel.QrCodeContent);
+        Assert.Contains("Product Type: Gold Turkey", customLabel.QrCodeContent);
+    }
 }
 
 

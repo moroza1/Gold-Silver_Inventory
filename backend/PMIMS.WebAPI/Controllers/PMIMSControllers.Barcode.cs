@@ -70,6 +70,23 @@ public partial class PMIMSControllers
             return BadRequest(new { error = "Reprint reason is mandatory (e.g. 'LABEL_DAMAGED', 'PACKAGING_REPLACED', 'AUDIT_REQUEST')." });
         }
 
+        string requiredPrivilege = await _repository.GetQrCodeReprintPrivilegeAsync();
+        bool isAdmin = User.IsInRole("IT/Admin") || User.IsInRole("IT Administrators");
+        bool isChecker = User.IsInRole("Treasury Operations (Checker)") || User.IsInRole("Checker");
+
+        if (requiredPrivilege == "DISABLED")
+        {
+            return StatusCode(403, new { error = "QR Code label reprinting is currently disabled in system configuration." });
+        }
+        else if (requiredPrivilege == "ADMIN_ONLY" && !isAdmin)
+        {
+            return StatusCode(403, new { error = "Unauthorized: QR Code label reprinting is restricted to Administrators in system settings." });
+        }
+        else if (requiredPrivilege == "CHECKER_AND_ADMIN" && !isAdmin && !isChecker)
+        {
+            return StatusCode(403, new { error = "Unauthorized: QR Code label reprinting requires Checker or Administrator privilege in system settings." });
+        }
+
         var label = await _barcodeLabelService.GenerateItemLabelByIdAsync(itemId);
         if (label == null) return NotFound(new { error = "Inventory item not found." });
 

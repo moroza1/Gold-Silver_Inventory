@@ -1072,6 +1072,24 @@ public static class DbSeeder
                 Description = "Duration (in seconds) that physical gold bars remain locked in pessimistic reservation during checkout before auto-release",
                 UpdatedBy = "SYSTEM",
                 UpdatedAt = DateTime.UtcNow
+            },
+            new SystemSetting
+            {
+                SettingKey = "RequireQrPrintedForTurkeyTransfer",
+                SettingValue = "false",
+                Category = "TURKEY_CONSIGNMENT",
+                Description = "Prevent gold bar ownership transfer from Turkey to KFH unless QR code has been printed",
+                UpdatedBy = "SYSTEM",
+                UpdatedAt = DateTime.UtcNow
+            },
+            new SystemSetting
+            {
+                SettingKey = "QrCodeReprintPrivilege",
+                SettingValue = "ADMIN_ONLY",
+                Category = "QR_CODE_LABELS",
+                Description = "Privilege level required to reprint physical QR code labels (ADMIN_ONLY, CHECKER_AND_ADMIN, ALL_OPERATORS, DISABLED)",
+                UpdatedBy = "SYSTEM",
+                UpdatedAt = DateTime.UtcNow
             }
         );
 

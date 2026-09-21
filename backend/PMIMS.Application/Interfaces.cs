@@ -21,7 +21,7 @@ public interface IInventoryRepository
         string sourceType = "SUPPLIER", int? customerId = null, int? accountId = null, string? receiptReason = null,
         int? vendorId = null, string? shipmentReference = null, string? deliveryNoteNumber = null, string? airwayBillNumber = null,
         string? supportingDocumentUrl = null, string? discrepancyNotes = null, DateTime? receivingDate = null, string ownershipType = "KFH_OWNED",
-        string? customsDeclarationNumber = null, string? portOfEntry = null);
+        string? customsDeclarationNumber = null, string? portOfEntry = null, decimal? customsDutyAmount = null);
     Task<IEnumerable<dynamic>> QueryAvailableStockAsync(int? branchId, int? metalTypeId, string? originCountry, int? denominationId);
     Task<Guid?> ReserveStockAsync(int customerId, int productId, int branchId, int channelId, string idempotencyKey, int ttlSeconds);
     Task<string> ConfirmPurchaseWithCustodyAsync(Guid reservationToken, int accountId, decimal salePrice, decimal markupAmount, string invoiceNumber, string? custodyAgreementNumber);
@@ -151,6 +151,7 @@ public interface IInventoryRepository
     Task<PendingCustomsTransfer> InitiateCustomsTransferWorkflowAsync(int? lotId, int? itemId, string targetOwnership, string requestedBy,
         string? clearanceNotes = null, string? customsDeclarationNumber = null, decimal? customsDutyAmount = null, string? portOfEntry = null);
     Task<IEnumerable<PendingCustomsTransfer>> GetPendingCustomsTransfersAsync();
+    Task<IEnumerable<CustomsShipmentDto>> GetCustomsShipmentsAsync();
     Task<string> NotifyBranchesOfReceivedInventoryAsync(int lotId, string lotNumber, int totalItemsReceived, decimal totalWeightGrams, string metalType, DateTime acquisitionDate, string notifiedBy);
     Task<IEnumerable<PendingIntake>> GetPendingIntakesAsync();
 
@@ -159,6 +160,11 @@ public interface IInventoryRepository
     Task<string> ApproveTurkeyPurchaseAsync(int pendingPurchaseId, string approvedBy);
     Task<IEnumerable<InventoryItem>> GetTurkeyInventoryAsync();
     Task<IEnumerable<PendingTurkeyPurchase>> GetPendingTurkeyPurchasesAsync();
+    Task<bool> IsQrCodeRequiredForTurkeyTransferAsync();
+    Task<SystemSetting> SetQrCodeRequiredForTurkeyTransferAsync(bool enabled, string updatedBy);
+    Task<HashSet<int>> GetPrintedLabelItemIdsAsync(IEnumerable<int> itemIds);
+    Task<string> GetQrCodeReprintPrivilegeAsync();
+    Task<SystemSetting> SetQrCodeReprintPrivilegeAsync(string privilegeLevel, string updatedBy);
 
     // =========================================================================
     // Dynamic Business Validation Rules Engine (RFP item 5) -- pure data access;

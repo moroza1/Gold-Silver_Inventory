@@ -21,12 +21,18 @@ public partial class PMIMSControllers
         try
         {
             var items = (await _repository.GetTurkeyInventoryAsync()).ToList();
+            var itemIds = items.Select(i => i.ItemId).ToList();
+            var printedItemIds = await _repository.GetPrintedLabelItemIdsAsync(itemIds);
+            bool qrRequired = await _repository.IsQrCodeRequiredForTurkeyTransferAsync();
 
             var summary = new
             {
                 total_bars = items.Count,
                 total_weight_grams = items.Sum(i => i.Product?.Denomination?.WeightGrams ?? 0),
                 total_weight_kg = Math.Round(items.Sum(i => i.Product?.Denomination?.WeightGrams ?? 0) / 1000m, 4),
+                qr_required_for_transfer = qrRequired,
+                total_qr_printed = items.Count(i => printedItemIds.Contains(i.ItemId)),
+                total_qr_missing = items.Count(i => !printedItemIds.Contains(i.ItemId)),
                 by_product = items.GroupBy(i => i.Product?.ProductCode ?? "UNKNOWN")
                     .Select(g => new
                     {
@@ -58,7 +64,8 @@ public partial class PMIMSControllers
                 location_code = i.Location != null ? $"{i.Location.ZoneRoom} / {i.Location.ShelfRow} / {i.Location.SlotBin}" : "Unassigned",
                 ownership_type = i.OwnershipType,
                 status_code = i.StatusCode,
-                lot_number = i.Lot?.LotNumber
+                lot_number = i.Lot?.LotNumber,
+                has_qr_printed = printedItemIds.Contains(i.ItemId)
             }).ToList();
 
             return Ok(new

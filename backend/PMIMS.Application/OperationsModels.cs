@@ -126,6 +126,8 @@ public class BarcodeLabelDto
     public string Gs1HumanReadable { get; set; } = null!;
     public string BarcodeSvg { get; set; } = null!;
     public string QrCodeSvg { get; set; } = null!;
+    // Exact text encoded into the QR code symbol (Denomination, Serial No, Product Type e.g. Gold Swiss / Gold Turkey)
+    public string QrCodeContent { get; set; } = null!;
 }
 
 public class LotLabelSheetDto

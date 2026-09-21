@@ -7,6 +7,9 @@ interface TurkeyPurchaseScreenProps {
       total_bars: number;
       total_weight_grams: number;
       total_weight_kg: number;
+      qr_required_for_transfer?: boolean;
+      total_qr_printed?: number;
+      total_qr_missing?: number;
       by_product: any[];
     };
     items: any[];
@@ -39,13 +42,11 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
   
   // Selection state
   const [selectedSerials, setSelectedSerials] = useState<string[]>([]);
-  
-  // Smart Tools Modal state (Range, Paste, OCR Scanner)
   const [showSmartModal, setShowSmartModal] = useState(false);
   const [smartTab, setSmartTab] = useState<'RANGE' | 'PASTE' | 'OCR'>('RANGE');
   const [smartProduct, setSmartProduct] = useState<string>('');
 
-  // Range tool state
+  // Range select state
   const [rangeStart, setRangeStart] = useState('');
   const [rangeEnd, setRangeEnd] = useState('');
 
@@ -70,6 +71,7 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
   const [searchSelectedQuery, setSearchSelectedQuery] = useState('');
 
   const availableItems = turkeyInventory?.items || [];
+  const isQrRequirementActive = !!turkeyInventory?.summary?.qr_required_for_transfer;
 
   // Filtered items
   const filteredItems = useMemo(() => {
@@ -96,6 +98,10 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
       totalWeightKg
     };
   }, [availableItems, selectedSerials]);
+
+  const unprintedSelectedItems = useMemo(() => {
+    return selectedItemsData.items.filter(i => !i.has_qr_printed);
+  }, [selectedItemsData.items]);
 
   // Search filter within selected items
   const displayedSelectedItems = useMemo(() => {
@@ -499,6 +505,14 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
       return;
     }
 
+    if (isQrRequirementActive && unprintedSelectedItems.length > 0) {
+      const sampleSerials = unprintedSelectedItems.slice(0, 5).map(i => i.serial_number).join(', ');
+      alert(currentLang === 'en'
+        ? `⚠️ Transfer Blocked by System Policy:\n\nQR Code has not been printed for ${unprintedSelectedItems.length} selected bar(s) (${sampleSerials}${unprintedSelectedItems.length > 5 ? '...' : ''}).\n\nPlease print QR code labels in Barcode & QR Labeling before transferring ownership.`
+        : `⚠️ النقل محظور وفقاً لسياسة النظام:\n\nلم تتم طباعة ملصق QR لعدد ${unprintedSelectedItems.length} سبيكة محددة (${sampleSerials}${unprintedSelectedItems.length > 5 ? '...' : ''}).\n\nيرجى طباعة ملصقات QR من شاشة الباركود قبل نقل الملكية إلى بيتك.`);
+      return;
+    }
+
     setIsSubmitting(true);
     const success = await onSubmitPurchase(selectedSerials, rateNum, purchaseNotes);
     setIsSubmitting(false);
@@ -559,6 +573,47 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
         </div>
 
       </div>
+
+      {/* QR Code Requirement Status Banner */}
+      {isQrRequirementActive && (
+        <div style={{
+          background: 'rgba(245, 158, 11, 0.08)',
+          border: '1px solid rgba(245, 158, 11, 0.35)',
+          borderRadius: '8px',
+          padding: '12px 18px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '12px'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div style={{ width: '34px', height: '34px', borderRadius: '50%', background: 'rgba(245, 158, 11, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#F59E0B', fontSize: '16px', flexShrink: 0 }}>
+              <i className="fa-solid fa-qrcode"></i>
+            </div>
+            <div>
+              <div style={{ fontWeight: 'bold', fontSize: '13px', color: '#F59E0B' }}>
+                {currentLang === 'en' ? 'System Setting Enforced: QR Code Verification' : 'شرط نظام مفعل: التحقق من طباعة رمز QR'}
+              </div>
+              <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                {currentLang === 'en'
+                  ? 'Transfer from Turkey ownership to KFH is blocked for any bar that does not have a printed QR label.'
+                  : 'نقل الملكية من تركيا إلى بيتك محظور لأي سبيكة لم تتم طباعة ملصق QR لها مسبقاً.'}
+              </div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', fontSize: '12px' }}>
+            <span className="badge badge-ready" style={{ fontSize: '12px', padding: '4px 10px' }}>
+              <i className="fa-solid fa-check"></i> {turkeyInventory?.summary?.total_qr_printed || 0} {currentLang === 'en' ? 'QR Printed' : 'مطبوع QR'}
+            </span>
+            {(turkeyInventory?.summary?.total_qr_missing || 0) > 0 && (
+              <span className="badge badge-sold" style={{ fontSize: '12px', padding: '4px 10px' }}>
+                <i className="fa-solid fa-triangle-exclamation"></i> {turkeyInventory?.summary?.total_qr_missing} {currentLang === 'en' ? 'No QR' : 'بدون QR'}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* 2. SUB-TABS NAVIGATION */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
@@ -757,13 +812,14 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
                         <th>{currentLang === 'en' ? 'Refiner / Brand' : 'المصفاة'}</th>
                         <th>{currentLang === 'en' ? 'Vault Location' : 'موقع الخزينة'}</th>
                         <th>{currentLang === 'en' ? 'Ownership' : 'الملكية'}</th>
+                        <th>{currentLang === 'en' ? 'QR Status' : 'حالة QR'}</th>
                         <th style={{ width: '70px', textAlign: 'center' }}>{currentLang === 'en' ? 'Action' : 'إجراء'}</th>
                       </tr>
                     </thead>
                     <tbody>
                       {displayedSelectedItems.length === 0 ? (
                         <tr>
-                          <td colSpan={7} style={{ textAlign: 'center', padding: '36px 20px', color: 'var(--text-muted)' }}>
+                          <td colSpan={8} style={{ textAlign: 'center', padding: '36px 20px', color: 'var(--text-muted)' }}>
                             <i className="fa-solid fa-cart-arrow-down" style={{ fontSize: '32px', marginBottom: '12px', color: 'var(--accent-gold)', opacity: 0.6, display: 'block' }}></i>
                             <strong style={{ fontSize: '14px', color: 'var(--text-primary)', display: 'block', marginBottom: '6px' }}>
                               {selectedItemsData.items.length === 0 
@@ -807,6 +863,17 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
                                 <span className="badge" style={{ background: 'rgba(225, 29, 72, 0.12)', color: '#E11D48', border: '1px solid rgba(225, 29, 72, 0.3)' }}>
                                   🇹🇷 TURKEY_OWNED
                                 </span>
+                              </td>
+                              <td>
+                                {item.has_qr_printed ? (
+                                  <span className="badge badge-ready" style={{ fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                    <i className="fa-solid fa-qrcode"></i> {currentLang === 'en' ? 'Printed' : 'مطبوع'}
+                                  </span>
+                                ) : (
+                                  <span className="badge" style={{ fontSize: '11px', background: 'rgba(239, 68, 68, 0.12)', color: '#EF4444', border: '1px solid rgba(239, 68, 68, 0.3)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                    <i className="fa-solid fa-triangle-exclamation"></i> {currentLang === 'en' ? 'No QR' : 'غير مطبوع'}
+                                  </span>
+                                )}
                               </td>
                               <td style={{ textAlign: 'center' }}>
                                 <button
@@ -905,13 +972,37 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
               />
             </div>
 
+            {/* QR Verification Warning if policy active and unprinted bars selected */}
+            {isQrRequirementActive && unprintedSelectedItems.length > 0 && selectedSerials.length > 0 && (
+              <div style={{
+                background: 'rgba(239, 68, 68, 0.1)',
+                border: '1px solid rgba(239, 68, 68, 0.35)',
+                borderRadius: '8px',
+                padding: '12px',
+                marginBottom: '16px',
+                color: '#EF4444',
+                fontSize: '12px',
+                lineHeight: '1.4'
+              }}>
+                <div style={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                  <i className="fa-solid fa-ban"></i>
+                  {currentLang === 'en' ? 'Ownership Transfer Blocked' : 'نقل الملكية محظور'}
+                </div>
+                <div>
+                  {currentLang === 'en'
+                    ? `${unprintedSelectedItems.length} selected bar(s) do not have printed QR codes. System settings require all bars to have printed QR labels before transfer.`
+                    : `يوجد ${unprintedSelectedItems.length} سبيكة محددة بدون ملصق QR مطبوع. إعدادات النظام تمنع نقل الملكية حتى تتم طباعة ملصقات QR لجميع السبائك.`}
+                </div>
+              </div>
+            )}
+
             {/* Submit Button */}
             {canModify ? (
               <button
                 type="button"
                 className="btn btn-primary"
                 onClick={handleSubmit}
-                disabled={selectedSerials.length === 0 || isSubmitting}
+                disabled={selectedSerials.length === 0 || isSubmitting || (isQrRequirementActive && unprintedSelectedItems.length > 0)}
                 style={{ width: '100%', padding: '12px', fontSize: '14px', fontWeight: 'bold' }}
               >
                 {isSubmitting ? (
