@@ -1881,8 +1881,9 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   }, [showCustomsTransferModal]);
 
   const handleInitiateCustomsTransfer = async () => {
-    if (!customsTransferLotId) {
-      alert(currentLang === 'en' ? 'Please select or enter a customs Lot ID.' : 'يرجى اختيار أو إدخال رقم دفعة الجمارك.');
+    const parsedId = parseInt(customsTransferLotId, 10);
+    if (!customsTransferLotId || isNaN(parsedId)) {
+      alert(currentLang === 'en' ? 'Please select a customs shipment from the list.' : 'يرجى اختيار شحنة جمركية صالحة من القائمة.');
       return;
     }
     setCustomsTransferSubmitting(true);
@@ -1891,7 +1892,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({
-          lotId: parseInt(customsTransferLotId) || null,
+          lotId: parsedId,
           targetOwnership: 'TURKEY_OWNED',
           clearanceNotes: customsTransferNotes,
           customsDeclarationNumber: customsTransferBayan,
@@ -14314,13 +14315,18 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     onChange={e => {
                       const selectedVal = e.target.value;
                       setCustomsTransferLotId(selectedVal);
-                      const s = customsShipmentsList.find(x => String(x.lotId) === selectedVal);
+                      const s = customsShipmentsList.find(x => String(x.lot_id ?? x.lotId) === selectedVal);
                       if (s) {
-                        if (s.customsDeclarationNumber) setCustomsTransferBayan(s.customsDeclarationNumber);
-                        if (s.customsDutyAmount) setCustomsTransferDuty(s.customsDutyAmount);
-                        if (s.portOfEntry) setCustomsTransferPort(s.portOfEntry);
-                        if (s.shipmentReference) {
-                          setCustomsTransferNotes(`Clearance and transfer of customs shipment ${s.shipmentReference} (${s.vendorName || 'Supplier'}) to Turkey portfolio.`);
+                        const bayan = s.customs_declaration_number ?? s.customsDeclarationNumber;
+                        const duty = s.customs_duty_amount ?? s.customsDutyAmount;
+                        const port = s.port_of_entry ?? s.portOfEntry;
+                        const ref = s.shipment_reference ?? s.shipmentReference;
+                        const vName = s.vendor_name ?? s.vendorName ?? 'Supplier';
+                        if (bayan) setCustomsTransferBayan(bayan);
+                        if (duty) setCustomsTransferDuty(duty);
+                        if (port) setCustomsTransferPort(port);
+                        if (ref) {
+                          setCustomsTransferNotes(`Clearance and transfer of customs shipment ${ref} (${vName}) to Turkey portfolio.`);
                         }
                       }
                     }}
@@ -14333,24 +14339,37 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                             : (currentLang === 'en' ? '-- No shipments currently in customs --' : '-- لا توجد شحنات بالجمارك حالياً --'))
                         : (currentLang === 'en' ? '-- Select a customs shipment --' : '-- اختر شحنة خاضعة للجمارك --')}
                     </option>
-                    {customsShipmentsList.map((s, idx) => (
-                      <option key={s.lotId ?? idx} value={String(s.lotId)}>
-                        📦 {s.lotNumber || `Lot #${s.lotId}`} | Ref: {s.shipmentReference || 'N/A'} | {s.vendorName} ({s.totalBars} bars, {s.totalWeightKg} kg)
-                      </option>
-                    ))}
+                    {customsShipmentsList.map((s, idx) => {
+                      const lId = s.lot_id ?? s.lotId;
+                      const lNum = s.lot_number ?? s.lotNumber ?? `Lot #${lId}`;
+                      const sRef = s.shipment_reference ?? s.shipmentReference ?? 'N/A';
+                      const vName = s.vendor_name ?? s.vendorName ?? 'Supplier';
+                      const tBars = s.total_bars ?? s.totalBars ?? 0;
+                      const tWeight = s.total_weight_kg ?? s.totalWeightKg ?? 0;
+                      return (
+                        <option key={lId ?? idx} value={String(lId)}>
+                          📦 {lNum} | Ref: {sRef} | {vName} ({tBars} bars, {tWeight} kg)
+                        </option>
+                      );
+                    })}
                   </select>
                 </div>
 
                 {customsTransferLotId && (() => {
-                  const s = customsShipmentsList.find(x => String(x.lotId) === customsTransferLotId);
+                  const s = customsShipmentsList.find(x => String(x.lot_id ?? x.lotId) === customsTransferLotId);
                   if (!s) return null;
+                  const tBars = s.total_bars ?? s.totalBars ?? 0;
+                  const tWeight = s.total_weight_kg ?? s.totalWeightKg ?? 0;
+                  const vName = s.vendor_name ?? s.vendorName ?? 'Supplier';
+                  const duty = s.customs_duty_amount ?? s.customsDutyAmount;
+                  const sCode = s.status_code ?? s.statusCode ?? 'IN_CUSTOMS';
                   return (
                     <div style={{ padding: '8px 12px', background: 'rgba(16, 185, 129, 0.08)', border: '1px solid rgba(16, 185, 129, 0.3)', borderRadius: '6px', fontSize: '12px', color: '#10B981', display: 'flex', gap: '15px', flexWrap: 'wrap' }}>
-                      <span><strong>{currentLang === 'en' ? 'Bars:' : 'السبائك:'}</strong> {s.totalBars}</span>
-                      <span><strong>{currentLang === 'en' ? 'Weight:' : 'الوزن:'}</strong> {s.totalWeightKg} kg</span>
-                      <span><strong>{currentLang === 'en' ? 'Supplier:' : 'المورد:'}</strong> {s.vendorName}</span>
-                      {s.customsDutyAmount ? <span><strong>{currentLang === 'en' ? 'Purchasing Cost:' : 'تكلفة الشراء:'}</strong> {s.customsDutyAmount} KWD</span> : null}
-                      <span><strong>{currentLang === 'en' ? 'Status:' : 'الحالة:'}</strong> {s.statusCode}</span>
+                      <span><strong>{currentLang === 'en' ? 'Bars:' : 'السبائك:'}</strong> {tBars}</span>
+                      <span><strong>{currentLang === 'en' ? 'Weight:' : 'الوزن:'}</strong> {tWeight} kg</span>
+                      <span><strong>{currentLang === 'en' ? 'Supplier:' : 'المورد:'}</strong> {vName}</span>
+                      {duty ? <span><strong>{currentLang === 'en' ? 'Purchasing Cost:' : 'تكلفة الشراء:'}</strong> {duty} KWD</span> : null}
+                      <span><strong>{currentLang === 'en' ? 'Status:' : 'الحالة:'}</strong> {sCode}</span>
                     </div>
                   );
                 })()}
