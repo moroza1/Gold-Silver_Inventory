@@ -680,38 +680,6 @@ public class AppDbContext : DbContext
                   .OnDelete(DeleteBehavior.Cascade);
         });
 
-        // Loop over all entities and convert property/column names to snake_case
-        foreach (var entity in modelBuilder.Model.GetEntityTypes())
-        {
-            foreach (var property in entity.GetProperties())
-            {
-                var columnName = ConvertToSnakeCase(property.Name);
-                property.SetColumnName(columnName);
-
-                // Configure RowVersion for SQLite if running on SQLite
-                if (property.Name == "RowVersion" && Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite")
-                {
-                    property.SetDefaultValueSql("randomblob(8)");
-                    property.ValueGenerated = Microsoft.EntityFrameworkCore.Metadata.ValueGenerated.OnAddOrUpdate;
-                }
-            }
-
-            foreach (var key in entity.GetKeys())
-            {
-                key.SetName(ConvertToSnakeCase(key.GetName()));
-            }
-
-            foreach (var key in entity.GetForeignKeys())
-            {
-                key.SetConstraintName(ConvertToSnakeCase(key.GetConstraintName()));
-            }
-
-            foreach (var index in entity.GetIndexes())
-            {
-                index.SetDatabaseName(ConvertToSnakeCase(index.GetDatabaseName()));
-            }
-        }
-
         // ReorderThreshold Configuration
         modelBuilder.Entity<ReorderThreshold>(entity =>
         {
@@ -954,6 +922,38 @@ public class AppDbContext : DbContext
             entity.HasKey(e => e.SettingKey);
             entity.ToTable("system_settings");
         });
+
+        // Loop over all entities and convert property/column names to snake_case
+        foreach (var entity in modelBuilder.Model.GetEntityTypes())
+        {
+            foreach (var property in entity.GetProperties())
+            {
+                var columnName = ConvertToSnakeCase(property.Name);
+                property.SetColumnName(columnName);
+
+                // Configure RowVersion for SQLite if running on SQLite
+                if (property.Name == "RowVersion" && Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite")
+                {
+                    property.SetDefaultValueSql("randomblob(8)");
+                    property.ValueGenerated = Microsoft.EntityFrameworkCore.Metadata.ValueGenerated.OnAddOrUpdate;
+                }
+            }
+
+            foreach (var key in entity.GetKeys())
+            {
+                key.SetName(ConvertToSnakeCase(key.GetName()));
+            }
+
+            foreach (var key in entity.GetForeignKeys())
+            {
+                key.SetConstraintName(ConvertToSnakeCase(key.GetConstraintName()));
+            }
+
+            foreach (var index in entity.GetIndexes())
+            {
+                index.SetDatabaseName(ConvertToSnakeCase(index.GetDatabaseName()));
+            }
+        }
     }
 
     private static string ConvertToSnakeCase(string? input)

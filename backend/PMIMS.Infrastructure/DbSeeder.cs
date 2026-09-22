@@ -161,6 +161,15 @@ public static class DbSeeder
                             );
                             CREATE INDEX IF NOT EXISTS IX_pending_missing_item_reports_status_code ON pending_missing_item_reports (status_code);
                             CREATE INDEX IF NOT EXISTS IX_pending_missing_item_reports_created_at ON pending_missing_item_reports (created_at);
+
+                            CREATE TABLE IF NOT EXISTS system_settings (
+                                setting_key TEXT NOT NULL CONSTRAINT PK_system_settings PRIMARY KEY,
+                                setting_value TEXT NOT NULL,
+                                description TEXT,
+                                category TEXT,
+                                updated_at TEXT NOT NULL,
+                                updated_by TEXT
+                            );
                         ";
                         await createTableCmd.ExecuteNonQueryAsync();
                     }
@@ -543,6 +552,18 @@ public static class DbSeeder
                         BEGIN
                             ALTER TABLE inventory_lots ADD port_of_entry NVARCHAR(100) NULL;
                         END
+
+                        IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'system_settings')
+                        BEGIN
+                            CREATE TABLE system_settings (
+                                setting_key NVARCHAR(100) NOT NULL CONSTRAINT PK_system_settings PRIMARY KEY,
+                                setting_value NVARCHAR(MAX) NOT NULL,
+                                description NVARCHAR(MAX) NULL,
+                                category NVARCHAR(100) NULL,
+                                updated_at DATETIME2 NOT NULL,
+                                updated_by NVARCHAR(100) NULL
+                            );
+                        END
                     ");
                 }
 
@@ -586,6 +607,62 @@ public static class DbSeeder
                         }
                         await context.SaveChangesAsync();
                     }
+                }
+
+                // 5. Ensure default system settings exist
+                try
+                {
+                    var existingSettings = await context.SystemSettings.Select(s => s.SettingKey).ToListAsync();
+                    var defaultSettings = new List<SystemSetting>();
+
+                    if (!existingSettings.Contains("ReservationTTLSeconds"))
+                    {
+                        defaultSettings.Add(new SystemSetting
+                        {
+                            SettingKey = "ReservationTTLSeconds",
+                            SettingValue = "300",
+                            Category = "RESERVATIONS",
+                            Description = "Duration (in seconds) that physical gold bars remain locked in pessimistic reservation during checkout before auto-release",
+                            UpdatedBy = "SYSTEM",
+                            UpdatedAt = DateTime.UtcNow
+                        });
+                    }
+
+                    if (!existingSettings.Contains("RequireQrPrintedForTurkeyTransfer"))
+                    {
+                        defaultSettings.Add(new SystemSetting
+                        {
+                            SettingKey = "RequireQrPrintedForTurkeyTransfer",
+                            SettingValue = "false",
+                            Category = "TURKEY_CONSIGNMENT",
+                            Description = "Prevent gold bar ownership transfer from Turkey to KFH unless QR code has been printed",
+                            UpdatedBy = "SYSTEM",
+                            UpdatedAt = DateTime.UtcNow
+                        });
+                    }
+
+                    if (!existingSettings.Contains("QrCodeReprintPrivilege"))
+                    {
+                        defaultSettings.Add(new SystemSetting
+                        {
+                            SettingKey = "QrCodeReprintPrivilege",
+                            SettingValue = "ADMIN_ONLY",
+                            Category = "QR_CODE_LABELS",
+                            Description = "Privilege level required to reprint physical QR code labels (ADMIN_ONLY, CHECKER_AND_ADMIN, ALL_OPERATORS, DISABLED)",
+                            UpdatedBy = "SYSTEM",
+                            UpdatedAt = DateTime.UtcNow
+                        });
+                    }
+
+                    if (defaultSettings.Count > 0)
+                    {
+                        context.SystemSettings.AddRange(defaultSettings);
+                        await context.SaveChangesAsync();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"⚠️ Failed to seed default system settings: {ex.Message}");
                 }
             }
             finally
