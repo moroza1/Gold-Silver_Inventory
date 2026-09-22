@@ -69,6 +69,79 @@ public static class DbSeeder
                             CREATE INDEX IF NOT EXISTS IX_pending_turkey_purchases_status_code ON pending_turkey_purchases (status_code);
                             CREATE INDEX IF NOT EXISTS IX_pending_turkey_purchases_created_at ON pending_turkey_purchases (created_at);
 
+                            CREATE TABLE IF NOT EXISTS pending_customs_transfers (
+                                pending_transfer_id INTEGER NOT NULL CONSTRAINT PK_pending_customs_transfers PRIMARY KEY AUTOINCREMENT,
+                                lot_id INTEGER,
+                                item_id INTEGER,
+                                target_ownership TEXT NOT NULL DEFAULT 'TURKEY_OWNED',
+                                requested_by TEXT NOT NULL,
+                                clearance_notes TEXT,
+                                customs_declaration_number TEXT,
+                                customs_duty_amount TEXT,
+                                port_of_entry TEXT,
+                                status_code TEXT NOT NULL DEFAULT 'PENDING_APPROVAL',
+                                created_at TEXT NOT NULL,
+                                approved_by TEXT,
+                                approved_at TEXT
+                            );
+                            CREATE INDEX IF NOT EXISTS IX_pending_customs_transfers_status_code ON pending_customs_transfers (status_code);
+                            CREATE INDEX IF NOT EXISTS IX_pending_customs_transfers_created_at ON pending_customs_transfers (created_at);
+
+                            CREATE TABLE IF NOT EXISTS pending_vip_allocations (
+                                pending_allocation_id INTEGER NOT NULL CONSTRAINT PK_pending_vip_allocations PRIMARY KEY AUTOINCREMENT,
+                                batch_reference TEXT NOT NULL,
+                                serials_json_list TEXT NOT NULL,
+                                total_items INTEGER NOT NULL,
+                                total_weight_grams TEXT NOT NULL,
+                                vip_category TEXT,
+                                requested_by TEXT NOT NULL,
+                                notes TEXT,
+                                status_code TEXT NOT NULL DEFAULT 'PENDING_APPROVAL',
+                                created_at TEXT NOT NULL,
+                                approved_by TEXT,
+                                approved_at TEXT
+                            );
+                            CREATE INDEX IF NOT EXISTS IX_pending_vip_allocations_status_code ON pending_vip_allocations (status_code);
+                            CREATE INDEX IF NOT EXISTS IX_pending_vip_allocations_created_at ON pending_vip_allocations (created_at);
+
+                            CREATE TABLE IF NOT EXISTS pending_vip_dispenses (
+                                pending_dispense_id INTEGER NOT NULL CONSTRAINT PK_pending_vip_dispenses PRIMARY KEY AUTOINCREMENT,
+                                dispense_reference TEXT NOT NULL,
+                                serials_json_list TEXT NOT NULL,
+                                total_items INTEGER NOT NULL,
+                                total_weight_grams TEXT NOT NULL,
+                                customer_name TEXT NOT NULL,
+                                customer_civil_id TEXT NOT NULL,
+                                customer_account_number TEXT,
+                                handover_location TEXT,
+                                requested_by TEXT NOT NULL,
+                                notes TEXT,
+                                status_code TEXT NOT NULL DEFAULT 'PENDING_APPROVAL',
+                                created_at TEXT NOT NULL,
+                                approved_by TEXT,
+                                approved_at TEXT
+                            );
+                            CREATE INDEX IF NOT EXISTS IX_pending_vip_dispenses_status_code ON pending_vip_dispenses (status_code);
+                            CREATE INDEX IF NOT EXISTS IX_pending_vip_dispenses_created_at ON pending_vip_dispenses (created_at);
+
+                            CREATE TABLE IF NOT EXISTS pending_turkey_returns (
+                                pending_return_id INTEGER NOT NULL CONSTRAINT PK_pending_turkey_returns PRIMARY KEY AUTOINCREMENT,
+                                batch_reference TEXT NOT NULL,
+                                serials_json_list TEXT NOT NULL,
+                                total_items INTEGER NOT NULL,
+                                total_weight_grams TEXT NOT NULL,
+                                source_ownership TEXT NOT NULL DEFAULT 'KFH_OWNED',
+                                return_reason TEXT,
+                                requested_by TEXT NOT NULL,
+                                notes TEXT,
+                                status_code TEXT NOT NULL DEFAULT 'PENDING_APPROVAL',
+                                created_at TEXT NOT NULL,
+                                approved_by TEXT,
+                                approved_at TEXT
+                            );
+                            CREATE INDEX IF NOT EXISTS IX_pending_turkey_returns_status_code ON pending_turkey_returns (status_code);
+                            CREATE INDEX IF NOT EXISTS IX_pending_turkey_returns_created_at ON pending_turkey_returns (created_at);
+
                             CREATE TABLE IF NOT EXISTS pending_missing_item_reports (
                                 pending_report_id INTEGER NOT NULL CONSTRAINT PK_pending_missing_item_reports PRIMARY KEY AUTOINCREMENT,
                                 report_reference TEXT NOT NULL,
@@ -311,6 +384,8 @@ public static class DbSeeder
                                 ApprovedAt DATETIME2 NULL
                             );
                             CREATE NONCLUSTERED INDEX IX_pending_turkey_purchases_StatusCode ON pending_turkey_purchases(StatusCode);
+                        END
+
                         IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'pending_missing_item_reports')
                         BEGIN
                             CREATE TABLE pending_missing_item_reports (
@@ -332,6 +407,86 @@ public static class DbSeeder
                             );
                             CREATE NONCLUSTERED INDEX IX_pending_missing_item_reports_StatusCode ON pending_missing_item_reports(StatusCode);
                             CREATE NONCLUSTERED INDEX IX_pending_missing_item_reports_CreatedAt ON pending_missing_item_reports(CreatedAt);
+                        END
+
+                        IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'pending_customs_transfers')
+                        BEGIN
+                            CREATE TABLE pending_customs_transfers (
+                                PendingTransferId INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_pending_customs_transfers PRIMARY KEY,
+                                TransferReference NVARCHAR(MAX) NOT NULL,
+                                TargetOwnershipType NVARCHAR(50) NOT NULL CONSTRAINT DF_pending_customs_transfers_TargetOwnershipType DEFAULT 'TURKEY_OWNED',
+                                SerialsJsonList NVARCHAR(MAX) NOT NULL,
+                                TotalItems INT NOT NULL,
+                                TotalWeightGrams DECIMAL(18,3) NOT NULL,
+                                RequestedBy NVARCHAR(MAX) NOT NULL,
+                                Notes NVARCHAR(MAX) NULL,
+                                StatusCode NVARCHAR(50) NOT NULL CONSTRAINT DF_pending_customs_transfers_StatusCode DEFAULT 'PENDING_APPROVAL',
+                                CreatedAt DATETIME2 NOT NULL,
+                                ApprovedBy NVARCHAR(MAX) NULL,
+                                ApprovedAt DATETIME2 NULL
+                            );
+                            CREATE NONCLUSTERED INDEX IX_pending_customs_transfers_StatusCode ON pending_customs_transfers(StatusCode);
+                        END
+
+                        IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'pending_vip_allocations')
+                        BEGIN
+                            CREATE TABLE pending_vip_allocations (
+                                PendingAllocationId INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_pending_vip_allocations PRIMARY KEY,
+                                AllocationReference NVARCHAR(MAX) NOT NULL,
+                                VipCustomerId INT NOT NULL,
+                                VipCustomerName NVARCHAR(MAX) NOT NULL,
+                                SerialsJsonList NVARCHAR(MAX) NOT NULL,
+                                TotalItems INT NOT NULL,
+                                TotalWeightGrams DECIMAL(18,3) NOT NULL,
+                                RequestedBy NVARCHAR(MAX) NOT NULL,
+                                Notes NVARCHAR(MAX) NULL,
+                                StatusCode NVARCHAR(50) NOT NULL CONSTRAINT DF_pending_vip_allocations_StatusCode DEFAULT 'PENDING_APPROVAL',
+                                CreatedAt DATETIME2 NOT NULL,
+                                ApprovedBy NVARCHAR(MAX) NULL,
+                                ApprovedAt DATETIME2 NULL
+                            );
+                            CREATE NONCLUSTERED INDEX IX_pending_vip_allocations_StatusCode ON pending_vip_allocations(StatusCode);
+                        END
+
+                        IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'pending_vip_dispenses')
+                        BEGIN
+                            CREATE TABLE pending_vip_dispenses (
+                                PendingDispenseId INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_pending_vip_dispenses PRIMARY KEY,
+                                DispenseReference NVARCHAR(MAX) NOT NULL,
+                                VipCustomerId INT NOT NULL,
+                                VipCustomerName NVARCHAR(MAX) NOT NULL,
+                                SerialsJsonList NVARCHAR(MAX) NOT NULL,
+                                TotalItems INT NOT NULL,
+                                TotalWeightGrams DECIMAL(18,3) NOT NULL,
+                                DeliveryOption NVARCHAR(MAX) NOT NULL,
+                                DeliveryReference NVARCHAR(MAX) NULL,
+                                RequestedBy NVARCHAR(MAX) NOT NULL,
+                                Notes NVARCHAR(MAX) NULL,
+                                StatusCode NVARCHAR(50) NOT NULL CONSTRAINT DF_pending_vip_dispenses_StatusCode DEFAULT 'PENDING_APPROVAL',
+                                CreatedAt DATETIME2 NOT NULL,
+                                ApprovedBy NVARCHAR(MAX) NULL,
+                                ApprovedAt DATETIME2 NULL
+                            );
+                            CREATE NONCLUSTERED INDEX IX_pending_vip_dispenses_StatusCode ON pending_vip_dispenses(StatusCode);
+                        END
+
+                        IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'pending_turkey_returns')
+                        BEGIN
+                            CREATE TABLE pending_turkey_returns (
+                                PendingReturnId INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_pending_turkey_returns PRIMARY KEY,
+                                ReturnReference NVARCHAR(MAX) NOT NULL,
+                                ReturnReason NVARCHAR(MAX) NOT NULL,
+                                SerialsJsonList NVARCHAR(MAX) NOT NULL,
+                                TotalItems INT NOT NULL,
+                                TotalWeightGrams DECIMAL(18,3) NOT NULL,
+                                RequestedBy NVARCHAR(MAX) NOT NULL,
+                                Notes NVARCHAR(MAX) NULL,
+                                StatusCode NVARCHAR(50) NOT NULL CONSTRAINT DF_pending_turkey_returns_StatusCode DEFAULT 'PENDING_APPROVAL',
+                                CreatedAt DATETIME2 NOT NULL,
+                                ApprovedBy NVARCHAR(MAX) NULL,
+                                ApprovedAt DATETIME2 NULL
+                            );
+                            CREATE NONCLUSTERED INDEX IX_pending_turkey_returns_StatusCode ON pending_turkey_returns(StatusCode);
                         END
 
                         IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('pending_intakes') AND name = 'ownership_type')
