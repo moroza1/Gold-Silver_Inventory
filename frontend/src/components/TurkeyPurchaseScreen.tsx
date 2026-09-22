@@ -1,6 +1,19 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import Tesseract from 'tesseract.js';
 
+const rawApiUrl = (import.meta as any).env?.VITE_API_URL;
+const normalizeApiBase = (url?: string) => {
+  if (!url) return null;
+  const clean = url.replace(/\/+$/, '');
+  return clean.endsWith('/api') ? clean : `${clean}/api`;
+};
+
+const API_BASE = (
+  typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+    ? (normalizeApiBase(rawApiUrl) || `http://${window.location.hostname}:8080/api`)
+    : (normalizeApiBase(rawApiUrl) || 'https://api.aisoftwares.cloud/api')
+);
+
 // --- GS1 and ISO/IEC 18004 barcode/QR code parser ---
 export const parseGs1Barcode = (rawInput: string): { serial: string; gtin: string; lot: string; denomination?: string; productType?: string } => {
   if (!rawInput) return { serial: '', gtin: '', lot: '' };
@@ -104,18 +117,85 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
   userRole: _userRole,
   displayName: _displayName
 }) => {
-  const [activeSubTab, setActiveSubTab] = useState<'STOCK_PURCHASE' | 'PENDING_BATCHES'>('STOCK_PURCHASE');
+  const [activeSubTab, setActiveSubTab] = useState<'STOCK_PURCHASE' | 'VIP_STOCK' | 'PENDING_BATCHES'>('STOCK_PURCHASE');
   
-  // Denomination / Product Selection State
+  // VIP & KFH Inventory State
+  const [vipInventory, setVipInventory] = useState<{
+    summary: { total_bars: number; total_weight_grams: number; total_weight_kg: number; by_product: any[] };
+    items: any[];
+  } | null>(null);
+  const [kfhAvailableInventory, setKfhAvailableInventory] = useState<{
+    summary: { total_bars: number; total_weight_grams: number; total_weight_kg: number; by_product: any[] };
+    items: any[];
+  } | null>(null);
+  const [pendingVipAllocations, setPendingVipAllocations] = useState<any[]>([]);
+  const [pendingVipDispenses, setPendingVipDispenses] = useState<any[]>([]);
+  const [pendingTurkeyReturns, setPendingTurkeyReturns] = useState<any[]>([]);
+  const [pendingBatchFilter, setPendingBatchFilter] = useState<'ALL' | 'TURKEY' | 'VIP_ALLOCATION' | 'VIP_DISPENSE' | 'TURKEY_RETURN'>('ALL');
+
+  // Fetch VIP, KFH, and Return Data
+  const fetchVipData = async () => {
+    try {
+      const [vipRes, kfhRes, allocRes, dispRes, retRes] = await Promise.all([
+        fetch(`${API_BASE}/inventory/vip`),
+        fetch(`${API_BASE}/inventory/kfh-available`),
+        fetch(`${API_BASE}/inventory/vip/pending-allocations`),
+        fetch(`${API_BASE}/inventory/vip/pending-dispenses`),
+        fetch(`${API_BASE}/inventory/turkey/pending-returns`)
+      ]);
+      if (vipRes.ok) setVipInventory(await vipRes.json());
+      if (kfhRes.ok) setKfhAvailableInventory(await kfhRes.json());
+      if (allocRes.ok) setPendingVipAllocations(await allocRes.json());
+      if (dispRes.ok) setPendingVipDispenses(await dispRes.json());
+      if (retRes.ok) setPendingTurkeyReturns(await retRes.json());
+    } catch (err) {
+      console.error('Failed to fetch VIP and return data:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchVipData();
+  }, []);
+
+  // Return Gold to Turkey Consignment State
+  const [showReturnModal, setShowReturnModal] = useState<boolean>(false);
+  const [returnSourceOrigin, setReturnSourceOrigin] = useState<'KFH' | 'VIP' | 'ALL'>('KFH');
+  const [returnReason, setReturnReason] = useState<string>('Consignment Rebalancing Agreement TR-2026');
+  const [returnNotes, setReturnNotes] = useState<string>('');
+  const [isSubmittingReturn, setIsSubmittingReturn] = useState<boolean>(false);
+
+  // KFH to VIP Allocation Selection State
+  const [selectedKfhSerials, setSelectedKfhSerials] = useState<string[]>([]);
+  const [selectedKfhDenomCode, setSelectedKfhDenomCode] = useState<string>('');
+  const [kfhSerialSearch, setKfhSerialSearch] = useState<string>('');
+  const [kfhQuickQty, setKfhQuickQty] = useState<number>(1);
+  const [kfhQrScanInput, setKfhQrScanInput] = useState<string>('');
+  const [kfhScanFeedback, setKfhScanFeedback] = useState<{ type: 'success' | 'warning' | 'error'; message: string } | null>(null);
+  const [vipCategory, setVipCategory] = useState<string>('Private Banking / VIP Exclusive');
+  const [vipAllocationNotes, setVipAllocationNotes] = useState<string>('');
+  const [isSubmittingVipAlloc, setIsSubmittingVipAlloc] = useState<boolean>(false);
+
+  // VIP Dispensation State
+  const [selectedVipSerials, setSelectedVipSerials] = useState<string[]>([]);
+  const [vipSerialSearch, setVipSerialSearch] = useState<string>('');
+  const [showVipDispenseModal, setShowVipDispenseModal] = useState<boolean>(false);
+  const [vipCustomerName, setVipCustomerName] = useState<string>('');
+  const [vipCustomerCivilId, setVipCustomerCivilId] = useState<string>('');
+  const [vipCustomerAccount, setVipCustomerAccount] = useState<string>('');
+  const [vipSpecialInstructions, setVipSpecialInstructions] = useState<string>('VIP Private Vault Handover');
+  const [vipDispenseNotes, setVipDispenseNotes] = useState<string>('');
+  const [isSubmittingVipDispense, setIsSubmittingVipDispense] = useState<boolean>(false);
+
+  // Denomination / Product Selection State (Turkey Purchase)
   const [selectedDenomCode, setSelectedDenomCode] = useState<string>('');
   const [denomSerialSearch, setDenomSerialSearch] = useState<string>('');
   const [quickQtyToSelect, setQuickQtyToSelect] = useState<number>(1);
 
-  // Dedicated QR / Barcode Scanner Input State
+  // Dedicated QR / Barcode Scanner Input State (Turkey Purchase)
   const [qrScanInput, setQrScanInput] = useState<string>('');
   const [scanFeedback, setScanFeedback] = useState<{ type: 'success' | 'warning' | 'error'; message: string } | null>(null);
 
-  // Selection state
+  // Selection state (Turkey Purchase)
   const [selectedSerials, setSelectedSerials] = useState<string[]>([]);
   const [showSmartModal, setShowSmartModal] = useState(false);
   const [smartTab, setSmartTab] = useState<'QR_SCAN' | 'RANGE' | 'PASTE' | 'OCR'>('QR_SCAN');
@@ -138,8 +218,9 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const qrInputRef = useRef<HTMLInputElement | null>(null);
+  const kfhQrInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Manual Purchase Rate (KWD per Gram)
+  // Manual Purchase Rate (Cost / Gram in KWD)
   const [unitPricePerGram, setUnitPricePerGram] = useState<string>('');
   const [purchaseNotes, setPurchaseNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -148,26 +229,34 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
 
   const availableItems = useMemo(() => turkeyInventory?.items || [], [turkeyInventory?.items]);
   const isQrRequirementActive = !!turkeyInventory?.summary?.qr_required_for_transfer;
+  const rateNum = parseFloat(unitPricePerGram) || 0;
 
-  // Auto-select first denomination if none selected
+  // Auto-select first denomination for Turkey purchase if none selected
   useEffect(() => {
     if (!selectedDenomCode && turkeyInventory?.summary?.by_product && turkeyInventory.summary.by_product.length > 0) {
       setSelectedDenomCode(turkeyInventory.summary.by_product[0].product_code);
     }
   }, [turkeyInventory, selectedDenomCode]);
 
-  // Selected Denomination object
+  // Auto-select first denomination for KFH available if none selected
+  useEffect(() => {
+    if (!selectedKfhDenomCode && kfhAvailableInventory?.summary?.by_product && kfhAvailableInventory.summary.by_product.length > 0) {
+      setSelectedKfhDenomCode(kfhAvailableInventory.summary.by_product[0].product_code);
+    }
+  }, [kfhAvailableInventory, selectedKfhDenomCode]);
+
+  // Selected Denomination object (Turkey)
   const currentDenomObj = useMemo(() => {
     return turkeyInventory?.summary?.by_product?.find(p => p.product_code === selectedDenomCode) || null;
   }, [turkeyInventory, selectedDenomCode]);
 
-  // Available items for the currently selected denomination
+  // Available items for the currently selected denomination (Turkey)
   const itemsForSelectedDenom = useMemo(() => {
     if (!selectedDenomCode) return availableItems;
     return availableItems.filter(i => i.product_code === selectedDenomCode || String(i.product_id) === String(selectedDenomCode));
   }, [availableItems, selectedDenomCode]);
 
-  // Filtered available serials in the facilitator grid
+  // Filtered available serials in the facilitator grid (Turkey)
   const displayedDenomSerials = useMemo(() => {
     if (!denomSerialSearch.trim()) return itemsForSelectedDenom;
     const q = denomSerialSearch.trim().toLowerCase();
@@ -178,13 +267,13 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
     );
   }, [itemsForSelectedDenom, denomSerialSearch]);
 
-  // Count of items selected for current denomination
+  // Count of items selected for current denomination (Turkey)
   const selectedCountForCurrentDenom = useMemo(() => {
     const selectedSet = new Set(selectedSerials);
     return itemsForSelectedDenom.filter(i => selectedSet.has(i.serial_number)).length;
   }, [itemsForSelectedDenom, selectedSerials]);
 
-  // Selected items calculations
+  // Selected items calculations (Turkey)
   const selectedItemsData = useMemo(() => {
     const selectedSet = new Set(selectedSerials);
     const items = availableItems.filter(i => selectedSet.has(i.serial_number));
@@ -202,7 +291,7 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
     return selectedItemsData.items.filter(i => !i.has_qr_printed);
   }, [selectedItemsData.items]);
 
-  // Search filter within selected items table
+  // Search filter within selected items table (Turkey)
   const displayedSelectedItems = useMemo(() => {
     if (!searchSelectedQuery.trim()) return selectedItemsData.items;
     const q = searchSelectedQuery.toLowerCase();
@@ -215,9 +304,8 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
     });
   }, [selectedItemsData.items, searchSelectedQuery]);
 
-  // Breakdown of selected items by denomination and shipment lot
+  // Purchasing Cost Breakdown per Denomination and Shipment Lot (Turkey)
   const selectedBreakdownByDenomination = useMemo(() => {
-    const rateNum = parseFloat(unitPricePerGram) || 0;
     const map = new Map<string, {
       product_code: string;
       denomination: string;
@@ -225,15 +313,15 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
       weight_grams: number;
       count: number;
       total_weight_grams: number;
-      unit_cost_per_bar: number;
-      subtotal_cost: number;
+      purchasing_cost_per_bar: number;
+      subtotal_purchasing_cost: number;
       lots: Set<string>;
     }>();
 
     selectedItemsData.items.forEach(item => {
       const key = item.product_code || String(item.product_id) || 'UNKNOWN';
       const w = item.weight_grams || 0;
-      const unitCost = rateNum > 0 ? (w * rateNum) : 0;
+      const costPerBar = rateNum > 0 ? (w * rateNum) : 0;
       if (!map.has(key)) {
         map.set(key, {
           product_code: key,
@@ -242,22 +330,22 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
           weight_grams: w,
           count: 0,
           total_weight_grams: 0,
-          unit_cost_per_bar: unitCost,
-          subtotal_cost: 0,
+          purchasing_cost_per_bar: costPerBar,
+          subtotal_purchasing_cost: 0,
           lots: new Set()
         });
       }
       const entry = map.get(key)!;
       entry.count += 1;
       entry.total_weight_grams += w;
-      entry.subtotal_cost += unitCost;
+      entry.subtotal_purchasing_cost += costPerBar;
       if (item.lot_number) entry.lots.add(item.lot_number);
     });
 
     return Array.from(map.values());
-  }, [selectedItemsData.items, unitPricePerGram]);
+  }, [selectedItemsData.items, rateNum]);
 
-  // Distinct shipment lots in selection
+  // Distinct shipment lots in selection (Turkey)
   const selectedShipmentLots = useMemo(() => {
     const lots = new Set<string>();
     selectedItemsData.items.forEach(i => {
@@ -266,7 +354,7 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
     return Array.from(lots);
   }, [selectedItemsData.items]);
 
-  // Handle Quick Barcode / QR Scan
+  // Handle Quick Barcode / QR Scan (Turkey)
   const handleProcessScanInput = (raw: string) => {
     const trimmed = raw.trim();
     if (!trimmed) return;
@@ -299,18 +387,19 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
       return;
     }
 
-    // Successfully add
     setSelectedSerials(prev => [...prev, matchedItem.serial_number]);
-    // Also switch denomination view to this item's denomination so user sees it highlighted
     if (matchedItem.product_code) {
       setSelectedDenomCode(matchedItem.product_code);
     }
 
+    const itemCost = rateNum > 0 ? (matchedItem.weight_grams * rateNum) : 0;
+    const costLabel = itemCost > 0 ? ` (Purchasing Cost: ${itemCost.toFixed(3)} KWD)` : '';
+
     setScanFeedback({
       type: 'success',
       message: currentLang === 'en'
-        ? `Added: ${matchedItem.serial_number} (${matchedItem.denomination || matchedItem.metal_name} - ${matchedItem.weight_grams}g) [Lot: ${matchedItem.lot_number || 'TR'}]`
-        : `تمت الإضافة: ${matchedItem.serial_number} (${matchedItem.denomination || matchedItem.metal_name} - ${matchedItem.weight_grams} جم) [الشحنة: ${matchedItem.lot_number || 'TR'}]`
+        ? `Added: ${matchedItem.serial_number} — ${matchedItem.denomination || matchedItem.metal_name} (${matchedItem.weight_grams}g)${costLabel}`
+        : `تمت الإضافة: ${matchedItem.serial_number} — ${matchedItem.denomination || matchedItem.metal_name} (${matchedItem.weight_grams} جم)${costLabel}`
     });
 
     setQrScanInput('');
@@ -319,7 +408,7 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
     }
   };
 
-  // Select first N unselected items for current denomination
+  // Select first N unselected items for current Turkey denomination
   const handleSelectFirstNForDenom = (qty: number) => {
     if (qty <= 0) return;
     const selectedSet = new Set(selectedSerials);
@@ -336,20 +425,20 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
     setSelectedSerials(prev => [...prev, ...toAdd]);
   };
 
-  // Select all available for current denomination
+  // Select all available for current Turkey denomination
   const handleSelectAllForDenom = () => {
     const denomSerials = itemsForSelectedDenom.map(i => i.serial_number);
     const newSet = new Set([...selectedSerials, ...denomSerials]);
     setSelectedSerials(Array.from(newSet));
   };
 
-  // Deselect all for current denomination
+  // Deselect all for current Turkey denomination
   const handleDeselectAllForDenom = () => {
     const denomSerialsSet = new Set(itemsForSelectedDenom.map(i => i.serial_number));
     setSelectedSerials(prev => prev.filter(s => !denomSerialsSet.has(s)));
   };
 
-  // Toggle single item
+  // Toggle single item (Turkey)
   const handleToggleItem = (serial: string) => {
     setSelectedSerials(prev => 
       prev.includes(serial) ? prev.filter(s => s !== serial) : [...prev, serial]
@@ -362,11 +451,324 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
     setSelectedSerials(allSerials);
   };
 
-  // Clear selection
+  // Clear selection (Turkey)
   const handleClearSelection = () => {
     setSelectedSerials([]);
     setSearchSelectedQuery('');
   };
+
+  // ===================== KFH -> VIP ALLOCATION HELPERS =====================
+  const kfhAvailableItems = useMemo(() => kfhAvailableInventory?.items || [], [kfhAvailableInventory?.items]);
+  
+  const currentKfhDenomObj = useMemo(() => {
+    return kfhAvailableInventory?.summary?.by_product?.find(p => p.product_code === selectedKfhDenomCode) || null;
+  }, [kfhAvailableInventory, selectedKfhDenomCode]);
+
+  const kfhItemsForSelectedDenom = useMemo(() => {
+    if (!selectedKfhDenomCode) return kfhAvailableItems;
+    return kfhAvailableItems.filter(i => i.product_code === selectedKfhDenomCode || String(i.product_id) === String(selectedKfhDenomCode));
+  }, [kfhAvailableItems, selectedKfhDenomCode]);
+
+  const displayedKfhSerials = useMemo(() => {
+    if (!kfhSerialSearch.trim()) return kfhItemsForSelectedDenom;
+    const q = kfhSerialSearch.trim().toLowerCase();
+    return kfhItemsForSelectedDenom.filter(i =>
+      i.serial_number.toLowerCase().includes(q) ||
+      (i.location_code && i.location_code.toLowerCase().includes(q)) ||
+      (i.refiner_name && i.refiner_name.toLowerCase().includes(q))
+    );
+  }, [kfhItemsForSelectedDenom, kfhSerialSearch]);
+
+  const selectedKfhCountForCurrentDenom = useMemo(() => {
+    const set = new Set(selectedKfhSerials);
+    return kfhItemsForSelectedDenom.filter(i => set.has(i.serial_number)).length;
+  }, [kfhItemsForSelectedDenom, selectedKfhSerials]);
+
+  const selectedKfhItemsData = useMemo(() => {
+    const set = new Set(selectedKfhSerials);
+    const items = kfhAvailableItems.filter(i => set.has(i.serial_number));
+    const totalWeightGrams = items.reduce((sum, i) => sum + (i.weight_grams || 0), 0);
+    const totalWeightKg = Math.round((totalWeightGrams / 1000) * 1000) / 1000;
+    return {
+      items,
+      count: items.length,
+      totalWeightGrams,
+      totalWeightKg
+    };
+  }, [kfhAvailableItems, selectedKfhSerials]);
+
+  const handleToggleKfhItem = (serial: string) => {
+    setSelectedKfhSerials(prev =>
+      prev.includes(serial) ? prev.filter(s => s !== serial) : [...prev, serial]
+    );
+  };
+
+  const handleSelectFirstNForKfh = (qty: number) => {
+    if (qty <= 0) return;
+    const selectedSet = new Set(selectedKfhSerials);
+    const unselected = kfhItemsForSelectedDenom.filter(i => !selectedSet.has(i.serial_number));
+    if (unselected.length === 0) {
+      alert(currentLang === 'en' ? 'All available bars for this denomination are already selected.' : 'جميع السبائك المتاحة محددة بالفعل.');
+      return;
+    }
+    const toAdd = unselected.slice(0, qty).map(i => i.serial_number);
+    setSelectedKfhSerials(prev => [...prev, ...toAdd]);
+  };
+
+  const handleSelectAllForKfhDenom = () => {
+    const denomSerials = kfhItemsForSelectedDenom.map(i => i.serial_number);
+    setSelectedKfhSerials(Array.from(new Set([...selectedKfhSerials, ...denomSerials])));
+  };
+
+  const handleDeselectAllForKfhDenom = () => {
+    const set = new Set(kfhItemsForSelectedDenom.map(i => i.serial_number));
+    setSelectedKfhSerials(prev => prev.filter(s => !set.has(s)));
+  };
+
+  const handleProcessKfhScanInput = (raw: string) => {
+    const trimmed = raw.trim();
+    if (!trimmed) return;
+    const parsed = parseGs1Barcode(trimmed);
+    const targetSerial = (parsed.serial || trimmed).toUpperCase();
+
+    const matched = kfhAvailableItems.find(i => i.serial_number.trim().toUpperCase() === targetSerial);
+    if (!matched) {
+      setKfhScanFeedback({
+        type: 'error',
+        message: currentLang === 'en'
+          ? `Bar "${targetSerial}" was not found in active KFH online stock.`
+          : `السبيكة "${targetSerial}" غير موجودة في مخزون بيتك المتاح.`
+      });
+      setKfhQrScanInput('');
+      return;
+    }
+    if (selectedKfhSerials.includes(matched.serial_number)) {
+      setKfhScanFeedback({
+        type: 'warning',
+        message: currentLang === 'en'
+          ? `Bar "${matched.serial_number}" is already selected for VIP allocation.`
+          : `السبيكة "${matched.serial_number}" محددة مسبقاً لتخصيص VIP.`
+      });
+      setKfhQrScanInput('');
+      return;
+    }
+    setSelectedKfhSerials(prev => [...prev, matched.serial_number]);
+    if (matched.product_code) setSelectedKfhDenomCode(matched.product_code);
+    setKfhScanFeedback({
+      type: 'success',
+      message: currentLang === 'en'
+        ? `Added: ${matched.serial_number} — ${matched.denomination || matched.metal_name} (${matched.weight_grams}g)`
+        : `تمت الإضافة: ${matched.serial_number} — ${matched.denomination || matched.metal_name} (${matched.weight_grams} جم)`
+    });
+    setKfhQrScanInput('');
+    if (kfhQrInputRef.current) kfhQrInputRef.current.focus();
+  };
+
+  const handleAllocateToVip = async () => {
+    if (selectedKfhSerials.length === 0) {
+      alert(currentLang === 'en' ? 'Please select at least one bar to allocate to VIP stock.' : 'يرجى تحديد سبيكة واحدة على الأقل لتخصيصها لمخزون كبار العملاء.');
+      return;
+    }
+    setIsSubmittingVipAlloc(true);
+    try {
+      const res = await fetch(`${API_BASE}/inventory/vip/allocate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          serial_numbers: selectedKfhSerials,
+          vip_category: vipCategory,
+          notes: vipAllocationNotes
+        })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || 'Failed to submit VIP allocation');
+      }
+      const data = await res.json();
+      alert(currentLang === 'en'
+        ? `✅ VIP Allocation Workflow Initiated!\nBatch Reference: ${data.batch_reference || 'VIP-ALLOC'}\n${selectedKfhSerials.length} bar(s) submitted for Checker authorization.\nOnce approved, ownership transitions to VIP_OWNED (isolated from online retail).`
+        : `✅ تم إنشاء طلب تخصيص مخزون VIP بنجاح!\nالمرجع: ${data.batch_reference || 'VIP-ALLOC'}\nتم إرسال ${selectedKfhSerials.length} سبيكة لاعتماد المراجع.\nبمجرد الاعتماد ستنتقل الملكية إلى مخزون كبار العملاء (VIP_OWNED).`);
+      setSelectedKfhSerials([]);
+      setVipAllocationNotes('');
+      await fetchVipData();
+      onRefresh();
+      setActiveSubTab('PENDING_BATCHES');
+      setPendingBatchFilter('VIP_ALLOCATION');
+    } catch (err: any) {
+      alert(currentLang === 'en' ? `Error: ${err.message}` : `خطأ: ${err.message}`);
+    } finally {
+      setIsSubmittingVipAlloc(false);
+    }
+  };
+
+  // ===================== VIP VAULT DISPENSATION HELPERS =====================
+  const vipItems = useMemo(() => vipInventory?.items || [], [vipInventory?.items]);
+
+  const displayedVipItems = useMemo(() => {
+    if (!vipSerialSearch.trim()) return vipItems;
+    const q = vipSerialSearch.trim().toLowerCase();
+    return vipItems.filter(i =>
+      i.serial_number.toLowerCase().includes(q) ||
+      (i.denomination && i.denomination.toLowerCase().includes(q)) ||
+      (i.location_code && i.location_code.toLowerCase().includes(q)) ||
+      (i.refiner_name && i.refiner_name.toLowerCase().includes(q)) ||
+      (i.vip_category && i.vip_category.toLowerCase().includes(q))
+    );
+  }, [vipItems, vipSerialSearch]);
+
+  const selectedVipItemsData = useMemo(() => {
+    const set = new Set(selectedVipSerials);
+    const items = vipItems.filter(i => set.has(i.serial_number));
+    const totalWeightGrams = items.reduce((sum, i) => sum + (i.weight_grams || 0), 0);
+    const totalWeightKg = Math.round((totalWeightGrams / 1000) * 1000) / 1000;
+    return {
+      items,
+      count: items.length,
+      totalWeightGrams,
+      totalWeightKg
+    };
+  }, [vipItems, selectedVipSerials]);
+
+  const handleToggleVipItem = (serial: string) => {
+    setSelectedVipSerials(prev =>
+      prev.includes(serial) ? prev.filter(s => s !== serial) : [...prev, serial]
+    );
+  };
+
+  const handleDispenseVip = async () => {
+    if (selectedVipSerials.length === 0) {
+      alert(currentLang === 'en' ? 'Please select at least one VIP bar to dispense.' : 'يرجى تحديد سبيكة واحدة على الأقل للصرف.');
+      return;
+    }
+    if (!vipCustomerName.trim()) {
+      alert(currentLang === 'en' ? 'Customer Name is required.' : 'اسم العميل مطلوب.');
+      return;
+    }
+    if (!vipCustomerCivilId.trim()) {
+      alert(currentLang === 'en' ? 'Civil ID / National ID is required.' : 'الرقم المدني مطلوب.');
+      return;
+    }
+    if (!vipCustomerAccount.trim()) {
+      alert(currentLang === 'en' ? 'Customer Account Number / IBAN is required.' : 'رقم الحساب / الآيبان مطلوب.');
+      return;
+    }
+
+    setIsSubmittingVipDispense(true);
+    try {
+      const res = await fetch(`${API_BASE}/inventory/vip/dispense`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          serial_numbers: selectedVipSerials,
+          customer_name: vipCustomerName.trim(),
+          customer_civil_id: vipCustomerCivilId.trim(),
+          customer_account_number: vipCustomerAccount.trim(),
+          special_instructions: vipSpecialInstructions,
+          notes: vipDispenseNotes
+        })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || 'Failed to submit VIP dispensation request');
+      }
+      const data = await res.json();
+      alert(currentLang === 'en'
+        ? `✅ VIP Dispense Workflow Initiated!\nReference: ${data.dispense_reference || 'VIP-DISP'}\nClient: ${vipCustomerName}\n${selectedVipSerials.length} bar(s) submitted for 4-Eyes Checker Authorization.`
+        : `✅ تم إنشاء طلب صرف مخزون VIP بنجاح!\nالمرجع: ${data.dispense_reference || 'VIP-DISP'}\nالعميل: ${vipCustomerName}\nتم إرسال ${selectedVipSerials.length} سبيكة لاعتماد المراجع.`);
+      setSelectedVipSerials([]);
+      setShowVipDispenseModal(false);
+      setVipCustomerName('');
+      setVipCustomerCivilId('');
+      setVipCustomerAccount('');
+      setVipDispenseNotes('');
+      await fetchVipData();
+      onRefresh();
+      setActiveSubTab('PENDING_BATCHES');
+      setPendingBatchFilter('VIP_DISPENSE');
+    } catch (err: any) {
+      alert(currentLang === 'en' ? `Error: ${err.message}` : `خطأ: ${err.message}`);
+    } finally {
+      setIsSubmittingVipDispense(false);
+    }
+  };
+
+  // ===================== RETURN GOLD TO TURKEY CONSIGNMENT HELPERS =====================
+  const handleInitiateTurkeyReturn = async () => {
+    const serialsToReturn = returnSourceOrigin === 'KFH'
+      ? selectedKfhSerials
+      : returnSourceOrigin === 'VIP'
+        ? selectedVipSerials
+        : Array.from(new Set([...selectedKfhSerials, ...selectedVipSerials]));
+
+    if (serialsToReturn.length === 0) {
+      alert(currentLang === 'en'
+        ? 'Please select at least one gold bar to return to Turkey consignment.'
+        : 'يرجى تحديد سبيكة واحدة على الأقل للإرجاع إلى مخزون أمانة تركيا.');
+      return;
+    }
+
+    setIsSubmittingReturn(true);
+    try {
+      const res = await fetch(`${API_BASE}/inventory/turkey/return`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          serial_numbers: serialsToReturn,
+          return_reason: returnReason,
+          notes: returnNotes
+        })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || 'Failed to initiate Turkey return workflow');
+      }
+      const data = await res.json();
+      alert(currentLang === 'en'
+        ? `✅ Turkey Return Workflow Initiated!\nBatch Reference: ${data.batch_reference || 'TR-RET'}\n${serialsToReturn.length} bar(s) submitted for Checker authorization.\nOnce approved, ownership transitions back to TURKEY_OWNED (Offline Consignment Stock).`
+        : `✅ تم إنشاء طلب إرجاع الذهب إلى تركيا بنجاح!\nالمرجع: ${data.batch_reference || 'TR-RET'}\nتم إرسال ${serialsToReturn.length} سبيكة لاعتماد المراجع.\nبمجرد الاعتماد ستعود الملكية إلى مخزون تركيا كأمانة (TURKEY_OWNED).`);
+
+      if (returnSourceOrigin === 'KFH') setSelectedKfhSerials([]);
+      else if (returnSourceOrigin === 'VIP') setSelectedVipSerials([]);
+      else { setSelectedKfhSerials([]); setSelectedVipSerials([]); }
+
+      setShowReturnModal(false);
+      setReturnNotes('');
+      await fetchVipData();
+      onRefresh();
+      setActiveSubTab('PENDING_BATCHES');
+      setPendingBatchFilter('TURKEY_RETURN');
+    } catch (err: any) {
+      alert(currentLang === 'en' ? `Error: ${err.message}` : `خطأ: ${err.message}`);
+    } finally {
+      setIsSubmittingReturn(false);
+    }
+  };
+
+  const returnItemsData = useMemo(() => {
+    let items: any[] = [];
+    if (returnSourceOrigin === 'KFH') {
+      const set = new Set(selectedKfhSerials);
+      items = kfhAvailableItems.filter(i => set.has(i.serial_number));
+    } else if (returnSourceOrigin === 'VIP') {
+      const set = new Set(selectedVipSerials);
+      items = vipItems.filter(i => set.has(i.serial_number));
+    } else {
+      const kfhSet = new Set(selectedKfhSerials);
+      const vipSet = new Set(selectedVipSerials);
+      items = [
+        ...kfhAvailableItems.filter(i => kfhSet.has(i.serial_number)),
+        ...vipItems.filter(i => vipSet.has(i.serial_number))
+      ];
+    }
+    const totalWeightGrams = items.reduce((sum, i) => sum + (i.weight_grams || 0), 0);
+    const totalWeightKg = Math.round((totalWeightGrams / 1000) * 1000) / 1000;
+    return {
+      items,
+      count: items.length,
+      totalWeightGrams,
+      totalWeightKg
+    };
+  }, [returnSourceOrigin, selectedKfhSerials, selectedVipSerials, kfhAvailableItems, vipItems]);
 
   // OCR Preprocessing: converts image to high-contrast grayscale to extract laser-engraved serials on gold
   const preprocessImage = (imageSrc: string): Promise<string> => {
@@ -449,7 +851,6 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
         }
       });
 
-      // Sort by vertical position (bottom-first)
       sortedTokens.sort((a, b) => b.y - a.y);
 
       sortedTokens.forEach(token => {
@@ -463,7 +864,6 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
         }
       });
 
-      // Fallback lines
       lines.forEach(line => {
         const tokens = line.split(/[\s,;|]+/).map(t => t.trim().replace(/[^a-zA-Z0-9-]/g, '').toUpperCase());
         tokens.forEach(t => {
@@ -562,97 +962,88 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
     if (matchedSerials.length === 0) {
       alert(currentLang === 'en' 
         ? `None of the requested serials (${serialsToSelect.slice(0, 5).join(', ')}${serialsToSelect.length > 5 ? '...' : ''}) were found in active Turkey inventory${prodLabel}. Please verify the serial numbers and selected product.` 
-        : `لم يتم العثور على الأرقام التسلسلية (${serialsToSelect.slice(0, 5).join(', ')}${serialsToSelect.length > 5 ? '...' : ''}) في مخزون تركيا الحالي${prodLabelAr}. يرجى التحقق من صحة الأرقام والمنتج المختار.`);
+        : `لم يتم العثور على أي من الأرقام التسلسلية المطلوبة في مخزون تركيا${prodLabelAr}. يرجى التحقق من الأرقام والمنتج المحدد.`);
       return;
     }
 
     const newSet = new Set([...selectedSerials, ...matchedSerials]);
     setSelectedSerials(Array.from(newSet));
+    if (productToFilter) {
+      setSelectedDenomCode(productToFilter);
+    }
     setShowSmartModal(false);
 
     if (missingSerials.length > 0) {
       alert(currentLang === 'en'
         ? `Selected ${matchedSerials.length} matching Turkey bar(s)${prodLabel}. Note: ${missingSerials.length} serial(s) do not exist in inventory (${missingSerials.slice(0, 3).join(', ')}${missingSerials.length > 3 ? '...' : ''}).`
-        : `تم تحديد ${matchedSerials.length} سبيكة مطابقة${prodLabelAr}. تنبيه: ${missingSerials.length} رقم تسلسلي غير موجود في المخزون (${missingSerials.slice(0, 3).join(', ')}${missingSerials.length > 3 ? '...' : ''}).`);
+        : `تم تحديد ${matchedSerials.length} سبيكة مطابقة${prodLabelAr}. تنبيه: يوجد ${missingSerials.length} رقم غير موجود بالمخزون.`);
     } else {
       alert(currentLang === 'en'
         ? `Selected ${matchedSerials.length} matching Turkey bar(s)${prodLabel}.`
-        : `تم تحديد ${matchedSerials.length} سبيكة تركية مطابقة${prodLabelAr}.`);
+        : `تم تحديد ${matchedSerials.length} سبيكة مطابقة بنجاح${prodLabelAr}.`);
     }
   };
 
-  // Handle Bulk Paste Select
+  // Apply Paste
   const handleApplyPasteSelect = () => {
-    if (!pasteText.trim()) {
-      alert(currentLang === 'en' ? 'Please paste serial numbers.' : 'يرجى لصق الأرقام التسلسلية.');
-      return;
+    if (!pasteText.trim()) return;
+    const rawList = pasteText
+      .split(/[\r\n,;\t]+/)
+      .map(s => s.trim())
+      .filter(s => s.length > 0);
+
+    if (rawList.length === 0) return;
+    handleApplyExtractedMatches(rawList);
+    setPasteText('');
+  };
+
+  // Helper for sequential range expansion
+  const generateSerialRange = (start: string, end: string): string[] => {
+    const startNumMatch = start.match(/^(.*?)(\d+)$/);
+    const endNumMatch = end.match(/^(.*?)(\d+)$/);
+
+    if (!startNumMatch || !endNumMatch) {
+      return [start, end];
     }
-    const lines = pasteText.split(/[\n,;|\s]+/).map(s => s.trim()).filter(Boolean);
-    handleApplyExtractedMatches(lines);
+
+    const prefixStart = startNumMatch[1];
+    const prefixEnd = endNumMatch[1];
+
+    if (prefixStart !== prefixEnd) {
+      return [start, end];
+    }
+
+    const numStart = parseInt(startNumMatch[2], 10);
+    const numEnd = parseInt(endNumMatch[2], 10);
+    const padLen = startNumMatch[2].length;
+
+    if (isNaN(numStart) || isNaN(numEnd) || numStart > numEnd || (numEnd - numStart) > 2000) {
+      return [start, end];
+    }
+
+    const result: string[] = [];
+    for (let i = numStart; i <= numEnd; i++) {
+      const padded = String(i).padStart(padLen, '0');
+      result.push(`${prefixStart}${padded}`);
+    }
+    return result;
   };
 
-  const splitSerial = (s: string) => {
-    const match = s.trim().toUpperCase().match(/^([A-Za-z0-9_-]*?)(\d+)([A-Za-z0-9_-]*)$/);
-    if (!match) return null;
-    return {
-      prefix: match[1],
-      numStr: match[2],
-      num: parseInt(match[2], 10),
-      padLen: match[2].length,
-      suffix: match[3]
-    };
-  };
-
-  // Handle Range Selection
-  const handleApplyRangeSelect = (targetProd?: string | any) => {
+  // Apply Range
+  const handleApplyRangeSelect = () => {
     const rawStart = rangeStart.trim().toUpperCase();
-    const rawEnd = (rangeEnd.trim() || rangeStart.trim()).toUpperCase();
-    const explicitProd = typeof targetProd === 'string' && targetProd.trim() ? targetProd.trim() : undefined;
-    const productToFilter = explicitProd !== undefined ? explicitProd : (showSmartModal ? smartProduct : '');
+    const rawEnd = rangeEnd.trim().toUpperCase();
 
-    if (!rawStart) {
-      alert(currentLang === 'en' ? 'Please enter Start and End serial numbers.' : 'يرجى إدخال رقم البداية والنهاية.');
+    if (!rawStart || !rawEnd) {
+      alert(currentLang === 'en' ? 'Please provide both Start and End serial numbers.' : 'يرجى إدخال رقم البداية والنهاية.');
       return;
     }
 
+    const expectedSerials = generateSerialRange(rawStart, rawEnd);
+    const productToFilter = showSmartModal ? smartProduct : '';
     let pool = availableItems;
     if (productToFilter) {
       pool = pool.filter(i => i.product_code === productToFilter || String(i.product_id) === String(productToFilter));
-    }
-
-    const startSplit = splitSerial(rawStart);
-    const endSplit = splitSerial(rawEnd);
-
-    let expectedSerials: string[] = [];
-
-    if (rawStart === rawEnd) {
-      expectedSerials = [rawStart];
-    } else if (startSplit && endSplit && startSplit.prefix === endSplit.prefix && startSplit.suffix === endSplit.suffix) {
-      if (startSplit.padLen !== endSplit.padLen) {
-        alert(currentLang === 'en' 
-          ? `Mismatched padding in range: "${rawStart}" has ${startSplit.padLen} digits while "${rawEnd}" has ${endSplit.padLen} digits. Please specify matching zero-padding.` 
-          : `اختلاف في عدد خانات الأرقام: "${rawStart}" يحتوي على ${startSplit.padLen} أرقام بينما "${rawEnd}" يحتوي على ${endSplit.padLen} أرقام. يرجى استخدام نفس عدد الخانات.`);
-        return;
-      }
-
-      const minNum = Math.min(startSplit.num, endSplit.num);
-      const maxNum = Math.max(startSplit.num, endSplit.num);
-      const count = maxNum - minNum + 1;
-
-      if (count > 5000) {
-        alert(currentLang === 'en' ? 'Range is too large (maximum 5,000 items at once).' : 'النطاق كبير جداً (الحد الأقصى 5000 سبيكة في المرة الواحدة).');
-        return;
-      }
-
-      for (let n = minNum; n <= maxNum; n++) {
-        const numFormatted = String(n).padStart(startSplit.padLen, '0');
-        expectedSerials.push(`${startSplit.prefix}${numFormatted}${startSplit.suffix}`);
-      }
-    } else {
-      alert(currentLang === 'en'
-        ? `Invalid serial range format. Start ("${rawStart}") and End ("${rawEnd}") must share the same prefix, suffix, and structure.`
-        : `صيغة نطاق الأرقام التسلسلية غير صحيحة. يجب أن يتطابق رقم البداية ("${rawStart}") ورقم النهاية ("${rawEnd}") في البادئة واللاحقة والبنية.`);
-      return;
     }
 
     const poolMap = new Map<string, any>();
@@ -670,46 +1061,49 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
     });
 
     const prodObj = turkeyInventory?.summary?.by_product?.find(p => p.product_code === productToFilter || String(p.product_id) === String(productToFilter));
-    const prodLabel = productToFilter ? ` for product [${prodObj?.denomination || (typeof productToFilter === 'string' ? productToFilter : '')}]` : '';
-    const prodLabelAr = productToFilter ? ` للمنتج [${prodObj?.denomination || (typeof productToFilter === 'string' ? productToFilter : '')}]` : '';
+    const prodLabel = productToFilter ? ` for product [${prodObj?.denomination || productToFilter}]` : '';
+    const prodLabelAr = productToFilter ? ` للمنتج [${prodObj?.denomination || productToFilter}]` : '';
 
     if (matchedSerials.length === 0) {
       if (expectedSerials.length === 1) {
         alert(currentLang === 'en'
           ? `Serial number "${expectedSerials[0]}" does not exist in active Turkey inventory${prodLabel}. Please verify the serial number and selected product.`
-          : `الرقم التسلسلي "${expectedSerials[0]}" غير موجود في مخزون تركيا الحالي${prodLabelAr}. يرجى التحقق من صحة الرقم والمنتج المختار.`);
+          : `الرقم التسلسلي "${expectedSerials[0]}" غير موجود في مخزون تركيا المتاح${prodLabelAr}.`);
       } else {
         alert(currentLang === 'en'
           ? `None of the requested serial numbers in range ${rawStart}..${rawEnd} (${expectedSerials.length} items) exist in active Turkey inventory${prodLabel}. Please verify the exact serial numbers.`
-          : `جميع الأرقام التسلسلية المحددة في النطاق ${rawStart}..${rawEnd} (${expectedSerials.length} قطعة) غير موجودة في مخزون تركيا الحالي${prodLabelAr}. يرجى التأكد من دقة الأرقام.`);
+          : `لا توجد أي من الأرقام التسلسلية في النطاق ${rawStart}..${rawEnd} بمخزون تركيا المتاح${prodLabelAr}.`);
       }
       return;
     }
 
     const newSet = new Set([...selectedSerials, ...matchedSerials]);
     setSelectedSerials(Array.from(newSet));
+    if (productToFilter) {
+      setSelectedDenomCode(productToFilter);
+    }
     setShowSmartModal(false);
 
     if (missingSerials.length > 0) {
       alert(currentLang === 'en'
         ? `Selected ${matchedSerials.length} matching Turkey bar(s) in range ${rawStart}..${rawEnd}${prodLabel}. Note: ${missingSerials.length} serial(s) do not exist in inventory (${missingSerials.slice(0, 3).join(', ')}${missingSerials.length > 3 ? '...' : ''}).`
-        : `تم تحديد ${matchedSerials.length} سبيكة مطابقة ضمن النطاق ${rawStart}..${rawEnd}${prodLabelAr}. تنبيه: ${missingSerials.length} رقم تسلسلي غير موجود في المخزون (${missingSerials.slice(0, 3).join(', ')}${missingSerials.length > 3 ? '...' : ''}).`);
+        : `تم تحديد ${matchedSerials.length} سبيكة بالنطاق ${rawStart}..${rawEnd}${prodLabelAr}. تنبيه: ${missingSerials.length} سبيكة غير موجودة بالمخزون.`);
     } else {
       alert(currentLang === 'en'
         ? `Successfully selected all ${matchedSerials.length} Turkey bar(s) in range ${rawStart}..${rawEnd}${prodLabel}.`
-        : `تم بنجاح تحديد جميع السبائك (${matchedSerials.length} قطعة) ضمن النطاق ${rawStart}..${rawEnd}${prodLabelAr}.`);
+        : `تم تحديد كافة السبائك البالغ عددها ${matchedSerials.length} في النطاق بنجاح${prodLabelAr}.`);
     }
   };
 
-  // Submit Purchase
+  // Handle Turkey Purchase Submit
   const handleSubmit = async () => {
     if (selectedSerials.length === 0) {
       alert(currentLang === 'en' ? 'Please select at least one Turkey bar to purchase.' : 'يرجى تحديد سبيكة تركية واحدة على الأقل للشراء.');
       return;
     }
-    const rateNum = parseFloat(unitPricePerGram);
+
     if (isNaN(rateNum) || rateNum <= 0) {
-      alert(currentLang === 'en' ? 'Please enter the agreed purchase rate (KWD/gram).' : 'يرجى إدخال سعر الشراء المتفق عليه للجرام (دينار/جرام).');
+      alert(currentLang === 'en' ? 'Please enter a valid Agreed Purchase Rate per gram (KWD / gram).' : 'يرجى إدخال سعر شراء صحيح للجرام (د.ك / جم).');
       return;
     }
 
@@ -730,24 +1124,35 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
       setUnitPricePerGram('');
       setPurchaseNotes('');
       setActiveSubTab('PENDING_BATCHES');
+      setPendingBatchFilter('TURKEY');
       onRefresh();
+      fetchVipData();
     }
   };
 
   // Total agreed cost in KWD
   const totalAgreedCostKwd = useMemo(() => {
-    const rate = parseFloat(unitPricePerGram);
-    if (isNaN(rate) || rate <= 0) return 0;
-    return Math.round(selectedItemsData.totalWeightGrams * rate * 1000) / 1000;
-  }, [selectedItemsData.totalWeightGrams, unitPricePerGram]);
+    if (isNaN(rateNum) || rateNum <= 0) return 0;
+    return Math.round(selectedItemsData.totalWeightGrams * rateNum * 1000) / 1000;
+  }, [selectedItemsData.totalWeightGrams, rateNum]);
+
+  // Overall Total Precious Metals Metric Calculations
+  const portfolioTotalBars = (turkeyInventory?.summary?.total_bars || 0) + (kfhAvailableInventory?.summary?.total_bars || 0) + (vipInventory?.summary?.total_bars || 0);
+  const portfolioTotalWeightKg = Math.round(((turkeyInventory?.summary?.total_weight_kg || 0) + (kfhAvailableInventory?.summary?.total_weight_kg || 0) + (vipInventory?.summary?.total_weight_kg || 0)) * 1000) / 1000;
+  const portfolioTotalWeightGrams = (turkeyInventory?.summary?.total_weight_grams || 0) + (kfhAvailableInventory?.summary?.total_weight_grams || 0) + (vipInventory?.summary?.total_weight_grams || 0);
+
+  // Combined Pending Batches for Tab 3
+  const totalPendingBatchesCount = (pendingPurchases.filter(p => p.status_code === 'PENDING_APPROVAL').length) +
+    (pendingVipAllocations.filter(a => a.status_code === 'PENDING_MAKER' || a.status_code === 'PENDING_APPROVAL').length) +
+    (pendingVipDispenses.filter(d => d.status_code === 'PENDING_MAKER' || d.status_code === 'PENDING_APPROVAL').length);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
       
-      {/* 1. TOP HEADER SUMMARY & KPIS */}
+      {/* 1. TOP HEADER SUMMARY & 4 KPIS */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px' }}>
         
-        {/* KPI 1: Turkey Stock Available */}
+        {/* KPI 1: Turkey Consignment Stock */}
         <div className="glass-card" style={{ padding: '18px', borderLeft: '4px solid #E11D48' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
@@ -767,42 +1172,62 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
           </div>
         </div>
 
-        {/* KPI 2: Selected for Purchase */}
+        {/* KPI 2: KFH Online Retail Stock */}
         <div className="glass-card" style={{ padding: '18px', borderLeft: '4px solid var(--kfh-green)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
               <div style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                {currentLang === 'en' ? 'Selected for KFH Purchase' : 'المحدد للشراء لصالح بيتك'}
+                {currentLang === 'en' ? 'KFH Online Retail Stock' : 'مخزون بيتك (متاح أونلاين)'}
               </div>
               <div style={{ fontSize: '22px', fontWeight: 'bold', marginTop: '6px', color: 'var(--kfh-green)' }}>
-                {selectedItemsData.count} <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'bars' : 'سبيكة'}</span>
+                {kfhAvailableInventory?.summary?.total_bars || 0} <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'bars' : 'سبيكة'}</span>
               </div>
               <div style={{ fontSize: '12px', color: 'var(--kfh-green)', fontWeight: 600, marginTop: '2px' }}>
-                {selectedItemsData.totalWeightKg} KG <span style={{ color: 'var(--text-muted)', fontWeight: 'normal' }}>({selectedItemsData.totalWeightGrams.toLocaleString()} g)</span>
+                {kfhAvailableInventory?.summary?.total_weight_kg || 0} KG <span style={{ color: 'var(--text-muted)', fontWeight: 'normal' }}>({(kfhAvailableInventory?.summary?.total_weight_grams || 0).toLocaleString()} g)</span>
               </div>
             </div>
             <div style={{ width: '42px', height: '42px', borderRadius: '8px', background: 'rgba(0, 155, 78, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', color: 'var(--kfh-green)' }}>
-              <i className="fa-solid fa-cart-shopping"></i>
+              🇰🇼
             </div>
           </div>
         </div>
 
-        {/* KPI 3: Live Guidance Rate */}
+        {/* KPI 3: VIP Exclusive Vault Reserve */}
+        <div className="glass-card" style={{ padding: '18px', borderLeft: '4px solid #ec4899' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                {currentLang === 'en' ? 'VIP Exclusive Vault Reserve' : 'مخزون كبار العملاء (VIP)'}
+              </div>
+              <div style={{ fontSize: '22px', fontWeight: 'bold', marginTop: '6px', color: '#ec4899' }}>
+                {vipInventory?.summary?.total_bars || 0} <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'bars' : 'سبيكة'}</span>
+              </div>
+              <div style={{ fontSize: '12px', color: '#ec4899', fontWeight: 600, marginTop: '2px' }}>
+                {vipInventory?.summary?.total_weight_kg || 0} KG <span style={{ color: 'var(--text-muted)', fontWeight: 'normal' }}>({(vipInventory?.summary?.total_weight_grams || 0).toLocaleString()} g)</span>
+              </div>
+            </div>
+            <div style={{ width: '42px', height: '42px', borderRadius: '8px', background: 'rgba(236, 72, 153, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', color: '#ec4899' }}>
+              👑
+            </div>
+          </div>
+        </div>
+
+        {/* KPI 4: Total Portfolio Precious Metals */}
         <div className="glass-card" style={{ padding: '18px', borderLeft: '4px solid var(--accent-gold)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
               <div style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                {currentLang === 'en' ? 'Indicative Gold Rate' : 'سعر الذهب الإرشادي (أونصة)'}
+                {currentLang === 'en' ? 'Total Precious Portfolio' : 'إجمالي محفظة المعادن الثمينة'}
               </div>
               <div style={{ fontSize: '22px', fontWeight: 'bold', marginTop: '6px', color: 'var(--accent-gold)' }}>
-                ${goldRate ? goldRate.toLocaleString() : '—'} <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>/ oz</span>
+                {portfolioTotalWeightKg} <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>KG</span>
               </div>
               <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                {currentLang === 'en' ? 'Negotiate & enter manual KWD rate per gram' : 'يتم إدخال السعر المتفق عليه يدوياً بدينار/جرام'}
+                {portfolioTotalBars} {currentLang === 'en' ? 'bars total' : 'سبيكة إجمالاً'} • {portfolioTotalWeightGrams.toLocaleString()} g
               </div>
             </div>
             <div style={{ width: '42px', height: '42px', borderRadius: '8px', background: 'rgba(212, 175, 55, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', color: 'var(--accent-gold)' }}>
-              <i className="fa-solid fa-chart-line"></i>
+              💎
             </div>
           </div>
         </div>
@@ -852,57 +1277,85 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
 
       {/* 2. SUB-TABS NAVIGATION */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
-        <div style={{ display: 'flex', gap: '10px' }}>
+        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
           <button
             className={`btn ${activeSubTab === 'STOCK_PURCHASE' ? 'btn-primary' : ''}`}
             style={activeSubTab !== 'STOCK_PURCHASE' ? { backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--surface-border)' } : {}}
             onClick={() => setActiveSubTab('STOCK_PURCHASE')}
           >
-            <i className="fa-solid fa-layer-group"></i> {currentLang === 'en' ? 'Turkey Stock & Purchase Order' : 'مخزون تركيا وأمر الشراء'}
+            <i className="fa-solid fa-layer-group"></i> {currentLang === 'en' ? '🇹🇷 Turkey Stock & Purchase Order' : '🇹🇷 مخزون تركيا وأمر الشراء'}
+          </button>
+
+          <button
+            className={`btn ${activeSubTab === 'VIP_STOCK' ? 'btn-primary' : ''}`}
+            style={activeSubTab !== 'VIP_STOCK' ? { backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--surface-border)', color: '#ec4899' } : { background: '#ec4899', borderColor: '#ec4899', color: '#fff' }}
+            onClick={() => {
+              setActiveSubTab('VIP_STOCK');
+              fetchVipData();
+            }}
+          >
+            <i className="fa-solid fa-crown"></i> {currentLang === 'en' ? '👑 KFH Stock & VIP Allocation' : '👑 مخزون بيتك وتخصيص كبار العملاء (VIP)'}
+            {vipInventory?.summary?.total_bars ? (
+              <span className="badge" style={{ marginLeft: '6px', fontSize: '10px', background: 'rgba(255,255,255,0.2)', color: '#fff' }}>
+                {vipInventory.summary.total_bars}
+              </span>
+            ) : null}
           </button>
 
           <button
             className={`btn ${activeSubTab === 'PENDING_BATCHES' ? 'btn-primary' : ''}`}
             style={activeSubTab !== 'PENDING_BATCHES' ? { backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--surface-border)' } : {}}
-            onClick={() => setActiveSubTab('PENDING_BATCHES')}
+            onClick={() => {
+              setActiveSubTab('PENDING_BATCHES');
+              fetchVipData();
+            }}
           >
-            <i className="fa-solid fa-clock-rotate-left"></i> {currentLang === 'en' ? 'Purchase Requests & History' : 'طلبات الشراء وسجل العمليات'}
-            {pendingPurchases.length > 0 && (
+            <i className="fa-solid fa-clock-rotate-left"></i> {currentLang === 'en' ? '📋 Operations Log & Maker-Checker' : '📋 سجل العمليات والأعين الأربعة'}
+            {totalPendingBatchesCount > 0 && (
               <span className="badge badge-reserved" style={{ marginLeft: '6px', fontSize: '10px' }}>
-                {pendingPurchases.filter(p => p.status_code === 'PENDING_APPROVAL').length}
+                {totalPendingBatchesCount}
               </span>
             )}
           </button>
         </div>
 
         <div style={{ display: 'flex', gap: '8px' }}>
+          {activeSubTab === 'STOCK_PURCHASE' && (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => {
+                setSmartProduct(selectedDenomCode);
+                setShowSmartModal(true);
+              }}
+              style={{ fontSize: '12px', padding: '6px 14px' }}
+            >
+              <i className="fa-solid fa-wand-magic-sparkles" style={{ color: 'var(--accent-gold)' }}></i>{' '}
+              {currentLang === 'en' ? 'Advanced Tools (Range / OCR / Paste)' : 'أدوات متقدمة (نطاق / OCR / لصق)'}
+            </button>
+          )}
+
           <button
-            type="button"
             className="btn btn-secondary"
             onClick={() => {
-              setSmartProduct(selectedDenomCode);
-              setShowSmartModal(true);
+              onRefresh();
+              fetchVipData();
             }}
-            style={{ fontSize: '12px', padding: '6px 14px' }}
+            style={{ fontSize: '12px', padding: '6px 12px' }}
           >
-            <i className="fa-solid fa-wand-magic-sparkles" style={{ color: 'var(--accent-gold)' }}></i>{' '}
-            {currentLang === 'en' ? 'Advanced Tools (Range / OCR / Paste)' : 'أدوات متقدمة (نطاق / OCR / لصق)'}
-          </button>
-
-          <button className="btn btn-secondary" onClick={onRefresh} style={{ fontSize: '12px', padding: '6px 12px' }}>
-            <i className="fa-solid fa-arrows-rotate"></i> {currentLang === 'en' ? 'Refresh Stock' : 'تحديث المخزون'}
+            <i className="fa-solid fa-arrows-rotate"></i> {currentLang === 'en' ? 'Refresh All' : 'تحديث الكل'}
           </button>
         </div>
       </div>
 
       {/* 3. SUBTAB 1: SELECT & PURCHASE TURKEY GOLD */}
       {activeSubTab === 'STOCK_PURCHASE' && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 360px', gap: '20px', alignItems: 'start' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 370px', gap: '20px', alignItems: 'start' }}>
           
           {/* LEFT: DENOMINATION SELECTOR + SERIAL FACILITATOR + QR SCANNER + SELECTED ITEMS */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
             
-            {/* STEP 1: SELECT DENOMINATION & TYPE (Simplified Explorer) */}
+            {/* STEP 1: SELECT DENOMINATION & TYPE */}
             <div className="glass-card" style={{ padding: '20px', border: '1px solid rgba(0, 155, 78, 0.25)', background: 'linear-gradient(180deg, rgba(0, 155, 78, 0.04) 0%, rgba(255,255,255,0.01) 100%)' }}>
               
               {/* Header */}
@@ -944,13 +1397,13 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
               </div>
 
               {/* Denomination Choice Pills / Cards */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '10px', marginBottom: '16px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px', marginBottom: '16px' }}>
                 {turkeyInventory?.summary?.by_product?.map(p => {
                   const isSelected = selectedDenomCode === p.product_code;
-                  // count selected for this product
                   const prodItems = availableItems.filter(i => i.product_code === p.product_code);
                   const selectedSet = new Set(selectedSerials);
                   const selectedInThis = prodItems.filter(i => selectedSet.has(i.serial_number)).length;
+                  const denomPurchasingCost = rateNum > 0 ? (p.weight_grams * rateNum) : 0;
 
                   return (
                     <div
@@ -988,6 +1441,24 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
                           </span>
                         )}
                       </div>
+
+                      {/* Purchasing Cost by Denomination preview on card */}
+                      {denomPurchasingCost > 0 && (
+                        <div style={{
+                          marginTop: '2px',
+                          paddingTop: '6px',
+                          borderTop: '1px dashed rgba(255,255,255,0.08)',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          fontSize: '11px'
+                        }}>
+                          <span style={{ color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Purchasing Cost:' : 'تكلفة الشراء للفئة:'}</span>
+                          <strong style={{ color: 'var(--kfh-green)' }}>
+                            {denomPurchasingCost.toFixed(3)} KWD <span style={{ fontSize: '9px', fontWeight: 'normal', color: 'var(--text-muted)' }}>/ bar</span>
+                          </strong>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -1046,94 +1517,98 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
                         onClick={handleSelectAllForDenom}
                         style={{ fontSize: '11px', padding: '4px 10px' }}
                       >
-                        <i className="fa-solid fa-check"></i> {currentLang === 'en' ? `Select All (${itemsForSelectedDenom.length})` : `تحديد كل الفئة (${itemsForSelectedDenom.length})`}
+                        <i className="fa-solid fa-check"></i> {currentLang === 'en' ? `Select All ${currentDenomObj.denomination} (${itemsForSelectedDenom.length})` : `تحديد كل فئة ${currentDenomObj.denomination} (${itemsForSelectedDenom.length})`}
                       </button>
                       {selectedCountForCurrentDenom > 0 && (
                         <button
                           type="button"
                           className="btn"
                           onClick={handleDeselectAllForDenom}
-                          style={{ fontSize: '11px', padding: '4px 10px', background: 'rgba(239, 68, 68, 0.1)', color: '#EF4444', border: '1px solid rgba(239, 68, 68, 0.2)' }}
+                          style={{ fontSize: '11px', padding: '4px 10px', background: 'rgba(255,255,255,0.05)' }}
                         >
-                          {currentLang === 'en' ? 'Deselect Denomination' : 'إلغاء تحديد الفئة'}
+                          {currentLang === 'en' ? 'Deselect Denom' : 'إلغاء تحديد الفئة'}
                         </button>
                       )}
                     </div>
                   </div>
 
-                  {/* Serial Search / Filter Input */}
-                  <div style={{ marginBottom: '10px' }}>
-                    <div style={{ position: 'relative' }}>
-                      <i className="fa-solid fa-magnifying-glass" style={{ position: 'absolute', left: currentLang === 'ar' ? 'auto' : '10px', right: currentLang === 'ar' ? '10px' : 'auto', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', fontSize: '12px' }}></i>
+                  {/* Search Bar for Serials in current denomination */}
+                  <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
+                    <div style={{ position: 'relative', flex: 1 }}>
                       <input
                         type="text"
                         className="form-control"
-                        placeholder={currentLang === 'en' ? `Filter available serials in ${currentDenomObj.denomination}... (e.g. 570 or B00)` : `تصفية الأرقام التسلسلية المتاحة لـ ${currentDenomObj.denomination}...`}
+                        placeholder={currentLang === 'en' ? `Search serials in ${currentDenomObj.denomination} (e.g. SN or TR-)... ` : `بحث في الأرقام التسلسلية لفئة ${currentDenomObj.denomination}...`}
                         value={denomSerialSearch}
                         onChange={e => setDenomSerialSearch(e.target.value)}
-                        style={{ fontSize: '12px', padding: currentLang === 'ar' ? '6px 30px 6px 10px' : '6px 10px 6px 30px' }}
+                        style={{ fontSize: '12px', padding: '6px 10px', paddingLeft: currentLang === 'en' ? '30px' : '10px', paddingRight: currentLang === 'ar' ? '30px' : '10px' }}
                       />
+                      <i className="fa-solid fa-magnifying-glass" style={{ position: 'absolute', top: '50%', [currentLang === 'en' ? 'left' : 'right']: '10px', transform: 'translateY(-50%)', color: 'var(--text-muted)', fontSize: '11px' }}></i>
                     </div>
+                    {denomSerialSearch && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() => setDenomSerialSearch('')}
+                        style={{ fontSize: '11px', padding: '4px 10px' }}
+                      >
+                        {currentLang === 'en' ? 'Clear Filter' : 'مسح'}
+                      </button>
+                    )}
                   </div>
 
-                  {/* Serials Badges Facilitator Grid */}
+                  {/* Available Serials Chips Grid */}
                   <div style={{
                     maxHeight: '180px',
                     overflowY: 'auto',
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))',
+                    display: 'flex',
+                    flexWrap: 'wrap',
                     gap: '6px',
                     padding: '8px',
-                    background: 'rgba(0,0,0,0.2)',
+                    background: 'var(--bg-secondary)',
                     borderRadius: '6px',
-                    border: '1px solid rgba(255,255,255,0.04)'
+                    border: '1px solid var(--surface-border)'
                   }}>
                     {displayedDenomSerials.length === 0 ? (
-                      <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '16px', color: 'var(--text-muted)', fontSize: '12px' }}>
-                        {currentLang === 'en' ? 'No serials match your search filter in this denomination.' : 'لا توجد أرقام تسلسلية مطابقة لبحثك في هذه الفئة.'}
+                      <div style={{ width: '100%', textAlign: 'center', padding: '14px', fontSize: '12px', color: 'var(--text-muted)' }}>
+                        {denomSerialSearch
+                          ? (currentLang === 'en' ? 'No serial numbers match your search query.' : 'لا توجد أرقام تسلسلية مطابقة لبحثك.')
+                          : (currentLang === 'en' ? 'No available items in this denomination.' : 'لا توجد سبائك متاحة لهذه الفئة.')}
                       </div>
                     ) : (
                       displayedDenomSerials.map(item => {
                         const isSelected = selectedSerials.includes(item.serial_number);
                         return (
                           <div
-                            key={item.item_id || item.serial_number}
+                            key={item.serial_number}
                             onClick={() => handleToggleItem(item.serial_number)}
                             style={{
-                              padding: '6px 8px',
+                              padding: '5px 9px',
                               borderRadius: '4px',
+                              fontSize: '11px',
+                              fontFamily: 'monospace',
+                              fontWeight: 600,
                               cursor: 'pointer',
+                              userSelect: 'none',
+                              transition: 'all 0.15s',
                               display: 'flex',
-                              flexDirection: 'column',
-                              gap: '2px',
-                              border: isSelected ? '1px solid var(--kfh-green)' : '1px solid rgba(255,255,255,0.08)',
-                              background: isSelected ? 'rgba(0, 155, 78, 0.25)' : 'rgba(255,255,255,0.03)',
-                              transition: 'all 0.15s'
+                              alignItems: 'center',
+                              gap: '6px',
+                              background: isSelected ? 'rgba(0, 155, 78, 0.25)' : 'rgba(255, 255, 255, 0.04)',
+                              border: isSelected ? '1px solid var(--kfh-green)' : '1px solid var(--surface-border)',
+                              color: isSelected ? 'var(--kfh-green)' : 'var(--text-primary)'
                             }}
                           >
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                              <span style={{ fontSize: '11px', fontWeight: 'bold', color: isSelected ? 'var(--kfh-green)' : 'var(--text-primary)', fontFamily: 'monospace' }}>
-                                {item.serial_number}
+                            <i className={`fa-solid ${isSelected ? 'fa-square-check' : 'fa-square'}`} style={{ color: isSelected ? 'var(--kfh-green)' : 'var(--text-muted)' }}></i>
+                            <span>{item.serial_number}</span>
+                            {item.has_qr_printed ? (
+                              <span title="QR Printed" style={{ fontSize: '9px', color: 'var(--kfh-green)' }}>
+                                <i className="fa-solid fa-qrcode"></i>
                               </span>
-                              <input
-                                type="checkbox"
-                                checked={isSelected}
-                                onChange={() => {}} // handled by div click
-                                style={{ accentColor: 'var(--kfh-green)', cursor: 'pointer' }}
-                              />
-                            </div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '9px', color: 'var(--text-muted)' }}>
-                              <span>{item.location_code || 'Vault'}</span>
-                              {item.has_qr_printed ? (
-                                <span title="QR Label Printed" style={{ color: 'var(--kfh-green)' }}><i className="fa-solid fa-qrcode"></i></span>
-                              ) : (
-                                <span title="No QR Label" style={{ color: '#EF4444' }}><i className="fa-solid fa-triangle-exclamation"></i></span>
-                              )}
-                            </div>
-                            {item.lot_number && (
-                              <div style={{ fontSize: '8.5px', color: 'var(--accent-gold)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                {item.lot_number}
-                              </div>
+                            ) : (
+                              <span title="No QR Label" style={{ fontSize: '9px', color: '#EF4444' }}>
+                                <i className="fa-solid fa-triangle-exclamation"></i>
+                              </span>
                             )}
                           </div>
                         );
@@ -1141,10 +1616,13 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
                     )}
                   </div>
 
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-muted)', marginTop: '8px' }}>
-                    <span>{displayedDenomSerials.length} {currentLang === 'en' ? 'serials shown' : 'رقم معروض'}</span>
-                    <span style={{ color: 'var(--kfh-green)', fontWeight: 600 }}>
-                      {selectedCountForCurrentDenom} / {itemsForSelectedDenom.length} {currentLang === 'en' ? 'selected in this denomination' : 'محدد من هذه الفئة'}
+                  {/* Summary footer for current denomination */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px', fontSize: '11px', color: 'var(--text-muted)' }}>
+                    <span>
+                      {currentLang === 'en' ? 'Showing:' : 'عرض:'} <strong>{displayedDenomSerials.length}</strong> {currentLang === 'en' ? 'bars' : 'سبيكة'}
+                    </span>
+                    <span style={{ color: selectedCountForCurrentDenom > 0 ? 'var(--kfh-green)' : 'inherit', fontWeight: selectedCountForCurrentDenom > 0 ? 'bold' : 'normal' }}>
+                      {currentLang === 'en' ? 'Selected in this denomination:' : 'المحدد من هذه الفئة:'} {selectedCountForCurrentDenom} / {itemsForSelectedDenom.length}
                     </span>
                   </div>
 
@@ -1153,254 +1631,208 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
 
             </div>
 
-            {/* STEP 2: DEDICATED QR & BARCODE QUICK SCANNER (USB Gun or Camera) */}
-            <div className="glass-card" style={{ padding: '16px 20px', border: '1px solid rgba(212, 175, 55, 0.3)', background: 'linear-gradient(180deg, rgba(212, 175, 55, 0.05) 0%, rgba(255,255,255,0.01) 100%)' }}>
-              
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
+            {/* DEDICATED QR & BARCODE FAST SCANNER BOX */}
+            <div className="glass-card" style={{ padding: '16px', borderLeft: '4px solid #3B82F6' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: 'var(--accent-gold)', color: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', fontWeight: 'bold' }}>
-                    <i className="fa-solid fa-qrcode"></i>
-                  </div>
+                  <i className="fa-solid fa-barcode" style={{ color: '#3B82F6', fontSize: '18px' }}></i>
                   <div>
-                    <h4 style={{ margin: 0, fontSize: '14px', color: 'var(--text-primary)' }}>
-                      {currentLang === 'en' ? 'Barcode & QR Code Scanner' : 'ماسح الباركود ورمز QR المباشر'}
-                    </h4>
+                    <h5 style={{ margin: 0, fontSize: '13px', color: 'var(--text-primary)' }}>
+                      {currentLang === 'en' ? 'Barcode & QR Code Scanner (Fast Piece Addition)' : 'ماسح الباركود ورمز QR (إضافة سريعة بالقطعة)'}
+                    </h5>
                     <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                      {currentLang === 'en' ? 'Scan physical bar labels with a barcode gun or camera to instantly add them to your purchase batch.' : 'امسح ملصق الباركود أو رمز QR بجهاز المسح أو الكاميرا لإضافتها مباشرة لطلب الشراء.'}
+                      {currentLang === 'en' ? 'Scan physical bar QR/DataMatrix or enter serial number directly.' : 'امسح رمز الاستجابة السريعة QR أو أدخل الرقم التسلسلي للإضافة فوراً.'}
                     </span>
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', gap: '6px' }}>
-                  {!cameraActive ? (
-                    <button
-                      type="button"
-                      className="btn btn-primary"
-                      onClick={() => {
-                        setSmartTab('OCR');
-                        setShowSmartModal(true);
-                      }}
-                      style={{ fontSize: '11px', padding: '5px 12px' }}
-                    >
-                      <i className="fa-solid fa-camera"></i> {currentLang === 'en' ? 'Live Camera Scanner' : 'مسح بالكاميرا'}
-                    </button>
-                  ) : null}
-                </div>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    setSmartProduct(selectedDenomCode);
+                    setShowSmartModal(true);
+                  }}
+                  style={{ fontSize: '11px', padding: '4px 10px' }}
+                >
+                  <i className="fa-solid fa-camera"></i> {currentLang === 'en' ? 'Camera / OCR / Range' : 'الكاميرا / النطاق'}
+                </button>
               </div>
 
-              {/* Fast Barcode/QR Input Form */}
-              <form
-                onSubmit={e => {
-                  e.preventDefault();
-                  handleProcessScanInput(qrScanInput);
-                }}
-                style={{ display: 'flex', gap: '8px', alignItems: 'center' }}
-              >
-                <div style={{ position: 'relative', flex: 1 }}>
-                  <i className="fa-solid fa-barcode" style={{ position: 'absolute', left: currentLang === 'ar' ? 'auto' : '12px', right: currentLang === 'ar' ? '12px' : 'auto', top: '50%', transform: 'translateY(-50%)', color: 'var(--accent-gold)', fontSize: '14px' }}></i>
-                  <input
-                    ref={qrInputRef}
-                    type="text"
-                    className="form-control"
-                    placeholder={currentLang === 'en' ? 'Scan barcode / QR code or enter serial number & hit Enter...' : 'امسح الباركود / رمز QR أو أدخل الرقم واضغط Enter...'}
-                    value={qrScanInput}
-                    onChange={e => setQrScanInput(e.target.value)}
-                    style={{ fontSize: '13px', padding: currentLang === 'ar' ? '8px 36px 8px 12px' : '8px 12px 8px 36px', height: '38px' }}
-                  />
-                </div>
-
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input
+                  ref={qrInputRef}
+                  type="text"
+                  className="form-control"
+                  placeholder={currentLang === 'en' ? 'Scan or type bar serial number and hit Enter (e.g. B00570, TR-2026-0001)...' : 'امسح أو اكتب الرقم التسلسلي واضغط Enter...'}
+                  value={qrScanInput}
+                  onChange={e => setQrScanInput(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleProcessScanInput(qrScanInput);
+                    }
+                  }}
+                  style={{ fontSize: '12px' }}
+                />
                 <button
-                  type="submit"
+                  type="button"
                   className="btn btn-primary"
-                  style={{ height: '38px', padding: '0 16px', fontSize: '12px', fontWeight: 'bold', whiteSpace: 'nowrap' }}
+                  onClick={() => handleProcessScanInput(qrScanInput)}
+                  style={{ fontSize: '12px', padding: '6px 16px' }}
                 >
-                  <i className="fa-solid fa-plus"></i> {currentLang === 'en' ? 'Scan & Add' : 'مسح وإضافة'}
+                  <i className="fa-solid fa-plus"></i> {currentLang === 'en' ? 'Add' : 'إضافة'}
                 </button>
-              </form>
+              </div>
 
-              {/* Scanner feedback message */}
               {scanFeedback && (
                 <div style={{
-                  marginTop: '10px',
+                  marginTop: '8px',
                   padding: '8px 12px',
                   borderRadius: '6px',
                   fontSize: '12px',
                   display: 'flex',
                   alignItems: 'center',
-                  justifyContent: 'space-between',
+                  gap: '8px',
                   background: scanFeedback.type === 'success' ? 'rgba(0, 155, 78, 0.15)' : scanFeedback.type === 'warning' ? 'rgba(245, 158, 11, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-                  color: scanFeedback.type === 'success' ? 'var(--kfh-green)' : scanFeedback.type === 'warning' ? '#F59E0B' : '#EF4444',
-                  border: `1px solid ${scanFeedback.type === 'success' ? 'rgba(0, 155, 78, 0.3)' : scanFeedback.type === 'warning' ? 'rgba(245, 158, 11, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`
+                  color: scanFeedback.type === 'success' ? 'var(--kfh-green)' : scanFeedback.type === 'warning' ? '#F59E0B' : '#EF4444'
                 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <i className={`fa-solid ${scanFeedback.type === 'success' ? 'fa-circle-check' : scanFeedback.type === 'warning' ? 'fa-triangle-exclamation' : 'fa-circle-xmark'}`}></i>
-                    <span>{scanFeedback.message}</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setScanFeedback(null)}
-                    style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '14px' }}
-                  >
-                    &times;
-                  </button>
+                  <i className={`fa-solid ${scanFeedback.type === 'success' ? 'fa-circle-check' : scanFeedback.type === 'warning' ? 'fa-triangle-exclamation' : 'fa-circle-xmark'}`}></i>
+                  <span>{scanFeedback.message}</span>
                 </div>
               )}
-
             </div>
 
             {/* STEP 3: SELECTED TURKEY GOLD ITEMS TABLE */}
             <div className="glass-card" style={{ padding: '20px' }}>
-              
-              {/* Header with Title, Count Badge, and Collapse/Expand Toggle */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: isItemsListExpanded ? '16px' : 0 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: 'var(--kfh-green)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', fontWeight: 'bold' }}>
-                    3
+                    2
                   </div>
-                  <h4 style={{ margin: 0, fontSize: '15px', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <i className="fa-solid fa-cart-shopping" style={{ color: 'var(--kfh-green)' }}></i>
-                    {currentLang === 'en' ? 'Selected Items for Purchase' : 'السبائك المحددة لأمر الشراء'}
-                  </h4>
-                  <span className="badge" style={{ background: selectedItemsData.count > 0 ? 'rgba(0, 155, 78, 0.15)' : 'rgba(255,255,255,0.06)', color: selectedItemsData.count > 0 ? 'var(--kfh-green)' : 'var(--text-muted)', fontSize: '12px', fontWeight: 'bold', border: selectedItemsData.count > 0 ? '1px solid rgba(0, 155, 78, 0.3)' : 'none' }}>
-                    {selectedItemsData.count} {currentLang === 'en' ? 'selected' : 'محددة'} ({selectedItemsData.totalWeightKg} KG)
-                  </span>
+                  <div>
+                    <h4 style={{ margin: 0, fontSize: '15px', color: 'var(--text-primary)' }}>
+                      {currentLang === 'en' ? 'Selected Turkey Consignment Bars' : 'السبائك التركية المحددة للشراء'}
+                      <span className="badge badge-ready" style={{ marginLeft: '8px', fontSize: '12px' }}>
+                        {selectedItemsData.count} {currentLang === 'en' ? 'bars' : 'سبيكة'}
+                      </span>
+                    </h4>
+                    <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                      {currentLang === 'en' ? `Total weight: ${selectedItemsData.totalWeightKg} KG (${selectedItemsData.totalWeightGrams.toLocaleString()} grams)` : `الوزن الإجمالي: ${selectedItemsData.totalWeightKg} كجم (${selectedItemsData.totalWeightGrams.toLocaleString()} جم)`}
+                    </span>
+                  </div>
                 </div>
 
                 <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                  {selectedSerials.length > 0 && (
+                  {selectedItemsData.count > 0 && (
                     <button
                       type="button"
-                      className="btn btn-danger"
-                      onClick={handleClearSelection}
-                      style={{ fontSize: '11px', padding: '4px 10px' }}
+                      className="btn btn-secondary"
+                      onClick={() => setIsItemsListExpanded(prev => !prev)}
+                      style={{ fontSize: '11px', padding: '5px 10px' }}
                     >
-                      <i className="fa-solid fa-trash-can"></i> {currentLang === 'en' ? 'Clear List' : 'تفريغ القائمة'}
+                      <i className={`fa-solid ${isItemsListExpanded ? 'fa-chevron-up' : 'fa-chevron-down'}`}></i> {isItemsListExpanded ? (currentLang === 'en' ? 'Collapse Table' : 'طي الجدول') : (currentLang === 'en' ? 'Expand Table' : 'توسيع الجدول')}
                     </button>
                   )}
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={() => setIsItemsListExpanded(!isItemsListExpanded)}
-                    style={{ fontSize: '12px', padding: '5px 12px', display: 'flex', alignItems: 'center', gap: '6px' }}
-                  >
-                    <i className={`fa-solid ${isItemsListExpanded ? 'fa-chevron-up' : 'fa-chevron-down'}`}></i>
-                    <span>{isItemsListExpanded ? (currentLang === 'en' ? 'Collapse' : 'طي القائمة') : (currentLang === 'en' ? 'Expand' : 'توسيع القائمة')}</span>
-                  </button>
                 </div>
               </div>
 
+              {/* Denomination Breakdown Summary Pills */}
+              {selectedBreakdownByDenomination.length > 0 && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '8px', marginBottom: '14px' }}>
+                  {selectedBreakdownByDenomination.map(denom => (
+                    <div key={denom.product_code} style={{ padding: '8px 12px', borderRadius: '6px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--surface-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <div style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--text-primary)' }}>{denom.denomination}</div>
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{denom.count} bars • {denom.total_weight_grams.toLocaleString()} g</div>
+                      </div>
+                      {rateNum > 0 && (
+                        <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{denom.purchasing_cost_per_bar.toFixed(3)} KWD/bar</div>
+                          <strong style={{ fontSize: '12px', color: 'var(--kfh-green)' }}>{denom.subtotal_purchasing_cost.toFixed(3)} KWD</strong>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Selected Items Table */}
               {isItemsListExpanded && (
                 <>
-                  {/* Filter within selected items */}
-                  {selectedItemsData.items.length > 0 && (
-                    <div style={{ marginBottom: '14px' }}>
+                  {selectedItemsData.count > 0 && (
+                    <div style={{ marginBottom: '10px' }}>
                       <input
                         type="text"
                         className="form-control"
-                        placeholder={currentLang === 'en' ? 'Search within selected bars by serial, refiner, denomination, shipment lot...' : 'بحث ضمن السبائك المحددة بالرقم أو المصفاة أو الفئة أو الشحنة...'}
+                        placeholder={currentLang === 'en' ? 'Filter selected items by serial, refiner, lot, or location...' : 'تصفية السبائك المحددة...'}
                         value={searchSelectedQuery}
                         onChange={e => setSearchSelectedQuery(e.target.value)}
-                        style={{ fontSize: '12px', padding: '7px 12px' }}
+                        style={{ fontSize: '12px', padding: '6px 10px' }}
                       />
                     </div>
                   )}
 
-                  {/* Selected Items Data Grid */}
-                  <div className="table-responsive" style={{ maxHeight: '420px', overflowY: 'auto' }}>
+                  <div className="table-responsive" style={{ maxHeight: '350px', overflowY: 'auto' }}>
                     <table>
                       <thead>
                         <tr>
-                          <th style={{ width: '40px', textAlign: 'center' }}>#</th>
+                          <th style={{ width: '40px' }}>#</th>
                           <th>{currentLang === 'en' ? 'Serial Number' : 'الرقم التسلسلي'}</th>
-                          <th>{currentLang === 'en' ? 'Denomination & Weight' : 'الفئة والوزن'}</th>
-                          <th>{currentLang === 'en' ? 'Shipment / Lot' : 'الشحنة / اللوت'}</th>
-                          <th>{currentLang === 'en' ? 'Registered Cost (KWD)' : 'التكلفة المسجلة'}</th>
-                          <th>{currentLang === 'en' ? 'Refiner / Brand' : 'المصفاة'}</th>
-                          <th>{currentLang === 'en' ? 'Vault Location' : 'موقع الخزينة'}</th>
+                          <th>{currentLang === 'en' ? 'Denomination' : 'الفئة'}</th>
+                          <th>{currentLang === 'en' ? 'Weight (g)' : 'الوزن (جم)'}</th>
+                          <th>{currentLang === 'en' ? 'Refiner' : 'المصفاة'}</th>
+                          <th>{currentLang === 'en' ? 'Shipment / Lot' : 'الشحنة / التشغيلة'}</th>
+                          <th>{currentLang === 'en' ? 'Purchasing Cost' : 'تكلفة الشراء'}</th>
                           <th>{currentLang === 'en' ? 'QR Status' : 'حالة QR'}</th>
-                          <th style={{ width: '60px', textAlign: 'center' }}>{currentLang === 'en' ? 'Action' : 'إجراء'}</th>
+                          <th style={{ width: '60px' }}>{currentLang === 'en' ? 'Remove' : 'إزالة'}</th>
                         </tr>
                       </thead>
                       <tbody>
                         {displayedSelectedItems.length === 0 ? (
                           <tr>
-                            <td colSpan={9} style={{ textAlign: 'center', padding: '36px 20px', color: 'var(--text-muted)' }}>
-                              <i className="fa-solid fa-cart-arrow-down" style={{ fontSize: '32px', marginBottom: '12px', color: 'var(--accent-gold)', opacity: 0.6, display: 'block' }}></i>
-                              <strong style={{ fontSize: '14px', color: 'var(--text-primary)', display: 'block', marginBottom: '6px' }}>
-                                {selectedItemsData.items.length === 0 
-                                  ? (currentLang === 'en' ? 'No Bars Selected Yet' : 'لم يتم تحديد أي سبائك بعد')
-                                  : (currentLang === 'en' ? 'No matching bars found in current search' : 'لا توجد سبائك مطابقة للبحث المحدد')}
-                              </strong>
-                              <span style={{ fontSize: '12px' }}>
-                                {selectedItemsData.items.length === 0
-                                  ? (currentLang === 'en' 
-                                      ? 'Select a Denomination / Type above, or use the Barcode & QR Code Scanner to add Turkey consignment bars to this purchase order.' 
-                                      : 'اختر فئة السبيكة أعلاه أو استخدم ماسح الباركود ورمز QR لإضافة السبائك التركية لأمر الشراء.')
-                                  : (currentLang === 'en' ? 'Try changing your search keywords.' : 'جرب تغيير كلمات البحث.')}
-                              </span>
+                            <td colSpan={9} style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)' }}>
+                              <i className="fa-solid fa-cart-arrow-down" style={{ fontSize: '24px', marginBottom: '8px', display: 'block', opacity: 0.5 }}></i>
+                              {currentLang === 'en' 
+                                ? 'Select a Denomination / Type above, or use the Barcode & QR Code Scanner to add Turkey consignment bars to this purchase order.' 
+                                : 'اختر فئة السبيكة بالأعلى أو استخدم ماسح الباركود و QR لإضافة السبائك التركية لأمر الشراء.'}
                             </td>
                           </tr>
                         ) : (
-                          displayedSelectedItems.map((item, index) => {
-                            const rateNum = parseFloat(unitPricePerGram) || 0;
+                          displayedSelectedItems.map((item, idx) => {
                             const barCost = rateNum > 0 ? (item.weight_grams * rateNum) : 0;
                             return (
-                              <tr key={item.item_id || item.serial_number}>
-                                <td style={{ textAlign: 'center', fontSize: '11px', color: 'var(--text-muted)' }}>
-                                  {index + 1}
-                                </td>
+                              <tr key={item.serial_number}>
+                                <td>{idx + 1}</td>
+                                <td><strong style={{ fontFamily: 'monospace', color: 'var(--kfh-green)' }}>{item.serial_number}</strong></td>
+                                <td>{item.denomination || item.metal_name}</td>
+                                <td>{item.weight_grams} g</td>
+                                <td>{item.refiner_name || 'Nadir Refinery'}</td>
                                 <td>
-                                  <strong style={{ color: 'var(--kfh-green)', fontFamily: 'monospace' }}>
-                                    {item.serial_number}
-                                  </strong>
-                                </td>
-                                <td>
-                                  {item.denomination || `${item.weight_grams}g Bar`}
-                                  <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: '4px' }}>
-                                    ({item.weight_grams}g)
-                                  </span>
-                                </td>
-                                <td>
-                                  <span style={{ fontSize: '11px', padding: '2px 6px', background: 'rgba(212, 175, 55, 0.1)', color: 'var(--accent-gold)', borderRadius: '4px', border: '1px solid rgba(212, 175, 55, 0.25)', fontWeight: 600 }}>
-                                    {item.lot_number || 'TR-CONSIGNMENT'}
+                                  <span style={{ fontSize: '11px', fontFamily: 'monospace', padding: '2px 6px', background: 'rgba(255,255,255,0.05)', borderRadius: '3px' }}>
+                                    {item.lot_number || 'LOT-TR-2026'}
                                   </span>
                                 </td>
                                 <td>
                                   {barCost > 0 ? (
-                                    <strong style={{ color: 'var(--kfh-green)', fontSize: '12px' }}>
-                                      {barCost.toFixed(3)} KWD
-                                      <span style={{ fontSize: '10px', color: 'var(--text-muted)', display: 'block', fontWeight: 'normal' }}>
-                                        @{rateNum.toFixed(3)}/g
-                                      </span>
-                                    </strong>
+                                    <strong style={{ color: 'var(--kfh-green)' }}>{barCost.toFixed(3)} KWD</strong>
                                   ) : (
                                     <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>—</span>
                                   )}
                                 </td>
-                                <td>{item.refiner_name || item.brand_name || 'Nadir Gold'}</td>
-                                <td>
-                                  <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                                    {item.location_code}
-                                  </span>
-                                </td>
                                 <td>
                                   {item.has_qr_printed ? (
-                                    <span className="badge badge-ready" style={{ fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                                      <i className="fa-solid fa-qrcode"></i> {currentLang === 'en' ? 'Printed' : 'مطبوع'}
-                                    </span>
+                                    <span className="badge badge-ready" style={{ fontSize: '10px' }}><i className="fa-solid fa-check"></i> Printed</span>
                                   ) : (
-                                    <span className="badge" style={{ fontSize: '11px', background: 'rgba(239, 68, 68, 0.12)', color: '#EF4444', border: '1px solid rgba(239, 68, 68, 0.3)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                                      <i className="fa-solid fa-triangle-exclamation"></i> {currentLang === 'en' ? 'No QR' : 'غير مطبوع'}
-                                    </span>
+                                    <span className="badge badge-sold" style={{ fontSize: '10px' }}><i className="fa-solid fa-triangle-exclamation"></i> Missing</span>
                                   )}
                                 </td>
-                                <td style={{ textAlign: 'center' }}>
+                                <td>
                                   <button
                                     type="button"
-                                    className="btn btn-danger"
                                     onClick={() => handleToggleItem(item.serial_number)}
-                                    title={currentLang === 'en' ? 'Remove from selection' : 'إزالة من التحديد'}
-                                    style={{ padding: '3px 8px', fontSize: '11px' }}
+                                    style={{ background: 'none', border: 'none', color: 'var(--accent-red)', cursor: 'pointer', fontSize: '14px' }}
+                                    title={currentLang === 'en' ? 'Remove' : 'إزالة'}
                                   >
                                     <i className="fa-solid fa-xmark"></i>
                                   </button>
@@ -1412,130 +1844,98 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
                       </tbody>
                     </table>
                   </div>
-
-                  <div style={{ marginTop: '10px', fontSize: '12px', color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between' }}>
-                    <span>{displayedSelectedItems.length} {currentLang === 'en' ? 'bars displayed' : 'سبيكة معروضة'}</span>
-                    <span><strong>{selectedItemsData.count}</strong> {currentLang === 'en' ? 'total bars selected' : 'إجمالي السبائك المحددة'} ({selectedItemsData.totalWeightKg} KG)</span>
-                  </div>
                 </>
               )}
-
             </div>
 
           </div>
 
-          {/* RIGHT: PURCHASE ORDER WORKBENCH PANEL */}
+          {/* RIGHT: PURCHASE RATE (COST / GRAM) & CONVERSION SUMMARY & SUBMIT */}
           <div className="glass-card" style={{ padding: '20px', position: 'sticky', top: '20px' }}>
-            <h4 style={{ margin: '0 0 16px 0', fontSize: '15px', color: 'var(--kfh-green)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <i className="fa-solid fa-file-signature"></i>
-              {currentLang === 'en' ? 'Purchase Order Summary' : 'ملخص أمر الشراء (Maker)'}
+            <h4 style={{ margin: 0, marginBottom: '16px', fontSize: '15px', color: 'var(--kfh-green)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <i className="fa-solid fa-receipt"></i>
+              {currentLang === 'en' ? 'Purchase Pricing & Terms' : 'تسعير الشراء وشروط التحويل'}
             </h4>
 
-            {/* Selected Breakdown */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', borderBottom: '1px solid var(--surface-border)', paddingBottom: '14px', marginBottom: '14px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
-                <span style={{ color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Total Bars:' : 'عدد السبائك:'}</span>
-                <strong style={{ color: 'var(--kfh-green)', fontSize: '14px' }}>{selectedItemsData.count} {currentLang === 'en' ? 'units' : 'قطعة'}</strong>
+            {/* Selected Bars Count & Weight */}
+            <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '8px', padding: '14px', marginBottom: '16px', border: '1px solid var(--surface-border)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Selected Quantity:' : 'الكمية المحددة:'}</span>
+                <strong>{selectedItemsData.count} {currentLang === 'en' ? 'bars' : 'سبيكة'}</strong>
               </div>
-
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
-                <span style={{ color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Total Weight (g):' : 'الوزن الإجمالي (جرام):'}</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Total Weight (grams):' : 'الوزن الإجمالي (جرام):'}</span>
                 <strong>{selectedItemsData.totalWeightGrams.toLocaleString()} g</strong>
               </div>
-
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
-                <span style={{ color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Total Weight (kg):' : 'الوزن الإجمالي (كجم):'}</span>
-                <strong>{selectedItemsData.totalWeightKg} KG</strong>
+              <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed var(--surface-border)', paddingTop: '8px' }}>
+                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Total Weight (KG):' : 'الوزن الإجمالي (كجم):'}</span>
+                <strong style={{ color: 'var(--kfh-green)', fontSize: '14px' }}>{selectedItemsData.totalWeightKg} KG</strong>
               </div>
+            </div>
 
+            {/* Agreed Purchase Rate (KWD / Gram) */}
+            <div className="form-group" style={{ marginBottom: '16px' }}>
+              <label style={{ fontSize: '12px', fontWeight: 600, display: 'flex', justifyContent: 'space-between' }}>
+                <span>{currentLang === 'en' ? 'Agreed Purchase Rate (KWD / gram) *' : 'سعر الشراء المتفق عليه (د.ك / جم) *'}</span>
+                {goldRate > 0 && (
+                  <span style={{ color: 'var(--accent-gold)', fontSize: '11px', fontWeight: 'normal' }}>
+                    ~{((goldRate * 0.308) / 31.1035).toFixed(3)} KWD/g spot
+                  </span>
+                )}
+              </label>
+              <div style={{ position: 'relative' }}>
+                <input
+                  type="number"
+                  step="0.001"
+                  min="0.001"
+                  className="form-control"
+                  placeholder="e.g. 26.450"
+                  value={unitPricePerGram}
+                  onChange={e => setUnitPricePerGram(e.target.value)}
+                  style={{ fontSize: '15px', fontWeight: 'bold', color: 'var(--kfh-green)' }}
+                  required
+                />
+                <span style={{ position: 'absolute', right: currentLang === 'en' ? '12px' : 'auto', left: currentLang === 'ar' ? '12px' : 'auto', top: '50%', transform: 'translateY(-50%)', fontSize: '12px', color: 'var(--text-muted)' }}>
+                  KWD / g
+                </span>
+              </div>
+              <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px', display: 'block' }}>
+                {currentLang === 'en' 
+                  ? 'Cost per gram registered with shipment lot and used to calculate purchasing cost by denomination.'
+                  : 'تكلفة الجرام ستُسجل مع الشحنة وتُستخدم لاحتساب تكلفة الشراء لكل فئة.'}
+              </span>
+            </div>
+
+            {/* Total Agreed Purchase Cost Card */}
+            <div style={{
+              background: 'linear-gradient(135deg, rgba(0, 155, 78, 0.15) 0%, rgba(212, 175, 55, 0.1) 100%)',
+              borderRadius: '8px',
+              padding: '14px',
+              border: '1px solid rgba(0, 155, 78, 0.3)',
+              marginBottom: '16px'
+            }}>
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                {currentLang === 'en' ? 'Total Agreed Purchasing Cost' : 'إجمالي تكلفة الشراء المتفق عليها'}
+              </div>
+              <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--kfh-green)', marginTop: '4px' }}>
+                {totalAgreedCostKwd.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })} <span style={{ fontSize: '14px' }}>KWD</span>
+              </div>
               {selectedShipmentLots.length > 0 && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', alignItems: 'center' }}>
-                  <span style={{ color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Shipment Lots:' : 'شحنات اللوت:'}</span>
-                  <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                    {selectedShipmentLots.map((lot, i) => (
-                      <span key={i} style={{ fontSize: '10px', padding: '1px 6px', background: 'rgba(212, 175, 55, 0.12)', color: 'var(--accent-gold)', borderRadius: '3px', border: '1px solid rgba(212, 175, 55, 0.3)' }}>
-                        {lot}
-                      </span>
-                    ))}
-                  </div>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px' }}>
+                  {currentLang === 'en' ? 'Shipment Lots:' : 'تشغيلات الشحنة:'} {selectedShipmentLots.join(', ')}
                 </div>
               )}
             </div>
 
-            {/* Agreed Unit Price per gram input (Mandatory) */}
-            <div className="form-group" style={{ marginBottom: '14px' }}>
-              <label style={{ fontSize: '12px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '6px' }}>
-                <span>{currentLang === 'en' ? 'Agreed Purchase Rate (KWD / gram)' : 'سعر شراء الجرام المتفق عليه (دينار / جرام)'}</span>
-                <span style={{ color: 'var(--accent-red)' }}>*</span>
-              </label>
-              <input
-                type="text"
-                inputMode="decimal"
-                className="form-control"
-                placeholder={currentLang === 'en' ? 'Enter rate e.g. 24.500' : 'أدخل السعر مثلاً 24.500'}
-                value={unitPricePerGram}
-                onChange={e => {
-                  const val = e.target.value;
-                  if (val === '' || /^\d*\.?\d*$/.test(val)) {
-                    setUnitPricePerGram(val);
-                  }
-                }}
-                disabled={!canModify}
-                style={{ fontSize: '14px', fontWeight: 'bold' }}
-              />
-              <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px', display: 'block' }}>
-                {currentLang === 'en'
-                  ? 'This agreed rate/g is registered with each denomination & shipment lot in inventory records.'
-                  : 'يتم تسجيل سعر الجرام هذا مع كل فئة وشحنة في سجلات المخزون والتكلفة.'}
-              </span>
-            </div>
-
-            {/* REGISTERED COST BREAKDOWN PER DENOMINATION & SHIPMENT */}
-            {selectedBreakdownByDenomination.length > 0 && parseFloat(unitPricePerGram) > 0 && (
-              <div style={{ background: 'rgba(0, 155, 78, 0.05)', border: '1px solid rgba(0, 155, 78, 0.25)', borderRadius: '8px', padding: '12px', marginBottom: '14px' }}>
-                <div style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--kfh-green)', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                  <i className="fa-solid fa-calculator"></i>
-                  {currentLang === 'en' ? 'Registered Cost per Denomination & Shipment:' : 'التكلفة المسجلة حسب الفئة والشحنة:'}
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  {selectedBreakdownByDenomination.map(d => (
-                    <div key={d.product_code} style={{ padding: '8px 10px', background: 'rgba(255,255,255,0.03)', borderRadius: '6px', border: '1px solid var(--surface-border)', fontSize: '11px' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', marginBottom: '3px' }}>
-                        <span>{d.denomination} ({d.weight_grams}g)</span>
-                        <span style={{ color: 'var(--kfh-green)' }}>{d.subtotal_cost.toFixed(3)} KWD</span>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-muted)', fontSize: '10.5px' }}>
-                        <span>{d.count} {currentLang === 'en' ? 'bars' : 'سبائك'} × {d.unit_cost_per_bar.toFixed(3)} KWD/bar</span>
-                        <span>@{parseFloat(unitPricePerGram).toFixed(3)} KWD/g</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Total Estimated Cost calculation */}
-            <div style={{ background: 'rgba(255,255,255,0.02)', padding: '12px', borderRadius: '6px', border: '1px solid var(--surface-border)', marginBottom: '16px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Total Purchase Value:' : 'إجمالي قيمة الشراء:'}</span>
-                <strong style={{ fontSize: '16px', color: 'var(--kfh-green)' }}>
-                  {totalAgreedCostKwd > 0 ? `${totalAgreedCostKwd.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })} KWD` : '—'}
-                </strong>
-              </div>
-            </div>
-
-            {/* Maker Notes */}
+            {/* Notes */}
             <div className="form-group" style={{ marginBottom: '16px' }}>
-              <label style={{ fontSize: '12px', fontWeight: 600, marginBottom: '6px', display: 'block' }}>
-                {currentLang === 'en' ? 'Maker Notes / Trade Reference' : 'ملاحظات الصانع / مرجع الصفقة'}
-              </label>
+              <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Purchase Notes & Memo' : 'ملاحظات أمر الشراء'}</label>
               <textarea
+                rows={3}
                 className="form-control"
-                rows={2}
-                placeholder={currentLang === 'en' ? 'Optional trade reference or notes...' : 'مرجع الصفقة أو ملاحظات اختيارية...'}
+                placeholder={currentLang === 'en' ? 'e.g. Nadir Refinery consignment conversion agreement Ref TR-2026-Q1...' : 'مثال: اتفاقية تحويل أمانات مصفاة نادر رقم TR-2026-Q1...'}
                 value={purchaseNotes}
                 onChange={e => setPurchaseNotes(e.target.value)}
-                disabled={!canModify}
                 style={{ fontSize: '12px' }}
               />
             </div>
@@ -1584,8 +1984,8 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
             <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '12px', textAlign: 'center', lineHeight: '1.4' }}>
               <i className="fa-solid fa-shield-halved" style={{ color: 'var(--kfh-green)' }}></i>{' '}
               {currentLang === 'en' 
-                ? 'Upon Checker approval, gold ownership will transition to KFH_OWNED and become available for retail sales & customer delivery.' 
-                : 'بمجرد اعتماد المراجع، ستتحول ملكية الذهب إلى بيتك (KFH_OWNED) وتصبح متاحة للبيع والتسليم للعملاء.'}
+                ? 'Upon Checker approval, gold ownership will transition to KFH_OWNED and purchasing costs per denomination will register in inventory ledger.' 
+                : 'بمجرد اعتماد المراجع، ستتحول ملكية الذهب إلى بيتك (KFH_OWNED) وتُسجل تكلفة الشراء حسب الفئة في سجلات المخزون.'}
             </div>
 
           </div>
@@ -1593,85 +1993,1130 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
         </div>
       )}
 
-      {/* 4. SUBTAB 2: PENDING PURCHASES & TRACKER */}
+      {/* 4. SUBTAB 2: KFH STOCK & VIP ALLOCATION WORKBENCH */}
+      {activeSubTab === 'VIP_STOCK' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          
+          {/* SECTION A: ALLOCATE KFH STOCK TO VIP RESERVE */}
+          <div className="glass-card" style={{ padding: '22px', borderLeft: '4px solid #ec4899', background: 'linear-gradient(180deg, rgba(236, 72, 153, 0.04) 0%, rgba(255,255,255,0.01) 100%)' }}>
+            
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#ec4899', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px' }}>
+                  👑
+                </div>
+                <div>
+                  <h4 style={{ margin: 0, fontSize: '16px', color: '#ec4899' }}>
+                    {currentLang === 'en' ? 'Allocate KFH Stock to VIP Reserve' : 'تخصيص مخزون بيتك لكبار العملاء (VIP)'}
+                  </h4>
+                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                    {currentLang === 'en' 
+                      ? 'Select gold bars from KFH Owned stock to transition ownership to VIP_OWNED. This stock will be strictly isolated from online retail.' 
+                      : 'حدد سبائك من مخزون بيتك لتحويل ملكيتها إلى كبار العملاء (VIP_OWNED). هذا المخزون لن يكون متاحاً للبيع أونلاين.'}
+                  </span>
+                </div>
+              </div>
+
+              {selectedKfhSerials.length > 0 && (
+                <button
+                  type="button"
+                  className="btn btn-danger"
+                  onClick={() => setSelectedKfhSerials([])}
+                  style={{ fontSize: '11px', padding: '5px 12px' }}
+                >
+                  <i className="fa-solid fa-trash-can"></i> {currentLang === 'en' ? `Clear Selection (${selectedKfhSerials.length})` : `إلغاء التحديد (${selectedKfhSerials.length})`}
+                </button>
+              )}
+            </div>
+
+            {/* Denomination Choice Pills for KFH Stock */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px', marginBottom: '16px' }}>
+              {kfhAvailableInventory?.summary?.by_product?.map(p => {
+                const isSelected = selectedKfhDenomCode === p.product_code;
+                const prodItems = kfhAvailableItems.filter(i => i.product_code === p.product_code);
+                const selectedSet = new Set(selectedKfhSerials);
+                const selectedInThis = prodItems.filter(i => selectedSet.has(i.serial_number)).length;
+
+                return (
+                  <div
+                    key={p.product_code}
+                    onClick={() => {
+                      setSelectedKfhDenomCode(p.product_code);
+                      setKfhSerialSearch('');
+                    }}
+                    style={{
+                      padding: '12px 14px',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s',
+                      border: isSelected ? '2px solid #ec4899' : '1px solid var(--surface-border)',
+                      background: isSelected ? 'rgba(236, 72, 153, 0.12)' : 'rgba(255,255,255,0.02)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '6px'
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: '13px', fontWeight: 'bold', color: isSelected ? '#ec4899' : 'var(--text-primary)' }}>
+                        {p.denomination}
+                      </span>
+                      <span style={{ fontSize: '11px', padding: '2px 7px', borderRadius: '10px', background: isSelected ? '#ec4899' : 'rgba(255,255,255,0.08)', color: isSelected ? '#fff' : 'var(--text-muted)', fontWeight: 600 }}>
+                        {p.count} {currentLang === 'en' ? 'KFH stock' : 'متاح بيتك'}
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-muted)' }}>
+                      <span>{p.metal_name} ({p.weight_grams}g)</span>
+                      {selectedInThis > 0 && (
+                        <span style={{ color: '#ec4899', fontWeight: 'bold' }}>
+                          ✓ {selectedInThis} {currentLang === 'en' ? 'selected' : 'محدد'}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* KFH Serials Facilitator & Quick Picker */}
+            {currentKfhDenomObj && (
+              <div style={{ background: 'rgba(0, 0, 0, 0.15)', borderRadius: '8px', padding: '14px', border: '1px solid rgba(255,255,255,0.06)', marginBottom: '16px' }}>
+                
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '12px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                      {currentLang === 'en' ? 'Quick Quantity Picker:' : 'تحديد سريع بالكمية:'}
+                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <input
+                        type="number"
+                        min="1"
+                        max={kfhItemsForSelectedDenom.length}
+                        value={kfhQuickQty}
+                        onChange={e => setKfhQuickQty(Math.max(1, parseInt(e.target.value) || 1))}
+                        style={{ width: '60px', padding: '4px 8px', fontSize: '12px', borderRadius: '4px', textAlign: 'center', background: 'var(--bg-secondary)', border: '1px solid var(--surface-border)', color: 'var(--text-primary)' }}
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() => handleSelectFirstNForKfh(kfhQuickQty)}
+                        style={{ fontSize: '11px', padding: '5px 10px' }}
+                      >
+                        <i className="fa-solid fa-plus"></i> {currentLang === 'en' ? `Select First ${kfhQuickQty}` : `تحديد أول ${kfhQuickQty}`}
+                      </button>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '4px', marginLeft: '6px' }}>
+                      {[1, 5, 10, 25].filter(n => n <= kfhItemsForSelectedDenom.length).map(n => (
+                        <button
+                          key={n}
+                          type="button"
+                          onClick={() => {
+                            setKfhQuickQty(n);
+                            handleSelectFirstNForKfh(n);
+                          }}
+                          style={{ fontSize: '10px', padding: '3px 8px', borderRadius: '4px', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--surface-border)', color: 'var(--text-muted)', cursor: 'pointer' }}
+                        >
+                          +{n}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={handleSelectAllForKfhDenom}
+                      style={{ fontSize: '11px', padding: '4px 10px' }}
+                    >
+                      <i className="fa-solid fa-check"></i> {currentLang === 'en' ? `Select All ${currentKfhDenomObj.denomination} (${kfhItemsForSelectedDenom.length})` : `تحديد كل فئة ${currentKfhDenomObj.denomination} (${kfhItemsForSelectedDenom.length})`}
+                    </button>
+                    {selectedKfhCountForCurrentDenom > 0 && (
+                      <button
+                        type="button"
+                        className="btn"
+                        onClick={handleDeselectAllForKfhDenom}
+                        style={{ fontSize: '11px', padding: '4px 10px', background: 'rgba(255,255,255,0.05)' }}
+                      >
+                        {currentLang === 'en' ? 'Deselect Denom' : 'إلغاء تحديد الفئة'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Search Bar for KFH serials */}
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
+                  <div style={{ position: 'relative', flex: 1 }}>
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder={currentLang === 'en' ? `Search serials in KFH ${currentKfhDenomObj.denomination}... ` : `بحث في أرقام بيتك لفئة ${currentKfhDenomObj.denomination}...`}
+                      value={kfhSerialSearch}
+                      onChange={e => setKfhSerialSearch(e.target.value)}
+                      style={{ fontSize: '12px', padding: '6px 10px', paddingLeft: currentLang === 'en' ? '30px' : '10px', paddingRight: currentLang === 'ar' ? '30px' : '10px' }}
+                    />
+                    <i className="fa-solid fa-magnifying-glass" style={{ position: 'absolute', top: '50%', [currentLang === 'en' ? 'left' : 'right']: '10px', transform: 'translateY(-50%)', color: 'var(--text-muted)', fontSize: '11px' }}></i>
+                  </div>
+                  {kfhSerialSearch && (
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => setKfhSerialSearch('')}
+                      style={{ fontSize: '11px', padding: '4px 10px' }}
+                    >
+                      {currentLang === 'en' ? 'Clear' : 'مسح'}
+                    </button>
+                  )}
+                </div>
+
+                {/* Available KFH Serials Chips Grid */}
+                <div style={{
+                  maxHeight: '160px',
+                  overflowY: 'auto',
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  gap: '6px',
+                  padding: '8px',
+                  background: 'var(--bg-secondary)',
+                  borderRadius: '6px',
+                  border: '1px solid var(--surface-border)'
+                }}>
+                  {displayedKfhSerials.length === 0 ? (
+                    <div style={{ width: '100%', textAlign: 'center', padding: '14px', fontSize: '12px', color: 'var(--text-muted)' }}>
+                      {currentLang === 'en' ? 'No KFH bars available in this denomination.' : 'لا توجد سبائك بيتك متاحة لهذه الفئة.'}
+                    </div>
+                  ) : (
+                    displayedKfhSerials.map(item => {
+                      const isSelected = selectedKfhSerials.includes(item.serial_number);
+                      return (
+                        <div
+                          key={item.serial_number}
+                          onClick={() => handleToggleKfhItem(item.serial_number)}
+                          style={{
+                            padding: '5px 9px',
+                            borderRadius: '4px',
+                            fontSize: '11px',
+                            fontFamily: 'monospace',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            userSelect: 'none',
+                            transition: 'all 0.15s',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            background: isSelected ? 'rgba(236, 72, 153, 0.25)' : 'rgba(255, 255, 255, 0.04)',
+                            border: isSelected ? '1px solid #ec4899' : '1px solid var(--surface-border)',
+                            color: isSelected ? '#ec4899' : 'var(--text-primary)'
+                          }}
+                        >
+                          <i className={`fa-solid ${isSelected ? 'fa-square-check' : 'fa-square'}`} style={{ color: isSelected ? '#ec4899' : 'var(--text-muted)' }}></i>
+                          <span>{item.serial_number}</span>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+
+                {/* Denomination summary footer */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px', fontSize: '11px', color: 'var(--text-muted)' }}>
+                  <span>{currentLang === 'en' ? 'Showing:' : 'عرض:'} <strong>{displayedKfhSerials.length}</strong> {currentLang === 'en' ? 'bars' : 'سبيكة'}</span>
+                  <span style={{ color: selectedKfhCountForCurrentDenom > 0 ? '#ec4899' : 'inherit', fontWeight: selectedKfhCountForCurrentDenom > 0 ? 'bold' : 'normal' }}>
+                    {currentLang === 'en' ? 'Selected in this denomination:' : 'المحدد من هذه الفئة:'} {selectedKfhCountForCurrentDenom} / {kfhItemsForSelectedDenom.length}
+                  </span>
+                </div>
+
+              </div>
+            )}
+
+            {/* Fast Scan input for KFH piece selection */}
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+              <input
+                ref={kfhQrInputRef}
+                type="text"
+                className="form-control"
+                placeholder={currentLang === 'en' ? 'Scan bar QR / Barcode to add to VIP allocation...' : 'امسح باركود أو رمز QR السبيكة للإضافة لتخصيص VIP...'}
+                value={kfhQrScanInput}
+                onChange={e => setKfhQrScanInput(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleProcessKfhScanInput(kfhQrScanInput);
+                  }
+                }}
+                style={{ fontSize: '12px' }}
+              />
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => handleProcessKfhScanInput(kfhQrScanInput)}
+                style={{ fontSize: '12px', padding: '6px 16px' }}
+              >
+                <i className="fa-solid fa-plus"></i> {currentLang === 'en' ? 'Add' : 'إضافة'}
+              </button>
+            </div>
+
+            {kfhScanFeedback && (
+              <div style={{
+                marginBottom: '16px',
+                padding: '8px 12px',
+                borderRadius: '6px',
+                fontSize: '12px',
+                background: kfhScanFeedback.type === 'success' ? 'rgba(0, 155, 78, 0.15)' : kfhScanFeedback.type === 'warning' ? 'rgba(245, 158, 11, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                color: kfhScanFeedback.type === 'success' ? 'var(--kfh-green)' : kfhScanFeedback.type === 'warning' ? '#F59E0B' : '#EF4444'
+              }}>
+                {kfhScanFeedback.message}
+              </div>
+            )}
+
+            {/* Allocation Form Fields & Submit */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px', alignItems: 'end', background: 'rgba(255,255,255,0.02)', padding: '14px', borderRadius: '8px', border: '1px solid var(--surface-border)' }}>
+              
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label style={{ fontSize: '12px', fontWeight: 600, color: '#ec4899' }}>
+                  {currentLang === 'en' ? 'VIP Category / Portfolio Tier:' : 'تصنيف محفظة كبار العملاء:'}
+                </label>
+                <select
+                  className="form-control"
+                  value={vipCategory}
+                  onChange={e => setVipCategory(e.target.value)}
+                  style={{ fontSize: '12px' }}
+                >
+                  <option value="Private Banking / VIP Exclusive">Private Banking / VIP Exclusive</option>
+                  <option value="High Net Worth Wealth Management">High Net Worth Wealth Management</option>
+                  <option value="Executive Board Reserve">Executive Board Reserve</option>
+                  <option value="Custom VIP Custody">Custom VIP Custody</option>
+                </select>
+              </div>
+
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label style={{ fontSize: '12px', fontWeight: 600 }}>
+                  {currentLang === 'en' ? 'Allocation Memo & Reason:' : 'ملاحظات وسبب التخصيص:'}
+                </label>
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder={currentLang === 'en' ? 'e.g. VIP client bulk reservation for Private Banking desk...' : 'مثال: حجز كمية لصالح عملاء الخدمات المصرفية الخاصة...'}
+                  value={vipAllocationNotes}
+                  onChange={e => setVipAllocationNotes(e.target.value)}
+                  style={{ fontSize: '12px' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                  {currentLang === 'en' ? 'Selected KFH Online Stock:' : 'المحدد من مخزون بيتك:'} <strong>{selectedKfhItemsData.count} bars ({selectedKfhItemsData.totalWeightKg} KG)</strong>
+                </div>
+
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={handleAllocateToVip}
+                    disabled={selectedKfhSerials.length === 0 || isSubmittingVipAlloc}
+                    style={{ flex: 1, background: '#ec4899', borderColor: '#ec4899', color: '#fff', padding: '10px 14px', fontWeight: 'bold', fontSize: '12px' }}
+                  >
+                    {isSubmittingVipAlloc ? (
+                      <><i className="fa-solid fa-spinner fa-spin"></i> {currentLang === 'en' ? 'Submitting...' : 'جاري الإرسال...'}</>
+                    ) : (
+                      <><i className="fa-solid fa-crown"></i> {currentLang === 'en' ? 'Allocate to VIP Stock' : 'تخصيص لمخزون VIP'}</>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => {
+                      setReturnSourceOrigin('KFH');
+                      setShowReturnModal(true);
+                    }}
+                    disabled={selectedKfhSerials.length === 0}
+                    style={{
+                      background: selectedKfhSerials.length > 0 ? '#F59E0B' : 'var(--bg-secondary)',
+                      borderColor: selectedKfhSerials.length > 0 ? '#F59E0B' : 'var(--surface-border)',
+                      color: selectedKfhSerials.length > 0 ? '#000' : 'var(--text-muted)',
+                      padding: '10px 14px',
+                      fontWeight: 'bold',
+                      fontSize: '12px'
+                    }}
+                    title={currentLang === 'en' ? 'Return selected bars back to Turkey consignment (offline owner)' : 'إرجاع السبائك المحددة إلى مخزون أمانة تركيا'}
+                  >
+                    <i className="fa-solid fa-rotate-left"></i> {currentLang === 'en' ? 'Return to Turkey' : 'إرجاع لتركيا'}
+                  </button>
+                </div>
+              </div>
+
+            </div>
+
+          </div>
+
+          {/* SECTION B: ACTIVE VIP EXCLUSIVE VAULT STOCK & DISPENSE WORKFLOW */}
+          <div className="glass-card" style={{ padding: '22px' }}>
+            
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
+              <div>
+                <h4 style={{ margin: 0, fontSize: '16px', color: '#ec4899', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <i className="fa-solid fa-vault"></i>
+                  {currentLang === 'en' ? 'Active VIP Exclusive Vault Stock (VIP_OWNED)' : 'مخزون كبار العملاء الفعلي بالخزنة (VIP_OWNED)'}
+                </h4>
+                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                  {currentLang === 'en'
+                    ? 'Isolated stock reserved for VIP private clients. When a VIP client requests gold bars, initiate a dispensation workflow below.'
+                    : 'مخزون معزول ومحجوز لكبار العملاء. عند رغبة العميل في استلام سبائك، يتم بدء طلب صرف معتمد عبر سير العمل.'}
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => setShowVipDispenseModal(true)}
+                  disabled={selectedVipSerials.length === 0}
+                  style={{
+                    background: selectedVipSerials.length > 0 ? '#ec4899' : 'var(--bg-secondary)',
+                    borderColor: selectedVipSerials.length > 0 ? '#ec4899' : 'var(--surface-border)',
+                    color: selectedVipSerials.length > 0 ? '#fff' : 'var(--text-muted)',
+                    fontWeight: 'bold',
+                    padding: '8px 16px'
+                  }}
+                >
+                  <i className="fa-solid fa-hand-holding-dollar"></i>{' '}
+                  {currentLang === 'en'
+                    ? `Dispense Selected (${selectedVipSerials.length}) to VIP Client`
+                    : `صرف السبائك المحددة (${selectedVipSerials.length}) لعميل VIP`}
+                </button>
+
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => {
+                    setReturnSourceOrigin('VIP');
+                    setShowReturnModal(true);
+                  }}
+                  disabled={selectedVipSerials.length === 0}
+                  style={{
+                    background: selectedVipSerials.length > 0 ? '#F59E0B' : 'var(--bg-secondary)',
+                    borderColor: selectedVipSerials.length > 0 ? '#F59E0B' : 'var(--surface-border)',
+                    color: selectedVipSerials.length > 0 ? '#000' : 'var(--text-muted)',
+                    fontWeight: 'bold',
+                    padding: '8px 16px'
+                  }}
+                  title={currentLang === 'en' ? 'Return selected VIP bars back to Turkey consignment (offline owner)' : 'إرجاع سبائك VIP المحددة إلى مخزون أمانة تركيا'}
+                >
+                  <i className="fa-solid fa-rotate-left"></i>{' '}
+                  {currentLang === 'en'
+                    ? `Return Selected VIP (${selectedVipSerials.length}) to Turkey`
+                    : `إرجاع سبائك VIP المحددة (${selectedVipSerials.length}) لتركيا`}
+                </button>
+              </div>
+            </div>
+
+            {/* Offline Isolation Alert Banner */}
+            <div style={{
+              background: 'rgba(236, 72, 153, 0.08)',
+              border: '1px solid rgba(236, 72, 153, 0.3)',
+              borderRadius: '8px',
+              padding: '12px 16px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              marginBottom: '16px'
+            }}>
+              <i className="fa-solid fa-eye-slash" style={{ color: '#ec4899', fontSize: '18px' }}></i>
+              <div style={{ fontSize: '12px', color: 'var(--text-primary)' }}>
+                <strong>{currentLang === 'en' ? 'Online Isolation Active:' : 'حظر العرض الأونلاين مفعل:'}</strong>{' '}
+                {currentLang === 'en'
+                  ? 'All bars listed below carry VIP_OWNED ownership. They are hidden from the online retail catalogue and cannot be bought by online retail customers.'
+                  : 'كافة السبائك أدناه مسجلة بملكية كبار العملاء (VIP_OWNED). وهي محجوبة تلقائياً عن متجر البيع الإلكتروني للأفراد.'}
+              </div>
+            </div>
+
+            {/* VIP Search filter */}
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+              <input
+                type="text"
+                className="form-control"
+                placeholder={currentLang === 'en' ? 'Search VIP vault stock by serial, denomination, location, category...' : 'بحث في مخزون VIP بالرقم أو الفئة أو الموقع...'}
+                value={vipSerialSearch}
+                onChange={e => setVipSerialSearch(e.target.value)}
+                style={{ fontSize: '12px', padding: '6px 10px' }}
+              />
+              {vipSerialSearch && (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setVipSerialSearch('')}
+                  style={{ fontSize: '11px', padding: '4px 10px' }}
+                >
+                  {currentLang === 'en' ? 'Clear' : 'مسح'}
+                </button>
+              )}
+            </div>
+
+            {/* VIP Table */}
+            <div className="table-responsive" style={{ maxHeight: '400px', overflowY: 'auto' }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th style={{ width: '40px' }}>
+                      <input
+                        type="checkbox"
+                        checked={vipItems.length > 0 && selectedVipSerials.length === vipItems.length}
+                        onChange={e => {
+                          if (e.target.checked) {
+                            setSelectedVipSerials(vipItems.map(i => i.serial_number));
+                          } else {
+                            setSelectedVipSerials([]);
+                          }
+                        }}
+                      />
+                    </th>
+                    <th>{currentLang === 'en' ? 'Serial Number' : 'الرقم التسلسلي'}</th>
+                    <th>{currentLang === 'en' ? 'Denomination' : 'الفئة'}</th>
+                    <th>{currentLang === 'en' ? 'Weight' : 'الوزن'}</th>
+                    <th>{currentLang === 'en' ? 'Refiner' : 'المصفاة'}</th>
+                    <th>{currentLang === 'en' ? 'Vault Location' : 'موقع الخزنة'}</th>
+                    <th>{currentLang === 'en' ? 'VIP Category' : 'تصنيف VIP'}</th>
+                    <th>{currentLang === 'en' ? 'Status' : 'الحالة'}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {displayedVipItems.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)' }}>
+                        <i className="fa-solid fa-crown" style={{ fontSize: '24px', opacity: 0.4, display: 'block', marginBottom: '8px' }}></i>
+                        {currentLang === 'en' ? 'No VIP exclusive bars currently held in vault reserve.' : 'لا توجد سبائك VIP محجوزة بالخزنة حالياً.'}
+                      </td>
+                    </tr>
+                  ) : (
+                    displayedVipItems.map(item => {
+                      const isSelected = selectedVipSerials.includes(item.serial_number);
+                      return (
+                        <tr key={item.serial_number} style={{ background: isSelected ? 'rgba(236, 72, 153, 0.08)' : undefined }}>
+                          <td>
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => handleToggleVipItem(item.serial_number)}
+                            />
+                          </td>
+                          <td>
+                            <strong style={{ fontFamily: 'monospace', color: '#ec4899' }}>{item.serial_number}</strong>
+                          </td>
+                          <td>{item.denomination || item.metal_name}</td>
+                          <td>{item.weight_grams} g</td>
+                          <td>{item.refiner_name || 'Valcambi Suisse'}</td>
+                          <td>
+                            <span style={{ fontSize: '11px', fontFamily: 'monospace', padding: '2px 6px', background: 'rgba(255,255,255,0.05)', borderRadius: '3px' }}>
+                              {item.location_code || 'VAULT-VIP-01'}
+                            </span>
+                          </td>
+                          <td>
+                            <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '4px', background: 'rgba(236, 72, 153, 0.15)', color: '#ec4899', fontWeight: 600 }}>
+                              {item.vip_category || 'Private Banking'}
+                            </span>
+                          </td>
+                          <td>
+                            <span className="badge" style={{ background: 'rgba(236, 72, 153, 0.2)', color: '#ec4899', fontSize: '10px' }}>
+                              🔒 VIP Isolated
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {selectedVipSerials.length > 0 && (
+              <div style={{ marginTop: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', color: '#ec4899', fontWeight: 'bold' }}>
+                <span>{currentLang === 'en' ? 'Selected for Dispense:' : 'المحدد للصرف:'} {selectedVipItemsData.count} bars ({selectedVipItemsData.totalWeightKg} KG)</span>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => setShowVipDispenseModal(true)}
+                  style={{ background: '#ec4899', color: '#fff', fontSize: '12px', padding: '6px 14px' }}
+                >
+                  <i className="fa-solid fa-arrow-right-to-bracket"></i> {currentLang === 'en' ? 'Proceed to Dispense Workflow' : 'متابعة سير عمل الصرف'}
+                </button>
+              </div>
+            )}
+
+          </div>
+
+        </div>
+      )}
+
+      {/* 5. SUBTAB 3: OPERATIONS LOG & MAKER-CHECKER WORKFLOWS */}
       {activeSubTab === 'PENDING_BATCHES' && (
         <div className="glass-card" style={{ padding: '20px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-            <h4 style={{ margin: 0, fontSize: '15px', color: 'var(--kfh-green)' }}>
-              <i className="fa-solid fa-list-check"></i> {currentLang === 'en' ? 'Turkey Purchase Requests & Maker-Checker Log' : 'طلبات شراء ذهب تركيا وسجل تدقيق الأعين الأربعة'}
+          
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
+            <h4 style={{ margin: 0, fontSize: '15px', color: 'var(--kfh-green)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <i className="fa-solid fa-list-check"></i>
+              {currentLang === 'en' ? 'Operations Log & Maker-Checker Workflow Requests' : 'سجل العمليات وطلبات اعتماد الأعين الأربعة'}
             </h4>
+
+            {/* Filter Chips */}
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <button
+                type="button"
+                className={`btn ${pendingBatchFilter === 'ALL' ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setPendingBatchFilter('ALL')}
+                style={{ fontSize: '11px', padding: '4px 10px' }}
+              >
+                {currentLang === 'en' ? 'All Operations' : 'كافة العمليات'}
+              </button>
+              <button
+                type="button"
+                className={`btn ${pendingBatchFilter === 'TURKEY' ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setPendingBatchFilter('TURKEY')}
+                style={{ fontSize: '11px', padding: '4px 10px' }}
+              >
+                🇹🇷 {currentLang === 'en' ? 'Turkey Purchases' : 'شراء تركيا'} ({pendingPurchases.length})
+              </button>
+              <button
+                type="button"
+                className={`btn ${pendingBatchFilter === 'VIP_ALLOCATION' ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setPendingBatchFilter('VIP_ALLOCATION')}
+                style={{ fontSize: '11px', padding: '4px 10px' }}
+              >
+                👑 {currentLang === 'en' ? 'VIP Allocations' : 'تخصيص VIP'} ({pendingVipAllocations.length})
+              </button>
+              <button
+                type="button"
+                className={`btn ${pendingBatchFilter === 'VIP_DISPENSE' ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setPendingBatchFilter('VIP_DISPENSE')}
+                style={{ fontSize: '11px', padding: '4px 10px' }}
+              >
+                📤 {currentLang === 'en' ? 'VIP Dispenses' : 'صرف VIP'} ({pendingVipDispenses.length})
+              </button>
+              <button
+                type="button"
+                className={`btn ${pendingBatchFilter === 'TURKEY_RETURN' ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setPendingBatchFilter('TURKEY_RETURN')}
+                style={{ fontSize: '11px', padding: '4px 10px' }}
+              >
+                ↩️ {currentLang === 'en' ? 'Turkey Returns' : 'إرجاع تركيا'} ({pendingTurkeyReturns.length})
+              </button>
+            </div>
           </div>
 
           <div className="table-responsive">
             <table>
               <thead>
                 <tr>
-                  <th>{currentLang === 'en' ? 'Batch Reference' : 'مرجع الدفعة'}</th>
+                  <th>{currentLang === 'en' ? 'Batch Reference' : 'مرجع العملية'}</th>
+                  <th>{currentLang === 'en' ? 'Operation Type' : 'نوع العملية'}</th>
                   <th>{currentLang === 'en' ? 'Items Count' : 'عدد السبائك'}</th>
                   <th>{currentLang === 'en' ? 'Total Weight' : 'الوزن الإجمالي'}</th>
-                  <th>{currentLang === 'en' ? 'Agreed Buy Rate' : 'سعر الشراء المتفق عليه'}</th>
-                  <th>{currentLang === 'en' ? 'Total Cost (KWD)' : 'إجمالي القيمة (د.ك)'}</th>
+                  <th>{currentLang === 'en' ? 'Financials / Details' : 'التفاصيل / التكلفة'}</th>
                   <th>{currentLang === 'en' ? 'Requested By' : 'مقدم الطلب'}</th>
                   <th>{currentLang === 'en' ? 'Status' : 'الحالة'}</th>
                   <th>{currentLang === 'en' ? 'Created At' : 'تاريخ الإنشاء'}</th>
-                  <th>{currentLang === 'en' ? 'Serials Preview' : 'الأرقام التسلسلية'}</th>
+                  <th>{currentLang === 'en' ? 'Serials' : 'الأرقام التسلسلية'}</th>
                 </tr>
               </thead>
               <tbody>
-                {pendingPurchases.length === 0 ? (
+                {/* 1. Turkey Purchases */}
+                {(pendingBatchFilter === 'ALL' || pendingBatchFilter === 'TURKEY') && pendingPurchases.map(p => {
+                  let serialsList: string[] = [];
+                  try { serialsList = JSON.parse(p.serials_json || '[]'); } catch (_) {}
+
+                  return (
+                    <tr key={`TR-${p.pending_purchase_id}`}>
+                      <td><strong style={{ color: 'var(--text-primary)' }}>{p.batch_reference}</strong></td>
+                      <td>
+                        <span className="badge" style={{ background: 'rgba(225, 29, 72, 0.15)', color: '#E11D48', fontSize: '11px' }}>
+                          🇹🇷 Turkey Purchase
+                        </span>
+                      </td>
+                      <td>{p.total_items} {currentLang === 'en' ? 'bars' : 'سبيكة'}</td>
+                      <td>{p.total_weight_grams} g ({(p.total_weight_grams / 1000).toFixed(3)} KG)</td>
+                      <td>
+                        <strong style={{ color: 'var(--kfh-green)' }}>
+                          {p.total_cost ? Number(p.total_cost).toFixed(3) : (p.total_weight_grams * p.unit_price).toFixed(3)} KWD
+                        </strong>
+                        <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>@{p.unit_price} KWD/g</div>
+                      </td>
+                      <td>{p.requested_by}</td>
+                      <td>
+                        <span className={`badge ${p.status_code === 'APPROVED' ? 'badge-ready' : p.status_code === 'REJECTED' ? 'badge-sold' : 'badge-reserved'}`}>
+                          {p.status_code === 'APPROVED' ? (currentLang === 'en' ? 'Approved & Converted' : 'معتمد ومحول') :
+                           p.status_code === 'REJECTED' ? (currentLang === 'en' ? 'Rejected' : 'مرفوض') :
+                           (currentLang === 'en' ? 'Pending Checker Approval' : 'بانتظار اعتماد المراجع')}
+                        </span>
+                      </td>
+                      <td>{new Date(p.created_at).toLocaleString()}</td>
+                      <td>
+                        <div style={{ maxWidth: '200px', overflowX: 'auto', whiteSpace: 'nowrap', display: 'flex', gap: '4px' }}>
+                          {serialsList.map((s, idx) => (
+                            <span key={idx} style={{ fontSize: '10px', padding: '2px 5px', background: 'rgba(255,255,255,0.05)', borderRadius: '3px' }}>
+                              {s}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+
+                {/* 2. VIP Allocations */}
+                {(pendingBatchFilter === 'ALL' || pendingBatchFilter === 'VIP_ALLOCATION') && pendingVipAllocations.map(a => {
+                  let serialsList: string[] = [];
+                  try { serialsList = JSON.parse(a.serials_json || '[]'); } catch (_) {}
+
+                  return (
+                    <tr key={`ALLOC-${a.pending_allocation_id}`}>
+                      <td><strong style={{ color: '#ec4899' }}>{a.batch_reference}</strong></td>
+                      <td>
+                        <span className="badge" style={{ background: 'rgba(236, 72, 153, 0.15)', color: '#ec4899', fontSize: '11px' }}>
+                          👑 VIP Allocation
+                        </span>
+                      </td>
+                      <td>{a.total_items} {currentLang === 'en' ? 'bars' : 'سبيكة'}</td>
+                      <td>{a.total_weight_grams} g ({(a.total_weight_grams / 1000).toFixed(3)} KG)</td>
+                      <td>
+                        <span style={{ fontSize: '11px', color: '#ec4899', fontWeight: 600 }}>{a.vip_category || 'Private Banking'}</span>
+                        {a.notes && <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{a.notes}</div>}
+                      </td>
+                      <td>{a.requested_by}</td>
+                      <td>
+                        <span className={`badge ${a.status_code === 'APPROVED' ? 'badge-ready' : a.status_code === 'REJECTED' ? 'badge-sold' : 'badge-reserved'}`}>
+                          {a.status_code === 'APPROVED' ? (currentLang === 'en' ? 'Approved & Assigned' : 'معتمد ومخصص') :
+                           a.status_code === 'REJECTED' ? (currentLang === 'en' ? 'Rejected' : 'مرفوض') :
+                           (currentLang === 'en' ? 'Pending Checker' : 'بانتظار المراجع')}
+                        </span>
+                      </td>
+                      <td>{new Date(a.created_at).toLocaleString()}</td>
+                      <td>
+                        <div style={{ maxWidth: '200px', overflowX: 'auto', whiteSpace: 'nowrap', display: 'flex', gap: '4px' }}>
+                          {serialsList.map((s, idx) => (
+                            <span key={idx} style={{ fontSize: '10px', padding: '2px 5px', background: 'rgba(236, 72, 153, 0.1)', color: '#ec4899', borderRadius: '3px' }}>
+                              {s}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+
+                {/* 3. VIP Dispenses */}
+                {(pendingBatchFilter === 'ALL' || pendingBatchFilter === 'VIP_DISPENSE') && pendingVipDispenses.map(d => {
+                  let serialsList: string[] = [];
+                  try { serialsList = JSON.parse(d.serials_json || '[]'); } catch (_) {}
+
+                  return (
+                    <tr key={`DISP-${d.pending_dispense_id}`}>
+                      <td><strong style={{ color: '#3B82F6' }}>{d.dispense_reference}</strong></td>
+                      <td>
+                        <span className="badge" style={{ background: 'rgba(59, 130, 246, 0.15)', color: '#3B82F6', fontSize: '11px' }}>
+                          📤 VIP Dispense
+                        </span>
+                      </td>
+                      <td>{d.total_items} {currentLang === 'en' ? 'bars' : 'سبيكة'}</td>
+                      <td>{d.total_weight_grams} g ({(d.total_weight_grams / 1000).toFixed(3)} KG)</td>
+                      <td>
+                        <strong style={{ fontSize: '12px', color: 'var(--text-primary)' }}>{d.customer_name}</strong>
+                        <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>ID: {d.customer_civil_id} • Acc: {d.customer_account_number}</div>
+                      </td>
+                      <td>{d.requested_by}</td>
+                      <td>
+                        <span className={`badge ${d.status_code === 'APPROVED' ? 'badge-ready' : d.status_code === 'REJECTED' ? 'badge-sold' : 'badge-reserved'}`}>
+                          {d.status_code === 'APPROVED' ? (currentLang === 'en' ? 'Delivered to VIP' : 'تم تسليم العميل') :
+                           d.status_code === 'REJECTED' ? (currentLang === 'en' ? 'Rejected' : 'مرفوض') :
+                           (currentLang === 'en' ? 'Pending Handover Approval' : 'بانتظار اعتماد التسليم')}
+                        </span>
+                      </td>
+                      <td>{new Date(d.created_at).toLocaleString()}</td>
+                      <td>
+                        <div style={{ maxWidth: '200px', overflowX: 'auto', whiteSpace: 'nowrap', display: 'flex', gap: '4px' }}>
+                          {serialsList.map((s, idx) => (
+                            <span key={idx} style={{ fontSize: '10px', padding: '2px 5px', background: 'rgba(59, 130, 246, 0.1)', color: '#3B82F6', borderRadius: '3px' }}>
+                              {s}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+
+                {/* 4. Turkey Consignment Returns */}
+                {(pendingBatchFilter === 'ALL' || pendingBatchFilter === 'TURKEY_RETURN') && pendingTurkeyReturns.map(r => {
+                  let serialsList: string[] = [];
+                  try { serialsList = JSON.parse(r.serials_json || '[]'); } catch (_) {}
+
+                  return (
+                    <tr key={`RET-${r.pending_return_id}`}>
+                      <td><strong style={{ color: '#F59E0B' }}>{r.batch_reference}</strong></td>
+                      <td>
+                        <span className="badge" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#F59E0B', fontSize: '11px' }}>
+                          ↩️ Turkey Return ({r.source_ownership})
+                        </span>
+                      </td>
+                      <td>{r.total_items} {currentLang === 'en' ? 'bars' : 'سبيكة'}</td>
+                      <td>{r.total_weight_grams} g ({(r.total_weight_grams / 1000).toFixed(3)} KG)</td>
+                      <td>
+                        <strong style={{ fontSize: '12px', color: '#F59E0B' }}>{r.return_reason || 'Consignment Rebalancing'}</strong>
+                        {r.notes && <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{r.notes}</div>}
+                      </td>
+                      <td>{r.requested_by}</td>
+                      <td>
+                        <span className={`badge ${r.status_code === 'APPROVED' ? 'badge-ready' : r.status_code === 'REJECTED' ? 'badge-sold' : 'badge-reserved'}`}>
+                          {r.status_code === 'APPROVED' ? (currentLang === 'en' ? 'Approved & Reverted' : 'معتمد وأُرجع لتركيا') :
+                           r.status_code === 'REJECTED' ? (currentLang === 'en' ? 'Rejected' : 'مرفوض') :
+                           (currentLang === 'en' ? 'Pending Checker' : 'بانتظار المراجع')}
+                        </span>
+                      </td>
+                      <td>{new Date(r.created_at).toLocaleString()}</td>
+                      <td>
+                        <div style={{ maxWidth: '200px', overflowX: 'auto', whiteSpace: 'nowrap', display: 'flex', gap: '4px' }}>
+                          {serialsList.map((s, idx) => (
+                            <span key={idx} style={{ fontSize: '10px', padding: '2px 5px', background: 'rgba(245, 158, 11, 0.1)', color: '#F59E0B', borderRadius: '3px' }}>
+                              {s}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+
+                {pendingPurchases.length === 0 && pendingVipAllocations.length === 0 && pendingVipDispenses.length === 0 && pendingTurkeyReturns.length === 0 && (
                   <tr>
-                    <td colSpan={9} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
-                      {currentLang === 'en' ? 'No purchase requests recorded yet.' : 'لا توجد طلبات شراء مسجلة بعد.'}
+                    <td colSpan={9} style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)' }}>
+                      {currentLang === 'en' ? 'No operations or requests recorded yet.' : 'لا توجد طلبات أو عمليات مسجلة بعد.'}
                     </td>
                   </tr>
-                ) : (
-                  pendingPurchases.map(p => {
-                    let serialsList: string[] = [];
-                    try {
-                      serialsList = JSON.parse(p.serials_json || '[]');
-                    } catch (_) {}
-
-                    return (
-                      <tr key={p.pending_purchase_id}>
-                        <td><strong>{p.batch_reference}</strong></td>
-                        <td>{p.total_items} {currentLang === 'en' ? 'bars' : 'سبيكة'}</td>
-                        <td>
-                          {p.total_weight_grams} g
-                          <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: '4px' }}>
-                            ({(p.total_weight_grams / 1000).toFixed(3)} KG)
-                          </span>
-                        </td>
-                        <td><strong style={{ color: 'var(--kfh-green)' }}>{p.unit_price} KWD / g</strong></td>
-                        <td><strong>{p.total_cost ? Number(p.total_cost).toFixed(3) : (p.total_weight_grams * p.unit_price).toFixed(3)} KWD</strong></td>
-                        <td>{p.requested_by}</td>
-                        <td>
-                          <span className={`badge ${p.status_code === 'APPROVED' ? 'badge-ready' : p.status_code === 'REJECTED' ? 'badge-sold' : 'badge-reserved'}`}>
-                            {p.status_code === 'APPROVED' ? (currentLang === 'en' ? 'Approved & Converted' : 'معتمد ومحول') :
-                             p.status_code === 'REJECTED' ? (currentLang === 'en' ? 'Rejected' : 'مرفوض') :
-                             (currentLang === 'en' ? 'Pending Checker Approval' : 'بانتظار اعتماد المراجع')}
-                          </span>
-                        </td>
-                        <td>{new Date(p.created_at).toLocaleString()}</td>
-                        <td>
-                          <div style={{ maxWidth: '240px', overflowX: 'auto', whiteSpace: 'nowrap', display: 'flex', gap: '4px' }}>
-                            {serialsList.map((s, idx) => (
-                              <span key={idx} style={{ fontSize: '10px', padding: '2px 5px', background: 'rgba(255,255,255,0.05)', borderRadius: '3px' }}>
-                                {s}
-                              </span>
-                            ))}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })
                 )}
               </tbody>
             </table>
           </div>
+
         </div>
       )}
 
-      {/* SMART SELECTION & SCANNER MODAL (QR SCAN, RANGE, BULK PASTE, OCR) */}
+      {/* 6. VIP DISPENSATION MODAL */}
+      {showVipDispenseModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100vw',
+          height: '100vh',
+          backgroundColor: 'rgba(0, 0, 0, 0.7)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999,
+          padding: '20px'
+        }}>
+          <div className="glass-card" style={{ width: '100%', maxWidth: '650px', maxHeight: '90vh', overflowY: 'auto', padding: '24px', borderLeft: '4px solid #ec4899' }}>
+            
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--surface-border)', paddingBottom: '12px', marginBottom: '16px' }}>
+              <h3 style={{ margin: 0, color: '#ec4899', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <i className="fa-solid fa-crown"></i>
+                {currentLang === 'en' ? 'Dispense Gold to VIP Client' : 'صرف سبائك الذهب لعميل VIP'}
+              </h3>
+              <button
+                onClick={() => setShowVipDispenseModal(false)}
+                style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: 'var(--text-muted)' }}
+              >
+                &times;
+              </button>
+            </div>
+
+            <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '0 0 16px 0' }}>
+              {currentLang === 'en'
+                ? 'Submit a Maker-Checker workflow to dispense selected gold bars from VIP reserve to a Private Banking client.'
+                : 'إنشاء طلب سير عمل لصرف السبائك المحددة من مخزون كبار العملاء لصالح عميل الخدمات الخاصة.'}
+            </p>
+
+            {/* Selected Bars Summary */}
+            <div style={{ background: 'rgba(236, 72, 153, 0.08)', borderRadius: '8px', padding: '12px', border: '1px solid rgba(236, 72, 153, 0.25)', marginBottom: '16px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', fontWeight: 'bold', color: '#ec4899', marginBottom: '6px' }}>
+                <span>{currentLang === 'en' ? 'Selected VIP Bars:' : 'السبائك المحددة:'} {selectedVipItemsData.count} bars</span>
+                <span>{selectedVipItemsData.totalWeightKg} KG ({selectedVipItemsData.totalWeightGrams.toLocaleString()} g)</span>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', maxHeight: '80px', overflowY: 'auto' }}>
+                {selectedVipSerials.map((s, idx) => (
+                  <span key={idx} style={{ fontSize: '10px', padding: '2px 6px', background: 'rgba(255,255,255,0.1)', borderRadius: '3px', fontFamily: 'monospace' }}>
+                    {s}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {/* Client Information Form */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '16px' }}>
+              
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label style={{ fontSize: '12px', fontWeight: 600 }}>
+                  {currentLang === 'en' ? 'Client Full Name *' : 'اسم العميل بالكامل *'}
+                </label>
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder={currentLang === 'en' ? 'e.g. Sheikh Nasser Al-Sabah' : 'مثال: الشيخ ناصر الصباح'}
+                  value={vipCustomerName}
+                  onChange={e => setVipCustomerName(e.target.value)}
+                  style={{ fontSize: '13px' }}
+                  required
+                />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label style={{ fontSize: '12px', fontWeight: 600 }}>
+                    {currentLang === 'en' ? 'Civil ID / National ID *' : 'الرقم المدني *'}
+                  </label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder="e.g. 290123456789"
+                    value={vipCustomerCivilId}
+                    onChange={e => setVipCustomerCivilId(e.target.value)}
+                    style={{ fontSize: '13px' }}
+                    required
+                  />
+                </div>
+
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label style={{ fontSize: '12px', fontWeight: 600 }}>
+                    {currentLang === 'en' ? 'Account Number / IBAN *' : 'رقم الحساب / الآيبان *'}
+                  </label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder="e.g. KFH-PB-99482"
+                    value={vipCustomerAccount}
+                    onChange={e => setVipCustomerAccount(e.target.value)}
+                    style={{ fontSize: '13px' }}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label style={{ fontSize: '12px', fontWeight: 600 }}>
+                  {currentLang === 'en' ? 'Special Handover Instructions' : 'تعليمات التسليم الخاصة'}
+                </label>
+                <select
+                  className="form-control"
+                  value={vipSpecialInstructions}
+                  onChange={e => setVipSpecialInstructions(e.target.value)}
+                  style={{ fontSize: '12px' }}
+                >
+                  <option value="VIP Private Vault Handover">VIP Private Vault Handover</option>
+                  <option value="Private Banking Suite Delivery">Private Banking Suite Delivery</option>
+                  <option value="Armored Escort to Client Location">Armored Escort to Client Location</option>
+                  <option value="Authorized Representative Pickup">Authorized Representative Pickup</option>
+                </select>
+              </div>
+
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label style={{ fontSize: '12px', fontWeight: 600 }}>
+                  {currentLang === 'en' ? 'Additional Notes / Custody Terms' : 'ملاحظات إضافية'}
+                </label>
+                <textarea
+                  rows={2}
+                  className="form-control"
+                  placeholder={currentLang === 'en' ? 'Optional notes...' : 'ملاحظات اختيارية...'}
+                  value={vipDispenseNotes}
+                  onChange={e => setVipDispenseNotes(e.target.value)}
+                  style={{ fontSize: '12px' }}
+                />
+              </div>
+
+            </div>
+
+            {/* Actions */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setShowVipDispenseModal(false)}
+                disabled={isSubmittingVipDispense}
+              >
+                {currentLang === 'en' ? 'Cancel' : 'إلغاء'}
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={handleDispenseVip}
+                disabled={isSubmittingVipDispense}
+                style={{ background: '#ec4899', color: '#fff', fontWeight: 'bold' }}
+              >
+                {isSubmittingVipDispense ? (
+                  <><i className="fa-solid fa-spinner fa-spin"></i> {currentLang === 'en' ? 'Submitting...' : 'جاري الإرسال...'}</>
+                ) : (
+                  <><i className="fa-solid fa-paper-plane"></i> {currentLang === 'en' ? 'Submit Dispensation for Approval' : 'إرسال طلب الصرف للاعتماد'}</>
+                )}
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* 6.5. RETURN TO TURKEY CONSIGNMENT MODAL */}
+      {showReturnModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100vw',
+          height: '100vh',
+          backgroundColor: 'rgba(0, 0, 0, 0.7)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999,
+          padding: '20px'
+        }}>
+          <div className="glass-card" style={{ width: '100%', maxWidth: '650px', maxHeight: '90vh', overflowY: 'auto', padding: '24px', borderLeft: '4px solid #F59E0B' }}>
+            
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--surface-border)', paddingBottom: '12px', marginBottom: '16px' }}>
+              <h3 style={{ margin: 0, color: '#F59E0B', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <i className="fa-solid fa-rotate-left"></i>
+                {currentLang === 'en' ? 'Return Gold to Turkey Consignment' : 'إرجاع الذهب إلى مخزون أمانة تركيا'}
+              </h3>
+              <button
+                onClick={() => setShowReturnModal(false)}
+                style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: 'var(--text-muted)' }}
+              >
+                &times;
+              </button>
+            </div>
+
+            <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '0 0 16px 0' }}>
+              {currentLang === 'en'
+                ? 'Initiate a Maker-Checker 4-eyes authorization workflow to return selected bullion from KFH or VIP stock back to Turkey consignment (TURKEY_OWNED). Once approved by the Checker, ownership reverts and items become available under Turkey offline consignment stock.'
+                : 'بدء سير عمل لاعتماد إرجاع السبائك المحددة من مخزون بيتك أو VIP إلى مخزون أمانة تركيا (TURKEY_OWNED). بمجرد اعتماد المراجع، ستعود الملكية إلى تركيا كأمانة أوفلاين.'}
+            </p>
+
+            {/* Source Origin Selector */}
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '6px' }}>
+                {currentLang === 'en' ? 'Source Stock Pool to Return From:' : 'المخزون المصدر المراد الإرجاع منه:'}
+              </label>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  type="button"
+                  className={`btn ${returnSourceOrigin === 'KFH' ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => setReturnSourceOrigin('KFH')}
+                  style={{ fontSize: '12px', padding: '6px 14px' }}
+                >
+                  🏦 {currentLang === 'en' ? 'KFH Online Stock' : 'مخزون بيتك المتاح'} ({selectedKfhSerials.length})
+                </button>
+                <button
+                  type="button"
+                  className={`btn ${returnSourceOrigin === 'VIP' ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => setReturnSourceOrigin('VIP')}
+                  style={{ fontSize: '12px', padding: '6px 14px' }}
+                >
+                  👑 {currentLang === 'en' ? 'VIP Reserve Stock' : 'مخزون كبار العملاء'} ({selectedVipSerials.length})
+                </button>
+                <button
+                  type="button"
+                  className={`btn ${returnSourceOrigin === 'ALL' ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => setReturnSourceOrigin('ALL')}
+                  style={{ fontSize: '12px', padding: '6px 14px' }}
+                >
+                  📦 {currentLang === 'en' ? 'Both Pools Combined' : 'كلا المخزونين معاً'} ({selectedKfhSerials.length + selectedVipSerials.length})
+                </button>
+              </div>
+            </div>
+
+            {/* Selected Bars Summary */}
+            <div style={{ background: 'rgba(245, 158, 11, 0.08)', borderRadius: '8px', padding: '12px', border: '1px solid rgba(245, 158, 11, 0.25)', marginBottom: '16px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', fontWeight: 'bold', color: '#F59E0B', marginBottom: '6px' }}>
+                <span>{currentLang === 'en' ? 'Selected Bars for Consignment Reversion:' : 'السبائك المحددة للإرجاع:'} {returnItemsData.count} {currentLang === 'en' ? 'bars' : 'سبيكة'}</span>
+                <span>{returnItemsData.totalWeightKg} KG ({returnItemsData.totalWeightGrams.toLocaleString()} g)</span>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', maxHeight: '90px', overflowY: 'auto' }}>
+                {returnItemsData.items.map((item, idx) => (
+                  <span key={idx} style={{ fontSize: '10px', padding: '2px 6px', background: 'rgba(255,255,255,0.1)', borderRadius: '3px', fontFamily: 'monospace' }}>
+                    {item.serial_number} ({item.weight_grams}g - {item.ownership_type || item.ownership || 'KFH/VIP'})
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {/* Return Details Form */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '16px' }}>
+              
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label style={{ fontSize: '12px', fontWeight: 600 }}>
+                  {currentLang === 'en' ? 'Return Reason / Agreement Reference *' : 'سبب الإرجاع / مرجع الاتفاقية *'}
+                </label>
+                <select
+                  className="form-control"
+                  value={returnReason}
+                  onChange={e => setReturnReason(e.target.value)}
+                  style={{ fontSize: '12px' }}
+                >
+                  <option value="Consignment Rebalancing Agreement TR-2026">Consignment Rebalancing Agreement TR-2026</option>
+                  <option value="Defective / Assay Mismatch Reversion">Defective / Assay Mismatch Reversion</option>
+                  <option value="Excess Bullion Reversion to Turkey Vault">Excess Bullion Reversion to Turkey Vault</option>
+                  <option value="Treasury Liquidity Recall">Treasury Liquidity Recall</option>
+                  <option value="Commercial Terms Adjustment">Commercial Terms Adjustment</option>
+                </select>
+              </div>
+
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label style={{ fontSize: '12px', fontWeight: 600 }}>
+                  {currentLang === 'en' ? 'Additional Notes & Justification' : 'ملاحظات إضافية وتبرير الإرجاع'}
+                </label>
+                <textarea
+                  rows={2}
+                  className="form-control"
+                  placeholder={currentLang === 'en' ? 'e.g. Return of unallocated consignment bars per Nadir Precious Metals rebalancing contract...' : 'مثال: إرجاع سبائك أمانة غير مخصصة طبقاً لعقد موازنة الأمانة مع مصفاة نادر...'}
+                  value={returnNotes}
+                  onChange={e => setReturnNotes(e.target.value)}
+                  style={{ fontSize: '12px' }}
+                />
+              </div>
+
+            </div>
+
+            {/* Actions */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setShowReturnModal(false)}
+                disabled={isSubmittingReturn}
+              >
+                {currentLang === 'en' ? 'Cancel' : 'إلغاء'}
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={handleInitiateTurkeyReturn}
+                disabled={returnItemsData.count === 0 || isSubmittingReturn}
+                style={{ background: '#F59E0B', color: '#000', fontWeight: 'bold' }}
+              >
+                {isSubmittingReturn ? (
+                  <><i className="fa-solid fa-spinner fa-spin"></i> {currentLang === 'en' ? 'Submitting...' : 'جاري الإرسال...'}</>
+                ) : (
+                  <><i className="fa-solid fa-rotate-left"></i> {currentLang === 'en' ? 'Submit Return for Checker Approval' : 'إرسال طلب الإرجاع لاعتماد المراجع'}</>
+                )}
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* 7. SMART SELECTION & SCANNER MODAL (QR SCAN, RANGE, BULK PASTE, OCR) */}
       {showSmartModal && (
         <div style={{
           position: 'fixed',

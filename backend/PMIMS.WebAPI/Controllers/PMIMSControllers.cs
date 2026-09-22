@@ -1634,6 +1634,18 @@ public partial class PMIMSControllers : ControllerBase
             {
                 return $"Turkey Purchase #{entityId}";
             }
+            if (workflowType == "TURKEY_RETURN")
+            {
+                return $"Turkey Return #{entityId} (KFH/VIP -> Consignment)";
+            }
+            if (workflowType == "VIP_ALLOCATION")
+            {
+                return $"VIP Stock Allocation #{entityId}";
+            }
+            if (workflowType == "VIP_DISPENSE")
+            {
+                return $"VIP Dispensation #{entityId}";
+            }
             if (workflowType == "CUSTOMS_TRANSFER")
             {
                 return $"Customs Transfer #{entityId} (Bonded -> Turkey/Kuwait)";
@@ -1747,6 +1759,10 @@ public partial class PMIMSControllers : ControllerBase
         decimal kfhWeightKg = WeightKg(kfhItems);
         int kfhQty = kfhItems.Count;
 
+        var vipItems = scopedItems.Where(i => i.OwnershipType == "VIP_OWNED").ToList();
+        decimal vipWeightKg = WeightKg(vipItems);
+        int vipQty = vipItems.Count;
+
         var transitItems = scopedItems.Where(i => i.StatusCode == "IN_TRANSFER").ToList();
         decimal transitWeightKg = WeightKg(transitItems);
         int transitQty = transitItems.Count;
@@ -1766,6 +1782,7 @@ public partial class PMIMSControllers : ControllerBase
         var allPreciousItems = scopedItems.Where(i =>
             i.OwnershipType == "TURKEY_OWNED" ||
             i.OwnershipType == "KFH_OWNED" ||
+            i.OwnershipType == "VIP_OWNED" ||
             i.StatusCode == "IN_TRANSFER" ||
             i.IsDamaged ||
             i.StatusCode == "QUARANTINED" ||
@@ -1818,6 +1835,8 @@ public partial class PMIMSControllers : ControllerBase
             turkey_qty = turkeyQty,
             kfh_weight_kg = kfhWeightKg,
             kfh_qty = kfhQty,
+            vip_weight_kg = vipWeightKg,
+            vip_qty = vipQty,
             total_precious = new
             {
                 total_weight_kg = totalPreciousWeightKg,
@@ -1827,6 +1846,8 @@ public partial class PMIMSControllers : ControllerBase
                 turkey_qty = turkeyQty,
                 kfh_weight_kg = kfhWeightKg,
                 kfh_qty = kfhQty,
+                vip_weight_kg = vipWeightKg,
+                vip_qty = vipQty,
                 transit_weight_kg = transitWeightKg,
                 transit_qty = transitQty,
                 damage_weight_kg = damageWeightKg,
@@ -1835,11 +1856,6 @@ public partial class PMIMSControllers : ControllerBase
                 pending_qty = pendingQty
             },
             total_gold_weight_kg = Math.Round(proprietaryBeforeTransferWeightGrams / 1000m, 3),
-            // Dropped the old `ready_qty` field: it used to be `i.StatusCode == "READY"` with
-            // no ownership check, which double-counted sold-but-still-custodied bars as
-            // available stock. Fixing that filter to require OwnershipType == KFH_OWNED made
-            // it numerically identical to `available_qty` below, so this was a duplicate
-            // dashboard card rather than a distinct metric -- see availableItems above.
             reserved_qty = scopedItems.Count(i => i.StatusCode == "RESERVED"),
             reserved_weight_kg = WeightKg(scopedItems.Where(i => i.StatusCode == "RESERVED").ToList()),
             custody_qty = holdings.Count(),

@@ -5,7 +5,8 @@ public enum OwnershipType
     KFH_OWNED,
     CUSTOMER_OWNED,
     TURKEY_OWNED,
-    CUSTOMS_OWNED
+    CUSTOMS_OWNED,
+    VIP_OWNED
 }
 
 public enum LocationType

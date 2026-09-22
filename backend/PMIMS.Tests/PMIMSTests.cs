@@ -2689,6 +2689,167 @@ public class PMIMSTests
         Assert.Contains("Denomination: 50g", customLabel.QrCodeContent);
         Assert.Contains("Product Type: Gold Turkey", customLabel.QrCodeContent);
     }
+
+    [Fact]
+    public async Task Test_VipStockAllocationAndDispense_Workflow()
+    {
+        using var setup = CreateContext();
+        await SeedBasicDataAsync(setup.Context);
+        var repo = new InventoryRepository(setup.Context);
+
+        // 0. Seed VIP workflow templates
+        var vipAllocWf = new WorkflowTemplate { WorkflowType = "VIP_ALLOCATION", Name = "VIP Alloc", Description = "VIP Allocation Workflow", IsActive = true };
+        setup.Context.WorkflowTemplates.Add(vipAllocWf);
+        var vipDispWf = new WorkflowTemplate { WorkflowType = "VIP_DISPENSE", Name = "VIP Disp", Description = "VIP Dispensation Workflow", IsActive = true };
+        setup.Context.WorkflowTemplates.Add(vipDispWf);
+        await setup.Context.SaveChangesAsync();
+
+        setup.Context.WorkflowSteps.Add(new WorkflowStep { TemplateId = vipAllocWf.TemplateId, StepOrder = 1, StepName = "Alloc Checker", RequiredRole = "Operations Checker", Description = "Checker approve" });
+        setup.Context.WorkflowSteps.Add(new WorkflowStep { TemplateId = vipDispWf.TemplateId, StepOrder = 1, StepName = "Disp Checker", RequiredRole = "Operations Checker", Description = "Checker approve" });
+        await setup.Context.SaveChangesAsync();
+
+        // 1. Setup KFH owned bar (after purchase from Turkey)
+        var product = await setup.Context.MetalProducts.Include(p => p.Denomination).FirstAsync();
+        var kfhBar = new InventoryItem
+        {
+            SerialNumber = "KFH-VIP-TEST-001",
+            ProductId = product.ProductId,
+            LotId = 1,
+            LocationId = 1,
+            OwnershipType = "KFH_OWNED",
+            StatusCode = "READY"
+        };
+        setup.Context.InventoryItems.Add(kfhBar);
+        await setup.Context.SaveChangesAsync();
+
+        // 2. Maker initiates VIP allocation
+        var allocation = await repo.InitiateVipAllocationWorkflowAsync(
+            new List<string> { "KFH-VIP-TEST-001" },
+            "treasury-maker",
+            "Allocating high grade bar to VIP reserve",
+            "Private Banking / VIP Exclusive");
+
+        Assert.NotNull(allocation);
+        Assert.Equal("PENDING_APPROVAL", allocation.StatusCode);
+        Assert.Equal(1, allocation.TotalItems);
+        Assert.Equal(product.Denomination?.WeightGrams ?? 0, allocation.TotalWeightGrams);
+
+        // 3. Checker approves VIP allocation
+        var approveAllocResult = await repo.ApproveVipAllocationAsync(allocation.PendingAllocationId, "treasury-checker");
+        Assert.Equal("SUCCESS", approveAllocResult);
+
+        var barAfterAlloc = await setup.Context.InventoryItems.FindAsync(kfhBar.ItemId);
+        Assert.NotNull(barAfterAlloc);
+        Assert.Equal("VIP_OWNED", barAfterAlloc.OwnershipType);
+        Assert.Equal("READY", barAfterAlloc.StatusCode);
+
+        // 4. Verify VIP inventory contains this item, and KFH online available excludes it
+        var vipItems = (await repo.GetVipInventoryAsync()).ToList();
+        Assert.Contains(vipItems, i => i.SerialNumber == "KFH-VIP-TEST-001");
+
+        var kfhAvailable = (await repo.GetKfhAvailableInventoryAsync()).ToList();
+        Assert.DoesNotContain(kfhAvailable, i => i.SerialNumber == "KFH-VIP-TEST-001");
+
+        // 5. Maker initiates VIP dispensation to VIP client
+        var dispense = await repo.InitiateVipDispenseWorkflowAsync(
+            new List<string> { "KFH-VIP-TEST-001" },
+            "Sheikha Al-Sabah",
+            "290010101234",
+            "ACC-VIP-999888",
+            "VIP Private Vault Handover",
+            "vip-specialist",
+            "Client requested physical collection");
+
+        Assert.NotNull(dispense);
+        Assert.Equal("PENDING_APPROVAL", dispense.StatusCode);
+        Assert.Equal("RESERVED", barAfterAlloc.StatusCode);
+
+        // 6. Checker approves VIP dispensation
+        var approveDispResult = await repo.ApproveVipDispenseAsync(dispense.PendingDispenseId, "treasury-checker");
+        Assert.Equal("SUCCESS", approveDispResult);
+
+        var barAfterDisp = await setup.Context.InventoryItems.FindAsync(kfhBar.ItemId);
+        Assert.NotNull(barAfterDisp);
+        Assert.Equal("CUSTOMER_OWNED", barAfterDisp.OwnershipType);
+        Assert.Equal("DELIVERED", barAfterDisp.StatusCode);
+    }
+
+    [Fact]
+    public async Task Test_TurkeyReturn_ConsignmentReversion_Workflow()
+    {
+        using var setup = CreateContext();
+        await SeedBasicDataAsync(setup.Context);
+        var repo = new InventoryRepository(setup.Context);
+
+        var turkeyReturnWf = new WorkflowTemplate { WorkflowType = "TURKEY_RETURN", Name = "Turkey Return", Description = "Turkey Return Workflow", IsActive = true };
+        setup.Context.WorkflowTemplates.Add(turkeyReturnWf);
+        await setup.Context.SaveChangesAsync();
+
+        var step1 = new WorkflowStep { TemplateId = turkeyReturnWf.TemplateId, StepOrder = 1, StepName = "Maker Request", RequiredRole = "Operations Maker", Description = "Maker submit" };
+        var step2 = new WorkflowStep { TemplateId = turkeyReturnWf.TemplateId, StepOrder = 2, StepName = "Checker Approval", RequiredRole = "Operations Checker", Description = "Checker approve" };
+        setup.Context.WorkflowSteps.AddRange(step1, step2);
+        await setup.Context.SaveChangesAsync();
+
+        var product = await setup.Context.MetalProducts.Include(p => p.Denomination).FirstAsync();
+        var kfhBar = new InventoryItem
+        {
+            ProductId = product.ProductId,
+            LotId = 1,
+            LocationId = 1,
+            SerialNumber = "KFH-RET-TEST-001",
+            OwnershipType = "KFH_OWNED",
+            StatusCode = "READY"
+        };
+        var vipBar = new InventoryItem
+        {
+            ProductId = product.ProductId,
+            LotId = 1,
+            LocationId = 1,
+            SerialNumber = "VIP-RET-TEST-002",
+            OwnershipType = "VIP_OWNED",
+            StatusCode = "READY"
+        };
+        setup.Context.InventoryItems.AddRange(kfhBar, vipBar);
+        await setup.Context.SaveChangesAsync();
+
+        // 1. Maker initiates return from KFH and VIP to Turkey consignment
+        var returnReq = await repo.InitiateTurkeyReturnWorkflowAsync(
+            new List<string> { "KFH-RET-TEST-001", "VIP-RET-TEST-002" },
+            "treasury-maker",
+            "Consignment Rebalancing Agreement TR-2026",
+            "Return unallocated bullion to Nadir custody");
+
+        Assert.NotNull(returnReq);
+        Assert.Equal("PENDING_APPROVAL", returnReq.StatusCode);
+        Assert.Equal(2, returnReq.TotalItems);
+        Assert.Equal("MIXED", returnReq.SourceOwnership);
+
+        // 2. Checker approves return
+        var approveResult = await repo.ApproveTurkeyReturnAsync(returnReq.PendingReturnId, "treasury-checker");
+        Assert.Equal("SUCCESS", approveResult);
+
+        // 3. Verify bars reverted to TURKEY_OWNED
+        var bar1 = await setup.Context.InventoryItems.FindAsync(kfhBar.ItemId);
+        var bar2 = await setup.Context.InventoryItems.FindAsync(vipBar.ItemId);
+        Assert.NotNull(bar1);
+        Assert.NotNull(bar2);
+        Assert.Equal("TURKEY_OWNED", bar1.OwnershipType);
+        Assert.Equal("TURKEY_OWNED", bar2.OwnershipType);
+        Assert.Equal("READY", bar1.StatusCode);
+        Assert.Equal("READY", bar2.StatusCode);
+
+        // 4. Verify in Turkey inventory list and excluded from KFH / VIP lists
+        var turkeyItems = (await repo.GetTurkeyInventoryAsync()).ToList();
+        Assert.Contains(turkeyItems, i => i.SerialNumber == "KFH-RET-TEST-001");
+        Assert.Contains(turkeyItems, i => i.SerialNumber == "VIP-RET-TEST-002");
+
+        var vipItems = (await repo.GetVipInventoryAsync()).ToList();
+        Assert.DoesNotContain(vipItems, i => i.SerialNumber == "VIP-RET-TEST-002");
+
+        var kfhItems = (await repo.GetKfhAvailableInventoryAsync()).ToList();
+        Assert.DoesNotContain(kfhItems, i => i.SerialNumber == "KFH-RET-TEST-001");
+    }
 }
+
 
 

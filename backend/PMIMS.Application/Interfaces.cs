@@ -166,6 +166,21 @@ public interface IInventoryRepository
     Task<string> GetQrCodeReprintPrivilegeAsync();
     Task<SystemSetting> SetQrCodeReprintPrivilegeAsync(string privilegeLevel, string updatedBy);
 
+    // VIP Stock Allocation & Dispensation Operations
+    Task<IEnumerable<InventoryItem>> GetVipInventoryAsync();
+    Task<IEnumerable<InventoryItem>> GetKfhAvailableInventoryAsync();
+    Task<PendingVipAllocation> InitiateVipAllocationWorkflowAsync(List<string> serialNumbers, string requestedBy, string? notes, string? vipCategory = null);
+    Task<string> ApproveVipAllocationAsync(int pendingAllocationId, string approvedBy);
+    Task<IEnumerable<PendingVipAllocation>> GetPendingVipAllocationsAsync();
+    Task<PendingVipDispense> InitiateVipDispenseWorkflowAsync(List<string> serialNumbers, string customerName, string customerCivilId, string? customerAccount, string? specialInstructions, string requestedBy, string? notes);
+    Task<string> ApproveVipDispenseAsync(int pendingDispenseId, string approvedBy);
+    Task<IEnumerable<PendingVipDispense>> GetPendingVipDispensesAsync();
+
+    // Turkey Consignment Return Operations (KFH/VIP -> TURKEY_OWNED)
+    Task<PendingTurkeyReturn> InitiateTurkeyReturnWorkflowAsync(List<string> serialNumbers, string requestedBy, string? returnReason, string? notes);
+    Task<string> ApproveTurkeyReturnAsync(int pendingReturnId, string approvedBy);
+    Task<IEnumerable<PendingTurkeyReturn>> GetPendingTurkeyReturnsAsync();
+
     // =========================================================================
     // Dynamic Business Validation Rules Engine (RFP item 5) -- pure data access;
     // predicate-tree evaluation logic lives in IRuleEngineService.

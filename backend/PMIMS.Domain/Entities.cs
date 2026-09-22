@@ -1040,6 +1040,58 @@ public class PendingCustomsTransfer
     public InventoryItem? Item { get; set; }
 }
 
+public class PendingVipAllocation
+{
+    public int PendingAllocationId { get; set; }
+    public string BatchReference { get; set; } = null!;
+    public string SerialsJsonList { get; set; } = null!;
+    public int TotalItems { get; set; }
+    public decimal TotalWeightGrams { get; set; }
+    public string? VipCategory { get; set; } // "Private Banking", "Royal / Executive VIP", "High Net Worth"
+    public string RequestedBy { get; set; } = null!;
+    public string? Notes { get; set; }
+    public string StatusCode { get; set; } = "PENDING_APPROVAL"; // PENDING_APPROVAL, APPROVED, REJECTED
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public string? ApprovedBy { get; set; }
+    public DateTime? ApprovedAt { get; set; }
+}
+
+public class PendingVipDispense
+{
+    public int PendingDispenseId { get; set; }
+    public string BatchReference { get; set; } = null!;
+    public string SerialsJsonList { get; set; } = null!;
+    public int TotalItems { get; set; }
+    public decimal TotalWeightGrams { get; set; }
+    public string CustomerName { get; set; } = null!;
+    public string CustomerCivilId { get; set; } = null!;
+    public string? CustomerAccount { get; set; }
+    public string? SpecialInstructions { get; set; }
+    public string RequestedBy { get; set; } = null!;
+    public string? Notes { get; set; }
+    public string StatusCode { get; set; } = "PENDING_APPROVAL"; // PENDING_APPROVAL, APPROVED, REJECTED
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public string? ApprovedBy { get; set; }
+    public DateTime? ApprovedAt { get; set; }
+}
+
+public class PendingTurkeyReturn
+{
+    public int PendingReturnId { get; set; }
+    public string BatchReference { get; set; } = null!;
+    public string SourceOwnership { get; set; } = "KFH_OWNED"; // "KFH_OWNED", "VIP_OWNED", "MIXED"
+    public string SerialsJsonList { get; set; } = null!;
+    public int TotalItems { get; set; }
+    public decimal TotalWeightGrams { get; set; }
+    public string ReturnReason { get; set; } = "Return Consignment to Turkey";
+    public string RequestedBy { get; set; } = null!;
+    public string? Notes { get; set; }
+    public string StatusCode { get; set; } = "PENDING_APPROVAL"; // PENDING_APPROVAL, APPROVED, REJECTED
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public string? ApprovedBy { get; set; }
+    public DateTime? ApprovedAt { get; set; }
+}
+
 public class CustomsShipmentDto
 {
     public int LotId { get; set; }

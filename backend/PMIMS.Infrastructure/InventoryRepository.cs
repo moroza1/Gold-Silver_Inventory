@@ -2083,6 +2083,30 @@ public class InventoryRepository : IInventoryRepository
                 var ct = await _dbContext.PendingCustomsTransfers.FindAsync(instance.EntityId);
                 if (ct != null) ct.StatusCode = "REJECTED";
             }
+            else if (instance.WorkflowType == "VIP_ALLOCATION")
+            {
+                var alloc = await _dbContext.PendingVipAllocations.FindAsync(instance.EntityId);
+                if (alloc != null) alloc.StatusCode = "REJECTED";
+            }
+            else if (instance.WorkflowType == "VIP_DISPENSE")
+            {
+                var disp = await _dbContext.PendingVipDispenses.FindAsync(instance.EntityId);
+                if (disp != null)
+                {
+                    disp.StatusCode = "REJECTED";
+                    var serials = JsonSerializer.Deserialize<List<string>>(disp.SerialsJsonList) ?? new List<string>();
+                    var items = await _dbContext.InventoryItems.Where(i => serials.Contains(i.SerialNumber)).ToListAsync();
+                    foreach (var it in items)
+                    {
+                        if (it.StatusCode == "RESERVED") it.StatusCode = "READY";
+                    }
+                }
+            }
+            else if (instance.WorkflowType == "TURKEY_RETURN")
+            {
+                var ret = await _dbContext.PendingTurkeyReturns.FindAsync(instance.EntityId);
+                if (ret != null) ret.StatusCode = "REJECTED";
+            }
         }
         else if (action == "RETURNED")
         {
@@ -2130,6 +2154,21 @@ public class InventoryRepository : IInventoryRepository
             {
                 var ct = await _dbContext.PendingCustomsTransfers.FindAsync(instance.EntityId);
                 if (ct != null) ct.StatusCode = "PENDING_APPROVAL";
+            }
+            else if (instance.WorkflowType == "VIP_ALLOCATION")
+            {
+                var alloc = await _dbContext.PendingVipAllocations.FindAsync(instance.EntityId);
+                if (alloc != null) alloc.StatusCode = "PENDING_APPROVAL";
+            }
+            else if (instance.WorkflowType == "VIP_DISPENSE")
+            {
+                var disp = await _dbContext.PendingVipDispenses.FindAsync(instance.EntityId);
+                if (disp != null) disp.StatusCode = "PENDING_APPROVAL";
+            }
+            else if (instance.WorkflowType == "TURKEY_RETURN")
+            {
+                var ret = await _dbContext.PendingTurkeyReturns.FindAsync(instance.EntityId);
+                if (ret != null) ret.StatusCode = "PENDING_APPROVAL";
             }
         }
         else if (action == "APPROVED")
@@ -2396,6 +2435,30 @@ public class InventoryRepository : IInventoryRepository
                         }
 
                         await SaveAuditLogAsync(username, "VAULT", "CUSTOMS", $"Workflow customs transfer completed for request #{ct.PendingTransferId}: {itemsToTransfer.Count} items transferred from CUSTOMS_OWNED to {ct.TargetOwnership}");
+                    }
+                }
+                else if (instance.WorkflowType == "VIP_ALLOCATION")
+                {
+                    string result = await ApproveVipAllocationAsync(instance.EntityId, username);
+                    if (result != "SUCCESS")
+                    {
+                        throw new InvalidOperationException($"VIP allocation approval execution failed: {result}");
+                    }
+                }
+                else if (instance.WorkflowType == "VIP_DISPENSE")
+                {
+                    string result = await ApproveVipDispenseAsync(instance.EntityId, username);
+                    if (result != "SUCCESS")
+                    {
+                        throw new InvalidOperationException($"VIP dispensation approval execution failed: {result}");
+                    }
+                }
+                else if (instance.WorkflowType == "TURKEY_RETURN")
+                {
+                    string result = await ApproveTurkeyReturnAsync(instance.EntityId, username);
+                    if (result != "SUCCESS")
+                    {
+                        throw new InvalidOperationException($"Turkey return approval execution failed: {result}");
                     }
                 }
             }
@@ -5856,6 +5919,476 @@ public class InventoryRepository : IInventoryRepository
         return "SUCCESS";
     }
 
+    public async Task<IEnumerable<InventoryItem>> GetVipInventoryAsync()
+    {
+        return await _dbContext.InventoryItems
+            .Include(i => i.Product)
+                .ThenInclude(p => p.MetalType)
+            .Include(i => i.Product)
+                .ThenInclude(p => p.Denomination)
+            .Include(i => i.Product)
+                .ThenInclude(p => p.Brand)
+            .Include(i => i.Product)
+                .ThenInclude(p => p.Purity)
+            .Include(i => i.Location)
+                .ThenInclude(l => l.Vault)
+            .Include(i => i.Lot)
+            .Where(i => i.OwnershipType == "VIP_OWNED")
+            .OrderByDescending(i => i.ItemId)
+            .ToListAsync();
+    }
+
+    public async Task<IEnumerable<InventoryItem>> GetKfhAvailableInventoryAsync()
+    {
+        return await _dbContext.InventoryItems
+            .Include(i => i.Product)
+                .ThenInclude(p => p.MetalType)
+            .Include(i => i.Product)
+                .ThenInclude(p => p.Denomination)
+            .Include(i => i.Product)
+                .ThenInclude(p => p.Brand)
+            .Include(i => i.Product)
+                .ThenInclude(p => p.Purity)
+            .Include(i => i.Location)
+                .ThenInclude(l => l.Vault)
+            .Include(i => i.Lot)
+            .Where(i => i.OwnershipType == "KFH_OWNED" && i.StatusCode == "READY")
+            .OrderByDescending(i => i.ItemId)
+            .ToListAsync();
+    }
+
+    public async Task<IEnumerable<PendingVipAllocation>> GetPendingVipAllocationsAsync()
+    {
+        return await _dbContext.PendingVipAllocations
+            .OrderByDescending(p => p.CreatedAt)
+            .ToListAsync();
+    }
+
+    public async Task<IEnumerable<PendingVipDispense>> GetPendingVipDispensesAsync()
+    {
+        return await _dbContext.PendingVipDispenses
+            .OrderByDescending(p => p.CreatedAt)
+            .ToListAsync();
+    }
+
+    public async Task<PendingVipAllocation> InitiateVipAllocationWorkflowAsync(List<string> serialNumbers, string requestedBy, string? notes, string? vipCategory = null)
+    {
+        if (serialNumbers == null || serialNumbers.Count == 0)
+        {
+            throw new InvalidOperationException("At least one serial number must be specified for VIP allocation.");
+        }
+
+        var cleanSerials = serialNumbers.Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s.Trim()).Distinct().ToList();
+        if (cleanSerials.Count == 0)
+        {
+            throw new InvalidOperationException("No valid serial numbers provided.");
+        }
+
+        var items = await _dbContext.InventoryItems
+            .Include(i => i.Product)
+                .ThenInclude(p => p.Denomination)
+            .Where(i => cleanSerials.Contains(i.SerialNumber))
+            .ToListAsync();
+
+        if (items.Count != cleanSerials.Count)
+        {
+            var foundSerials = items.Select(i => i.SerialNumber).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var missing = cleanSerials.Where(s => !foundSerials.Contains(s)).ToList();
+            throw new InvalidOperationException($"The following serial numbers were not found: {string.Join(", ", missing)}");
+        }
+
+        var invalidOwner = items.Where(i => i.OwnershipType != "KFH_OWNED").ToList();
+        if (invalidOwner.Any())
+        {
+            throw new InvalidOperationException($"Items must be KFH-owned before allocating to VIP reserve: {string.Join(", ", invalidOwner.Select(i => i.SerialNumber))}");
+        }
+
+        var invalidStatus = items.Where(i => i.StatusCode != "READY").ToList();
+        if (invalidStatus.Any())
+        {
+            throw new InvalidOperationException($"Items must be in READY status: {string.Join(", ", invalidStatus.Select(i => i.SerialNumber))}");
+        }
+
+        decimal totalWeightGrams = items.Sum(i => i.Product?.Denomination?.WeightGrams ?? 0);
+        string batchRef = $"VIP-ALC-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..6].ToUpperInvariant()}";
+
+        var pending = new PendingVipAllocation
+        {
+            BatchReference = batchRef,
+            SerialsJsonList = JsonSerializer.Serialize(cleanSerials),
+            TotalItems = items.Count,
+            TotalWeightGrams = totalWeightGrams,
+            VipCategory = string.IsNullOrWhiteSpace(vipCategory) ? "Private Banking / VIP Exclusive" : vipCategory,
+            RequestedBy = requestedBy,
+            Notes = notes,
+            StatusCode = "PENDING_APPROVAL",
+            CreatedAt = DateTime.UtcNow
+        };
+
+        _dbContext.PendingVipAllocations.Add(pending);
+        await _dbContext.SaveChangesAsync();
+
+        var template = await _dbContext.WorkflowTemplates.Include(t => t.Steps)
+            .FirstOrDefaultAsync(t => t.WorkflowType == "VIP_ALLOCATION" && t.IsActive);
+        if (template == null || template.Steps.Count == 0)
+        {
+            throw new InvalidOperationException("Cannot initiate VIP allocation: No active VIP_ALLOCATION workflow template configured.");
+        }
+
+        await StartWorkflowInstanceAsync("VIP_ALLOCATION", pending.PendingAllocationId, requestedBy);
+        return pending;
+    }
+
+    public async Task<string> ApproveVipAllocationAsync(int pendingAllocationId, string approvedBy)
+    {
+        var allocation = await _dbContext.PendingVipAllocations.FindAsync(pendingAllocationId);
+        if (allocation == null) throw new InvalidOperationException("Pending VIP allocation not found.");
+        if (allocation.StatusCode == "APPROVED") return "SUCCESS";
+
+        var serials = JsonSerializer.Deserialize<List<string>>(allocation.SerialsJsonList) ?? new List<string>();
+        var items = await _dbContext.InventoryItems
+            .Include(i => i.Product)
+                .ThenInclude(p => p.Denomination)
+            .Where(i => serials.Contains(i.SerialNumber))
+            .ToListAsync();
+
+        allocation.StatusCode = "APPROVED";
+        allocation.ApprovedBy = approvedBy;
+        allocation.ApprovedAt = DateTime.UtcNow;
+
+        var affectedProductsByLocation = new HashSet<(int locationId, int productId)>();
+
+        foreach (var item in items)
+        {
+            string oldOwnership = item.OwnershipType;
+            item.OwnershipType = "VIP_OWNED";
+            item.StatusCode = "READY";
+
+            if (item.LocationId.HasValue)
+            {
+                affectedProductsByLocation.Add((item.LocationId.Value, item.ProductId));
+            }
+
+            var tx = new InventoryTransaction
+            {
+                TransactionNumber = $"TX-VIP-ALC-{item.ItemId}-{DateTime.UtcNow:yyyyMMddHHmmssfff}",
+                ItemId = item.ItemId,
+                TransactionType = "ADJUSTMENT",
+                SourceLocationId = item.LocationId,
+                DestinationLocationId = item.LocationId,
+                SourceOwnership = oldOwnership,
+                DestinationOwnership = "VIP_OWNED",
+                InitiatedBy = allocation.RequestedBy,
+                ApprovedBy = approvedBy,
+                TransactionTimestamp = DateTime.UtcNow
+            };
+            _dbContext.InventoryTransactions.Add(tx);
+
+            await RecordChainOfCustodyEventAsync(item.ItemId, "VIP_ALLOCATION", approvedBy, item.LocationId, tx.TransactionNumber,
+                $"Allocated to VIP Exclusive Stock ({allocation.VipCategory ?? "VIP Reserve"}). Batch: {allocation.BatchReference}. Non-Online Inventory.");
+        }
+
+        await _dbContext.SaveChangesAsync();
+
+        foreach (var (locId, prodId) in affectedProductsByLocation)
+        {
+            await RecalculateInventoryBalanceAsync(locId, prodId, "KFH_OWNED");
+            await RecalculateInventoryBalanceAsync(locId, prodId, "VIP_OWNED");
+        }
+
+        await SaveAuditLogAsync(approvedBy, "VAULT", "VIP_ALLOCATION",
+            $"Approved VIP Stock Allocation #{allocation.PendingAllocationId} ({allocation.TotalItems} bars, {allocation.TotalWeightGrams:N2}g) to VIP Exclusive reserve.",
+            entityType: "PENDING_VIP_ALLOCATION", entityId: allocation.PendingAllocationId.ToString());
+
+        return "SUCCESS";
+    }
+
+    public async Task<PendingVipDispense> InitiateVipDispenseWorkflowAsync(List<string> serialNumbers, string customerName, string customerCivilId, string? customerAccount, string? specialInstructions, string requestedBy, string? notes)
+    {
+        if (serialNumbers == null || serialNumbers.Count == 0)
+        {
+            throw new InvalidOperationException("At least one VIP serial number must be selected for withdrawal/dispensation.");
+        }
+        if (string.IsNullOrWhiteSpace(customerName))
+        {
+            throw new InvalidOperationException("VIP customer name is required.");
+        }
+        if (string.IsNullOrWhiteSpace(customerCivilId))
+        {
+            throw new InvalidOperationException("VIP customer Civil ID is required.");
+        }
+
+        var cleanSerials = serialNumbers.Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s.Trim()).Distinct().ToList();
+        var items = await _dbContext.InventoryItems
+            .Include(i => i.Product)
+                .ThenInclude(p => p.Denomination)
+            .Where(i => cleanSerials.Contains(i.SerialNumber))
+            .ToListAsync();
+
+        if (items.Count != cleanSerials.Count)
+        {
+            var foundSerials = items.Select(i => i.SerialNumber).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var missing = cleanSerials.Where(s => !foundSerials.Contains(s)).ToList();
+            throw new InvalidOperationException($"The following VIP serial numbers were not found: {string.Join(", ", missing)}");
+        }
+
+        var invalidOwner = items.Where(i => i.OwnershipType != "VIP_OWNED").ToList();
+        if (invalidOwner.Any())
+        {
+            throw new InvalidOperationException($"Items must be in VIP Exclusive Stock (VIP_OWNED): {string.Join(", ", invalidOwner.Select(i => i.SerialNumber))}");
+        }
+
+        var invalidStatus = items.Where(i => i.StatusCode != "READY").ToList();
+        if (invalidStatus.Any())
+        {
+            throw new InvalidOperationException($"Items must be in READY status: {string.Join(", ", invalidStatus.Select(i => i.SerialNumber))}");
+        }
+
+        foreach (var it in items)
+        {
+            it.StatusCode = "RESERVED";
+        }
+
+        decimal totalWeightGrams = items.Sum(i => i.Product?.Denomination?.WeightGrams ?? 0);
+        string batchRef = $"VIP-DSP-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..6].ToUpperInvariant()}";
+
+        var pending = new PendingVipDispense
+        {
+            BatchReference = batchRef,
+            SerialsJsonList = JsonSerializer.Serialize(cleanSerials),
+            TotalItems = items.Count,
+            TotalWeightGrams = totalWeightGrams,
+            CustomerName = customerName,
+            CustomerCivilId = customerCivilId,
+            CustomerAccount = customerAccount,
+            SpecialInstructions = specialInstructions,
+            RequestedBy = requestedBy,
+            Notes = notes,
+            StatusCode = "PENDING_APPROVAL",
+            CreatedAt = DateTime.UtcNow
+        };
+
+        _dbContext.PendingVipDispenses.Add(pending);
+        await _dbContext.SaveChangesAsync();
+
+        var template = await _dbContext.WorkflowTemplates.Include(t => t.Steps)
+            .FirstOrDefaultAsync(t => t.WorkflowType == "VIP_DISPENSE" && t.IsActive);
+        if (template == null || template.Steps.Count == 0)
+        {
+            throw new InvalidOperationException("Cannot initiate VIP dispensation: No active VIP_DISPENSE workflow template configured.");
+        }
+
+        await StartWorkflowInstanceAsync("VIP_DISPENSE", pending.PendingDispenseId, requestedBy);
+        return pending;
+    }
+
+    public async Task<string> ApproveVipDispenseAsync(int pendingDispenseId, string approvedBy)
+    {
+        var dispense = await _dbContext.PendingVipDispenses.FindAsync(pendingDispenseId);
+        if (dispense == null) throw new InvalidOperationException("Pending VIP dispensation request not found.");
+        if (dispense.StatusCode == "APPROVED") return "SUCCESS";
+
+        var serials = JsonSerializer.Deserialize<List<string>>(dispense.SerialsJsonList) ?? new List<string>();
+        var items = await _dbContext.InventoryItems
+            .Include(i => i.Product)
+                .ThenInclude(p => p.Denomination)
+            .Where(i => serials.Contains(i.SerialNumber))
+            .ToListAsync();
+
+        dispense.StatusCode = "APPROVED";
+        dispense.ApprovedBy = approvedBy;
+        dispense.ApprovedAt = DateTime.UtcNow;
+
+        var affectedProductsByLocation = new HashSet<(int locationId, int productId)>();
+
+        foreach (var item in items)
+        {
+            string oldOwnership = item.OwnershipType;
+            item.OwnershipType = "CUSTOMER_OWNED";
+            item.StatusCode = "DELIVERED";
+
+            if (item.LocationId.HasValue)
+            {
+                affectedProductsByLocation.Add((item.LocationId.Value, item.ProductId));
+            }
+
+            var tx = new InventoryTransaction
+            {
+                TransactionNumber = $"TX-VIP-DSP-{item.ItemId}-{DateTime.UtcNow:yyyyMMddHHmmssfff}",
+                ItemId = item.ItemId,
+                TransactionType = "DISPATCH",
+                SourceLocationId = item.LocationId,
+                DestinationLocationId = item.LocationId,
+                SourceOwnership = oldOwnership,
+                DestinationOwnership = "CUSTOMER_OWNED",
+                InitiatedBy = dispense.RequestedBy,
+                ApprovedBy = approvedBy,
+                TransactionTimestamp = DateTime.UtcNow
+            };
+            _dbContext.InventoryTransactions.Add(tx);
+
+            await RecordChainOfCustodyEventAsync(item.ItemId, "VIP_DISPENSE", approvedBy, item.LocationId, tx.TransactionNumber,
+                $"Dispensed to VIP Customer '{dispense.CustomerName}' (Civil ID: {dispense.CustomerCivilId}, Acc: {dispense.CustomerAccount ?? "N/A"}). Batch: {dispense.BatchReference}.");
+        }
+
+        await _dbContext.SaveChangesAsync();
+
+        foreach (var (locId, prodId) in affectedProductsByLocation)
+        {
+            await RecalculateInventoryBalanceAsync(locId, prodId, "VIP_OWNED");
+            await RecalculateInventoryBalanceAsync(locId, prodId, "CUSTOMER_OWNED");
+        }
+
+        await SaveAuditLogAsync(approvedBy, "VAULT", "VIP_DISPENSE",
+            $"Approved VIP Gold Dispensation #{dispense.PendingDispenseId} ({dispense.TotalItems} bars, {dispense.TotalWeightGrams:N2}g) to {dispense.CustomerName}.",
+            entityType: "PENDING_VIP_DISPENSE", entityId: dispense.PendingDispenseId.ToString());
+
+        return "SUCCESS";
+    }
+
+    public async Task<IEnumerable<PendingTurkeyReturn>> GetPendingTurkeyReturnsAsync()
+    {
+        return await _dbContext.PendingTurkeyReturns
+            .OrderByDescending(p => p.CreatedAt)
+            .ToListAsync();
+    }
+
+    public async Task<PendingTurkeyReturn> InitiateTurkeyReturnWorkflowAsync(List<string> serialNumbers, string requestedBy, string? returnReason, string? notes)
+    {
+        if (serialNumbers == null || serialNumbers.Count == 0)
+        {
+            throw new InvalidOperationException("At least one serial number must be selected to return to Turkey consignment.");
+        }
+
+        var cleanSerials = serialNumbers.Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s.Trim()).Distinct().ToList();
+        if (cleanSerials.Count == 0)
+        {
+            throw new InvalidOperationException("No valid serial numbers provided.");
+        }
+
+        var items = await _dbContext.InventoryItems
+            .Include(i => i.Product)
+                .ThenInclude(p => p.Denomination)
+            .Where(i => cleanSerials.Contains(i.SerialNumber))
+            .ToListAsync();
+
+        if (items.Count != cleanSerials.Count)
+        {
+            var foundSerials = items.Select(i => i.SerialNumber).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var missing = cleanSerials.Where(s => !foundSerials.Contains(s)).ToList();
+            throw new InvalidOperationException($"The following serial numbers were not found: {string.Join(", ", missing)}");
+        }
+
+        var invalidOwner = items.Where(i => i.OwnershipType != "KFH_OWNED" && i.OwnershipType != "VIP_OWNED").ToList();
+        if (invalidOwner.Any())
+        {
+            throw new InvalidOperationException($"Items must be KFH-owned or VIP-owned to return to Turkey: {string.Join(", ", invalidOwner.Select(i => i.SerialNumber))}");
+        }
+
+        var invalidStatus = items.Where(i => i.StatusCode != "READY").ToList();
+        if (invalidStatus.Any())
+        {
+            throw new InvalidOperationException($"Items must be in READY status: {string.Join(", ", invalidStatus.Select(i => i.SerialNumber))}");
+        }
+
+        var distinctOwners = items.Select(i => i.OwnershipType).Distinct().ToList();
+        string sourceOwnership = distinctOwners.Count == 1 ? distinctOwners[0] : "MIXED";
+
+        decimal totalWeightGrams = items.Sum(i => i.Product?.Denomination?.WeightGrams ?? 0);
+        string batchRef = $"TR-RET-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..6].ToUpperInvariant()}";
+
+        var pending = new PendingTurkeyReturn
+        {
+            BatchReference = batchRef,
+            SourceOwnership = sourceOwnership,
+            SerialsJsonList = JsonSerializer.Serialize(cleanSerials),
+            TotalItems = items.Count,
+            TotalWeightGrams = totalWeightGrams,
+            ReturnReason = string.IsNullOrWhiteSpace(returnReason) ? "Return Consignment to Turkey" : returnReason,
+            RequestedBy = requestedBy,
+            Notes = notes,
+            StatusCode = "PENDING_APPROVAL",
+            CreatedAt = DateTime.UtcNow
+        };
+
+        _dbContext.PendingTurkeyReturns.Add(pending);
+        await _dbContext.SaveChangesAsync();
+
+        var template = await _dbContext.WorkflowTemplates.Include(t => t.Steps)
+            .FirstOrDefaultAsync(t => t.WorkflowType == "TURKEY_RETURN" && t.IsActive);
+        if (template == null || template.Steps.Count == 0)
+        {
+            throw new InvalidOperationException("Cannot initiate Turkey return: No active TURKEY_RETURN workflow template configured.");
+        }
+
+        await StartWorkflowInstanceAsync("TURKEY_RETURN", pending.PendingReturnId, requestedBy);
+        return pending;
+    }
+
+    public async Task<string> ApproveTurkeyReturnAsync(int pendingReturnId, string approvedBy)
+    {
+        var ret = await _dbContext.PendingTurkeyReturns.FindAsync(pendingReturnId);
+        if (ret == null) throw new InvalidOperationException("Pending Turkey return request not found.");
+        if (ret.StatusCode == "APPROVED") return "SUCCESS";
+
+        var serials = JsonSerializer.Deserialize<List<string>>(ret.SerialsJsonList) ?? new List<string>();
+        var items = await _dbContext.InventoryItems
+            .Include(i => i.Product)
+                .ThenInclude(p => p.Denomination)
+            .Where(i => serials.Contains(i.SerialNumber))
+            .ToListAsync();
+
+        ret.StatusCode = "APPROVED";
+        ret.ApprovedBy = approvedBy;
+        ret.ApprovedAt = DateTime.UtcNow;
+
+        var affectedOwnershipsByLocation = new HashSet<(int locationId, int productId, string ownership)>();
+
+        foreach (var item in items)
+        {
+            string oldOwnership = item.OwnershipType;
+            item.OwnershipType = "TURKEY_OWNED";
+            item.StatusCode = "READY";
+
+            if (item.LocationId.HasValue)
+            {
+                affectedOwnershipsByLocation.Add((item.LocationId.Value, item.ProductId, oldOwnership));
+                affectedOwnershipsByLocation.Add((item.LocationId.Value, item.ProductId, "TURKEY_OWNED"));
+            }
+
+            var tx = new InventoryTransaction
+            {
+                TransactionNumber = $"TX-TR-RET-{item.ItemId}-{DateTime.UtcNow:yyyyMMddHHmmssfff}",
+                ItemId = item.ItemId,
+                TransactionType = "ADJUSTMENT",
+                SourceLocationId = item.LocationId,
+                DestinationLocationId = item.LocationId,
+                SourceOwnership = oldOwnership,
+                DestinationOwnership = "TURKEY_OWNED",
+                InitiatedBy = ret.RequestedBy,
+                ApprovedBy = approvedBy,
+                TransactionTimestamp = DateTime.UtcNow
+            };
+            _dbContext.InventoryTransactions.Add(tx);
+
+            await RecordChainOfCustodyEventAsync(item.ItemId, "TURKEY_RETURN", approvedBy, item.LocationId, tx.TransactionNumber,
+                $"Returned from {oldOwnership} to Turkey Consignment (TURKEY_OWNED). Batch: {ret.BatchReference}. Reason: {ret.ReturnReason}");
+        }
+
+        await _dbContext.SaveChangesAsync();
+
+        foreach (var (locId, prodId, own) in affectedOwnershipsByLocation)
+        {
+            await RecalculateInventoryBalanceAsync(locId, prodId, own);
+        }
+
+        await SaveAuditLogAsync(approvedBy, "VAULT", "TURKEY_RETURN",
+            $"Approved Return of {ret.TotalItems} bars ({ret.TotalWeightGrams:N2}g) to Turkey Consignment (TURKEY_OWNED). Batch: {ret.BatchReference}.",
+            entityType: "PENDING_TURKEY_RETURN", entityId: ret.PendingReturnId.ToString());
+
+        return "SUCCESS";
+    }
+
     public async Task<bool> ResetStoreDataAndAuditTrailAsync(string initiatedBy)
     {
         // 1. Remove all transactional, movement, workflow, and customer records
@@ -5884,6 +6417,9 @@ public class InventoryRepository : IInventoryRepository
         _dbContext.PendingIntakes.RemoveRange(_dbContext.PendingIntakes);
         _dbContext.PendingTurkeyPurchases.RemoveRange(_dbContext.PendingTurkeyPurchases);
         _dbContext.PendingThresholdChanges.RemoveRange(_dbContext.PendingThresholdChanges);
+        _dbContext.PendingVipAllocations.RemoveRange(_dbContext.PendingVipAllocations);
+        _dbContext.PendingVipDispenses.RemoveRange(_dbContext.PendingVipDispenses);
+        _dbContext.PendingTurkeyReturns.RemoveRange(_dbContext.PendingTurkeyReturns);
         _dbContext.FimSyncLogs.RemoveRange(_dbContext.FimSyncLogs);
         _dbContext.BusinessRuleEvaluations.RemoveRange(_dbContext.BusinessRuleEvaluations);
         _dbContext.NotificationDeliveries.RemoveRange(_dbContext.NotificationDeliveries);

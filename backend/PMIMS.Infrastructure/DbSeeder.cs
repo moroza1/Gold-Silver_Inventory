@@ -502,6 +502,36 @@ public static class DbSeeder
                 MakerDesc = "Maker verifies Bayan customs declaration number, port entry clearance documents, and submits ownership transfer request.",
                 CheckerStepName = "Customs Transfer Checker Authorization",
                 CheckerDesc = "Checker reviews customs clearance documents, duty receipts, and authorizes ownership transfer to Turkey/Kuwait inventory."
+            },
+            new
+            {
+                WorkflowType = "VIP_ALLOCATION",
+                Name = "Default VIP Stock Allocation Workflow",
+                Description = "Maker-Checker verification for allocating KFH owned gold into VIP Exclusive Stock (isolated from online retail).",
+                MakerStepName = "VIP Stock Allocation Maker Submission",
+                MakerDesc = "Maker selects KFH owned gold bars, assigns VIP category, and submits allocation request.",
+                CheckerStepName = "VIP Stock Allocation Checker Approval",
+                CheckerDesc = "Checker verifies bar serials, denomination weights, and approves transfer of ownership to VIP_OWNED."
+            },
+            new
+            {
+                WorkflowType = "VIP_DISPENSE",
+                Name = "Default VIP Client Gold Dispensation Workflow",
+                Description = "Maker-Checker verification for withdrawing and dispensing physical gold from VIP Exclusive Stock to VIP clients.",
+                MakerStepName = "VIP Gold Dispensation Maker Request",
+                MakerDesc = "Maker records VIP customer profile, Civil ID, account number, selects VIP bars, and submits withdrawal request.",
+                CheckerStepName = "VIP Gold Dispensation Checker Authorization",
+                CheckerDesc = "Checker validates VIP customer identity and authorizes vault release and physical dispensation."
+            },
+            new
+            {
+                WorkflowType = "TURKEY_RETURN",
+                Name = "Default Return Gold to Turkey Consignment Workflow",
+                Description = "Maker-Checker verification for returning KFH Owned or VIP Owned gold bars back to Turkey Consignment (TURKEY_OWNED).",
+                MakerStepName = "Turkey Return Maker Request",
+                MakerDesc = "Maker selects available KFH or VIP gold bars, specifies return reason, and submits return request.",
+                CheckerStepName = "Turkey Return Checker Authorization",
+                CheckerDesc = "Checker verifies bar serials, physical return checklist, and authorizes ownership reversion to TURKEY_OWNED."
             }
         };
 

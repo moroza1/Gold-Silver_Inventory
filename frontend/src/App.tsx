@@ -870,6 +870,8 @@ export default function App() {
     turkey_qty?: number;
     kfh_weight_kg?: number;
     kfh_qty?: number;
+    vip_weight_kg?: number;
+    vip_qty?: number;
     total_gold_weight_kg: number;
     available_weight_kg: number;
     reserved_weight_kg: number;
@@ -880,7 +882,7 @@ export default function App() {
     items: any[];
   } | null>(null);
   const [loadingExecBoard, setLoadingExecBoard] = useState(false);
-  const [selectedExecKpi, setSelectedExecKpi] = useState<'TOTAL_PRECIOUS' | 'PROPRIETARY_GOLD' | 'READY_SALE' | 'RESERVED' | 'CUSTODY' | 'DAMAGED'>('TOTAL_PRECIOUS');
+  const [selectedExecKpi, setSelectedExecKpi] = useState<'TOTAL_PRECIOUS' | 'PROPRIETARY_GOLD' | 'READY_SALE' | 'VIP_STOCK' | 'RESERVED' | 'CUSTODY' | 'DAMAGED'>('TOTAL_PRECIOUS');
   const [execPreciousFilter, setExecPreciousFilter] = useState<'ALL' | 'SWISS' | 'TURKEY' | 'SILVER'>('ALL');
 
   // Compliance Dashboard (Reporting Requirements Gap Analysis, Item 6) -- summarizes the
@@ -5267,6 +5269,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
       return execBoard.items.filter((i: any) =>
         i.ownership === 'TURKEY_OWNED' ||
         i.ownership === 'KFH_OWNED' ||
+        i.ownership === 'VIP_OWNED' ||
         i.status === 'IN_TRANSFER' ||
         i.is_damaged ||
         i.status === 'QUARANTINED' ||
@@ -5285,6 +5288,8 @@ const [migrationApproved, setMigrationApproved] = useState(false);
       return execBoard.items.filter((i: any) => i.metal === 'Gold' && (i.ownership === 'TURKEY_OWNED' || i.ownership === 'PROPRIETARY'));
     } else if (selectedExecKpi === 'READY_SALE') {
       return execBoard.items.filter((i: any) => i.status === 'READY' && i.ownership === 'KFH_OWNED');
+    } else if (selectedExecKpi === 'VIP_STOCK') {
+      return execBoard.items.filter((i: any) => i.ownership === 'VIP_OWNED');
     } else if (selectedExecKpi === 'RESERVED') {
       return execBoard.items.filter((i: any) => i.status === 'RESERVED');
     } else if (selectedExecKpi === 'CUSTODY') {
@@ -5959,6 +5964,9 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                 <span style={{ padding: '2px 6px', borderRadius: '4px', background: 'rgba(0, 155, 78, 0.15)', color: 'var(--kfh-green)', border: '1px solid rgba(0, 155, 78, 0.3)' }} title="KFH Owned">
                   KFH: {(execBoard?.kfh_weight_kg ?? 0).toFixed(1)}kg ({execBoard?.kfh_qty ?? 0})
                 </span>
+                <span style={{ padding: '2px 6px', borderRadius: '4px', background: 'rgba(236, 72, 153, 0.15)', color: '#ec4899', border: '1px solid rgba(236, 72, 153, 0.3)' }} title="VIP Exclusive Reserve">
+                  VIP: {(execBoard?.vip_weight_kg ?? 0).toFixed(1)}kg ({execBoard?.vip_qty ?? 0})
+                </span>
                 <span style={{ padding: '2px 6px', borderRadius: '4px', background: 'rgba(147, 51, 234, 0.15)', color: '#c084fc', border: '1px solid rgba(147, 51, 234, 0.3)' }} title="In Transit">
                   Transit: {(execBoard?.transit_weight_kg ?? 0).toFixed(1)}kg ({execBoard?.transit_qty ?? 0})
                 </span>
@@ -6022,6 +6030,36 @@ const [migrationApproved, setMigrationApproved] = useState(false);
               <span className="kpi-value">{(execBoard?.available_weight_kg ?? 0).toFixed(3)} KG</span>
               <span className="kpi-sub">
                 {((execBoard?.available_weight_kg ?? 0) * 1000).toLocaleString()} g • <i className="fa-solid fa-hand-pointer"></i> {currentLang === 'en' ? 'Click to view bar quantities' : 'انقر لعرض كميات السبائك'}
+              </span>
+            </div>
+
+            {/* 4. VIP EXCLUSIVE RESERVE STOCK */}
+            <div
+              className="glass-card kpi-card"
+              onClick={() => { setSelectedExecKpi('VIP_STOCK'); setExecPreciousFilter('ALL'); }}
+              style={{
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                border: selectedExecKpi === 'VIP_STOCK' ? '2px solid #ec4899' : '1px solid var(--surface-border)',
+                background: selectedExecKpi === 'VIP_STOCK' ? 'rgba(236, 72, 153, 0.08)' : undefined,
+                boxShadow: selectedExecKpi === 'VIP_STOCK' ? '0 0 16px rgba(236, 72, 153, 0.25)' : undefined,
+                transform: selectedExecKpi === 'VIP_STOCK' ? 'translateY(-2px)' : undefined
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span className="kpi-title" style={{ color: '#ec4899' }}>
+                  <i className="fa-solid fa-crown" style={{ marginRight: '6px' }}></i>
+                  {currentLang === 'en' ? 'VIP Exclusive Stock' : 'مخزون كبار العملاء (VIP)'}
+                </span>
+                {selectedExecKpi === 'VIP_STOCK' && (
+                  <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: '#ec4899', color: '#fff', fontWeight: 'bold' }}>
+                    <i className="fa-solid fa-chart-pie"></i> {currentLang === 'en' ? 'Active' : 'نشط'}
+                  </span>
+                )}
+              </div>
+              <span className="kpi-value" style={{ color: '#ec4899' }}>{(execBoard?.vip_weight_kg ?? 0).toFixed(3)} KG</span>
+              <span className="kpi-sub" style={{ color: '#f472b6' }}>
+                {((execBoard?.vip_weight_kg ?? 0) * 1000).toLocaleString()} g • {execBoard?.vip_qty ?? 0} {currentLang === 'en' ? 'Bars (Vault VIP Reserve)' : 'سبيكة (غير متاحة أونلاين)'}
               </span>
             </div>
 
@@ -14780,8 +14818,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                         const res = await fetch(`${API_BASE}/gfs/home-delivery`, {
                           method: 'POST',
                           headers: { 
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${token}`
+                            'Content-Type': 'application/json'
                           },
                           body: JSON.stringify({
                             barId: hdMatchedBar.item_id,
@@ -14807,7 +14844,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                           setShowCreateHomeDeliveryModal(false);
                           fetchHomeDeliveries();
                           fetchInventory();
-                          fetchWorkflowInstances();
+                          fetchWorkflows();
                         } else {
                           const err = await res.json();
                           alert(err.error || 'Creation failed');
