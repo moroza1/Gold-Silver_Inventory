@@ -68,6 +68,26 @@ public static class DbSeeder
                             );
                             CREATE INDEX IF NOT EXISTS IX_pending_turkey_purchases_status_code ON pending_turkey_purchases (status_code);
                             CREATE INDEX IF NOT EXISTS IX_pending_turkey_purchases_created_at ON pending_turkey_purchases (created_at);
+
+                            CREATE TABLE IF NOT EXISTS pending_missing_item_reports (
+                                pending_report_id INTEGER NOT NULL CONSTRAINT PK_pending_missing_item_reports PRIMARY KEY AUTOINCREMENT,
+                                report_reference TEXT NOT NULL,
+                                ownership_type TEXT NOT NULL DEFAULT 'TURKEY_OWNED',
+                                lot_id INTEGER,
+                                lot_number TEXT,
+                                serials_json_list TEXT NOT NULL,
+                                total_items INTEGER NOT NULL,
+                                total_weight_grams TEXT NOT NULL,
+                                discrepancy_reason TEXT NOT NULL,
+                                requested_by TEXT NOT NULL,
+                                notes TEXT,
+                                status_code TEXT NOT NULL DEFAULT 'PENDING_APPROVAL',
+                                created_at TEXT NOT NULL,
+                                approved_by TEXT,
+                                approved_at TEXT
+                            );
+                            CREATE INDEX IF NOT EXISTS IX_pending_missing_item_reports_status_code ON pending_missing_item_reports (status_code);
+                            CREATE INDEX IF NOT EXISTS IX_pending_missing_item_reports_created_at ON pending_missing_item_reports (created_at);
                         ";
                         await createTableCmd.ExecuteNonQueryAsync();
                     }
@@ -291,7 +311,27 @@ public static class DbSeeder
                                 ApprovedAt DATETIME2 NULL
                             );
                             CREATE NONCLUSTERED INDEX IX_pending_turkey_purchases_StatusCode ON pending_turkey_purchases(StatusCode);
-                            CREATE NONCLUSTERED INDEX IX_pending_turkey_purchases_CreatedAt ON pending_turkey_purchases(CreatedAt);
+                        IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'pending_missing_item_reports')
+                        BEGIN
+                            CREATE TABLE pending_missing_item_reports (
+                                PendingReportId INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_pending_missing_item_reports PRIMARY KEY,
+                                ReportReference NVARCHAR(MAX) NOT NULL,
+                                OwnershipType NVARCHAR(50) NOT NULL CONSTRAINT DF_pending_missing_item_reports_OwnershipType DEFAULT 'TURKEY_OWNED',
+                                LotId INT NULL,
+                                LotNumber NVARCHAR(MAX) NULL,
+                                SerialsJsonList NVARCHAR(MAX) NOT NULL,
+                                TotalItems INT NOT NULL,
+                                TotalWeightGrams DECIMAL(18,3) NOT NULL,
+                                DiscrepancyReason NVARCHAR(MAX) NOT NULL,
+                                RequestedBy NVARCHAR(MAX) NOT NULL,
+                                Notes NVARCHAR(MAX) NULL,
+                                StatusCode NVARCHAR(50) NOT NULL CONSTRAINT DF_pending_missing_item_reports_StatusCode DEFAULT 'PENDING_APPROVAL',
+                                CreatedAt DATETIME2 NOT NULL,
+                                ApprovedBy NVARCHAR(MAX) NULL,
+                                ApprovedAt DATETIME2 NULL
+                            );
+                            CREATE NONCLUSTERED INDEX IX_pending_missing_item_reports_StatusCode ON pending_missing_item_reports(StatusCode);
+                            CREATE NONCLUSTERED INDEX IX_pending_missing_item_reports_CreatedAt ON pending_missing_item_reports(CreatedAt);
                         END
 
                         IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('pending_intakes') AND name = 'ownership_type')
@@ -532,6 +572,16 @@ public static class DbSeeder
                 MakerDesc = "Maker selects available KFH or VIP gold bars, specifies return reason, and submits return request.",
                 CheckerStepName = "Turkey Return Checker Authorization",
                 CheckerDesc = "Checker verifies bar serials, physical return checklist, and authorizes ownership reversion to TURKEY_OWNED."
+            },
+            new
+            {
+                WorkflowType = "MISSING_ITEMS",
+                Name = "Default Missing Items Workflow",
+                Description = "Maker-Checker verification for reporting and writing off missing items/serials from Turkey consignment or customs intake.",
+                MakerStepName = "Missing Items Maker Submission",
+                MakerDesc = "Maker selects missing serials, identifies source lot/consignment, specifies discrepancy justification, and submits report.",
+                CheckerStepName = "Missing Items Checker Authorization",
+                CheckerDesc = "Checker investigates missing serial discrepancy, approves inventory status transition to MISSING, and adjusts ownership balance."
             }
         };
 

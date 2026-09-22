@@ -131,23 +131,35 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
   const [pendingVipAllocations, setPendingVipAllocations] = useState<any[]>([]);
   const [pendingVipDispenses, setPendingVipDispenses] = useState<any[]>([]);
   const [pendingTurkeyReturns, setPendingTurkeyReturns] = useState<any[]>([]);
-  const [pendingBatchFilter, setPendingBatchFilter] = useState<'ALL' | 'TURKEY' | 'VIP_ALLOCATION' | 'VIP_DISPENSE' | 'TURKEY_RETURN'>('ALL');
+  const [pendingMissingReports, setPendingMissingReports] = useState<any[]>([]);
+  const [pendingBatchFilter, setPendingBatchFilter] = useState<'ALL' | 'TURKEY' | 'VIP_ALLOCATION' | 'VIP_DISPENSE' | 'TURKEY_RETURN' | 'MISSING_ITEMS'>('ALL');
+
+  // Missing Items State
+  const [showMissingModal, setShowMissingModal] = useState<boolean>(false);
+  const [selectedMissingSerials, setSelectedMissingSerials] = useState<string[]>([]);
+  const [missingDiscrepancyReason, setMissingDiscrepancyReason] = useState<string>('Physical bar missing upon customs receipt unpacking verification');
+  const [missingNotes, setMissingNotes] = useState<string>('');
+  const [missingLotFilter, setMissingLotFilter] = useState<string>('');
+  const [missingSerialSearch, setMissingSerialSearch] = useState<string>('');
+  const [isSubmittingMissing, setIsSubmittingMissing] = useState<boolean>(false);
 
   // Fetch VIP, KFH, and Return Data
   const fetchVipData = async () => {
     try {
-      const [vipRes, kfhRes, allocRes, dispRes, retRes] = await Promise.all([
+      const [vipRes, kfhRes, allocRes, dispRes, retRes, missRes] = await Promise.all([
         fetch(`${API_BASE}/inventory/vip`),
         fetch(`${API_BASE}/inventory/kfh-available`),
         fetch(`${API_BASE}/inventory/vip/pending-allocations`),
         fetch(`${API_BASE}/inventory/vip/pending-dispenses`),
-        fetch(`${API_BASE}/inventory/turkey/pending-returns`)
+        fetch(`${API_BASE}/inventory/turkey/pending-returns`),
+        fetch(`${API_BASE}/inventory/turkey/pending-missing-reports`)
       ]);
       if (vipRes.ok) setVipInventory(await vipRes.json());
       if (kfhRes.ok) setKfhAvailableInventory(await kfhRes.json());
       if (allocRes.ok) setPendingVipAllocations(await allocRes.json());
       if (dispRes.ok) setPendingVipDispenses(await dispRes.json());
       if (retRes.ok) setPendingTurkeyReturns(await retRes.json());
+      if (missRes.ok) setPendingMissingReports(await missRes.json());
     } catch (err) {
       console.error('Failed to fetch VIP and return data:', err);
     }
@@ -744,6 +756,71 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
     }
   };
 
+  const handleReportMissingItems = async () => {
+    if (selectedMissingSerials.length === 0) {
+      alert(currentLang === 'en' ? 'Please select at least one serial number to report as missing.' : 'يرجى اختيار رقم تسلسلي واحد على الأقل للإبلاغ عنه كمفقود.');
+      return;
+    }
+    setIsSubmittingMissing(true);
+    try {
+      const res = await fetch(`${API_BASE}/inventory/turkey/missing-items/report`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          serialNumbers: selectedMissingSerials,
+          discrepancyReason: missingDiscrepancyReason,
+          notes: missingNotes,
+          requestedBy: _displayName || _userRole || 'Treasury Maker',
+          ownershipType: 'TURKEY_OWNED'
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        alert(currentLang === 'en'
+          ? `✅ Missing Items Discrepancy Workflow Initiated!\nReference: ${data.report_reference}\n${data.total_items} bar(s) submitted for Checker authorization.\nOnce approved by the Checker, serials will transition to MISSING status and be deducted from Turkey Owner balance.`
+          : `✅ تم إنشاء مسار تدقيق مفقودات الشحنة بنجاح!\nالمرجع: ${data.report_reference}\nتم إرسال ${data.total_items} سبيكة لاعتماد المعتمد.\nفور الاعتماد، ستتحول السبائك إلى مفقودة وتُخصم تلقائياً من رصيد محفظة تركيا.`);
+        setShowMissingModal(false);
+        setSelectedMissingSerials([]);
+        setMissingNotes('');
+        setActiveSubTab('PENDING_BATCHES');
+        setPendingBatchFilter('MISSING_ITEMS');
+        onRefresh();
+        fetchVipData();
+      } else {
+        const err = await res.json();
+        alert(err.error || (currentLang === 'en' ? 'Failed to submit missing items report.' : 'فشل إرسال تقرير المفقودات.'));
+      }
+    } catch (e: any) {
+      alert(e.message || (currentLang === 'en' ? 'Network error submitting report.' : 'خطأ في الاتصال بالخادم.'));
+    } finally {
+      setIsSubmittingMissing(false);
+    }
+  };
+
+  const missingModalCandidateItems = useMemo(() => {
+    let list = availableItems;
+    if (missingLotFilter) {
+      list = list.filter(i => (i.lot_number || '').toLowerCase().includes(missingLotFilter.toLowerCase()));
+    }
+    if (missingSerialSearch) {
+      const q = missingSerialSearch.trim().toLowerCase();
+      list = list.filter(i => (i.serial_number || '').toLowerCase().includes(q));
+    }
+    return list;
+  }, [availableItems, missingLotFilter, missingSerialSearch]);
+
+  const selectedMissingItemsData = useMemo(() => {
+    const selectedSet = new Set(selectedMissingSerials);
+    const matched = availableItems.filter(i => selectedSet.has(i.serial_number));
+    const totalWeightGrams = matched.reduce((sum, i) => sum + (i.weight_grams || 0), 0);
+    return {
+      count: selectedMissingSerials.length,
+      totalWeightGrams,
+      totalWeightKg: Math.round((totalWeightGrams / 1000) * 1000) / 1000,
+      items: matched
+    };
+  }, [availableItems, selectedMissingSerials]);
+
   const returnItemsData = useMemo(() => {
     let items: any[] = [];
     if (returnSourceOrigin === 'KFH') {
@@ -1165,6 +1242,25 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
               <div style={{ fontSize: '12px', color: '#E11D48', fontWeight: 600, marginTop: '2px' }}>
                 {turkeyInventory?.summary?.total_weight_kg || 0} KG <span style={{ color: 'var(--text-muted)', fontWeight: 'normal' }}>({(turkeyInventory?.summary?.total_weight_grams || 0).toLocaleString()} g)</span>
               </div>
+              <div style={{ marginTop: '8px', paddingTop: '6px', borderTop: '1px dashed rgba(255,255,255,0.1)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '11px', color: ((turkeyInventory?.summary as any)?.total_missing_bars || 0) > 0 ? '#EF4444' : 'var(--text-muted)' }}>
+                  ⚠️ {currentLang === 'en' ? 'Missing / Discrepancies:' : 'المفقودات / الفروقات:'} <strong>{(turkeyInventory?.summary as any)?.total_missing_bars || 0} {currentLang === 'en' ? 'bars' : 'سبيكة'}</strong>
+                </span>
+                {canModify && (
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => {
+                      setSelectedMissingSerials([]);
+                      setShowMissingModal(true);
+                    }}
+                    style={{ fontSize: '10px', padding: '2px 8px', background: 'rgba(239, 68, 68, 0.15)', color: '#EF4444', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '4px', cursor: 'pointer' }}
+                    title={currentLang === 'en' ? 'Report missing serials after lot receipt / transfer' : 'تسجيل أرقام تسلسلية مفقودة بعد استلام اللوت'}
+                  >
+                    <i className="fa-solid fa-triangle-exclamation"></i> {currentLang === 'en' ? 'Report Missing' : 'تسجيل مفقودات'}
+                  </button>
+                )}
+              </div>
             </div>
             <div style={{ width: '42px', height: '42px', borderRadius: '8px', background: 'rgba(225, 29, 72, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', color: '#E11D48' }}>
               🇹🇷
@@ -1383,6 +1479,19 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
                   >
                     <i className="fa-solid fa-check-double"></i> {currentLang === 'en' ? `Select All Stock (${availableItems.length})` : `تحديد كل المخزون (${availableItems.length})`}
                   </button>
+                  {canModify && (
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() => {
+                        setSelectedMissingSerials([]);
+                        setShowMissingModal(true);
+                      }}
+                      style={{ fontSize: '11px', padding: '5px 10px', background: 'rgba(239, 68, 68, 0.15)', color: '#EF4444', border: '1px solid rgba(239, 68, 68, 0.3)' }}
+                    >
+                      <i className="fa-solid fa-triangle-exclamation"></i> {currentLang === 'en' ? 'Report Missing Serials' : 'تسجيل سبائك مفقودة'}
+                    </button>
+                  )}
                   {selectedSerials.length > 0 && (
                     <button
                       type="button"
@@ -2602,6 +2711,14 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
               >
                 ↩️ {currentLang === 'en' ? 'Turkey Returns' : 'إرجاع تركيا'} ({pendingTurkeyReturns.length})
               </button>
+              <button
+                type="button"
+                className={`btn ${pendingBatchFilter === 'MISSING_ITEMS' ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setPendingBatchFilter('MISSING_ITEMS')}
+                style={{ fontSize: '11px', padding: '4px 10px', ...(pendingBatchFilter === 'MISSING_ITEMS' ? { background: '#EF4444', borderColor: '#EF4444' } : {}) }}
+              >
+                ⚠️ {currentLang === 'en' ? 'Missing Reports' : 'تقارير المفقودات'} ({pendingMissingReports.length})
+              </button>
             </div>
           </div>
 
@@ -2787,7 +2904,62 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
                   );
                 })}
 
-                {pendingPurchases.length === 0 && pendingVipAllocations.length === 0 && pendingVipDispenses.length === 0 && pendingTurkeyReturns.length === 0 && (
+                {(pendingBatchFilter === 'ALL' || pendingBatchFilter === 'MISSING_ITEMS') && pendingMissingReports.map(m => {
+                  let serialsList: string[] = [];
+                  try {
+                    serialsList = JSON.parse(m.serials_json || '[]');
+                  } catch {
+                    serialsList = [];
+                  }
+                  return (
+                    <tr key={`miss-${m.pending_report_id}`}>
+                      <td>
+                        <strong style={{ fontFamily: 'monospace', color: '#EF4444' }}>{m.report_reference}</strong>
+                        {m.lot_number && <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Lot: {m.lot_number}</div>}
+                      </td>
+                      <td>
+                        <span className="badge" style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#EF4444', fontSize: '11px' }}>
+                          ⚠️ {currentLang === 'en' ? 'Missing Items Discrepancy' : 'تسجيل مفقودات الشحنة'}
+                        </span>
+                      </td>
+                      <td>
+                        <strong>{m.total_items}</strong> {currentLang === 'en' ? 'bars' : 'سبيكة'}
+                      </td>
+                      <td>
+                        {Math.round((m.total_weight_grams / 1000) * 1000) / 1000} KG <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>({m.total_weight_grams} g)</span>
+                      </td>
+                      <td>
+                        <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{m.discrepancy_reason || 'Missing Verification'}</span>
+                        {m.notes && <div style={{ fontSize: '10px', fontStyle: 'italic', color: 'var(--text-muted)' }}>{m.notes}</div>}
+                      </td>
+                      <td>
+                        <span style={{ fontSize: '12px' }}>{m.requested_by}</span>
+                      </td>
+                      <td>
+                        <span className={`badge ${m.status_code === 'APPROVED' ? 'badge-ready' : (m.status_code === 'REJECTED' ? 'badge-quarantined' : 'badge-reserved')}`}>
+                          {m.status_code === 'APPROVED' ? '✓ APPROVED' : (m.status_code === 'REJECTED' ? '✗ REJECTED' : '⏳ PENDING CHECKER')}
+                        </span>
+                      </td>
+                      <td style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                        {m.created_at ? new Date(m.created_at).toLocaleString() : '—'}
+                      </td>
+                      <td>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px', maxWidth: '200px' }}>
+                          {serialsList.slice(0, 4).map((s, idx) => (
+                            <span key={idx} style={{ fontSize: '10px', padding: '2px 5px', background: 'rgba(239, 68, 68, 0.1)', color: '#EF4444', borderRadius: '3px' }}>
+                              {s}
+                            </span>
+                          ))}
+                          {serialsList.length > 4 && (
+                            <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>+{serialsList.length - 4} more</span>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+
+                {pendingPurchases.length === 0 && pendingVipAllocations.length === 0 && pendingVipDispenses.length === 0 && pendingTurkeyReturns.length === 0 && pendingMissingReports.length === 0 && (
                   <tr>
                     <td colSpan={9} style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)' }}>
                       {currentLang === 'en' ? 'No operations or requests recorded yet.' : 'لا توجد طلبات أو عمليات مسجلة بعد.'}
@@ -3108,6 +3280,227 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
                   <><i className="fa-solid fa-spinner fa-spin"></i> {currentLang === 'en' ? 'Submitting...' : 'جاري الإرسال...'}</>
                 ) : (
                   <><i className="fa-solid fa-rotate-left"></i> {currentLang === 'en' ? 'Submit Return for Checker Approval' : 'إرسال طلب الإرجاع لاعتماد المراجع'}</>
+                )}
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* 6.6. REPORT MISSING ITEMS (CUSTOMS TO TURKEY INTAKE DISCREPANCY) MODAL */}
+      {showMissingModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100vw',
+          height: '100vh',
+          backgroundColor: 'rgba(0, 0, 0, 0.7)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999,
+          padding: '20px'
+        }}>
+          <div className="glass-card" style={{ width: '100%', maxWidth: '680px', maxHeight: '92vh', overflowY: 'auto', padding: '24px', borderLeft: '4px solid #EF4444' }}>
+            
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--surface-border)', paddingBottom: '12px', marginBottom: '16px' }}>
+              <h3 style={{ margin: 0, color: '#EF4444', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <i className="fa-solid fa-triangle-exclamation"></i>
+                {currentLang === 'en' ? 'Report Missing Serials (Maker-Checker)' : 'تسجيل أرقام تسلسلية مفقودة (صانع / معتمد)'}
+              </h3>
+              <button
+                onClick={() => setShowMissingModal(false)}
+                style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: 'var(--text-muted)' }}
+              >
+                &times;
+              </button>
+            </div>
+
+            <div style={{ padding: '10px 14px', background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '6px', fontSize: '12px', color: '#EF4444', marginBottom: '16px' }}>
+              <i className="fa-solid fa-shield-halved" style={{ marginRight: '6px' }}></i>
+              {currentLang === 'en'
+                ? 'Submitting this form initiates a 4-eyes Maker-Checker workflow. Upon Checker authorization, reported serials will be set to MISSING, deducted from the Turkey Owner balance, and reflected across all management dashboards and GL journals.'
+                : 'إرسال هذا النموذج ينشئ مسار تدقيق صانع/معتمد. فور اعتماد المعتمد، ستتحول السبائك المسجلة إلى مفقودة وتُخصم تلقائياً من رصيد أمانات تركيا وتنعكس على لوحات المتابعة وسجلات القيود.'}
+            </div>
+
+            {/* Filters */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '12px' }}>
+              <div>
+                <label style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
+                  {currentLang === 'en' ? 'Filter by Lot / Shipment Reference:' : 'تصفية برقم اللوت / الشحنة:'}
+                </label>
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="e.g. LOT-2026 / BAYAN..."
+                  value={missingLotFilter}
+                  onChange={e => setMissingLotFilter(e.target.value)}
+                  style={{ fontSize: '12px', padding: '6px 10px' }}
+                />
+              </div>
+              <div>
+                <label style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
+                  {currentLang === 'en' ? 'Search Bar Serial Number:' : 'بحث بالرقم التسلسلي:'}
+                </label>
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="e.g. B00570..."
+                  value={missingSerialSearch}
+                  onChange={e => setMissingSerialSearch(e.target.value)}
+                  style={{ fontSize: '12px', padding: '6px 10px' }}
+                />
+              </div>
+            </div>
+
+            {/* Candidate Items Table */}
+            <div style={{ marginBottom: '14px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px', fontSize: '12px' }}>
+                <span style={{ fontWeight: 600 }}>{currentLang === 'en' ? 'Select Missing Bars from Turkey Stock:' : 'حدد السبائك المفقودة من مخزون تركيا:'}</span>
+                <span style={{ color: 'var(--text-muted)' }}>{missingModalCandidateItems.length} {currentLang === 'en' ? 'available' : 'متاح'}</span>
+              </div>
+              
+              <div className="table-responsive" style={{ maxHeight: '200px', overflowY: 'auto', border: '1px solid var(--surface-border)', borderRadius: '6px' }}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th style={{ width: '40px' }}>
+                        <input
+                          type="checkbox"
+                          checked={missingModalCandidateItems.length > 0 && selectedMissingSerials.length === missingModalCandidateItems.length}
+                          onChange={e => {
+                            if (e.target.checked) {
+                              setSelectedMissingSerials(missingModalCandidateItems.map(i => i.serial_number));
+                            } else {
+                              setSelectedMissingSerials([]);
+                            }
+                          }}
+                        />
+                      </th>
+                      <th>{currentLang === 'en' ? 'Serial Number' : 'الرقم التسلسلي'}</th>
+                      <th>{currentLang === 'en' ? 'Denomination' : 'الفئة'}</th>
+                      <th>{currentLang === 'en' ? 'Weight' : 'الوزن'}</th>
+                      <th>{currentLang === 'en' ? 'Lot Number' : 'رقم اللوت'}</th>
+                      <th>{currentLang === 'en' ? 'Vault Location' : 'موقع الخزنة'}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {missingModalCandidateItems.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>
+                          {currentLang === 'en' ? 'No matching Turkey consignment bars found.' : 'لا توجد سبائك تركية مطابقة.'}
+                        </td>
+                      </tr>
+                    ) : (
+                      missingModalCandidateItems.map(item => {
+                        const isSelected = selectedMissingSerials.includes(item.serial_number);
+                        return (
+                          <tr key={item.serial_number} style={{ background: isSelected ? 'rgba(239, 68, 68, 0.1)' : undefined }}>
+                            <td>
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => {
+                                  if (isSelected) {
+                                    setSelectedMissingSerials(prev => prev.filter(s => s !== item.serial_number));
+                                  } else {
+                                    setSelectedMissingSerials(prev => [...prev, item.serial_number]);
+                                  }
+                                }}
+                              />
+                            </td>
+                            <td>
+                              <strong style={{ fontFamily: 'monospace', color: '#EF4444' }}>{item.serial_number}</strong>
+                            </td>
+                            <td>{item.denomination || item.metal_name}</td>
+                            <td>{item.weight_grams}g</td>
+                            <td><span style={{ fontSize: '11px', fontFamily: 'monospace' }}>{item.lot_number || 'N/A'}</span></td>
+                            <td><span style={{ fontSize: '11px' }}>{item.location_code || 'Main Vault'}</span></td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Selected Summary */}
+            {selectedMissingSerials.length > 0 && (
+              <div style={{ background: 'rgba(239, 68, 68, 0.08)', borderRadius: '8px', padding: '12px', border: '1px solid rgba(239, 68, 68, 0.25)', marginBottom: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', fontWeight: 'bold', color: '#EF4444', marginBottom: '6px' }}>
+                  <span>{currentLang === 'en' ? 'Selected Missing Bars:' : 'السبائك المحددة كمفقودة:'} {selectedMissingItemsData.count} {currentLang === 'en' ? 'bars' : 'سبيكة'}</span>
+                  <span>{selectedMissingItemsData.totalWeightKg} KG ({selectedMissingItemsData.totalWeightGrams.toLocaleString()} g)</span>
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', maxHeight: '70px', overflowY: 'auto' }}>
+                  {selectedMissingItemsData.items.map((item, idx) => (
+                    <span key={idx} style={{ fontSize: '10px', padding: '2px 6px', background: 'rgba(255,255,255,0.1)', borderRadius: '3px', fontFamily: 'monospace', color: '#EF4444' }}>
+                      {item.serial_number} ({item.weight_grams}g)
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Form Inputs */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '16px' }}>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label style={{ fontSize: '12px', fontWeight: 600 }}>
+                  {currentLang === 'en' ? 'Discrepancy Justification / Reason *' : 'سبب وتبرير فقدان السبيكة *'}
+                </label>
+                <select
+                  className="form-control"
+                  value={missingDiscrepancyReason}
+                  onChange={e => setMissingDiscrepancyReason(e.target.value)}
+                  style={{ fontSize: '12px' }}
+                >
+                  <option value="Physical bar missing upon customs receipt unpacking verification">Physical bar missing upon customs receipt unpacking verification</option>
+                  <option value="Serial mismatch between delivery documentation and physical parcel">Serial mismatch between delivery documentation and physical parcel</option>
+                  <option value="Short-shipped by Turkish supplier / missing in customs transit">Short-shipped by Turkish supplier / missing in customs transit</option>
+                  <option value="Vault intake stocktake discrepancy">Vault intake stocktake discrepancy</option>
+                  <option value="Assay inspection shortfall">Assay inspection shortfall</option>
+                </select>
+              </div>
+
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label style={{ fontSize: '12px', fontWeight: 600 }}>
+                  {currentLang === 'en' ? 'Investigation Notes & Reference Details' : 'ملاحظات التحقيق والمراجع'}
+                </label>
+                <textarea
+                  rows={2}
+                  className="form-control"
+                  placeholder={currentLang === 'en' ? 'Details of unpacking committee, courier seal status, discrepancy report ref...' : 'تفاصيل محضر الفتح والمعاينة، حالة الختم، مرجع تقرير الفروقات...'}
+                  value={missingNotes}
+                  onChange={e => setMissingNotes(e.target.value)}
+                  style={{ fontSize: '12px' }}
+                />
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setShowMissingModal(false)}
+                disabled={isSubmittingMissing}
+              >
+                {currentLang === 'en' ? 'Cancel' : 'إلغاء'}
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger"
+                onClick={handleReportMissingItems}
+                disabled={selectedMissingSerials.length === 0 || isSubmittingMissing}
+                style={{ background: '#EF4444', borderColor: '#EF4444', fontWeight: 'bold' }}
+              >
+                {isSubmittingMissing ? (
+                  <><i className="fa-solid fa-spinner fa-spin"></i> {currentLang === 'en' ? 'Submitting...' : 'جاري الإرسال...'}</>
+                ) : (
+                  <><i className="fa-solid fa-paper-plane"></i> {currentLang === 'en' ? 'Submit Missing Report for Checker Sign-off' : 'إرسال تقرير المفقودات للاعتماد'}</>
                 )}
               </button>
             </div>

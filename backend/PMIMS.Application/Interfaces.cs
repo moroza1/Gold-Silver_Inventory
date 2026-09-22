@@ -181,6 +181,12 @@ public interface IInventoryRepository
     Task<string> ApproveTurkeyReturnAsync(int pendingReturnId, string approvedBy);
     Task<IEnumerable<PendingTurkeyReturn>> GetPendingTurkeyReturnsAsync();
 
+    // Missing Items Operations (Customs / Turkey Consignment Verification)
+    Task<PendingMissingItemReport> InitiateMissingItemsWorkflowAsync(List<string> serialNumbers, string requestedBy, string? discrepancyReason, string? notes, int? lotId = null, string ownershipType = "TURKEY_OWNED");
+    Task<string> ApproveMissingItemsAsync(int pendingReportId, string approvedBy);
+    Task<IEnumerable<PendingMissingItemReport>> GetPendingMissingItemReportsAsync();
+    Task<IEnumerable<InventoryItem>> GetTurkeyMissingItemsAsync();
+
     // =========================================================================
     // Dynamic Business Validation Rules Engine (RFP item 5) -- pure data access;
     // predicate-tree evaluation logic lives in IRuleEngineService.

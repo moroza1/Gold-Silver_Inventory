@@ -1503,6 +1503,40 @@ public partial class PMIMSControllers : ControllerBase
                     };
                 }
             }
+            else if (inst.WorkflowType == "MISSING_ITEMS")
+            {
+                var reports = await _repository.GetPendingMissingItemReportsAsync();
+                var rep = reports.FirstOrDefault(r => r.PendingReportId == inst.EntityId);
+                if (rep != null)
+                {
+                    List<string> serials = new();
+                    try
+                    {
+                        serials = JsonSerializer.Deserialize<List<string>>(rep.SerialsJsonList ?? "[]") ?? new();
+                    }
+                    catch { }
+
+                    entityDetails = new
+                    {
+                        pending_report_id = rep.PendingReportId,
+                        report_reference = rep.ReportReference,
+                        ownership_type = rep.OwnershipType,
+                        lot_id = rep.LotId,
+                        lot_number = rep.LotNumber,
+                        total_items = rep.TotalItems,
+                        total_weight_grams = rep.TotalWeightGrams,
+                        discrepancy_reason = rep.DiscrepancyReason,
+                        serials_json = rep.SerialsJsonList,
+                        serials = serials,
+                        notes = rep.Notes,
+                        status_code = rep.StatusCode,
+                        requested_by = rep.RequestedBy,
+                        created_by = rep.RequestedBy,
+                        approved_by = rep.ApprovedBy,
+                        approved_at = rep.ApprovedAt
+                    };
+                }
+            }
 
             var lastAction = approvalActions.OrderByDescending(a => a.ActionTimestamp).ThenByDescending(a => a.ActionId).FirstOrDefault();
             string? stepName = currentStep?.StepName;
@@ -1649,6 +1683,10 @@ public partial class PMIMSControllers : ControllerBase
             if (workflowType == "CUSTOMS_TRANSFER")
             {
                 return $"Customs Transfer #{entityId} (Bonded -> Turkey/Kuwait)";
+            }
+            if (workflowType == "MISSING_ITEMS")
+            {
+                return $"Missing Items Discrepancy #{entityId} (Turkey Consignment)";
             }
             return $"{workflowType} #{entityId}";
         }

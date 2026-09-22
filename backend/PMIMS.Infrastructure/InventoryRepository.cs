@@ -2107,6 +2107,11 @@ public class InventoryRepository : IInventoryRepository
                 var ret = await _dbContext.PendingTurkeyReturns.FindAsync(instance.EntityId);
                 if (ret != null) ret.StatusCode = "REJECTED";
             }
+            else if (instance.WorkflowType == "MISSING_ITEMS")
+            {
+                var rep = await _dbContext.PendingMissingItemReports.FindAsync(instance.EntityId);
+                if (rep != null) rep.StatusCode = "REJECTED";
+            }
         }
         else if (action == "RETURNED")
         {
@@ -2169,6 +2174,11 @@ public class InventoryRepository : IInventoryRepository
             {
                 var ret = await _dbContext.PendingTurkeyReturns.FindAsync(instance.EntityId);
                 if (ret != null) ret.StatusCode = "PENDING_APPROVAL";
+            }
+            else if (instance.WorkflowType == "MISSING_ITEMS")
+            {
+                var rep = await _dbContext.PendingMissingItemReports.FindAsync(instance.EntityId);
+                if (rep != null) rep.StatusCode = "PENDING_APPROVAL";
             }
         }
         else if (action == "APPROVED")
@@ -2459,6 +2469,14 @@ public class InventoryRepository : IInventoryRepository
                     if (result != "SUCCESS")
                     {
                         throw new InvalidOperationException($"Turkey return approval execution failed: {result}");
+                    }
+                }
+                else if (instance.WorkflowType == "MISSING_ITEMS")
+                {
+                    string result = await ApproveMissingItemsAsync(instance.EntityId, username);
+                    if (result != "SUCCESS")
+                    {
+                        throw new InvalidOperationException($"Missing items approval execution failed: {result}");
                     }
                 }
             }
@@ -6385,6 +6403,165 @@ public class InventoryRepository : IInventoryRepository
         await SaveAuditLogAsync(approvedBy, "VAULT", "TURKEY_RETURN",
             $"Approved Return of {ret.TotalItems} bars ({ret.TotalWeightGrams:N2}g) to Turkey Consignment (TURKEY_OWNED). Batch: {ret.BatchReference}.",
             entityType: "PENDING_TURKEY_RETURN", entityId: ret.PendingReturnId.ToString());
+
+        return "SUCCESS";
+    }
+
+    public async Task<IEnumerable<PendingMissingItemReport>> GetPendingMissingItemReportsAsync()
+    {
+        return await _dbContext.PendingMissingItemReports
+            .OrderByDescending(p => p.CreatedAt)
+            .ToListAsync();
+    }
+
+    public async Task<IEnumerable<InventoryItem>> GetTurkeyMissingItemsAsync()
+    {
+        return await _dbContext.InventoryItems
+            .Include(i => i.Product)
+                .ThenInclude(p => p!.Denomination)
+            .Include(i => i.Product)
+                .ThenInclude(p => p!.MetalType)
+            .Include(i => i.Product)
+                .ThenInclude(p => p!.Brand)
+            .Include(i => i.Location)
+                .ThenInclude(l => l!.Vault)
+            .Include(i => i.Lot)
+                .ThenInclude(l => l!.Vendor)
+            .Where(i => i.OwnershipType == "TURKEY_OWNED" && i.StatusCode == "MISSING")
+            .OrderBy(i => i.SerialNumber)
+            .ToListAsync();
+    }
+
+    public async Task<PendingMissingItemReport> InitiateMissingItemsWorkflowAsync(List<string> serialNumbers, string requestedBy, string? discrepancyReason, string? notes, int? lotId = null, string ownershipType = "TURKEY_OWNED")
+    {
+        if (serialNumbers == null || serialNumbers.Count == 0)
+        {
+            throw new InvalidOperationException("At least one serial number must be specified for reporting missing items.");
+        }
+
+        var cleanSerials = serialNumbers.Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s.Trim()).Distinct().ToList();
+        if (cleanSerials.Count == 0)
+        {
+            throw new InvalidOperationException("No valid serial numbers provided.");
+        }
+
+        var items = await _dbContext.InventoryItems
+            .Include(i => i.Product)
+                .ThenInclude(p => p!.Denomination)
+            .Include(i => i.Lot)
+            .Where(i => cleanSerials.Contains(i.SerialNumber))
+            .ToListAsync();
+
+        var foundSerials = items.Select(i => i.SerialNumber).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var missingSerials = cleanSerials.Where(s => !foundSerials.Contains(s)).ToList();
+        if (missingSerials.Count > 0)
+        {
+            throw new InvalidOperationException($"The following serial numbers were not found in inventory: {string.Join(", ", missingSerials)}");
+        }
+
+        var invalidOwnerItems = items.Where(i => !string.Equals(i.OwnershipType, ownershipType, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (invalidOwnerItems.Count > 0)
+        {
+            throw new InvalidOperationException($"Items must belong to {ownershipType}. The following items have a different ownership: {string.Join(", ", invalidOwnerItems.Select(i => $"{i.SerialNumber} ({i.OwnershipType})"))}");
+        }
+
+        var alreadyMissing = items.Where(i => i.StatusCode == "MISSING").ToList();
+        if (alreadyMissing.Count > 0)
+        {
+            throw new InvalidOperationException($"The following items are already marked as MISSING: {string.Join(", ", alreadyMissing.Select(i => i.SerialNumber))}");
+        }
+
+        decimal totalWeightGrams = items.Sum(i => i.Product?.Denomination?.WeightGrams ?? 0);
+        string reportRef = $"TR-MISS-{DateTime.UtcNow:yyyyMMddHHmmss}-{Guid.NewGuid().ToString().Substring(0, 4).ToUpper()}";
+        string? lotNumber = items.FirstOrDefault(i => i.Lot != null)?.Lot?.LotNumber;
+
+        var pending = new PendingMissingItemReport
+        {
+            ReportReference = reportRef,
+            OwnershipType = ownershipType,
+            LotId = lotId ?? items.FirstOrDefault()?.LotId,
+            LotNumber = lotNumber,
+            SerialsJsonList = JsonSerializer.Serialize(cleanSerials),
+            TotalItems = items.Count,
+            TotalWeightGrams = totalWeightGrams,
+            DiscrepancyReason = string.IsNullOrWhiteSpace(discrepancyReason) ? "Missing physical bar upon customs receipt unpacking verification" : discrepancyReason,
+            RequestedBy = requestedBy,
+            Notes = notes,
+            StatusCode = "PENDING_APPROVAL",
+            CreatedAt = DateTime.UtcNow
+        };
+
+        _dbContext.PendingMissingItemReports.Add(pending);
+        await _dbContext.SaveChangesAsync();
+
+        var template = await _dbContext.WorkflowTemplates.Include(t => t.Steps)
+            .FirstOrDefaultAsync(t => t.WorkflowType == "MISSING_ITEMS" && t.IsActive);
+        if (template == null || template.Steps.Count == 0)
+        {
+            throw new InvalidOperationException("Cannot initiate missing items report: No active MISSING_ITEMS workflow template configured.");
+        }
+
+        await StartWorkflowInstanceAsync("MISSING_ITEMS", pending.PendingReportId, requestedBy);
+        return pending;
+    }
+
+    public async Task<string> ApproveMissingItemsAsync(int pendingReportId, string approvedBy)
+    {
+        var rep = await _dbContext.PendingMissingItemReports.FindAsync(pendingReportId);
+        if (rep == null) throw new InvalidOperationException("Pending missing items report not found.");
+        if (rep.StatusCode == "APPROVED") return "SUCCESS";
+
+        var serials = JsonSerializer.Deserialize<List<string>>(rep.SerialsJsonList) ?? new List<string>();
+        var items = await _dbContext.InventoryItems
+            .Include(i => i.Product)
+                .ThenInclude(p => p!.Denomination)
+            .Where(i => serials.Contains(i.SerialNumber))
+            .ToListAsync();
+
+        rep.StatusCode = "APPROVED";
+        rep.ApprovedBy = approvedBy;
+        rep.ApprovedAt = DateTime.UtcNow;
+
+        var affectedOwnershipsByLocation = new HashSet<(int locationId, int productId, string ownership)>();
+
+        foreach (var item in items)
+        {
+            item.StatusCode = "MISSING";
+
+            if (item.LocationId.HasValue)
+            {
+                affectedOwnershipsByLocation.Add((item.LocationId.Value, item.ProductId, item.OwnershipType));
+            }
+
+            var tx = new InventoryTransaction
+            {
+                TransactionNumber = $"TX-MISSING-{item.ItemId}-{DateTime.UtcNow:yyyyMMddHHmmssfff}",
+                ItemId = item.ItemId,
+                TransactionType = "ADJUSTMENT",
+                SourceLocationId = item.LocationId,
+                DestinationLocationId = item.LocationId,
+                SourceOwnership = item.OwnershipType,
+                DestinationOwnership = item.OwnershipType,
+                InitiatedBy = rep.RequestedBy,
+                ApprovedBy = approvedBy,
+                TransactionTimestamp = DateTime.UtcNow
+            };
+            _dbContext.InventoryTransactions.Add(tx);
+
+            await RecordChainOfCustodyEventAsync(item.ItemId, "MISSING_DISCREPANCY", approvedBy, item.LocationId, tx.TransactionNumber,
+                $"Marked as MISSING. Report: {rep.ReportReference}. Reason: {rep.DiscrepancyReason}");
+        }
+
+        await _dbContext.SaveChangesAsync();
+
+        foreach (var (locId, prodId, own) in affectedOwnershipsByLocation)
+        {
+            await RecalculateInventoryBalanceAsync(locId, prodId, own);
+        }
+
+        await SaveAuditLogAsync(approvedBy, "VAULT", "MISSING_ITEMS",
+            $"Approved Missing Items Report of {rep.TotalItems} bars ({rep.TotalWeightGrams:N2}g) for {rep.OwnershipType}. Ref: {rep.ReportReference}. Reason: {rep.DiscrepancyReason}",
+            entityType: "PENDING_MISSING_ITEM_REPORT", entityId: rep.PendingReportId.ToString());
 
         return "SUCCESS";
     }

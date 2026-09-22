@@ -1092,6 +1092,25 @@ public class PendingTurkeyReturn
     public DateTime? ApprovedAt { get; set; }
 }
 
+public class PendingMissingItemReport
+{
+    public int PendingReportId { get; set; }
+    public string ReportReference { get; set; } = null!;
+    public string OwnershipType { get; set; } = "TURKEY_OWNED";
+    public int? LotId { get; set; }
+    public string? LotNumber { get; set; }
+    public string SerialsJsonList { get; set; } = null!;
+    public int TotalItems { get; set; }
+    public decimal TotalWeightGrams { get; set; }
+    public string DiscrepancyReason { get; set; } = "Missing physical bar upon customs receipt unpacking verification";
+    public string RequestedBy { get; set; } = null!;
+    public string? Notes { get; set; }
+    public string StatusCode { get; set; } = "PENDING_APPROVAL"; // PENDING_APPROVAL, APPROVED, REJECTED
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public string? ApprovedBy { get; set; }
+    public DateTime? ApprovedAt { get; set; }
+}
+
 public class CustomsShipmentDto
 {
     public int LotId { get; set; }

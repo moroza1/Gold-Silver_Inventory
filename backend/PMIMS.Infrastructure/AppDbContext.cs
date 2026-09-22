@@ -125,6 +125,7 @@ public class AppDbContext : DbContext
     public DbSet<PendingVipAllocation> PendingVipAllocations { get; set; } = null!;
     public DbSet<PendingVipDispense> PendingVipDispenses { get; set; } = null!;
     public DbSet<PendingTurkeyReturn> PendingTurkeyReturns { get; set; } = null!;
+    public DbSet<PendingMissingItemReport> PendingMissingItemReports { get; set; } = null!;
     public DbSet<SystemSetting> SystemSettings { get; set; } = null!;
 
     // FIM Integration Module
@@ -426,6 +427,15 @@ public class AppDbContext : DbContext
         {
             entity.HasKey(e => e.PendingReturnId);
             entity.ToTable("pending_turkey_returns");
+            entity.HasIndex(e => e.StatusCode);
+            entity.HasIndex(e => e.CreatedAt);
+        });
+
+        // PendingMissingItemReport Configuration
+        modelBuilder.Entity<PendingMissingItemReport>(entity =>
+        {
+            entity.HasKey(e => e.PendingReportId);
+            entity.ToTable("pending_missing_item_reports");
             entity.HasIndex(e => e.StatusCode);
             entity.HasIndex(e => e.CreatedAt);
         });

@@ -25,11 +25,16 @@ public partial class PMIMSControllers
             var printedItemIds = await _repository.GetPrintedLabelItemIdsAsync(itemIds);
             bool qrRequired = await _repository.IsQrCodeRequiredForTurkeyTransferAsync();
 
+            var missingItems = (await _repository.GetTurkeyMissingItemsAsync()).ToList();
+
             var summary = new
             {
                 total_bars = items.Count,
                 total_weight_grams = items.Sum(i => i.Product?.Denomination?.WeightGrams ?? 0),
                 total_weight_kg = Math.Round(items.Sum(i => i.Product?.Denomination?.WeightGrams ?? 0) / 1000m, 4),
+                total_missing_bars = missingItems.Count,
+                total_missing_weight_grams = missingItems.Sum(i => i.Product?.Denomination?.WeightGrams ?? 0),
+                total_missing_weight_kg = Math.Round(missingItems.Sum(i => i.Product?.Denomination?.WeightGrams ?? 0) / 1000m, 4),
                 qr_required_for_transfer = qrRequired,
                 total_qr_printed = items.Count(i => printedItemIds.Contains(i.ItemId)),
                 total_qr_missing = items.Count(i => !printedItemIds.Contains(i.ItemId)),
@@ -433,6 +438,117 @@ public partial class PMIMSControllers
             return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
         }
     }
+
+    // =========================================================================
+    // Missing Items Operations (Customs / Turkey Consignment Verification)
+    // =========================================================================
+
+    [HttpGet("inventory/turkey/pending-missing-reports")]
+    [Authorize(Policy = "pending_actions.read")]
+    public async Task<IActionResult> GetPendingMissingItemReports()
+    {
+        try
+        {
+            var list = await _repository.GetPendingMissingItemReportsAsync();
+            return Ok(list.Select(r => new
+            {
+                pending_report_id = r.PendingReportId,
+                report_reference = r.ReportReference,
+                ownership_type = r.OwnershipType,
+                lot_id = r.LotId,
+                lot_number = r.LotNumber,
+                total_items = r.TotalItems,
+                total_weight_grams = r.TotalWeightGrams,
+                discrepancy_reason = r.DiscrepancyReason,
+                serials_json = r.SerialsJsonList,
+                requested_by = r.RequestedBy,
+                notes = r.Notes,
+                status_code = r.StatusCode,
+                created_at = r.CreatedAt,
+                approved_by = r.ApprovedBy,
+                approved_at = r.ApprovedAt
+            }));
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
+    [HttpGet("inventory/turkey/missing-items")]
+    [Authorize(Policy = "purchase_orders.read")]
+    public async Task<IActionResult> GetTurkeyMissingItems()
+    {
+        try
+        {
+            var items = (await _repository.GetTurkeyMissingItemsAsync()).ToList();
+            return Ok(items.Select(i => new
+            {
+                item_id = i.ItemId,
+                serial_number = i.SerialNumber,
+                product_id = i.ProductId,
+                product_code = i.Product?.ProductCode,
+                metal_name = i.Product?.MetalType?.MetalName ?? "Gold",
+                denomination = i.Product?.Denomination?.Label ?? "1kg Bar",
+                weight_grams = i.Product?.Denomination?.WeightGrams ?? 0,
+                lot_number = i.Lot?.LotNumber,
+                location_code = i.Location != null ? $"{i.Location.ZoneRoom} / {i.Location.ShelfRow} / {i.Location.SlotBin}" : "Unassigned",
+                status_code = i.StatusCode,
+                ownership_type = i.OwnershipType
+            }));
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
+    [HttpPost("inventory/turkey/missing-items/report")]
+    [Authorize(Policy = "purchase_orders.write")]
+    public async Task<IActionResult> InitiateMissingItemsReport([FromBody] MissingItemsReportRequest req)
+    {
+        try
+        {
+            if (req.SerialNumbers == null || req.SerialNumbers.Count == 0)
+            {
+                return BadRequest(new { error = "Please select or provide at least one missing serial number to report." });
+            }
+
+            string requestedBy = !string.IsNullOrWhiteSpace(req.RequestedBy) ? req.RequestedBy : (User.Identity?.Name ?? "Treasury Maker");
+
+            var pending = await _repository.InitiateMissingItemsWorkflowAsync(
+                req.SerialNumbers,
+                requestedBy,
+                req.DiscrepancyReason,
+                req.Notes,
+                req.LotId,
+                req.OwnershipType ?? "TURKEY_OWNED");
+
+            return Ok(new
+            {
+                pending_report_id = pending.PendingReportId,
+                report_reference = pending.ReportReference,
+                total_items = pending.TotalItems,
+                total_weight_grams = pending.TotalWeightGrams,
+                ownership_type = pending.OwnershipType,
+                message = "Missing items discrepancy report initiated and routed to Maker-Checker workflow for Checker authorization."
+            });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+}
+
+public class MissingItemsReportRequest
+{
+    public List<string> SerialNumbers { get; set; } = new();
+    public int? LotId { get; set; }
+    public string? DiscrepancyReason { get; set; }
+    public string? RequestedBy { get; set; }
+    public string? Notes { get; set; }
+    public string OwnershipType { get; set; } = "TURKEY_OWNED";
 }
 
 public class VipAllocationRequest

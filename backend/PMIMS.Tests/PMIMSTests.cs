@@ -2849,7 +2849,206 @@ public class PMIMSTests
         var kfhItems = (await repo.GetKfhAvailableInventoryAsync()).ToList();
         Assert.DoesNotContain(kfhItems, i => i.SerialNumber == "KFH-RET-TEST-001");
     }
+
+    [Fact]
+    public async Task MissingItemsWorkflow_InitiateAndApprove_ReducesTurkeyBalance()
+    {
+        using var setup = CreateContext();
+        await SeedBasicDataAsync(setup.Context);
+        var repo = new InventoryRepository(setup.Context);
+
+        // Setup workflow template for MISSING_ITEMS
+        var missingWf = new WorkflowTemplate { WorkflowType = "MISSING_ITEMS", Name = "Missing Items", Description = "Missing Items Workflow", IsActive = true };
+        setup.Context.WorkflowTemplates.Add(missingWf);
+        await setup.Context.SaveChangesAsync();
+
+        var step1 = new WorkflowStep { TemplateId = missingWf.TemplateId, StepOrder = 1, StepName = "Maker Request", RequiredRole = "Operations Maker", Description = "Maker submit" };
+        var step2 = new WorkflowStep { TemplateId = missingWf.TemplateId, StepOrder = 2, StepName = "Checker Approval", RequiredRole = "Operations Checker", Description = "Checker approve" };
+        setup.Context.WorkflowSteps.AddRange(step1, step2);
+        await setup.Context.SaveChangesAsync();
+
+        var product = await setup.Context.MetalProducts.FirstAsync();
+        var lot = new InventoryLot
+        {
+            LotId = 10,
+            LotNumber = "LOT-TURKEY-MISSING-TEST-01",
+            VendorId = 1,
+            TotalItems = 3,
+            AverageUnitCost = 15000,
+            CreatedAt = DateTime.UtcNow
+        };
+        setup.Context.InventoryLots.Add(lot);
+
+        var items = new List<InventoryItem>
+        {
+            new InventoryItem
+            {
+                ProductId = product.ProductId,
+                LotId = lot.LotId,
+                LocationId = 1,
+                SerialNumber = "TR-MISS-001",
+                OwnershipType = "TURKEY_OWNED",
+                StatusCode = "READY"
+            },
+            new InventoryItem
+            {
+                ProductId = product.ProductId,
+                LotId = lot.LotId,
+                LocationId = 1,
+                SerialNumber = "TR-MISS-002",
+                OwnershipType = "TURKEY_OWNED",
+                StatusCode = "READY"
+            },
+            new InventoryItem
+            {
+                ProductId = product.ProductId,
+                LotId = lot.LotId,
+                LocationId = 1,
+                SerialNumber = "TR-MISS-003",
+                OwnershipType = "TURKEY_OWNED",
+                StatusCode = "READY"
+            }
+        };
+        setup.Context.InventoryItems.AddRange(items);
+
+        var initialBalance = new InventoryBalance
+        {
+            ProductId = product.ProductId,
+            LocationId = 1,
+            OwnershipType = "TURKEY_OWNED",
+            ReadyForSaleQty = 3
+        };
+        setup.Context.InventoryBalances.Add(initialBalance);
+        await setup.Context.SaveChangesAsync();
+
+        // 1. Initiate Missing Items report for 2 items: TR-MISS-001 and TR-MISS-002
+        var pendingReport = await repo.InitiateMissingItemsWorkflowAsync(
+            new List<string> { "TR-MISS-001", "TR-MISS-002" },
+            "treasury-maker",
+            "Discrepancy at Nadir Vault hand-off",
+            "Lot box arrived with seal intact but missing 2 bars inside sleeve",
+            lot.LotId,
+            "TURKEY_OWNED");
+
+        Assert.NotNull(pendingReport);
+        Assert.Equal("PENDING_APPROVAL", pendingReport.StatusCode);
+        Assert.Equal(2, pendingReport.TotalItems);
+        Assert.Equal(2000m, pendingReport.TotalWeightGrams);
+        Assert.Equal(lot.LotId, pendingReport.LotId);
+
+        // Check workflow instance created
+        var wf = await setup.Context.WorkflowInstances
+            .FirstOrDefaultAsync(w => w.WorkflowType == "MISSING_ITEMS" && w.EntityId == pendingReport.PendingReportId);
+        Assert.NotNull(wf);
+        Assert.Equal("PENDING_MAKER", wf.StatusCode);
+
+        // 2. Checker approves the Missing Items report
+        var approveRes = await repo.ApproveMissingItemsAsync(pendingReport.PendingReportId, "treasury-checker");
+        Assert.Equal("SUCCESS", approveRes);
+
+        // 3. Verify items status transitioned to MISSING
+        var item1 = await setup.Context.InventoryItems.FirstOrDefaultAsync(i => i.SerialNumber == "TR-MISS-001");
+        var item2 = await setup.Context.InventoryItems.FirstOrDefaultAsync(i => i.SerialNumber == "TR-MISS-002");
+        var item3 = await setup.Context.InventoryItems.FirstOrDefaultAsync(i => i.SerialNumber == "TR-MISS-003");
+        Assert.NotNull(item1);
+        Assert.NotNull(item2);
+        Assert.NotNull(item3);
+        Assert.Equal("MISSING", item1.StatusCode);
+        Assert.Equal("MISSING", item2.StatusCode);
+        Assert.Equal("READY", item3.StatusCode);
+
+        // 4. Verify Turkey available stock excludes missing items
+        var turkeyStock = (await repo.GetTurkeyInventoryAsync()).ToList();
+        Assert.DoesNotContain(turkeyStock, i => i.SerialNumber == "TR-MISS-001");
+        Assert.DoesNotContain(turkeyStock, i => i.SerialNumber == "TR-MISS-002");
+        Assert.Contains(turkeyStock, i => i.SerialNumber == "TR-MISS-003");
+
+        // 5. Verify Turkey missing items list includes missing items
+        var missingStock = (await repo.GetTurkeyMissingItemsAsync()).ToList();
+        Assert.Contains(missingStock, i => i.SerialNumber == "TR-MISS-001");
+        Assert.Contains(missingStock, i => i.SerialNumber == "TR-MISS-002");
+        Assert.DoesNotContain(missingStock, i => i.SerialNumber == "TR-MISS-003");
+
+        // 6. Verify Turkey inventory balance was decremented from 3 to 1
+        var updatedBalance = await setup.Context.InventoryBalances
+            .FirstOrDefaultAsync(b => b.ProductId == product.ProductId && b.LocationId == 1 && b.OwnershipType == "TURKEY_OWNED");
+        Assert.NotNull(updatedBalance);
+        Assert.Equal(1, updatedBalance.ReadyForSaleQty);
+
+        // 7. Verify audit transaction
+        var txs = await setup.Context.InventoryTransactions
+            .Where(t => t.TransactionType == "ADJUSTMENT")
+            .ToListAsync();
+        Assert.Equal(2, txs.Count);
+    }
+
+    [Fact]
+    public async Task MissingItemsWorkflow_RejectOrInvalidSerials_HandledSafely()
+    {
+        using var setup = CreateContext();
+        await DbSeeder.SeedAsync(setup.Context);
+        var repo = new InventoryRepository(setup.Context);
+
+        // 1. Validation test: Non-existent serial should throw InvalidOperationException
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await repo.InitiateMissingItemsWorkflowAsync(
+                new List<string> { "NON_EXISTENT_SERIAL_999" },
+                "treasury-maker",
+                "Reason",
+                null,
+                null,
+                "TURKEY_OWNED");
+        });
+
+        // 2. Rejection test
+        var product = await setup.Context.MetalProducts.FirstAsync();
+        var vendor = await setup.Context.Vendors.FirstAsync();
+        var lot = new InventoryLot
+        {
+            LotNumber = "LOT-TURKEY-REJECT-01",
+            VendorId = vendor.VendorId,
+            TotalItems = 1,
+            AverageUnitCost = 15000,
+            CreatedAt = DateTime.UtcNow
+        };
+        setup.Context.InventoryLots.Add(lot);
+        await setup.Context.SaveChangesAsync();
+
+        var item = new InventoryItem
+        {
+            ProductId = product.ProductId,
+            LotId = lot.LotId,
+            LocationId = 1,
+            SerialNumber = "TR-REJECT-001",
+            OwnershipType = "TURKEY_OWNED",
+            StatusCode = "READY"
+        };
+        setup.Context.InventoryItems.Add(item);
+        await setup.Context.SaveChangesAsync();
+
+        var pendingReport = await repo.InitiateMissingItemsWorkflowAsync(
+            new List<string> { "TR-REJECT-001" },
+            "treasury-maker",
+            "Counting mistake check",
+            null,
+            null,
+            "TURKEY_OWNED");
+
+        var wf = await setup.Context.WorkflowInstances
+            .FirstAsync(w => w.WorkflowType == "MISSING_ITEMS" && w.EntityId == pendingReport.PendingReportId);
+
+        // Act: Reject workflow
+        var res = await repo.ProcessWorkflowActionAsync(wf.InstanceId, "treasury-maker", "REJECTED", "Found bars in second tray");
+        Assert.Equal("SUCCESS", res);
+
+        // Verify status is REJECTED and item remains READY
+        var updatedReport = await setup.Context.PendingMissingItemReports.FindAsync(pendingReport.PendingReportId);
+        Assert.NotNull(updatedReport);
+        Assert.Equal("REJECTED", updatedReport.StatusCode);
+
+        var refreshedItem = await setup.Context.InventoryItems.FindAsync(item.ItemId);
+        Assert.NotNull(refreshedItem);
+        Assert.Equal("READY", refreshedItem.StatusCode);
+    }
 }
-
-
-

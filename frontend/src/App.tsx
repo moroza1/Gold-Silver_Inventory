@@ -2161,6 +2161,14 @@ const [migrationApproved, setMigrationApproved] = useState(false);
           checkerStep: 'Customs Transfer Checker Authorization',
           makerDesc: 'Maker verifies Bayan customs declaration number, port entry clearance documents, and submits ownership transfer request.',
           checkerDesc: 'Checker reviews customs clearance documents, duty receipts, and authorizes ownership transfer to Turkey/Kuwait inventory.'
+        },
+        'MISSING_ITEMS': {
+          name: 'Default Missing Items Workflow',
+          desc: 'Maker-Checker verification for reporting and writing off missing items/serials from Turkey consignment or customs intake.',
+          makerStep: 'Missing Items Maker Submission',
+          checkerStep: 'Missing Items Checker Authorization',
+          makerDesc: 'Maker selects missing serials, identifies source lot/consignment, specifies discrepancy justification, and submits report.',
+          checkerDesc: 'Checker investigates missing serial discrepancy, approves inventory status transition to MISSING, and adjusts ownership balance.'
         }
       };
 
@@ -13389,7 +13397,8 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                   <option value="DAMAGE_BAR">{currentLang === 'en' ? '⚠️ Damaged Bar Quarantine (DAMAGE_BAR)' : '⚠️ إثبات وإحالة السبائك التالفة (DAMAGE_BAR)'}</option>
                   <option value="CUSTODY_WITHDRAWAL">{currentLang === 'en' ? '🔒 Custody Withdrawal & Handover (CUSTODY_WITHDRAWAL)' : '🔒 سحب أمانات عميل وتسليم (CUSTODY_WITHDRAWAL)'}</option>
                   <option value="THRESHOLD_CONFIG">{currentLang === 'en' ? '⚙️ Cut-Off Threshold Config (THRESHOLD_CONFIG)' : '⚙️ إعداد حدود المخزون التنبيهية (THRESHOLD_CONFIG)'}</option>
-                  <option value="HOME_DELIVERY">{currentLang === 'en' ? '🏡 Home Delivery Fulfillment (HOME_DELIVERY)' : '🏡 توصيل منزلي للعملاء (HOME_DELIVERY)'}</option>
+                  <option value="CUSTOMS_TRANSFER">{currentLang === 'en' ? '🛃 Customs Ownership Transfer (CUSTOMS_TRANSFER)' : '🛃 تحويل ملكية الجمارك (CUSTOMS_TRANSFER)'}</option>
+                  <option value="MISSING_ITEMS">{currentLang === 'en' ? '⚠️ Missing Items Discrepancy (MISSING_ITEMS)' : '⚠️ إثبات مفقودات الشحنات (MISSING_ITEMS)'}</option>
                 </select>
               </div>
 
@@ -14124,8 +14133,39 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                           <div><strong>{currentLang === 'en' ? 'Status Code:' : 'حالة الاعتماد:'}</strong> <span className="badge badge-reserved">{selectedWfInstance.details.status_code}</span></div>
                           {selectedWfInstance.details.clearance_notes && (
                             <div style={{ gridColumn: '1 / -1' }}>
-                              <strong>{currentLang === 'en' ? 'Clearance Notes:' : 'ملاحظات التخليص الجمركي:'}</strong>
-                              <p style={{ margin: '4px 0 0 0', color: 'var(--text-muted)', fontSize: '12px' }}>{selectedWfInstance.details.clearance_notes}</p>
+                                <strong>{currentLang === 'en' ? 'Clearance Notes:' : 'ملاحظات التخليص الجمركي:'}</strong>
+                                <p style={{ margin: '4px 0 0 0', color: 'var(--text-muted)', fontSize: '12px' }}>{selectedWfInstance.details.clearance_notes}</p>
+                            </div>
+                          )}
+                        </div>
+                      ) : selectedWfInstance.workflow_type === "MISSING_ITEMS" ? (
+                        <div className="split-grid-2" style={{ gap: '10px 20px' }}>
+                          <div><strong>{currentLang === 'en' ? 'Report Reference:' : 'مرجع تقرير المفقودات:'}</strong> <span style={{ fontFamily: 'monospace', color: '#EF4444' }}>{selectedWfInstance.details.report_reference}</span></div>
+                          <div><strong>{currentLang === 'en' ? 'Target Stock Pool:' : 'المخزون المتأثر:'}</strong> <span className="badge" style={{ background: 'rgba(225, 29, 72, 0.15)', color: '#E11D48', border: '1px solid currentColor' }}>🇹🇷 {selectedWfInstance.details.ownership_type}</span></div>
+                          <div><strong>{currentLang === 'en' ? 'Total Missing Count:' : 'عدد السبائك المفقودة:'}</strong> <strong style={{ color: '#EF4444' }}>{selectedWfInstance.details.total_items} {currentLang === 'en' ? 'bars' : 'سبيكة'}</strong></div>
+                          <div><strong>{currentLang === 'en' ? 'Total Missing Weight:' : 'الوزن الإجمالي المفقود:'}</strong> {selectedWfInstance.details.total_weight_grams} g ({(selectedWfInstance.details.total_weight_grams / 1000).toFixed(3)} KG)</div>
+                          {selectedWfInstance.details.lot_number && (
+                            <div><strong>{currentLang === 'en' ? 'Source Lot Number:' : 'رقم اللوت المصدر:'}</strong> <span style={{ fontFamily: 'monospace' }}>{selectedWfInstance.details.lot_number}</span></div>
+                          )}
+                          <div><strong>{currentLang === 'en' ? 'Discrepancy Justification:' : 'سبب وتبرير الفقدان:'}</strong> {selectedWfInstance.details.discrepancy_reason}</div>
+                          <div><strong>{currentLang === 'en' ? 'Reported By (Maker):' : 'مقدم التقرير (المنشئ):'}</strong> {selectedWfInstance.details.requested_by || selectedWfInstance.details.created_by}</div>
+                          <div><strong>{currentLang === 'en' ? 'Status:' : 'الحالة:'}</strong> <span className="badge badge-reserved">{selectedWfInstance.details.status_code}</span></div>
+                          {selectedWfInstance.details.serials && selectedWfInstance.details.serials.length > 0 && (
+                            <div style={{ gridColumn: '1 / -1' }}>
+                              <strong>{currentLang === 'en' ? 'Missing Serial Numbers:' : 'الأرقام التسلسلية المفقودة:'}</strong>
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '4px' }}>
+                                {selectedWfInstance.details.serials.map((s: string, sIdx: number) => (
+                                  <span key={sIdx} style={{ fontSize: '11px', padding: '2px 8px', background: 'rgba(239, 68, 68, 0.12)', color: '#EF4444', borderRadius: '4px', fontFamily: 'monospace' }}>
+                                    {s}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {selectedWfInstance.details.notes && (
+                            <div style={{ gridColumn: '1 / -1' }}>
+                              <strong>{currentLang === 'en' ? 'Investigation Notes:' : 'ملاحظات التحقيق:'}</strong>
+                              <p style={{ margin: '4px 0 0 0', color: 'var(--text-muted)', fontSize: '12px' }}>{selectedWfInstance.details.notes}</p>
                             </div>
                           )}
                         </div>
