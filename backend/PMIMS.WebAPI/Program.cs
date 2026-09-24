@@ -84,7 +84,7 @@ try
     builder.Services.AddScoped<IAuditExportService, AuditExportService>();
     builder.Services.AddScoped<IEmailSenderService, EmailSenderService>();
     builder.Services.AddScoped<IMonitoringAdapter, GenericWebhookMonitoringAdapter>();
-    // Cost Tracking & Valuation -- Core Banking (IMAL) GL Integration (pushes purchase-order
+    // Cost Tracking & Valuation -- Core Banking (Phoenix) GL Integration (pushes purchase-order
     // receipt landed-cost journal entries; see InventoryRepository.IntakeInventoryItemsAsync).
     builder.Services.AddScoped<ICoreBankingLedgerService, CoreBankingGlAdapter>();
 

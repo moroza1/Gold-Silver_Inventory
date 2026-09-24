@@ -454,7 +454,7 @@ public class PMIMSTests
 
     // ============================================================
     // Cost Tracking & Valuation -- purchase cost detail (supplier invoice + acquisition
-    // fees) feeding the Average Cost Method, and the Core Banking (IMAL) GL Integration
+    // fees) feeding the Average Cost Method, and the Core Banking (Phoenix) GL Integration
     // adapter hook fired on a supplier receipt.
     // ============================================================
 

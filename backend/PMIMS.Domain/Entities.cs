@@ -1302,16 +1302,16 @@ public class FimSyncLog
 }
 
 // ============================================================
-// Cost Tracking & Valuation -- Core Banking (IMAL) GL Integration
+// Cost Tracking & Valuation -- Core Banking (Phoenix) GL Integration
 // ------------------------------------------------------------
 // A CoreBankingLedgerPosting is PMIMS's local, durable record of every
 // journal entry it has pushed (or attempted to push) to the Core Banking
 // System's general ledger -- e.g. "Debit Inventory-Precious Metals / Credit
 // Accounts Payable-Vendor" for the landed cost of a purchase-order receipt.
 // It is written PENDING *before* the outbound call and then updated to
-// POSTED/FAILED after, mirroring the MonitoringEvent adapter philosophy
+// POSTED/FAILED, after, mirroring the MonitoringEvent adapter philosophy
 // (GenericWebhookMonitoringAdapter) so this table is a reliable local audit
-// of what was (attempted to be) posted even if Core Banking/IMAL is
+// of what was (attempted to be) posted even if Core Banking/Phoenix is
 // unreachable. Adapter: ICoreBankingLedgerService (PMIMS.Application),
 // implemented by CoreBankingGlAdapter (PMIMS.Infrastructure/ExternalServices.cs).
 // This is distinct from ReconciliationService's existing (read-only,

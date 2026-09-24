@@ -1230,7 +1230,7 @@ public partial class PMIMSControllers : ControllerBase
         return Ok(valuationList);
     }
 
-    // Cost Tracking & Valuation -- Core Banking (IMAL) GL Integration: every journal entry
+    // Cost Tracking & Valuation -- Core Banking (Phoenix) GL Integration: every journal entry
     // PMIMS has pushed (or attempted to push) to Core Banking's general ledger, newest first.
     // Same `reports` module/tier as the rest of the financial reporting surface (valuation,
     // transactions, reconciliation) -- this is the "did the ledger update actually happen"

@@ -321,7 +321,7 @@ public interface IInventoryRepository
     Task<bool> ResetStoreDataAndAuditTrailAsync(string initiatedBy);
 
     // =========================================================================
-    // Cost Tracking & Valuation -- Core Banking (IMAL) GL Integration
+    // Cost Tracking & Valuation -- Core Banking (Phoenix) GL Integration
     // =========================================================================
     // Every GL posting PMIMS has pushed (or attempted to push) to Core Banking,
     // newest first -- see CoreBankingLedgerPosting and ICoreBankingLedgerService.
@@ -492,7 +492,7 @@ public interface IReconciliationService
 }
 
 // ============================================================
-// Cost Tracking & Valuation -- Core Banking (IMAL) GL Integration adapter.
+// Cost Tracking & Valuation -- Core Banking (Phoenix) GL Integration adapter.
 // Same "adapter, not vendor lock-in" shape as IMonitoringAdapter -- posts one
 // journal entry and returns the durable local record of the attempt
 // (CoreBankingLedgerPosting), so callers (InventoryRepository) don't need to

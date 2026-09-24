@@ -327,7 +327,7 @@ const Translations: Record<string, Record<string, string>> = {
     rep_transactions: "Transaction Ledger History",
     rep_inventory_balance: "Inventory Balance Report",
     rep_reconciliation: "Reconciliation Differences Report",
-    rep_gl_postings: "Core Banking (IMAL) GL Postings",
+    rep_gl_postings: "Core Banking (Phoenix) GL Postings",
     // Reporting Requirements Gap Analysis -- Items 4, 5, 8, 9
     rep_kpis: "KPIs (Efficiency, Error Rates, Volume)",
     rep_exceptions: "Exceptions Report",
@@ -644,7 +644,7 @@ const Translations: Record<string, Record<string, string>> = {
     rep_transactions: "حركات سجل الأستاذ التاريخية",
     rep_inventory_balance: "تقرير أرصدة المخزون",
     rep_reconciliation: "تقرير فروقات المطابقة",
-    rep_gl_postings: "قيود الأستاذ العام - النظام المصرفي الأساسي (IMAL)",
+    rep_gl_postings: "قيود الأستاذ العام - النظام المصرفي الأساسي (Phoenix)",
     // تحليل فجوات متطلبات التقارير -- البنود 4، 5، 8، 9
     rep_kpis: "مؤشرات الأداء (الكفاءة، معدلات الخطأ، الحجم)",
     rep_exceptions: "تقرير الاستثناءات",

@@ -20,7 +20,7 @@ public class InventoryRepository : IInventoryRepository
     // GenerateIfrsValuationDisclosureAsync needs a live rate feed, and it fails fast with a
     // clear error if none was supplied instead of silently pricing at zero.
     private readonly IRateFeedService? _rateFeed;
-    // Cost Tracking & Valuation -- Core Banking (IMAL) GL Integration. Nullable/optional
+    // Cost Tracking & Valuation -- Core Banking (Phoenix) GL Integration. Nullable/optional
     // (default null), same pattern as _rateFeed, so every existing
     // `new InventoryRepository(context)` call site -- test fixtures included -- keeps
     // compiling; a supplier receipt just doesn't push a GL posting if none is supplied.
@@ -725,7 +725,7 @@ public class InventoryRepository : IInventoryRepository
 
                 await _dbContext.SaveChangesAsync();
 
-                // Cost Tracking & Valuation -- Core Banking (IMAL) GL Integration: a supplier
+                // Cost Tracking & Valuation -- Core Banking (Phoenix) GL Integration: a supplier
                 // receipt is the point the landed cost (line-item cost + freight/insurance/
                 // customs/other fees) becomes a real liability -- post the standard
                 // Debit Inventory-Precious Metals / Credit Accounts Payable-Vendor journal
@@ -1665,7 +1665,7 @@ public class InventoryRepository : IInventoryRepository
             .Include(p => p.Vendor)
             .ToListAsync();
 
-    // Cost Tracking & Valuation -- Core Banking (IMAL) GL Integration: every posting PMIMS
+    // Cost Tracking & Valuation -- Core Banking (Phoenix) GL Integration: every posting PMIMS
     // has pushed (or attempted to push), newest first.
     public async Task<IEnumerable<CoreBankingLedgerPosting>> GetCoreBankingPostingsAsync() =>
         await _dbContext.CoreBankingLedgerPostings.OrderByDescending(p => p.CreatedAt).ToListAsync();

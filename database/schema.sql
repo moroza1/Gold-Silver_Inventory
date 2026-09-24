@@ -344,7 +344,7 @@ CREATE TABLE mismatch_cases (
 CREATE TABLE exchange_rates (
     rate_id INT IDENTITY(1,1) PRIMARY KEY,
     metal_type_id INT FOREIGN KEY REFERENCES metal_types(metal_type_id),
-    rate_source VARCHAR(50) NOT NULL, -- '360T', 'IMAL_FALLBACK'
+    rate_source VARCHAR(50) NOT NULL, -- '360T', 'PHOENIX_FALLBACK'
     bid_rate DECIMAL(18,6) NOT NULL,
     ask_rate DECIMAL(18,6) NOT NULL,
     captured_at DATETIME2 NOT NULL DEFAULT GETDATE()

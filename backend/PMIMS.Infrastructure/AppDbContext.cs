@@ -155,7 +155,7 @@ public class AppDbContext : DbContext
     public DbSet<ChainOfCustodyEvent> ChainOfCustodyEvents { get; set; } = null!;
     public DbSet<IfrsValuationDisclosure> IfrsValuationDisclosures { get; set; } = null!;
 
-    // Cost Tracking & Valuation -- Core Banking (IMAL) GL Integration
+    // Cost Tracking & Valuation -- Core Banking (Phoenix) GL Integration
     public DbSet<CoreBankingLedgerPosting> CoreBankingLedgerPostings { get; set; } = null!;
 
     // Reporting Requirements Gap Analysis -- Cost Analysis & Variance (Item 8)
@@ -835,7 +835,7 @@ public class AppDbContext : DbContext
         });
 
         // ============================================================
-        // Cost Tracking & Valuation -- Core Banking (IMAL) GL Integration
+        // Cost Tracking & Valuation -- Core Banking (Phoenix) GL Integration
         // ============================================================
         modelBuilder.Entity<CoreBankingLedgerPosting>(entity =>
         {

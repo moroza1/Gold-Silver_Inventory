@@ -22,9 +22,9 @@ PMIMS is a production-grade, secure, and Sharia-compliant inventory ledger and t
 - **Physical serialized inventory ledger:** Atomic movements mapping metal bars (gold/silver) to branch vault coordinate grids (zone, row, shelf, slot).
 - **Maker-Checker Workflow (4-eyes):** Dual-authorization filters for procurement (POs) and inventory migrations.
 - **Pessimistic Reservation Locks:** 5-minute TTL locks with idempotency guards for purchase checkouts.
-- **Automated GL Reconciliation:** Continuous balancing runs mapping inventory ledger to Core Banking (IMAL) and General Ledgers, automatically quarantining breaks.
+- **Automated GL Reconciliation:** Continuous balancing runs mapping inventory ledger to Core Banking (Phoenix) and General Ledgers, automatically quarantining breaks.
 - **Zero-Trust Auth & RBAC:** Signed-JWT authentication with server-side authorization policies. Permissions are modular, separating operational *view* modules from administrative *manage/setup* modules (e.g. viewing the vault map vs. creating shelves). See [`docs/PERMISSIONS.md`](./docs/PERMISSIONS.md).
-- **Islamic Finance Integrations:** Real-time rate tickers matching GMT+3 operating hours with automatic IMAL fallback.
+- **Islamic Finance Integrations:** Real-time rate tickers matching GMT+3 operating hours with automatic Phoenix fallback.
 
 ---
 
