@@ -170,6 +170,90 @@ public static class DbSeeder
                                 updated_at TEXT NOT NULL,
                                 updated_by TEXT
                             );
+
+                            CREATE TABLE IF NOT EXISTS pending_qr_reprints (
+                                reprint_request_id INTEGER NOT NULL CONSTRAINT PK_pending_qr_reprints PRIMARY KEY AUTOINCREMENT,
+                                request_type TEXT NOT NULL DEFAULT 'SINGLE',
+                                item_ids_json TEXT NOT NULL DEFAULT '[]',
+                                item_count INTEGER NOT NULL DEFAULT 1,
+                                reason TEXT NOT NULL,
+                                attachment_url TEXT,
+                                status TEXT NOT NULL DEFAULT 'PENDING_APPROVAL',
+                                initiated_by TEXT NOT NULL,
+                                initiated_at TEXT NOT NULL,
+                                approved_by TEXT,
+                                approved_at TEXT,
+                                rejection_reason TEXT
+                            );
+                            CREATE INDEX IF NOT EXISTS IX_pending_qr_reprints_status ON pending_qr_reprints (status);
+
+                            CREATE TABLE IF NOT EXISTS qr_print_logs (
+                                print_log_id INTEGER NOT NULL CONSTRAINT PK_qr_print_logs PRIMARY KEY AUTOINCREMENT,
+                                item_id INTEGER NOT NULL,
+                                serial_number TEXT NOT NULL,
+                                print_type TEXT NOT NULL DEFAULT 'INITIAL_SINGLE',
+                                print_reason TEXT,
+                                reprint_request_id INTEGER,
+                                printed_by TEXT NOT NULL,
+                                printed_at TEXT NOT NULL,
+                                label_payload TEXT,
+                                CONSTRAINT FK_qr_print_logs_inventory_items_item_id FOREIGN KEY (item_id) REFERENCES inventory_items (item_id) ON DELETE RESTRICT,
+                                CONSTRAINT FK_qr_print_logs_pending_qr_reprints_reprint_request_id FOREIGN KEY (reprint_request_id) REFERENCES pending_qr_reprints (reprint_request_id) ON DELETE SET NULL
+                            );
+                            CREATE INDEX IF NOT EXISTS IX_qr_print_logs_item_id ON qr_print_logs (item_id);
+                            CREATE INDEX IF NOT EXISTS IX_qr_print_logs_printed_at ON qr_print_logs (printed_at);
+
+                            CREATE TABLE IF NOT EXISTS damaged_bar_replacements (
+                                replacement_id INTEGER NOT NULL CONSTRAINT PK_damaged_bar_replacements PRIMARY KEY AUTOINCREMENT,
+                                replacement_reference TEXT NOT NULL,
+                                damaged_item_id INTEGER NOT NULL,
+                                damaged_serial_number TEXT NOT NULL,
+                                damaged_original_owner TEXT NOT NULL DEFAULT 'KFH_OWNED',
+                                customer_id INTEGER,
+                                account_id INTEGER,
+                                customer_holding_id INTEGER,
+                                replacement_item_id INTEGER NOT NULL,
+                                replacement_serial_number TEXT NOT NULL,
+                                metal_type_id INTEGER NOT NULL DEFAULT 1,
+                                denomination_id INTEGER NOT NULL DEFAULT 1,
+                                weight_grams REAL NOT NULL DEFAULT 0.0,
+                                reason TEXT NOT NULL,
+                                attachment_url TEXT,
+                                status TEXT NOT NULL DEFAULT 'PENDING_APPROVAL',
+                                initiated_by TEXT NOT NULL,
+                                initiated_at TEXT NOT NULL,
+                                approved_by TEXT,
+                                approved_at TEXT,
+                                rejection_reason TEXT
+                            );
+
+                            CREATE TABLE IF NOT EXISTS pending_damaged_exports (
+                                export_id INTEGER NOT NULL CONSTRAINT PK_pending_damaged_exports PRIMARY KEY AUTOINCREMENT,
+                                export_reference TEXT NOT NULL,
+                                item_id INTEGER NOT NULL,
+                                serial_number TEXT NOT NULL,
+                                metal_type_id INTEGER NOT NULL,
+                                weight_grams REAL NOT NULL,
+                                vendor_id INTEGER,
+                                vendor_name TEXT,
+                                reason TEXT NOT NULL,
+                                customs_declaration_number TEXT,
+                                courier_company TEXT,
+                                courier_tracking_number TEXT,
+                                handover_courier_rep TEXT,
+                                security_seal_number TEXT,
+                                handover_timestamp TEXT,
+                                status_code TEXT NOT NULL DEFAULT 'PENDING_APPROVAL',
+                                requested_by TEXT NOT NULL,
+                                checker_approved_by TEXT,
+                                senior_manager_approved_by TEXT,
+                                created_at TEXT NOT NULL,
+                                approved_at TEXT,
+                                exported_at TEXT,
+                                notes TEXT,
+                                rejection_reason TEXT
+                            );
+                            CREATE UNIQUE INDEX IF NOT EXISTS IX_pending_damaged_exports_export_reference ON pending_damaged_exports (export_reference);
                         ";
                         await createTableCmd.ExecuteNonQueryAsync();
                     }

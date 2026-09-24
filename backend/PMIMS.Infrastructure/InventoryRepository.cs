@@ -4113,7 +4113,8 @@ public class InventoryRepository : IInventoryRepository
                 throw new InvalidOperationException($"Cannot transfer damaged bar {item.SerialNumber} from customs.");
             }
         }
-        else if (lotId.HasValue)
+        InventoryLot? resolvedLot = null;
+        if (lotId.HasValue)
         {
             var lot = await _dbContext.InventoryLots.FindAsync(lotId.Value);
             PendingIntake? pendingIntake = null;
@@ -4127,7 +4128,7 @@ public class InventoryRepository : IInventoryRepository
                     if (pi != null && pi.OwnershipType == "CUSTOMS_OWNED")
                     {
                         pendingIntake = pi;
-                        lot = await _dbContext.InventoryLots.FirstOrDefaultAsync(l => l.LotNumber == pi.LotNumber);
+                        lot = await _dbContext.InventoryLots.FirstOrDefaultAsync(l => l.LotNumber == pi.LotNumber || (!string.IsNullOrWhiteSpace(pi.ShipmentReference) && l.ShipmentReference == pi.ShipmentReference));
                     }
                 }
             }
@@ -4136,7 +4137,7 @@ public class InventoryRepository : IInventoryRepository
                 pendingIntake = await _dbContext.PendingIntakes.FindAsync(lotId.Value);
                 if (pendingIntake != null)
                 {
-                    lot = await _dbContext.InventoryLots.FirstOrDefaultAsync(l => l.LotNumber == pendingIntake.LotNumber);
+                    lot = await _dbContext.InventoryLots.FirstOrDefaultAsync(l => l.LotNumber == pendingIntake.LotNumber || (!string.IsNullOrWhiteSpace(pendingIntake.ShipmentReference) && l.ShipmentReference == pendingIntake.ShipmentReference));
                 }
             }
 
@@ -4152,6 +4153,7 @@ public class InventoryRepository : IInventoryRepository
                 {
                     throw new InvalidOperationException($"No CUSTOMS_OWNED items found in lot {lot.LotNumber}.");
                 }
+                resolvedLot = lot;
             }
             else if (pendingIntake != null && pendingIntake.OwnershipType != "CUSTOMS_OWNED")
             {
@@ -4161,7 +4163,7 @@ public class InventoryRepository : IInventoryRepository
 
         var pendingTransfer = new PendingCustomsTransfer
         {
-            LotId = lotId,
+            LotId = resolvedLot?.LotId,
             ItemId = itemId,
             TargetOwnership = "TURKEY_OWNED",
             RequestedBy = requestedBy,
@@ -4195,6 +4197,8 @@ public class InventoryRepository : IInventoryRepository
     {
         var result = new List<CustomsShipmentDto>();
         var seenLotNumbers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seenShipmentRefs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seenLotIds = new HashSet<int>();
 
         // 1. Items currently in CUSTOMS_OWNED grouped by Lot
         var customsItems = await _dbContext.InventoryItems
@@ -4212,14 +4216,19 @@ public class InventoryRepository : IInventoryRepository
             var lot = firstItem.Lot;
             if (lot == null) continue;
 
-            seenLotNumbers.Add(lot.LotNumber);
+            seenLotIds.Add(lot.LotId);
+            if (!string.IsNullOrWhiteSpace(lot.LotNumber))
+                seenLotNumbers.Add(lot.LotNumber.Trim());
+            if (!string.IsNullOrWhiteSpace(lot.ShipmentReference))
+                seenShipmentRefs.Add(lot.ShipmentReference.Trim());
+
             decimal totalGrams = group.Sum(i => i.Product?.Denomination?.WeightGrams ?? 0m);
 
             result.Add(new CustomsShipmentDto
             {
                 LotId = lot.LotId,
-                LotNumber = lot.LotNumber,
-                ShipmentReference = lot.ShipmentReference ?? lot.LotNumber,
+                LotNumber = !string.IsNullOrWhiteSpace(lot.LotNumber) ? lot.LotNumber : $"LOT-{lot.LotId}",
+                ShipmentReference = lot.ShipmentReference ?? lot.LotNumber ?? $"LOT-{lot.LotId}",
                 VendorName = lot.Vendor?.VendorName ?? "Direct Supplier",
                 CustomsDeclarationNumber = lot.CustomsDeclarationNumber,
                 CustomsDutyAmount = lot.AverageUnitCost > 0 ? lot.AverageUnitCost : null,
@@ -4231,16 +4240,19 @@ public class InventoryRepository : IInventoryRepository
             });
         }
 
-        // 2. PendingIntakes with CUSTOMS_OWNED
+        // 2. PendingIntakes with CUSTOMS_OWNED that are STILL PENDING approval (not yet converted to inventory items)
         var pendingCustoms = await _dbContext.PendingIntakes
             .Include(p => p.Vendor)
-            .Where(p => p.OwnershipType == "CUSTOMS_OWNED")
+            .Where(p => p.OwnershipType == "CUSTOMS_OWNED" && p.StatusCode == "PENDING_APPROVAL")
             .ToListAsync();
 
         foreach (var pi in pendingCustoms)
         {
-            if (seenLotNumbers.Contains(pi.LotNumber)) continue;
-            seenLotNumbers.Add(pi.LotNumber);
+            if (!string.IsNullOrWhiteSpace(pi.LotNumber) && seenLotNumbers.Contains(pi.LotNumber.Trim())) continue;
+            if (!string.IsNullOrWhiteSpace(pi.ShipmentReference) && seenShipmentRefs.Contains(pi.ShipmentReference.Trim())) continue;
+
+            if (!string.IsNullOrWhiteSpace(pi.LotNumber)) seenLotNumbers.Add(pi.LotNumber.Trim());
+            if (!string.IsNullOrWhiteSpace(pi.ShipmentReference)) seenShipmentRefs.Add(pi.ShipmentReference.Trim());
 
             int barsCount = 0;
             decimal totalGrams = 0m;
@@ -4267,8 +4279,8 @@ public class InventoryRepository : IInventoryRepository
             result.Add(new CustomsShipmentDto
             {
                 LotId = pi.PendingIntakeId,
-                LotNumber = pi.LotNumber,
-                ShipmentReference = pi.ShipmentReference ?? pi.LotNumber,
+                LotNumber = !string.IsNullOrWhiteSpace(pi.LotNumber) ? pi.LotNumber : $"INTAKE-{pi.PendingIntakeId}",
+                ShipmentReference = pi.ShipmentReference ?? pi.LotNumber ?? $"INTAKE-{pi.PendingIntakeId}",
                 VendorName = pi.Vendor?.VendorName ?? "Direct Supplier",
                 CustomsDeclarationNumber = pi.CustomsDeclarationNumber,
                 CustomsDutyAmount = pi.CustomsDutyAmount,

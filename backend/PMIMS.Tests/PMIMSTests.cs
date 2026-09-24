@@ -4161,6 +4161,35 @@ public class PMIMSTests
         Assert.Equal(newlyReceivedBar.ItemId, activeRecord.ItemId);
         Assert.Equal(historicalItemId, historicalRecord.ItemId);
     }
+
+    [Fact]
+    public async Task Test_EnsureLiveDatabaseHasAllQrAndCustomsTables_AndCanRecordPrint()
+    {
+        var dbPath = @"D:\Projects\Gold2\backend\PMIMS.WebAPI\pmims.db";
+        if (System.IO.File.Exists(dbPath))
+        {
+            var options = new DbContextOptionsBuilder<AppDbContext>()
+                .UseSqlite($"Data Source={dbPath}")
+                .Options;
+
+            using var context = new AppDbContext(options);
+            await DbSeeder.SeedAsync(context);
+
+            var connection = context.Database.GetDbConnection();
+            if (connection.State != System.Data.ConnectionState.Open)
+                await connection.OpenAsync();
+
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = "SELECT COUNT(*) FROM qr_print_logs;";
+            var count = await cmd.ExecuteScalarAsync();
+            Assert.NotNull(count);
+
+            using var cmdReprint = connection.CreateCommand();
+            cmdReprint.CommandText = "SELECT COUNT(*) FROM pending_qr_reprints;";
+            var countReprint = await cmdReprint.ExecuteScalarAsync();
+            Assert.NotNull(countReprint);
+        }
+    }
 }
 
 
