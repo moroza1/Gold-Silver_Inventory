@@ -184,6 +184,43 @@ public static class DbSeeder
                         try { await idxCmd.ExecuteNonQueryAsync(); } catch { }
                     }
 
+                    // 1c. Ensure columns on inventory_items
+                    var itemCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    using (var pragmaCmd = connection.CreateCommand())
+                    {
+                        pragmaCmd.CommandText = "PRAGMA table_info(inventory_items);";
+                        using var reader = await pragmaCmd.ExecuteReaderAsync();
+                        while (await reader.ReadAsync())
+                        {
+                            var colName = reader["name"]?.ToString();
+                            if (!string.IsNullOrEmpty(colName)) itemCols.Add(colName);
+                        }
+                    }
+                    if (itemCols.Count > 0)
+                    {
+                        var itemColsToAdd = new List<(string Name, string Def)>
+                        {
+                            ("production_cost_kwd", "DECIMAL(18,4)"),
+                            ("replaced_by_item_id", "INTEGER"),
+                            ("replaces_item_id", "INTEGER"),
+                            ("replacement_date", "TEXT")
+                        };
+                        foreach (var (col, def) in itemColsToAdd)
+                        {
+                            if (!itemCols.Contains(col))
+                            {
+                                try
+                                {
+                                    using var alterCmd = connection.CreateCommand();
+                                    alterCmd.CommandText = $"ALTER TABLE inventory_items ADD COLUMN {col} {def};";
+                                    await alterCmd.ExecuteNonQueryAsync();
+                                    itemCols.Add(col);
+                                }
+                                catch { }
+                            }
+                        }
+                    }
+
                     // 2. Ensure columns on pending_intakes
                     using var cmd = connection.CreateCommand();
                     cmd.CommandText = "PRAGMA table_info(pending_intakes);";
@@ -216,7 +253,8 @@ public static class DbSeeder
                             ("customs_declaration_number", "TEXT"),
                             ("customs_duty_amount", "DECIMAL(18,4)"),
                             ("port_of_entry", "TEXT"),
-                            ("customs_clearance_date", "TEXT")
+                            ("customs_clearance_date", "TEXT"),
+                            ("production_costs_json", "TEXT")
                         };
 
                         foreach (var (col, def) in colsToAdd)
@@ -236,6 +274,45 @@ public static class DbSeeder
                                 }
                             }
                         }
+
+                        // Ensure shipment_production_costs table exists in SQLite
+                        try
+                        {
+                            using var prodCostTableCmd = connection.CreateCommand();
+                            prodCostTableCmd.CommandText = @"
+                                CREATE TABLE IF NOT EXISTS shipment_production_costs (
+                                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                    pending_intake_id INTEGER,
+                                    lot_id INTEGER,
+                                    shipment_reference TEXT NOT NULL,
+                                    metal_type_id INTEGER NOT NULL,
+                                    denomination_id INTEGER NOT NULL,
+                                    production_cost_kwd DECIMAL(18,4) NOT NULL,
+                                    created_at TEXT NOT NULL
+                                );
+                            ";
+                            await prodCostTableCmd.ExecuteNonQueryAsync();
+
+                            // Also ensure lot_id column exists if table was created previously without it
+                            var prodCostCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                            using (var pragmaCmd = connection.CreateCommand())
+                            {
+                                pragmaCmd.CommandText = "PRAGMA table_info(shipment_production_costs);";
+                                using var reader = await pragmaCmd.ExecuteReaderAsync();
+                                while (await reader.ReadAsync())
+                                {
+                                    var colName = reader["name"]?.ToString();
+                                    if (!string.IsNullOrEmpty(colName)) prodCostCols.Add(colName);
+                                }
+                            }
+                            if (prodCostCols.Count > 0 && !prodCostCols.Contains("lot_id"))
+                            {
+                                using var alterCmd = connection.CreateCommand();
+                                alterCmd.CommandText = "ALTER TABLE shipment_production_costs ADD COLUMN lot_id INTEGER;";
+                                await alterCmd.ExecuteNonQueryAsync();
+                            }
+                        }
+                        catch { }
 
                         // Check and update inventory_lots for customs columns
                         var lotCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -543,6 +620,11 @@ public static class DbSeeder
                             ALTER TABLE pending_intakes ADD customs_clearance_date DATETIME2 NULL;
                         END
 
+                        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('pending_intakes') AND name = 'production_costs_json')
+                        BEGIN
+                            ALTER TABLE pending_intakes ADD production_costs_json NVARCHAR(MAX) NULL;
+                        END
+
                         IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('inventory_lots') AND name = 'customs_declaration_number')
                         BEGIN
                             ALTER TABLE inventory_lots ADD customs_declaration_number NVARCHAR(100) NULL;
@@ -551,6 +633,47 @@ public static class DbSeeder
                         IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('inventory_lots') AND name = 'port_of_entry')
                         BEGIN
                             ALTER TABLE inventory_lots ADD port_of_entry NVARCHAR(100) NULL;
+                        END
+
+                        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('inventory_items') AND name = 'production_cost_kwd')
+                        BEGIN
+                            ALTER TABLE inventory_items ADD production_cost_kwd DECIMAL(18,4) NULL;
+                        END
+
+                        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('inventory_items') AND name = 'replaced_by_item_id')
+                        BEGIN
+                            ALTER TABLE inventory_items ADD replaced_by_item_id INT NULL;
+                        END
+
+                        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('inventory_items') AND name = 'replaces_item_id')
+                        BEGIN
+                            ALTER TABLE inventory_items ADD replaces_item_id INT NULL;
+                        END
+
+                        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('inventory_items') AND name = 'replacement_date')
+                        BEGIN
+                            ALTER TABLE inventory_items ADD replacement_date DATETIME2 NULL;
+                        END
+
+                        IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'shipment_production_costs')
+                        BEGIN
+                            CREATE TABLE shipment_production_costs (
+                                id INT IDENTITY(1,1) PRIMARY KEY,
+                                pending_intake_id INT NULL,
+                                lot_id INT NULL,
+                                shipment_reference NVARCHAR(100) NOT NULL,
+                                metal_type_id INT NOT NULL,
+                                denomination_id INT NOT NULL,
+                                production_cost_kwd DECIMAL(18,4) NOT NULL,
+                                created_at DATETIME2 NOT NULL
+                            );
+                        END
+                        ELSE
+                        BEGIN
+                            IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('shipment_production_costs') AND name = 'lot_id')
+                            BEGIN
+                                ALTER TABLE shipment_production_costs ADD lot_id INT NULL;
+                            END
                         END
 
                         IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'system_settings')

@@ -7035,7 +7035,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       const isCustomer = owner.owner_code === 'CUSTOMER_OWNED';
                       const isVip = owner.owner_code === 'VIP_OWNED';
 
-                      const themeColor = isKfh ? 'var(--kfh-green)' : isTurkey ? '#D4AF37' : isVip ? '#ec4899' : '#3b82f6';
+                      const themeColor = isKfh ? 'var(--kfh-green)' : isTurkey ? '#D4AF37' : isVip ? '#6366f1' : '#3b82f6';
                       const icon = isKfh ? 'fa-building-columns' : isTurkey ? 'fa-coins' : isVip ? 'fa-crown' : 'fa-user-shield';
 
                       return (
@@ -7428,11 +7428,9 @@ const [migrationApproved, setMigrationApproved] = useState(false);
               style={{
                 cursor: 'pointer',
                 transition: 'all 0.2s ease',
-                border: selectedExecKpi === 'TOTAL_PRECIOUS' ? '2px solid #D4AF37' : '1px solid rgba(212, 175, 55, 0.4)',
-                background: selectedExecKpi === 'TOTAL_PRECIOUS'
-                  ? 'linear-gradient(135deg, rgba(212, 175, 55, 0.18), rgba(0, 155, 78, 0.12))'
-                  : 'linear-gradient(135deg, rgba(212, 175, 55, 0.08), rgba(0, 155, 78, 0.04))',
-                boxShadow: selectedExecKpi === 'TOTAL_PRECIOUS' ? '0 0 20px rgba(212, 175, 55, 0.35)' : undefined,
+                border: selectedExecKpi === 'TOTAL_PRECIOUS' ? '2px solid #D4AF37' : '1px solid var(--surface-border)',
+                background: selectedExecKpi === 'TOTAL_PRECIOUS' ? 'rgba(212, 175, 55, 0.08)' : undefined,
+                boxShadow: selectedExecKpi === 'TOTAL_PRECIOUS' ? '0 0 16px rgba(212, 175, 55, 0.25)' : undefined,
                 transform: selectedExecKpi === 'TOTAL_PRECIOUS' ? 'translateY(-2px)' : undefined
               }}
             >
@@ -7462,7 +7460,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                 <span style={{ padding: '2px 6px', borderRadius: '4px', background: 'rgba(0, 155, 78, 0.15)', color: 'var(--kfh-green)', border: '1px solid rgba(0, 155, 78, 0.3)' }} title="KFH Owned">
                   KFH: {(execBoard?.kfh_weight_kg ?? 0).toFixed(1)}kg ({execBoard?.kfh_qty ?? 0})
                 </span>
-                <span style={{ padding: '2px 6px', borderRadius: '4px', background: 'rgba(236, 72, 153, 0.15)', color: '#ec4899', border: '1px solid rgba(236, 72, 153, 0.3)' }} title="VIP Exclusive Reserve">
+                <span style={{ padding: '2px 6px', borderRadius: '4px', background: 'rgba(99, 102, 241, 0.15)', color: '#6366f1', border: '1px solid rgba(99, 102, 241, 0.3)' }} title="VIP Exclusive Reserve">
                   VIP: {(execBoard?.vip_weight_kg ?? 0).toFixed(1)}kg ({execBoard?.vip_qty ?? 0})
                 </span>
                 <span style={{ padding: '2px 6px', borderRadius: '4px', background: 'rgba(147, 51, 234, 0.15)', color: '#c084fc', border: '1px solid rgba(147, 51, 234, 0.3)' }} title="In Transit">
@@ -7538,25 +7536,25 @@ const [migrationApproved, setMigrationApproved] = useState(false);
               style={{
                 cursor: 'pointer',
                 transition: 'all 0.2s ease',
-                border: selectedExecKpi === 'VIP_STOCK' ? '2px solid #ec4899' : '1px solid var(--surface-border)',
-                background: selectedExecKpi === 'VIP_STOCK' ? 'rgba(236, 72, 153, 0.08)' : undefined,
-                boxShadow: selectedExecKpi === 'VIP_STOCK' ? '0 0 16px rgba(236, 72, 153, 0.25)' : undefined,
+                border: selectedExecKpi === 'VIP_STOCK' ? '2px solid #6366f1' : '1px solid var(--surface-border)',
+                background: selectedExecKpi === 'VIP_STOCK' ? 'rgba(99, 102, 241, 0.08)' : undefined,
+                boxShadow: selectedExecKpi === 'VIP_STOCK' ? '0 0 16px rgba(99, 102, 241, 0.25)' : undefined,
                 transform: selectedExecKpi === 'VIP_STOCK' ? 'translateY(-2px)' : undefined
               }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span className="kpi-title" style={{ color: '#ec4899' }}>
+                <span className="kpi-title" style={{ color: '#6366f1' }}>
                   <i className="fa-solid fa-crown" style={{ marginRight: '6px' }}></i>
                   {currentLang === 'en' ? 'VIP Exclusive Stock' : 'مخزون كبار العملاء (VIP)'}
                 </span>
                 {selectedExecKpi === 'VIP_STOCK' && (
-                  <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: '#ec4899', color: '#fff', fontWeight: 'bold' }}>
+                  <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: '#6366f1', color: '#fff', fontWeight: 'bold' }}>
                     <i className="fa-solid fa-chart-pie"></i> {currentLang === 'en' ? 'Active' : 'نشط'}
                   </span>
                 )}
               </div>
-              <span className="kpi-value" style={{ color: '#ec4899' }}>{(execBoard?.vip_weight_kg ?? 0).toFixed(3)} KG</span>
-              <span className="kpi-sub" style={{ color: '#f472b6' }}>
+              <span className="kpi-value" style={{ color: '#6366f1' }}>{(execBoard?.vip_weight_kg ?? 0).toFixed(3)} KG</span>
+              <span className="kpi-sub" style={{ color: '#818cf8' }}>
                 {((execBoard?.vip_weight_kg ?? 0) * 1000).toLocaleString()} g • {execBoard?.vip_qty ?? 0} {currentLang === 'en' ? 'Bars (Vault VIP Reserve)' : 'سبيكة (غير متاحة أونلاين)'}
               </span>
             </div>

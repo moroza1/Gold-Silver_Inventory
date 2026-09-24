@@ -1289,20 +1289,20 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
         </div>
 
         {/* KPI 3: VIP Exclusive Vault Reserve */}
-        <div className="glass-card" style={{ padding: '18px', borderLeft: '4px solid #ec4899' }}>
+        <div className="glass-card" style={{ padding: '18px', borderLeft: '4px solid #6366f1' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
               <div style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                 {currentLang === 'en' ? 'VIP Exclusive Vault Reserve' : 'مخزون كبار العملاء (VIP)'}
               </div>
-              <div style={{ fontSize: '22px', fontWeight: 'bold', marginTop: '6px', color: '#ec4899' }}>
+              <div style={{ fontSize: '22px', fontWeight: 'bold', marginTop: '6px', color: '#6366f1' }}>
                 {vipInventory?.summary?.total_bars || 0} <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'bars' : 'سبيكة'}</span>
               </div>
-              <div style={{ fontSize: '12px', color: '#ec4899', fontWeight: 600, marginTop: '2px' }}>
+              <div style={{ fontSize: '12px', color: '#6366f1', fontWeight: 600, marginTop: '2px' }}>
                 {vipInventory?.summary?.total_weight_kg || 0} KG <span style={{ color: 'var(--text-muted)', fontWeight: 'normal' }}>({(vipInventory?.summary?.total_weight_grams || 0).toLocaleString()} g)</span>
               </div>
             </div>
-            <div style={{ width: '42px', height: '42px', borderRadius: '8px', background: 'rgba(236, 72, 153, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', color: '#ec4899' }}>
+            <div style={{ width: '42px', height: '42px', borderRadius: '8px', background: 'rgba(99, 102, 241, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', color: '#6366f1' }}>
               👑
             </div>
           </div>
@@ -1384,7 +1384,7 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
 
           <button
             className={`btn ${activeSubTab === 'VIP_STOCK' ? 'btn-primary' : ''}`}
-            style={activeSubTab !== 'VIP_STOCK' ? { backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--surface-border)', color: '#ec4899' } : { background: '#ec4899', borderColor: '#ec4899', color: '#fff' }}
+            style={activeSubTab !== 'VIP_STOCK' ? { backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--surface-border)', color: '#6366f1' } : { background: '#6366f1', borderColor: '#6366f1', color: '#fff' }}
             onClick={() => {
               setActiveSubTab('VIP_STOCK');
               fetchVipData();
@@ -2107,16 +2107,16 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
           
           {/* SECTION A: ALLOCATE KFH STOCK TO VIP RESERVE */}
-          <div className="glass-card" style={{ padding: '22px', borderLeft: '4px solid #ec4899', background: 'linear-gradient(180deg, rgba(236, 72, 153, 0.04) 0%, rgba(255,255,255,0.01) 100%)' }}>
+          <div className="glass-card" style={{ padding: '22px', borderLeft: '4px solid #6366f1', background: 'linear-gradient(180deg, rgba(99, 102, 241, 0.04) 0%, rgba(255,255,255,0.01) 100%)' }}>
             
             {/* Header */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#ec4899', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px' }}>
+                <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#6366f1', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px' }}>
                   👑
                 </div>
                 <div>
-                  <h4 style={{ margin: 0, fontSize: '16px', color: '#ec4899' }}>
+                  <h4 style={{ margin: 0, fontSize: '16px', color: '#6366f1' }}>
                     {currentLang === 'en' ? 'Allocate KFH Stock to VIP Reserve' : 'تخصيص مخزون بيتك لكبار العملاء (VIP)'}
                   </h4>
                   <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
@@ -2159,18 +2159,18 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
                       borderRadius: '8px',
                       cursor: 'pointer',
                       transition: 'all 0.2s',
-                      border: isSelected ? '2px solid #ec4899' : '1px solid var(--surface-border)',
-                      background: isSelected ? 'rgba(236, 72, 153, 0.12)' : 'rgba(255,255,255,0.02)',
+                      border: isSelected ? '2px solid #6366f1' : '1px solid var(--surface-border)',
+                      background: isSelected ? 'rgba(99, 102, 241, 0.12)' : 'rgba(255,255,255,0.02)',
                       display: 'flex',
                       flexDirection: 'column',
                       gap: '6px'
                     }}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontSize: '13px', fontWeight: 'bold', color: isSelected ? '#ec4899' : 'var(--text-primary)' }}>
+                      <span style={{ fontSize: '13px', fontWeight: 'bold', color: isSelected ? '#6366f1' : 'var(--text-primary)' }}>
                         {p.denomination}
                       </span>
-                      <span style={{ fontSize: '11px', padding: '2px 7px', borderRadius: '10px', background: isSelected ? '#ec4899' : 'rgba(255,255,255,0.08)', color: isSelected ? '#fff' : 'var(--text-muted)', fontWeight: 600 }}>
+                      <span style={{ fontSize: '11px', padding: '2px 7px', borderRadius: '10px', background: isSelected ? '#6366f1' : 'rgba(255,255,255,0.08)', color: isSelected ? '#fff' : 'var(--text-muted)', fontWeight: 600 }}>
                         {p.count} {currentLang === 'en' ? 'KFH stock' : 'متاح بيتك'}
                       </span>
                     </div>
@@ -2178,7 +2178,7 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-muted)' }}>
                       <span>{p.metal_name} ({p.weight_grams}g)</span>
                       {selectedInThis > 0 && (
-                        <span style={{ color: '#ec4899', fontWeight: 'bold' }}>
+                        <span style={{ color: '#6366f1', fontWeight: 'bold' }}>
                           ✓ {selectedInThis} {currentLang === 'en' ? 'selected' : 'محدد'}
                         </span>
                       )}
@@ -2315,12 +2315,12 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
                             display: 'flex',
                             alignItems: 'center',
                             gap: '6px',
-                            background: isSelected ? 'rgba(236, 72, 153, 0.25)' : 'rgba(255, 255, 255, 0.04)',
-                            border: isSelected ? '1px solid #ec4899' : '1px solid var(--surface-border)',
-                            color: isSelected ? '#ec4899' : 'var(--text-primary)'
+                            background: isSelected ? 'rgba(99, 102, 241, 0.25)' : 'rgba(255, 255, 255, 0.04)',
+                            border: isSelected ? '1px solid #6366f1' : '1px solid var(--surface-border)',
+                            color: isSelected ? '#6366f1' : 'var(--text-primary)'
                           }}
                         >
-                          <i className={`fa-solid ${isSelected ? 'fa-square-check' : 'fa-square'}`} style={{ color: isSelected ? '#ec4899' : 'var(--text-muted)' }}></i>
+                          <i className={`fa-solid ${isSelected ? 'fa-square-check' : 'fa-square'}`} style={{ color: isSelected ? '#6366f1' : 'var(--text-muted)' }}></i>
                           <span>{item.serial_number}</span>
                         </div>
                       );
@@ -2331,7 +2331,7 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
                 {/* Denomination summary footer */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px', fontSize: '11px', color: 'var(--text-muted)' }}>
                   <span>{currentLang === 'en' ? 'Showing:' : 'عرض:'} <strong>{displayedKfhSerials.length}</strong> {currentLang === 'en' ? 'bars' : 'سبيكة'}</span>
-                  <span style={{ color: selectedKfhCountForCurrentDenom > 0 ? '#ec4899' : 'inherit', fontWeight: selectedKfhCountForCurrentDenom > 0 ? 'bold' : 'normal' }}>
+                  <span style={{ color: selectedKfhCountForCurrentDenom > 0 ? '#6366f1' : 'inherit', fontWeight: selectedKfhCountForCurrentDenom > 0 ? 'bold' : 'normal' }}>
                     {currentLang === 'en' ? 'Selected in this denomination:' : 'المحدد من هذه الفئة:'} {selectedKfhCountForCurrentDenom} / {kfhItemsForSelectedDenom.length}
                   </span>
                 </div>
@@ -2383,7 +2383,7 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px', alignItems: 'end', background: 'rgba(255,255,255,0.02)', padding: '14px', borderRadius: '8px', border: '1px solid var(--surface-border)' }}>
               
               <div className="form-group" style={{ marginBottom: 0 }}>
-                <label style={{ fontSize: '12px', fontWeight: 600, color: '#ec4899' }}>
+                <label style={{ fontSize: '12px', fontWeight: 600, color: '#6366f1' }}>
                   {currentLang === 'en' ? 'VIP Category / Portfolio Tier:' : 'تصنيف محفظة كبار العملاء:'}
                 </label>
                 <select
@@ -2424,7 +2424,7 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
                     className="btn"
                     onClick={handleAllocateToVip}
                     disabled={selectedKfhSerials.length === 0 || isSubmittingVipAlloc}
-                    style={{ flex: 1, background: '#ec4899', borderColor: '#ec4899', color: '#fff', padding: '10px 14px', fontWeight: 'bold', fontSize: '12px' }}
+                    style={{ flex: 1, background: '#6366f1', borderColor: '#6366f1', color: '#fff', padding: '10px 14px', fontWeight: 'bold', fontSize: '12px' }}
                   >
                     {isSubmittingVipAlloc ? (
                       <><i className="fa-solid fa-spinner fa-spin"></i> {currentLang === 'en' ? 'Submitting...' : 'جاري الإرسال...'}</>
@@ -2466,7 +2466,7 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
             {/* Header */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
               <div>
-                <h4 style={{ margin: 0, fontSize: '16px', color: '#ec4899', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <h4 style={{ margin: 0, fontSize: '16px', color: '#6366f1', display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <i className="fa-solid fa-vault"></i>
                   {currentLang === 'en' ? 'Active VIP Exclusive Vault Stock (VIP_OWNED)' : 'مخزون كبار العملاء الفعلي بالخزنة (VIP_OWNED)'}
                 </h4>
@@ -2484,8 +2484,8 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
                   onClick={() => setShowVipDispenseModal(true)}
                   disabled={selectedVipSerials.length === 0}
                   style={{
-                    background: selectedVipSerials.length > 0 ? '#ec4899' : 'var(--bg-secondary)',
-                    borderColor: selectedVipSerials.length > 0 ? '#ec4899' : 'var(--surface-border)',
+                    background: selectedVipSerials.length > 0 ? '#6366f1' : 'var(--bg-secondary)',
+                    borderColor: selectedVipSerials.length > 0 ? '#6366f1' : 'var(--surface-border)',
                     color: selectedVipSerials.length > 0 ? '#fff' : 'var(--text-muted)',
                     fontWeight: 'bold',
                     padding: '8px 16px'
@@ -2524,8 +2524,8 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
 
             {/* Offline Isolation Alert Banner */}
             <div style={{
-              background: 'rgba(236, 72, 153, 0.08)',
-              border: '1px solid rgba(236, 72, 153, 0.3)',
+              background: 'rgba(99, 102, 241, 0.08)',
+              border: '1px solid rgba(99, 102, 241, 0.3)',
               borderRadius: '8px',
               padding: '12px 16px',
               display: 'flex',
@@ -2533,7 +2533,7 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
               gap: '12px',
               marginBottom: '16px'
             }}>
-              <i className="fa-solid fa-eye-slash" style={{ color: '#ec4899', fontSize: '18px' }}></i>
+              <i className="fa-solid fa-eye-slash" style={{ color: '#6366f1', fontSize: '18px' }}></i>
               <div style={{ fontSize: '12px', color: 'var(--text-primary)' }}>
                 <strong>{currentLang === 'en' ? 'Online Isolation Active:' : 'حظر العرض الأونلاين مفعل:'}</strong>{' '}
                 {currentLang === 'en'
@@ -2603,7 +2603,7 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
                     displayedVipItems.map(item => {
                       const isSelected = selectedVipSerials.includes(item.serial_number);
                       return (
-                        <tr key={item.serial_number} style={{ background: isSelected ? 'rgba(236, 72, 153, 0.08)' : undefined }}>
+                        <tr key={item.serial_number} style={{ background: isSelected ? 'rgba(99, 102, 241, 0.08)' : undefined }}>
                           <td>
                             <input
                               type="checkbox"
@@ -2612,7 +2612,7 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
                             />
                           </td>
                           <td>
-                            <strong style={{ fontFamily: 'monospace', color: '#ec4899' }}>{item.serial_number}</strong>
+                            <strong style={{ fontFamily: 'monospace', color: '#6366f1' }}>{item.serial_number}</strong>
                           </td>
                           <td>{item.denomination || item.metal_name}</td>
                           <td>{item.weight_grams} g</td>
@@ -2623,12 +2623,12 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
                             </span>
                           </td>
                           <td>
-                            <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '4px', background: 'rgba(236, 72, 153, 0.15)', color: '#ec4899', fontWeight: 600 }}>
+                            <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '4px', background: 'rgba(99, 102, 241, 0.15)', color: '#6366f1', fontWeight: 600 }}>
                               {item.vip_category || 'Private Banking'}
                             </span>
                           </td>
                           <td>
-                            <span className="badge" style={{ background: 'rgba(236, 72, 153, 0.2)', color: '#ec4899', fontSize: '10px' }}>
+                            <span className="badge" style={{ background: 'rgba(99, 102, 241, 0.2)', color: '#6366f1', fontSize: '10px' }}>
                               🔒 VIP Isolated
                             </span>
                           </td>
@@ -2641,13 +2641,13 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
             </div>
 
             {selectedVipSerials.length > 0 && (
-              <div style={{ marginTop: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', color: '#ec4899', fontWeight: 'bold' }}>
+              <div style={{ marginTop: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', color: '#6366f1', fontWeight: 'bold' }}>
                 <span>{currentLang === 'en' ? 'Selected for Dispense:' : 'المحدد للصرف:'} {selectedVipItemsData.count} bars ({selectedVipItemsData.totalWeightKg} KG)</span>
                 <button
                   type="button"
                   className="btn"
                   onClick={() => setShowVipDispenseModal(true)}
-                  style={{ background: '#ec4899', color: '#fff', fontSize: '12px', padding: '6px 14px' }}
+                  style={{ background: '#6366f1', color: '#fff', fontSize: '12px', padding: '6px 14px' }}
                 >
                   <i className="fa-solid fa-arrow-right-to-bracket"></i> {currentLang === 'en' ? 'Proceed to Dispense Workflow' : 'متابعة سير عمل الصرف'}
                 </button>
@@ -2788,16 +2788,16 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
 
                   return (
                     <tr key={`ALLOC-${a.pending_allocation_id}`}>
-                      <td><strong style={{ color: '#ec4899' }}>{a.batch_reference}</strong></td>
+                      <td><strong style={{ color: '#6366f1' }}>{a.batch_reference}</strong></td>
                       <td>
-                        <span className="badge" style={{ background: 'rgba(236, 72, 153, 0.15)', color: '#ec4899', fontSize: '11px' }}>
+                        <span className="badge" style={{ background: 'rgba(99, 102, 241, 0.15)', color: '#6366f1', fontSize: '11px' }}>
                           👑 VIP Allocation
                         </span>
                       </td>
                       <td>{a.total_items} {currentLang === 'en' ? 'bars' : 'سبيكة'}</td>
                       <td>{a.total_weight_grams} g ({(a.total_weight_grams / 1000).toFixed(3)} KG)</td>
                       <td>
-                        <span style={{ fontSize: '11px', color: '#ec4899', fontWeight: 600 }}>{a.vip_category || 'Private Banking'}</span>
+                        <span style={{ fontSize: '11px', color: '#6366f1', fontWeight: 600 }}>{a.vip_category || 'Private Banking'}</span>
                         {a.notes && <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{a.notes}</div>}
                       </td>
                       <td>{a.requested_by}</td>
@@ -2812,7 +2812,7 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
                       <td>
                         <div style={{ maxWidth: '200px', overflowX: 'auto', whiteSpace: 'nowrap', display: 'flex', gap: '4px' }}>
                           {serialsList.map((s, idx) => (
-                            <span key={idx} style={{ fontSize: '10px', padding: '2px 5px', background: 'rgba(236, 72, 153, 0.1)', color: '#ec4899', borderRadius: '3px' }}>
+                            <span key={idx} style={{ fontSize: '10px', padding: '2px 5px', background: 'rgba(99, 102, 241, 0.1)', color: '#6366f1', borderRadius: '3px' }}>
                               {s}
                             </span>
                           ))}
@@ -2989,10 +2989,10 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
           zIndex: 9999,
           padding: '20px'
         }}>
-          <div className="glass-card" style={{ width: '100%', maxWidth: '650px', maxHeight: '90vh', overflowY: 'auto', padding: '24px', borderLeft: '4px solid #ec4899' }}>
+          <div className="glass-card" style={{ width: '100%', maxWidth: '650px', maxHeight: '90vh', overflowY: 'auto', padding: '24px', borderLeft: '4px solid #6366f1' }}>
             
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--surface-border)', paddingBottom: '12px', marginBottom: '16px' }}>
-              <h3 style={{ margin: 0, color: '#ec4899', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <h3 style={{ margin: 0, color: '#6366f1', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <i className="fa-solid fa-crown"></i>
                 {currentLang === 'en' ? 'Dispense Gold to VIP Client' : 'صرف سبائك الذهب لعميل VIP'}
               </h3>
@@ -3011,8 +3011,8 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
             </p>
 
             {/* Selected Bars Summary */}
-            <div style={{ background: 'rgba(236, 72, 153, 0.08)', borderRadius: '8px', padding: '12px', border: '1px solid rgba(236, 72, 153, 0.25)', marginBottom: '16px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', fontWeight: 'bold', color: '#ec4899', marginBottom: '6px' }}>
+            <div style={{ background: 'rgba(99, 102, 241, 0.08)', borderRadius: '8px', padding: '12px', border: '1px solid rgba(99, 102, 241, 0.25)', marginBottom: '16px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', fontWeight: 'bold', color: '#6366f1', marginBottom: '6px' }}>
                 <span>{currentLang === 'en' ? 'Selected VIP Bars:' : 'السبائك المحددة:'} {selectedVipItemsData.count} bars</span>
                 <span>{selectedVipItemsData.totalWeightKg} KG ({selectedVipItemsData.totalWeightGrams.toLocaleString()} g)</span>
               </div>
@@ -3123,7 +3123,7 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
                 className="btn"
                 onClick={handleDispenseVip}
                 disabled={isSubmittingVipDispense}
-                style={{ background: '#ec4899', color: '#fff', fontWeight: 'bold' }}
+                style={{ background: '#6366f1', color: '#fff', fontWeight: 'bold' }}
               >
                 {isSubmittingVipDispense ? (
                   <><i className="fa-solid fa-spinner fa-spin"></i> {currentLang === 'en' ? 'Submitting...' : 'جاري الإرسال...'}</>

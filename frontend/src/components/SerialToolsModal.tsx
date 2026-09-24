@@ -70,6 +70,7 @@ export const SerialToolsModal: React.FC<SerialToolsModalProps> = ({
   const totalWeightGrams = count * weightGrams;
   const totalWeightKg = Math.round((totalWeightGrams / 1000) * 1000) / 1000;
   const parsedCost = parseFloat(purchasingCost) || 0;
+  const isValidCost = purchasingCost.trim() !== '' && !isNaN(parsedCost) && parsedCost > 0;
   const totalCost = count * parsedCost;
 
   // Generate Sample Preview
@@ -96,6 +97,13 @@ export const SerialToolsModal: React.FC<SerialToolsModalProps> = ({
   const handleGenerateRange = () => {
     if (!isValidRange) {
       alert(currentLang === 'en' ? 'Please enter a valid Start and End serial number.' : 'يرجى إدخال رقم بداية ونهاية صالحين.');
+      return;
+    }
+
+    if (!isValidCost) {
+      alert(currentLang === 'en'
+        ? 'Please enter a valid Purchasing Cost / Value (must be greater than 0) before submitting.'
+        : 'يرجى إدخال تكلفة شراء / قيمة صالحة (يجب أن تكون أكبر من 0) قبل الإضافة.');
       return;
     }
 
@@ -132,7 +140,7 @@ export const SerialToolsModal: React.FC<SerialToolsModalProps> = ({
       });
     }
 
-    const costNum = parseFloat(purchasingCost) || 0;
+    const costNum = parsedCost;
     if (onUpdatePurchasingCost) {
       onUpdatePurchasingCost(selectedProductId, costNum);
     }
@@ -291,22 +299,35 @@ export const SerialToolsModal: React.FC<SerialToolsModalProps> = ({
                 <label style={{ fontSize: '12px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <i className="fa-solid fa-coins" style={{ color: 'var(--accent-gold)' }}></i>
                   {currentLang === 'en' ? 'Purchasing Cost / Value (KWD)' : 'تكلفة الشراء للفئة (د.ك)'}
+                  <span style={{ color: '#EF4444', fontWeight: 'bold' }}>*</span>
                 </label>
                 <div style={{ position: 'relative' }}>
                   <input
                     type="number"
                     step="0.001"
-                    min="0"
+                    min="0.001"
                     className="form-control"
-                    placeholder="0.000"
+                    placeholder={currentLang === 'en' ? 'e.g. 23500.000 (Required)' : 'مثال: 23500.000 (مطلوب)'}
                     value={purchasingCost}
                     onChange={e => setPurchasingCost(e.target.value)}
-                    style={{ fontSize: '13px', fontWeight: 'bold', color: 'var(--kfh-green)' }}
+                    style={{
+                      fontSize: '13px',
+                      fontWeight: 'bold',
+                      color: 'var(--kfh-green)',
+                      borderColor: !isValidCost && purchasingCost.trim() !== '' ? '#EF4444' : undefined
+                    }}
                   />
                 </div>
-                <span style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px', display: 'block' }}>
-                  {currentLang === 'en' ? 'Cost per bar for this denomination in this shipment' : 'تكلفة السبيكة الواحدة لهذه الفئة في هذه الشحنة'}
-                </span>
+                {!isValidCost ? (
+                  <span style={{ fontSize: '11px', color: '#EF4444', marginTop: '3px', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 600 }}>
+                    <i className="fa-solid fa-circle-exclamation"></i>
+                    {currentLang === 'en' ? 'Purchasing cost > 0 is mandatory to add bars.' : 'تكلفة الشراء أكبر من 0 إلزامية لإضافة السبائك.'}
+                  </span>
+                ) : (
+                  <span style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px', display: 'block' }}>
+                    {currentLang === 'en' ? 'Cost per bar for this denomination in this shipment' : 'تكلفة السبيكة الواحدة لهذه الفئة في هذه الشحنة'}
+                  </span>
+                )}
               </div>
             </div>
 
@@ -347,8 +368,14 @@ export const SerialToolsModal: React.FC<SerialToolsModalProps> = ({
               type="button"
               className="btn btn-primary"
               onClick={handleGenerateRange}
-              disabled={!isValidRange}
-              style={{ padding: '8px 18px', fontSize: '13px', fontWeight: 'bold' }}
+              disabled={!isValidRange || !isValidCost}
+              style={{
+                padding: '8px 18px',
+                fontSize: '13px',
+                fontWeight: 'bold',
+                opacity: (!isValidRange || !isValidCost) ? 0.5 : 1,
+                cursor: (!isValidRange || !isValidCost) ? 'not-allowed' : 'pointer'
+              }}
             >
               <i className="fa-solid fa-plus"></i> {count === 1
                 ? (currentLang === 'en' ? 'Add 1 Bar to Manifest' : 'إضافة سبيكة واحدة إلى الكشف')
