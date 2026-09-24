@@ -605,6 +605,43 @@ public static class DbSeeder
                                 UpdatedAt = DateTime.UtcNow
                             });
                         }
+
+                        // Seed Damaged Gold & Silver High-Stock thresholds (Requirement 6)
+                        var goldMetal = await context.MetalTypes.FirstOrDefaultAsync(m => m.MetalName == "Gold");
+                        var silverMetal = await context.MetalTypes.FirstOrDefaultAsync(m => m.MetalName == "Silver");
+                        if (goldMetal != null)
+                        {
+                            context.ReorderThresholds.Add(new ReorderThreshold
+                            {
+                                ThresholdType = "DAMAGED_HIGH_STOCK",
+                                MetalTypeId = goldMetal.MetalTypeId,
+                                VendorId = defaultVendor.VendorId,
+                                ThresholdWeightKg = 5.0m, // 5.000 KG threshold for Gold
+                                MinStockQty = 0,
+                                MaxStockQty = 0,
+                                ReorderQty = 0,
+                                IsActive = true,
+                                CreatedAt = DateTime.UtcNow,
+                                UpdatedAt = DateTime.UtcNow
+                            });
+                        }
+                        if (silverMetal != null)
+                        {
+                            context.ReorderThresholds.Add(new ReorderThreshold
+                            {
+                                ThresholdType = "DAMAGED_HIGH_STOCK",
+                                MetalTypeId = silverMetal.MetalTypeId,
+                                VendorId = defaultVendor.VendorId,
+                                ThresholdWeightKg = 20.0m, // 20.000 KG threshold for Silver
+                                MinStockQty = 0,
+                                MaxStockQty = 0,
+                                ReorderQty = 0,
+                                IsActive = true,
+                                CreatedAt = DateTime.UtcNow,
+                                UpdatedAt = DateTime.UtcNow
+                            });
+                        }
+
                         await context.SaveChangesAsync();
                     }
                 }
@@ -814,6 +851,16 @@ public static class DbSeeder
                 MakerDesc = "Maker selects missing serials, identifies source lot/consignment, specifies discrepancy justification, and submits report.",
                 CheckerStepName = "Missing Items Checker Authorization",
                 CheckerDesc = "Checker investigates missing serial discrepancy, approves inventory status transition to MISSING, and adjusts ownership balance."
+            },
+            new
+            {
+                WorkflowType = "DAMAGED_EXPORT",
+                Name = "Default Damaged Gold Export Workflow",
+                Description = "Three-level Maker-Checker-SeniorManager approval process for exporting damaged precious metals to manufacturer/refiner.",
+                MakerStepName = "Damaged Export Maker Initiation",
+                MakerDesc = "Maker selects damaged Turkey-owned bar, verifies physical defect report and MOCI assay, and initiates export request.",
+                CheckerStepName = "Damaged Export Checker Review",
+                CheckerDesc = "Checker reviews damage evidence, Turkey ownership, and validates export details."
             }
         };
 
@@ -852,11 +899,26 @@ public static class DbSeeder
                     Description = def.CheckerDesc
                 };
                 context.WorkflowSteps.AddRange(step1, step2);
+
+                if (def.WorkflowType == "DAMAGED_EXPORT")
+                {
+                    var step3 = new WorkflowStep
+                    {
+                        TemplateId = template.TemplateId,
+                        StepOrder = 3,
+                        StepName = "Damaged Export Senior Manager Authorization",
+                        RequiredRole = "Senior Treasury Manager",
+                        Description = "Senior Treasury Manager gives final executive authorization for overseas manufacturer export and courier dispatch."
+                    };
+                    context.WorkflowSteps.Add(step3);
+                }
+
                 await context.SaveChangesAsync();
             }
             else
             {
-                if (template.Steps == null || template.Steps.Count < 2)
+                int minSteps = def.WorkflowType == "DAMAGED_EXPORT" ? 3 : 2;
+                if (template.Steps == null || template.Steps.Count < minSteps)
                 {
                     bool hasPending = await context.WorkflowInstances.AnyAsync(i => i.TemplateId == template.TemplateId && i.StatusCode == "PENDING_MAKER");
                     if (!hasPending)
@@ -884,6 +946,20 @@ public static class DbSeeder
                             Description = def.CheckerDesc
                         };
                         context.WorkflowSteps.AddRange(step1, step2);
+
+                        if (def.WorkflowType == "DAMAGED_EXPORT")
+                        {
+                            var step3 = new WorkflowStep
+                            {
+                                TemplateId = template.TemplateId,
+                                StepOrder = 3,
+                                StepName = "Damaged Export Senior Manager Authorization",
+                                RequiredRole = "Senior Treasury Manager",
+                                Description = "Senior Treasury Manager gives final executive authorization for overseas manufacturer export and courier dispatch."
+                            };
+                            context.WorkflowSteps.Add(step3);
+                        }
+
                         await context.SaveChangesAsync();
                     }
                 }
@@ -922,6 +998,15 @@ public static class DbSeeder
             {"master_data","HIDDEN"}, {"workflow_design","READ_ONLY"}, {"intake","READ_ONLY"}, {"rules_engine","HIDDEN"},
             {"monitoring","HIDDEN"}, {"barcode_qr_labeling","READ_ONLY"}, {"purchase_orders","READ_ONLY"},
             {"dispensing","READ_ONLY"}, {"device_integration","HIDDEN"}, {"notifications","READ_ONLY"},
+        },
+        ["Senior Treasury Manager"] = new()
+        {
+            {"dashboard","FULL"}, {"pending_actions","FULL"}, {"spatial_map","READ_ONLY"},
+            {"custody","FULL"}, {"stocktake","READ_ONLY"}, {"migration","HIDDEN"}, {"reports","FULL"},
+            {"workflows","FULL"}, {"settings","READ_ONLY"}, {"user_admin","READ_ONLY"}, {"vault_location","READ_ONLY"},
+            {"master_data","READ_ONLY"}, {"workflow_design","READ_ONLY"}, {"intake","READ_ONLY"}, {"rules_engine","READ_ONLY"},
+            {"monitoring","FULL"}, {"barcode_qr_labeling","READ_ONLY"}, {"purchase_orders","FULL"},
+            {"dispensing","FULL"}, {"device_integration","READ_ONLY"}, {"notifications","FULL"},
         },
         ["IT Administrators"] = new()
         {
@@ -1205,9 +1290,10 @@ public static class DbSeeder
 
         var grpMaker = new PrivilegeGroup { GroupName = "Treasury Operations (Maker)", Description = "Initiates purchase orders, transfers, and branch operations.", IsSystem = true };
         var grpChecker = new PrivilegeGroup { GroupName = "Treasury Operations (Checker)", Description = "Reviews and approves purchase orders and intake verifications.", IsSystem = true };
+        var grpSenior = new PrivilegeGroup { GroupName = "Senior Treasury Manager", Description = "Executive authorization for high-value gold movements and overseas exports.", IsSystem = true };
         var grpRecon = new PrivilegeGroup { GroupName = "Reconciliation Officers", Description = "Runs audit sessions, stocktakes, and ledger reconciliation checks.", IsSystem = true };
         var grpAdmin = new PrivilegeGroup { GroupName = "IT Administrators", Description = "Full system access including user administration and configuration.", IsSystem = true };
-        context.PrivilegeGroups.AddRange(grpMaker, grpChecker, grpRecon, grpAdmin);
+        context.PrivilegeGroups.AddRange(grpMaker, grpChecker, grpSenior, grpRecon, grpAdmin);
         await context.SaveChangesAsync();
 
         // Apply the shared permission matrix (single source of truth -- see
@@ -1217,6 +1303,7 @@ public static class DbSeeder
         {
             [grpMaker.GroupName] = grpMaker,
             [grpChecker.GroupName] = grpChecker,
+            [grpSenior.GroupName] = grpSenior,
             [grpRecon.GroupName] = grpRecon,
             [grpAdmin.GroupName] = grpAdmin,
         };
@@ -1232,15 +1319,17 @@ public static class DbSeeder
 
         var userMaker = new AppUser { Username = "treasury-maker", DisplayName = "KFH Treasury Maker User", Email = "maker@kfh.com.kw", PasswordHash = demoHash, CreatedBy = "SYSTEM" };
         var userChecker = new AppUser { Username = "treasury-checker", DisplayName = "KFH Treasury Checker User", Email = "checker@kfh.com.kw", PasswordHash = demoHash, CreatedBy = "SYSTEM" };
+        var userSenior = new AppUser { Username = "treasury-manager", DisplayName = "KFH Senior Treasury Manager", Email = "manager@kfh.com.kw", PasswordHash = demoHash, CreatedBy = "SYSTEM" };
         var userRecon = new AppUser { Username = "reconciliation-reconciler", DisplayName = "KFH Reconciliation Officer", Email = "reconciler@kfh.com.kw", PasswordHash = demoHash, CreatedBy = "SYSTEM" };
         var userAdmin = new AppUser { Username = "system-admin", DisplayName = "KFH IT Administrator", Email = "admin@kfh.com.kw", PasswordHash = demoHash, CreatedBy = "SYSTEM" };
-        context.AppUsers.AddRange(userMaker, userChecker, userRecon, userAdmin);
+        context.AppUsers.AddRange(userMaker, userChecker, userSenior, userRecon, userAdmin);
         await context.SaveChangesAsync();
 
         // 21. User-Group Memberships
         context.UserGroupMemberships.AddRange(
             new UserGroupMembership { UserId = userMaker.UserId, GroupId = grpMaker.GroupId, AssignedBy = "SYSTEM" },
             new UserGroupMembership { UserId = userChecker.UserId, GroupId = grpChecker.GroupId, AssignedBy = "SYSTEM" },
+            new UserGroupMembership { UserId = userSenior.UserId, GroupId = grpSenior.GroupId, AssignedBy = "SYSTEM" },
             new UserGroupMembership { UserId = userRecon.UserId, GroupId = grpRecon.GroupId, AssignedBy = "SYSTEM" },
             new UserGroupMembership { UserId = userAdmin.UserId, GroupId = grpAdmin.GroupId, AssignedBy = "SYSTEM" }
         );

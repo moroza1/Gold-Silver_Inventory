@@ -215,3 +215,29 @@ public interface IMonitoringAdapter
     Task<SlaMetricsSnapshot> GetSlaMetricsAsync();
     Task<DetailedHealthStatus> GetDetailedHealthAsync(string environment);
 }
+
+// ---- Shipment Production Cost & Serial Validation ----
+public class ShipmentProductionCostInput
+{
+    public int MetalTypeId { get; set; }
+    public string? MetalTypeName { get; set; }
+    public int DenominationId { get; set; }
+    public string? DenominationName { get; set; }
+    public decimal ProductionCostKwd { get; set; }
+}
+
+public class IntakeSerialValidationRequest
+{
+    public List<string> SerialNumbers { get; set; } = new();
+    public string SourceType { get; set; } = "SUPPLIER";
+    public int? ProductId { get; set; }
+}
+
+public class IntakeSerialValidationResult
+{
+    public bool IsValid { get; set; } = true;
+    public List<string> Errors { get; set; } = new();
+    public List<string> DuplicateSerials { get; set; } = new();
+    public List<string> ExistingInventorySerials { get; set; } = new();
+    public List<string> InFlightPendingSerials { get; set; } = new();
+}

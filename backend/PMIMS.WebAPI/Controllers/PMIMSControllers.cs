@@ -609,6 +609,9 @@ public partial class PMIMSControllers : ControllerBase
             }
 
             string itemsJson = JsonSerializer.Serialize(req.Items);
+            string? prodCostsJson = req.ProductionCosts != null && req.ProductionCosts.Count > 0
+                ? JsonSerializer.Serialize(req.ProductionCosts)
+                : null;
             int? poId = (req.PoId == 0) ? null : req.PoId;
             int locationId = req.LocationId > 0 ? req.LocationId : 1;
             string initiator = User?.Identity?.Name ?? req.ReceivedBy;
@@ -621,7 +624,8 @@ public partial class PMIMSControllers : ControllerBase
                 ownershipType: string.IsNullOrWhiteSpace(req.OwnershipType) ? "CUSTOMS_OWNED" : req.OwnershipType,
                 customsDeclarationNumber: req.CustomsDeclarationNumber,
                 customsDutyAmount: req.CustomsDutyAmount,
-                portOfEntry: req.PortOfEntry);
+                portOfEntry: req.PortOfEntry,
+                productionCostsJson: prodCostsJson);
 
             return Ok(new { pending_id = pending.PendingIntakeId, message = "Intake shipment verification request initiated and routed to the Maker-Checker workflow approval." });
         }
@@ -755,7 +759,36 @@ public partial class PMIMSControllers : ControllerBase
             location_id = pi.LocationId,
             location_desc = pi.Location != null ? $"{pi.Location.ZoneRoom} - {pi.Location.ShelfRow} - {pi.Location.SlotBin}" : "Main Vault",
             serials_json = pi.SerialsJsonList,
+            production_costs_json = pi.ProductionCostsJson,
             created_at = pi.CreatedAt
+        }));
+    }
+
+    [HttpPost("vault/intake/validate-serials")]
+    [Authorize(Policy = "intake.read")]
+    public async Task<IActionResult> ValidateIntakeSerials([FromBody] IntakeSerialValidationRequest req)
+    {
+        var result = await _repository.ValidateIntakeSerialsAsync(req.SerialNumbers, req.SourceType, req.ProductId);
+        return Ok(result);
+    }
+
+    [HttpGet("vault/shipments/production-costs")]
+    [Authorize(Policy = "intake.read")]
+    public async Task<IActionResult> GetShipmentProductionCosts([FromQuery] int? pendingIntakeId, [FromQuery] int? lotId)
+    {
+        var costs = await _repository.GetShipmentProductionCostsAsync(pendingIntakeId, lotId);
+        return Ok(costs.Select(c => new {
+            id = c.Id,
+            pending_intake_id = c.PendingIntakeId,
+            lot_id = c.LotId,
+            shipment_reference = c.ShipmentReference,
+            metal_type_id = c.MetalTypeId,
+            metal_type_name = c.MetalType?.MetalName,
+            denomination_id = c.DenominationId,
+            denomination_weight_grams = c.Denomination?.WeightGrams,
+            denomination_name = c.Denomination != null ? (c.Denomination.WeightGrams >= 1000 ? $"{c.Denomination.WeightGrams / 1000m} KG" : $"{c.Denomination.WeightGrams}g") : null,
+            production_cost_kwd = c.ProductionCostKwd,
+            created_at = c.CreatedAt
         }));
     }
 
@@ -1329,6 +1362,7 @@ public partial class PMIMSControllers : ControllerBase
                         customs_duty_amount = pending.CustomsDutyAmount,
                         port_of_entry = pending.PortOfEntry,
                         serials_json = pending.SerialsJsonList,
+                        production_costs_json = pending.ProductionCostsJson,
                         created_by = pending.ReceivedBy
                     };
                 }
@@ -1958,6 +1992,210 @@ public partial class PMIMSControllers : ControllerBase
     }
 
     // =========================================================================
+    // INVENTORY HIERARCHY DASHBOARD (Card-based 4-Level Drill-Down in KG)
+    // Hierarchy: 1. Owner -> 2. Precious Metal Type -> 3. Location (incl. In-Transit Custody) -> 4. Denomination
+    // In-Transit Classification represents custody/movement, NOT ownership (retains actual owner).
+    // =========================================================================
+    [Authorize(Policy = "dashboard.read")]
+    [HttpGet("dashboard/inventory-hierarchy")]
+    public async Task<IActionResult> GetInventoryHierarchy([FromQuery] string? startDate, [FromQuery] string? endDate)
+    {
+        DateTime? rangeStart = ParseDateOrNull(startDate);
+        DateTime? rangeEndExclusive = ParseDateOrNull(endDate)?.Date.AddDays(1);
+
+        var allItems = (await _repository.GetItemsAsync()).AsEnumerable();
+        if (rangeStart.HasValue)
+            allItems = allItems.Where(i => i.Lot == null || i.Lot.AcquisitionDate >= rangeStart.Value);
+        if (rangeEndExclusive.HasValue)
+            allItems = allItems.Where(i => i.Lot == null || i.Lot.AcquisitionDate < rangeEndExclusive.Value);
+        
+        var scopedItems = allItems.ToList();
+        var transfers = (await _repository.GetBranchTransfersAsync())
+            .Where(t => t.StatusCode == "IN_TRANSIT" || t.StatusCode == "APPROVED")
+            .ToList();
+
+        // Map active transfers by ItemId
+        var activeTransferMap = transfers
+            .GroupBy(t => t.ItemId)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(t => t.CreatedAt).First());
+
+        static decimal GetItemWeightKg(InventoryItem item) =>
+            (item.Product?.Denomination?.WeightGrams ?? 0m) / 1000m;
+
+        static string ResolveOwnerCode(string? raw) => raw switch
+        {
+            "TURKEY_OWNED" or "PROPRIETARY" => "TURKEY_OWNED",
+            "CUSTOMER_OWNED" or "HELD_IN_CUSTODY" => "CUSTOMER_OWNED",
+            "VIP_OWNED" => "VIP_OWNED",
+            _ => "KFH_OWNED"
+        };
+
+        static string ResolveOwnerLabel(string code) => code switch
+        {
+            "TURKEY_OWNED" => "Turkey Consignment (KT Gold)",
+            "CUSTOMER_OWNED" => "Customer Custody (Safekeeping)",
+            "VIP_OWNED" => "VIP Exclusive Reserve",
+            _ => "KFH Proprietary Stock"
+        };
+
+        static string ResolveMetalType(InventoryItem item)
+        {
+            var metalName = item.Product?.MetalType?.MetalName;
+            if (!string.IsNullOrWhiteSpace(metalName)) return metalName.Trim();
+            var code = item.Product?.ProductCode ?? "";
+            if (code.StartsWith("AG-", StringComparison.OrdinalIgnoreCase) || code.Contains("SILVER", StringComparison.OrdinalIgnoreCase))
+                return "Silver";
+            if (code.StartsWith("PT-", StringComparison.OrdinalIgnoreCase) || code.Contains("PLATINUM", StringComparison.OrdinalIgnoreCase))
+                return "Platinum";
+            return "Gold";
+        }
+
+        var ownerGroups = scopedItems
+            .GroupBy(i => ResolveOwnerCode(i.OwnershipType))
+            .Select(og =>
+            {
+                var ownerCode = og.Key;
+                var ownerLabel = ResolveOwnerLabel(ownerCode);
+                var ownerItems = og.ToList();
+                var ownerTotalWeightKg = Math.Round(ownerItems.Sum(GetItemWeightKg), 3);
+                var ownerTotalQty = ownerItems.Count;
+
+                var metalGroups = ownerItems
+                    .GroupBy(ResolveMetalType)
+                    .Select(mg =>
+                    {
+                        var metalName = mg.Key;
+                        var metalItems = mg.ToList();
+                        var metalTotalWeightKg = Math.Round(metalItems.Sum(GetItemWeightKg), 3);
+                        var metalTotalQty = metalItems.Count;
+
+                        var locationGroups = metalItems
+                            .GroupBy(i =>
+                            {
+                                bool isTransit = i.StatusCode == "IN_TRANSFER" || activeTransferMap.ContainsKey(i.ItemId);
+                                if (isTransit)
+                                {
+                                    activeTransferMap.TryGetValue(i.ItemId, out var tr);
+                                    var courier = !string.IsNullOrWhiteSpace(tr?.CourierInfo) ? tr.CourierInfo : "Authorized Armored Logistics";
+                                    var destBranch = tr?.DestinationBranch?.BranchName;
+                                    var destInfo = !string.IsNullOrWhiteSpace(destBranch) ? $" -> {destBranch}" : "";
+                                    return (IsTransit: true, Key: $"IN_TRANSIT:{courier}{destInfo}", Label: $"In Transit (Courier: {courier}{destInfo})", Courier: courier);
+                                }
+
+                                var vaultName = i.Location?.Vault?.VaultName;
+                                var desc = i.Location?.Description;
+                                var locLabel = !string.IsNullOrWhiteSpace(vaultName)
+                                    ? (!string.IsNullOrWhiteSpace(desc) ? $"{vaultName} - {desc}" : vaultName)
+                                    : (!string.IsNullOrWhiteSpace(desc) ? desc : "Main Vault Storage");
+
+                                return (IsTransit: false, Key: $"LOC:{i.LocationId ?? 0}:{locLabel}", Label: locLabel, Courier: (string?)null);
+                            })
+                            .Select(lg =>
+                            {
+                                var locInfo = lg.Key;
+                                var locItems = lg.ToList();
+                                var locTotalWeightKg = Math.Round(locItems.Sum(GetItemWeightKg), 3);
+                                var locTotalQty = locItems.Count;
+
+                                var denomGroups = locItems
+                                    .GroupBy(i => i.Product?.Denomination?.Label ?? $"{i.Product?.Denomination?.WeightGrams ?? 0}g Bar")
+                                    .Select(dg =>
+                                    {
+                                        var denomLabel = dg.Key;
+                                        var denomItems = dg.ToList();
+                                        var unitWeightGrams = denomItems.FirstOrDefault()?.Product?.Denomination?.WeightGrams ?? 0m;
+                                        var denomTotalWeightKg = Math.Round(denomItems.Sum(GetItemWeightKg), 3);
+                                        var denomTotalQty = denomItems.Count;
+
+                                        return new
+                                        {
+                                            denomination_label = denomLabel,
+                                            unit_weight_grams = unitWeightGrams,
+                                            bar_count = denomTotalQty,
+                                            total_weight_kg = denomTotalWeightKg,
+                                            items = denomItems.Select(item => new
+                                            {
+                                                item_id = item.ItemId,
+                                                serial_number = item.SerialNumber,
+                                                product_code = item.Product?.ProductCode ?? "",
+                                                metal_name = metalName,
+                                                weight_grams = item.Product?.Denomination?.WeightGrams ?? 0m,
+                                                weight_kg = Math.Round(GetItemWeightKg(item), 4),
+                                                purity = item.Product?.Purity?.PurityValue ?? 0.9999m,
+                                                brand_name = item.Product?.BrandName ?? item.Product?.Brand?.BrandName ?? "",
+                                                status = item.StatusCode,
+                                                ownership_type = item.OwnershipType,
+                                                is_in_transit = locInfo.IsTransit,
+                                                courier_info = locInfo.Courier,
+                                                location_label = locInfo.Label,
+                                                is_damaged = item.IsDamaged,
+                                                gdl_status = item.GoodDeliveryStatus
+                                            })
+                                        };
+                                    })
+                                    .OrderByDescending(d => d.unit_weight_grams)
+                                    .ToList();
+
+                                return new
+                                {
+                                    location_key = locInfo.Key,
+                                    location_label = locInfo.Label,
+                                    is_in_transit = locInfo.IsTransit,
+                                    courier_info = locInfo.Courier,
+                                    bar_count = locTotalQty,
+                                    total_weight_kg = locTotalWeightKg,
+                                    denominations = denomGroups
+                                };
+                            })
+                            .OrderBy(l => l.is_in_transit ? 1 : 0)
+                            .ThenByDescending(l => l.total_weight_kg)
+                            .ToList();
+
+                        return new
+                        {
+                            metal_name = metalName,
+                            bar_count = metalTotalQty,
+                            total_weight_kg = metalTotalWeightKg,
+                            locations = locationGroups
+                        };
+                    })
+                    .OrderByDescending(m => m.total_weight_kg)
+                    .ToList();
+
+                var inTransitItems = ownerItems.Where(i => i.StatusCode == "IN_TRANSFER" || activeTransferMap.ContainsKey(i.ItemId)).ToList();
+                var inTransitWeightKg = Math.Round(inTransitItems.Sum(GetItemWeightKg), 3);
+                var inTransitQty = inTransitItems.Count;
+
+                return new
+                {
+                    owner_code = ownerCode,
+                    owner_label = ownerLabel,
+                    bar_count = ownerTotalQty,
+                    total_weight_kg = ownerTotalWeightKg,
+                    in_transit_weight_kg = inTransitWeightKg,
+                    in_transit_bar_count = inTransitQty,
+                    metals = metalGroups
+                };
+            })
+            .OrderByDescending(o => o.total_weight_kg)
+            .ToList();
+
+        var grandTotalWeightKg = Math.Round(scopedItems.Sum(GetItemWeightKg), 3);
+        var grandTotalBars = scopedItems.Count;
+        var totalInTransitWeightKg = Math.Round(scopedItems.Where(i => i.StatusCode == "IN_TRANSFER" || activeTransferMap.ContainsKey(i.ItemId)).Sum(GetItemWeightKg), 3);
+        var totalInTransitBars = scopedItems.Count(i => i.StatusCode == "IN_TRANSFER" || activeTransferMap.ContainsKey(i.ItemId));
+
+        return Ok(new
+        {
+            total_weight_kg = grandTotalWeightKg,
+            total_bar_count = grandTotalBars,
+            total_in_transit_weight_kg = totalInTransitWeightKg,
+            total_in_transit_bar_count = totalInTransitBars,
+            hierarchy = ownerGroups
+        });
+    }
+
+    // =========================================================================
     // COMPLIANCE DASHBOARD -- Reporting Requirements Gap Analysis, Item 6.
     // ------------------------------------------------------------------------
     // The Executive Board dashboard above serves Management; Compliance/Audit
@@ -2488,6 +2726,62 @@ public partial class PMIMSControllers : ControllerBase
         return Ok(alerts);
     }
 
+    [Authorize(Policy = "custody.write")]
+    [HttpPost("inventory/damaged/export/initiate")]
+    public async Task<IActionResult> InitiateDamagedExport([FromBody] InitiateDamagedExportRequest req)
+    {
+        try
+        {
+            string username = User.Identity?.Name ?? "system";
+            var result = await _repository.InitiateDamagedExportAsync(req.ItemId, username, req.Notes, req.VendorId, req.CustomsDeclarationNumber);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
+    [Authorize]
+    [HttpGet("inventory/damaged/export/pending")]
+    public async Task<IActionResult> GetPendingDamagedExports()
+    {
+        var list = await _repository.GetPendingDamagedExportsAsync();
+        return Ok(list);
+    }
+
+    [Authorize]
+    [HttpGet("inventory/damaged/export/history")]
+    public async Task<IActionResult> GetDamagedExportHistory()
+    {
+        var list = await _repository.GetDamagedExportHistoryAsync();
+        return Ok(list);
+    }
+
+    [Authorize(Policy = "custody.write")]
+    [HttpPost("inventory/damaged/export/{exportId}/handover")]
+    public async Task<IActionResult> HandoverDamagedExportToCourier(int exportId, [FromBody] HandoverDamagedExportRequest req)
+    {
+        try
+        {
+            string username = User.Identity?.Name ?? "system";
+            var result = await _repository.HandoverDamagedExportToCourierAsync(exportId, req.CourierCompany, req.CourierRep, req.TrackingNumber, req.SecuritySeal, username, req.Notes);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
+    [Authorize]
+    [HttpGet("inventory/bars/history/{serialNumber}")]
+    public async Task<IActionResult> GetBarHistoryBySerial(string serialNumber)
+    {
+        var history = await _repository.GetItemHistoryBySerialNumberAsync(serialNumber);
+        return Ok(history);
+    }
+
     private static string ComputeSha256(string input)
     {
         using var sha = System.Security.Cryptography.SHA256.Create();
@@ -2570,6 +2864,7 @@ public class IntakeRequest
     public decimal? PurchasingCost { get => CustomsDutyAmount; set => CustomsDutyAmount = value; }
     public string? PortOfEntry { get; set; }
     public List<IntakeItemDTO> Items { get; set; } = new();
+    public List<ShipmentProductionCostInput>? ProductionCosts { get; set; }
 }
 
 public class ClearCustomsRequest
@@ -2727,13 +3022,23 @@ public class AddMemberRequest
 public class SaveReorderThresholdRequest
 {
     public int? ThresholdId { get; set; }
-    public string ThresholdType { get; set; } = "LOW_STOCK"; // LOW_STOCK, HIGH_STOCK
-    public int ProductId { get; set; }
-    public int VendorId { get; set; }
+    public string ThresholdType { get; set; } = "LOW_STOCK"; // LOW_STOCK, HIGH_STOCK, DAMAGED_HIGH_STOCK
+    public int? ProductId { get; set; }
+    public int? VendorId { get; set; }
+    public int? MetalTypeId { get; set; }
     public int MinStockQty { get; set; }
     public int? MaxStockQty { get; set; }
+    public decimal? ThresholdWeightKg { get; set; }
     public int ReorderQty { get; set; }
     public bool IsActive { get; set; } = true;
+}
+
+public class GenerateDamagedExportManifestRequest
+{
+    public int MetalTypeId { get; set; } = 1;
+    public int? VendorId { get; set; }
+    public List<int> ItemIds { get; set; } = new();
+    public string? Notes { get; set; }
 }
 
 public class DraftPORequest

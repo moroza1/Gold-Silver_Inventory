@@ -272,6 +272,14 @@ public class InventoryItem
     public string? MociAssayNumber { get; set; }
     public DateTime? MociInspectionDate { get; set; }
 
+    // Shipment Production Cost (KWD) captured at intake
+    public decimal? ProductionCostKwd { get; set; }
+
+    // Damaged Bar Replacement & Traceability Linking
+    public int? ReplacedByItemId { get; set; }
+    public int? ReplacesItemId { get; set; }
+    public DateTime? ReplacementDate { get; set; }
+
     public int? BrandId { get; set; }
     public MetalBrand? Brand { get; set; }
 
@@ -876,11 +884,13 @@ public class UserGroupMembership
 public class ReorderThreshold
 {
     public int ThresholdId { get; set; }
-    public string ThresholdType { get; set; } = "LOW_STOCK"; // LOW_STOCK, HIGH_STOCK
-    public int ProductId { get; set; }
-    public int VendorId { get; set; }
+    public string ThresholdType { get; set; } = "LOW_STOCK"; // LOW_STOCK, HIGH_STOCK, DAMAGED_HIGH_STOCK
+    public int? ProductId { get; set; }
+    public int? VendorId { get; set; }
+    public int? MetalTypeId { get; set; }
     public int MinStockQty { get; set; } // Min threshold alert level (LOW_STOCK)
     public int? MaxStockQty { get; set; } // Max threshold alert level (HIGH_STOCK)
+    public decimal? ThresholdWeightKg { get; set; } // Applicable for DAMAGED_HIGH_STOCK (accumulated damaged weight limit in KG)
     public int ReorderQty { get; set; }
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
@@ -888,6 +898,74 @@ public class ReorderThreshold
 
     public MetalProduct? Product { get; set; }
     public Vendor? Vendor { get; set; }
+    public MetalType? MetalType { get; set; }
+}
+
+public class DamagedHighStockAlert
+{
+    public int MetalTypeId { get; set; }
+    public string MetalName { get; set; } = "Gold";
+    public decimal TotalDamagedWeightGrams { get; set; }
+    public decimal TotalDamagedWeightKg { get; set; }
+    public int TotalDamagedBarsCount { get; set; }
+    public decimal ThresholdWeightKg { get; set; }
+    public bool IsBreached { get; set; }
+    public decimal ExcessWeightKg { get; set; }
+    public int? ThresholdId { get; set; }
+    public string AlertStatus { get; set; } = "NORMAL"; // NORMAL, ALERT_BREACHED
+    public string Message { get; set; } = "";
+    public List<DamagedBarExportCandidate> CandidateBars { get; set; } = new();
+}
+
+public class DamagedBarExportCandidate
+{
+    public int ItemId { get; set; }
+    public string SerialNumber { get; set; } = "";
+    public int MetalTypeId { get; set; }
+    public string MetalName { get; set; } = "";
+    public string DenominationLabel { get; set; } = "";
+    public decimal WeightGrams { get; set; }
+    public decimal WeightKg { get; set; }
+    public decimal? FinenessPpt { get; set; }
+    public string RefinerName { get; set; } = "";
+    public int? VendorId { get; set; }
+    public string VendorName { get; set; } = "";
+    public string OwnershipType { get; set; } = "";
+    public string StatusCode { get; set; } = "";
+    public string DamageReason { get; set; } = "";
+    public string DamageDescription { get; set; } = "";
+    public string LocationDescription { get; set; } = "";
+    public DateTime? InspectionDate { get; set; }
+    public DateTime? DamageApprovedAt { get; set; }
+    public string DamageApprovedBy { get; set; } = "";
+}
+
+public class DamagedExportManifestResult
+{
+    public string manifest_number { get; set; } = "";
+    public int metal_type_id { get; set; }
+    public string metal_name { get; set; } = "";
+    public int? vendor_id { get; set; }
+    public string vendor_name { get; set; } = "";
+    public int total_items_count { get; set; }
+    public decimal total_weight_grams { get; set; }
+    public decimal total_weight_kg { get; set; }
+    public string generated_by { get; set; } = "";
+    public DateTime generated_at { get; set; } = DateTime.UtcNow;
+    public string notes { get; set; } = "";
+    public List<DamagedExportManifestItem> items { get; set; } = new();
+}
+
+public class DamagedExportManifestItem
+{
+    public int item_id { get; set; }
+    public string serial_number { get; set; } = "";
+    public string denomination { get; set; } = "";
+    public decimal weight_grams { get; set; }
+    public decimal weight_kg { get; set; }
+    public decimal? fineness { get; set; }
+    public string damage_reason { get; set; } = "";
+    public string refiner { get; set; } = "";
 }
 
 public class StockAlertItem
@@ -971,6 +1049,7 @@ public class PendingIntake
     public decimal? CustomsDutyAmount { get; set; }
     public string? PortOfEntry { get; set; }
     public DateTime? CustomsClearanceDate { get; set; }
+    public string? ProductionCostsJson { get; set; }
     public string StatusCode { get; set; } = "PENDING_APPROVAL"; // PENDING_APPROVAL, APPROVED, REJECTED
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
@@ -978,6 +1057,23 @@ public class PendingIntake
     public Vendor? Vendor { get; set; }
     public InventoryLocation? Location { get; set; }
     public Customer? Customer { get; set; }
+}
+
+public class ShipmentProductionCost
+{
+    public int Id { get; set; }
+    public int? PendingIntakeId { get; set; }
+    public int? LotId { get; set; }
+    public string ShipmentReference { get; set; } = string.Empty;
+    public int MetalTypeId { get; set; }
+    public int DenominationId { get; set; }
+    public decimal ProductionCostKwd { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    public PendingIntake? PendingIntake { get; set; }
+    public InventoryLot? Lot { get; set; }
+    public MetalType? MetalType { get; set; }
+    public MetalDenomination? Denomination { get; set; }
 }
 
 public class PendingTurkeyPurchase
@@ -1001,12 +1097,14 @@ public class PendingThresholdChange
 {
     public int PendingChangeId { get; set; }
     public string ChangeType { get; set; } = "CREATE"; // CREATE, AMEND, ACTIVATE, DEACTIVATE, DELETE
-    public string ThresholdType { get; set; } = "LOW_STOCK"; // LOW_STOCK, HIGH_STOCK
+    public string ThresholdType { get; set; } = "LOW_STOCK"; // LOW_STOCK, HIGH_STOCK, DAMAGED_HIGH_STOCK
     public int? ThresholdId { get; set; }
-    public int ProductId { get; set; }
-    public int VendorId { get; set; }
+    public int? ProductId { get; set; }
+    public int? VendorId { get; set; }
+    public int? MetalTypeId { get; set; }
     public int MinStockQty { get; set; }
     public int? MaxStockQty { get; set; }
+    public decimal? ThresholdWeightKg { get; set; }
     public int ReorderQty { get; set; }
     public bool IsActive { get; set; } = true;
     public string StatusCode { get; set; } = "PENDING_APPROVAL"; // PENDING_APPROVAL, APPROVED, REJECTED
@@ -1017,6 +1115,7 @@ public class PendingThresholdChange
 
     public MetalProduct? Product { get; set; }
     public Vendor? Vendor { get; set; }
+    public MetalType? MetalType { get; set; }
     public ReorderThreshold? Threshold { get; set; }
 }
 
@@ -1450,5 +1549,140 @@ public class SystemSetting
     public string? UpdatedBy { get; set; }
 }
 
+// ============================================================
+// QR Printing and Reprinting Log & Approvals
+// ============================================================
+public class QrPrintLog
+{
+    public int PrintLogId { get; set; }
+    public int ItemId { get; set; }
+    public string SerialNumber { get; set; } = null!;
+    public string PrintType { get; set; } = "INITIAL_SINGLE"; // INITIAL_SINGLE, INITIAL_BATCH, REPRINT_SINGLE, REPRINT_BATCH
+    public string? PrintReason { get; set; }
+    public int? ReprintRequestId { get; set; }
+    public string PrintedBy { get; set; } = null!;
+    public DateTime PrintedAt { get; set; } = DateTime.UtcNow;
+    public string? LabelPayload { get; set; }
 
+    public InventoryItem? Item { get; set; }
+    public PendingQrReprint? ReprintRequest { get; set; }
+}
 
+public class PendingQrReprint
+{
+    public int ReprintRequestId { get; set; }
+    public string RequestType { get; set; } = "SINGLE"; // SINGLE, BATCH
+    public string ItemIdsJson { get; set; } = "[]"; // JSON array of ItemIds
+    public int ItemCount { get; set; } = 1;
+    public string Reason { get; set; } = null!;
+    public string? AttachmentUrl { get; set; }
+    public string Status { get; set; } = "PENDING_APPROVAL"; // PENDING_APPROVAL, APPROVED, REJECTED
+    public string InitiatedBy { get; set; } = null!;
+    public DateTime InitiatedAt { get; set; } = DateTime.UtcNow;
+    public string? ApprovedBy { get; set; }
+    public DateTime? ApprovedAt { get; set; }
+    public string? RejectionReason { get; set; }
+}
+
+// ============================================================
+// Damaged-Bar Replacement with Turkey Consignment
+// ============================================================
+public class DamagedBarReplacement
+{
+    public int ReplacementId { get; set; }
+    public string ReplacementReference { get; set; } = null!; // e.g. DBR-2026-0001
+    public int DamagedItemId { get; set; }
+    public string DamagedSerialNumber { get; set; } = null!;
+    public string DamagedOriginalOwner { get; set; } = "KFH_OWNED"; // KFH_OWNED, CUSTOMER_OWNED
+    public int? CustomerId { get; set; }
+    public int? AccountId { get; set; }
+    public int? CustomerHoldingId { get; set; }
+    public int ReplacementItemId { get; set; }
+    public string ReplacementSerialNumber { get; set; } = null!;
+    public int MetalTypeId { get; set; }
+    public int DenominationId { get; set; }
+    public decimal WeightGrams { get; set; }
+    public string Reason { get; set; } = null!;
+    public string? AttachmentUrl { get; set; }
+    public string Status { get; set; } = "PENDING_APPROVAL"; // PENDING_APPROVAL, APPROVED, REJECTED
+    public string InitiatedBy { get; set; } = null!;
+    public DateTime InitiatedAt { get; set; } = DateTime.UtcNow;
+    public string? ApprovedBy { get; set; }
+    public DateTime? ApprovedAt { get; set; }
+    public string? RejectionReason { get; set; }
+
+    public InventoryItem? DamagedItem { get; set; }
+    public InventoryItem? ReplacementItem { get; set; }
+    public Customer? Customer { get; set; }
+    public CustomerAccount? Account { get; set; }
+    public CustomerHolding? CustomerHolding { get; set; }
+}
+
+// ============================================================
+// Damaged Gold Export (3-Level Maker-Checker-SeniorManager Approval)
+// ============================================================
+public class PendingDamagedExport
+{
+    public int ExportId { get; set; }
+    public string ExportReference { get; set; } = null!; // e.g. EXP-DMG-20260922-0001
+    public int ItemId { get; set; }
+    public string SerialNumber { get; set; } = null!;
+    public int MetalTypeId { get; set; }
+    public decimal WeightGrams { get; set; }
+    public int? VendorId { get; set; }
+    public string? VendorName { get; set; }
+    public string Reason { get; set; } = null!;
+    public string? CustomsDeclarationNumber { get; set; }
+    public string? CourierCompany { get; set; }
+    public string? CourierTrackingNumber { get; set; }
+    public string? HandoverCourierRep { get; set; }
+    public string? SecuritySealNumber { get; set; }
+    public DateTime? HandoverTimestamp { get; set; }
+    public string StatusCode { get; set; } = "PENDING_APPROVAL"; // PENDING_APPROVAL, APPROVED, EXPORTED, REJECTED
+    public string RequestedBy { get; set; } = null!;
+    public string? CheckerApprovedBy { get; set; }
+    public string? SeniorManagerApprovedBy { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? ApprovedAt { get; set; }
+    public DateTime? ExportedAt { get; set; }
+    public string? Notes { get; set; }
+    public string? RejectionReason { get; set; }
+
+    public InventoryItem? Item { get; set; }
+    public MetalType? MetalType { get; set; }
+    public Vendor? Vendor { get; set; }
+}
+
+public class InitiateDamagedExportRequest
+{
+    public int ItemId { get; set; }
+    public string? Reason { get; set; }
+    public string? Notes { get; set; }
+    public int? VendorId { get; set; }
+    public string? CustomsDeclarationNumber { get; set; }
+}
+
+public class HandoverDamagedExportRequest
+{
+    public string CourierCompany { get; set; } = null!;
+    public string CourierRep { get; set; } = null!;
+    public string TrackingNumber { get; set; } = null!;
+    public string SecuritySeal { get; set; } = null!;
+    public string? Notes { get; set; }
+}
+
+public class BarLifecycleHistoryDto
+{
+    public int ItemId { get; set; }
+    public string SerialNumber { get; set; } = null!;
+    public string ProductName { get; set; } = null!;
+    public decimal WeightGrams { get; set; }
+    public string OwnershipType { get; set; } = null!;
+    public string StatusCode { get; set; } = null!;
+    public string? LocationLabel { get; set; }
+    public DateTime? ReceivingDate { get; set; }
+    public bool IsDamaged { get; set; }
+    public string? DamageReason { get; set; }
+    public DateTime? ExportedAt { get; set; }
+    public List<ChainOfCustodyEvent> CustodyEvents { get; set; } = new();
+}

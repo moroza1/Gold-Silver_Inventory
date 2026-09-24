@@ -287,11 +287,14 @@ public partial class PMIMSControllers
             threshold_type = t.ThresholdType,
             product_id = t.ProductId,
             product_code = t.Product?.ProductCode ?? "",
-            product_name = $"{t.Product?.MetalType?.MetalName ?? ""} {t.Product?.Denomination?.Label ?? ""}",
+            product_name = t.Product != null ? $"{t.Product?.MetalType?.MetalName ?? ""} {t.Product?.Denomination?.Label ?? ""}" : $"{t.MetalType?.MetalName ?? "All"} Products",
+            metal_type_id = t.MetalTypeId ?? t.Product?.MetalTypeId,
+            metal_name = t.MetalType?.MetalName ?? t.Product?.MetalType?.MetalName ?? "Gold",
             vendor_id = t.VendorId,
-            vendor_name = t.Vendor?.VendorName ?? "",
+            vendor_name = t.Vendor?.VendorName ?? "All Manufacturers",
             min_stock_qty = t.MinStockQty,
             max_stock_qty = t.MaxStockQty ?? (t.ThresholdType == "HIGH_STOCK" ? t.MinStockQty : (int?)null),
+            threshold_weight_kg = t.ThresholdWeightKg,
             reorder_qty = t.ReorderQty,
             is_active = t.IsActive
         }));
@@ -302,7 +305,20 @@ public partial class PMIMSControllers
     public async Task<IActionResult> SaveReorderThreshold([FromBody] SaveReorderThresholdRequest req)
     {
         string username = User.Identity?.Name ?? "system-admin";
-        var pending = await _repository.SubmitThresholdChangeRequestAsync(req.ThresholdType, req.ThresholdId, req.ProductId, req.VendorId, req.MinStockQty, req.MaxStockQty, req.ReorderQty, req.IsActive, username);
+        var pending = await _repository.SubmitThresholdChangeRequestAsync(
+            req.ThresholdType,
+            req.ThresholdId,
+            req.ProductId,
+            req.VendorId,
+            req.MinStockQty,
+            req.MaxStockQty,
+            req.ReorderQty,
+            req.IsActive,
+            username,
+            null,
+            req.MetalTypeId,
+            req.ThresholdWeightKg
+        );
         return Ok(new {
             pending_change_id = pending.PendingChangeId,
             change_type = pending.ChangeType,
@@ -310,10 +326,13 @@ public partial class PMIMSControllers
             threshold_id = pending.ThresholdId,
             product_id = pending.ProductId,
             product_code = pending.Product?.ProductCode ?? "",
+            metal_type_id = pending.MetalTypeId,
+            metal_name = pending.MetalType?.MetalName ?? pending.Product?.MetalType?.MetalName ?? "Gold",
             vendor_id = pending.VendorId,
-            vendor_name = pending.Vendor?.VendorName ?? "",
+            vendor_name = pending.Vendor?.VendorName ?? "All Manufacturers",
             min_stock_qty = pending.MinStockQty,
             max_stock_qty = pending.MaxStockQty,
+            threshold_weight_kg = pending.ThresholdWeightKg,
             reorder_qty = pending.ReorderQty,
             is_active = pending.IsActive,
             status_code = pending.StatusCode,
@@ -349,11 +368,14 @@ public partial class PMIMSControllers
             threshold_id = c.ThresholdId,
             product_id = c.ProductId,
             product_code = c.Product?.ProductCode ?? "",
-            product_name = $"{c.Product?.MetalType?.MetalName ?? ""} {c.Product?.Denomination?.Label ?? ""}",
+            product_name = c.Product != null ? $"{c.Product?.MetalType?.MetalName ?? ""} {c.Product?.Denomination?.Label ?? ""}" : $"{c.MetalType?.MetalName ?? "All"} Products",
+            metal_type_id = c.MetalTypeId ?? c.Product?.MetalTypeId,
+            metal_name = c.MetalType?.MetalName ?? c.Product?.MetalType?.MetalName ?? "Gold",
             vendor_id = c.VendorId,
-            vendor_name = c.Vendor?.VendorName ?? "",
+            vendor_name = c.Vendor?.VendorName ?? "All Manufacturers",
             min_stock_qty = c.MinStockQty,
             max_stock_qty = c.MaxStockQty,
+            threshold_weight_kg = c.ThresholdWeightKg,
             reorder_qty = c.ReorderQty,
             is_active = c.IsActive,
             status_code = c.StatusCode,
@@ -361,6 +383,47 @@ public partial class PMIMSControllers
             created_at = c.CreatedAt,
             comments = c.Comments
         }));
+    }
+
+    // =========================================================================
+    // Damaged Gold High-Stock Alert & Manufacturer Export (Requirement 6)
+    // =========================================================================
+
+    [Authorize(Policy = "dashboard.read")]
+    [HttpGet("inventory/damaged/high-stock-alerts")]
+    public async Task<IActionResult> GetDamagedHighStockAlerts([FromQuery] int? metalTypeId = null)
+    {
+        var alerts = await _repository.GetDamagedHighStockAlertsAsync(metalTypeId);
+        return Ok(alerts);
+    }
+
+    [Authorize]
+    [HttpGet("inventory/damaged/export-candidates")]
+    public async Task<IActionResult> GetDamagedExportCandidates([FromQuery] int? metalTypeId = null, [FromQuery] int? vendorId = null)
+    {
+        var candidates = await _repository.GetDamagedExportCandidatesAsync(metalTypeId, vendorId);
+        return Ok(candidates);
+    }
+
+    [Authorize(Policy = "master_data.write")]
+    [HttpPost("inventory/damaged/export-manifest")]
+    public async Task<IActionResult> GenerateDamagedExportManifest([FromBody] GenerateDamagedExportManifestRequest req)
+    {
+        string username = User.Identity?.Name ?? "system-admin";
+        if (req.ItemIds == null || req.ItemIds.Count == 0)
+        {
+            return BadRequest(new { error = "Please select at least one damaged bar to export to the manufacturer." });
+        }
+
+        try
+        {
+            var manifest = await _repository.GenerateDamagedExportManifestAsync(req.MetalTypeId, req.VendorId, req.ItemIds, username, req.Notes);
+            return Ok(manifest);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
     }
 
     [Authorize(Policy = "dashboard.read")]

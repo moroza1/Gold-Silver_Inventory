@@ -885,6 +885,49 @@ export default function App() {
   const [selectedExecKpi, setSelectedExecKpi] = useState<'TOTAL_PRECIOUS' | 'PROPRIETARY_GOLD' | 'READY_SALE' | 'VIP_STOCK' | 'RESERVED' | 'CUSTODY' | 'DAMAGED'>('TOTAL_PRECIOUS');
   const [execPreciousFilter, setExecPreciousFilter] = useState<'ALL' | 'SWISS' | 'TURKEY' | 'SILVER'>('ALL');
 
+  // Hierarchical Drill-down Dashboard state (Owner -> Metal -> Location/In-Transit -> Denomination) in KG
+  const [execDashboardMode, setExecDashboardMode] = useState<'drilldown' | 'classic'>('drilldown');
+  const [inventoryHierarchy, setInventoryHierarchy] = useState<{
+    total_weight_kg: number;
+    total_bar_count: number;
+    total_in_transit_weight_kg: number;
+    total_in_transit_bar_count: number;
+    hierarchy: Array<{
+      owner_code: string;
+      owner_label: string;
+      bar_count: number;
+      total_weight_kg: number;
+      in_transit_weight_kg: number;
+      in_transit_bar_count: number;
+      metals: Array<{
+        metal_name: string;
+        bar_count: number;
+        total_weight_kg: number;
+        locations: Array<{
+          location_key: string;
+          location_label: string;
+          is_in_transit: boolean;
+          courier_info: string | null;
+          bar_count: number;
+          total_weight_kg: number;
+          denominations: Array<{
+            denomination_label: string;
+            unit_weight_grams: number;
+            bar_count: number;
+            total_weight_kg: number;
+            items: any[];
+          }>;
+        }>;
+      }>;
+    }>;
+  } | null>(null);
+  const [loadingHierarchy, setLoadingHierarchy] = useState(false);
+  const [drilldownOwner, setDrilldownOwner] = useState<string | null>(null);
+  const [drilldownMetal, setDrilldownMetal] = useState<string | null>(null);
+  const [drilldownLocation, setDrilldownLocation] = useState<string | null>(null);
+  const [drilldownDenom, setDrilldownDenom] = useState<string | null>(null);
+  const [drilldownSearch, setDrilldownSearch] = useState<string>('');
+
   // Compliance Dashboard (Reporting Requirements Gap Analysis, Item 6) -- summarizes the
   // same exceptions feed the Reports screen's Exceptions Report exports, plus audit-log
   // tamper-check status. See backend GetComplianceDashboard.
@@ -1128,6 +1171,8 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   const [newThresholdMinQty, setNewThresholdMinQty] = useState('5');
   const [newThresholdMaxQty, setNewThresholdMaxQty] = useState('50');
   const [newThresholdReorderQty, setNewThresholdReorderQty] = useState('10');
+  const [newThresholdMetalTypeId, setNewThresholdMetalTypeId] = useState('1'); // 1 = Gold, 2 = Silver
+  const [newThresholdWeightKg, setNewThresholdWeightKg] = useState('5.000');
   const [thresholdFilterType, setThresholdFilterType] = useState('ALL');
 
   // KFH Branches CRUD state
@@ -1706,6 +1751,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     setPassportError(null);
     try {
       const res = await fetch(`${API_BASE}/inventory/traceability/passport?query=${encodeURIComponent(serial)}`);
+      fetchSerialLifecycleHistory(serial);
       if (res.ok) {
         const data = await res.json();
         setBarPassportData(data);
@@ -1822,7 +1868,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   ];
 
   // UC01 - Barcode & QR Code Labeling states
-  const [barcodeTab, setBarcodeTab] = useState<'generate' | 'reprint' | 'bulk'>('generate');
+  const [barcodeTab, setBarcodeTab] = useState<'unprinted' | 'generate' | 'reprint' | 'reprint_approvals' | 'history' | 'bulk'>('unprinted');
   const [barcodeSelectedItemId, setBarcodeSelectedItemId] = useState<number | null>(null);
   const [barcodeSearchQuery, setBarcodeSearchQuery] = useState('');
   const [barcodeFilterProductType, setBarcodeFilterProductType] = useState<string>('');
@@ -1844,6 +1890,59 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   const [barcodeBulkInput, setBarcodeBulkInput] = useState('');
   const [barcodeBulkLabels, setBarcodeBulkLabels] = useState<any[]>([]);
   const [barcodeBulkLoading, setBarcodeBulkLoading] = useState(false);
+
+  // Requirement 3: Manual Batch QR & Maker-Checker Reprint States
+  const [unprintedBarsList, setUnprintedBarsList] = useState<any[]>([]);
+  const [selectedUnprintedIds, setSelectedUnprintedIds] = useState<number[]>([]);
+  const [isBatchPrinting, setIsBatchPrinting] = useState(false);
+  const [qrHistoryList, setQrHistoryList] = useState<any[]>([]);
+  const [pendingQrReprintsList, setPendingQrReprintsList] = useState<any[]>([]);
+  const [showQrReprintModal, setShowQrReprintModal] = useState(false);
+  const [qrReprintType, setQrReprintType] = useState<'SINGLE' | 'BATCH'>('SINGLE');
+  const [qrReprintReasonText, setQrReprintReasonText] = useState('');
+  const [qrReprintAttachmentUrl, setQrReprintAttachmentUrl] = useState('');
+  const [selectedReprintItemIds, setSelectedReprintItemIds] = useState<number[]>([]);
+
+  // Requirement 4: Damaged-Bar Replacement with Turkey Consignment States
+  const [showTurkeyReplaceModal, setShowTurkeyReplaceModal] = useState(false);
+  const [selectedDamagedBarForReplace, setSelectedDamagedBarForReplace] = useState<any | null>(null);
+  const [eligibleTurkeyBars, setEligibleTurkeyBars] = useState<any[]>([]);
+  const [selectedTurkeyBarId, setSelectedTurkeyBarId] = useState<number | null>(null);
+  const [damageReplaceReason, setDamageReplaceReason] = useState('');
+  const [damageReplaceAttachmentUrl, setDamageReplaceAttachmentUrl] = useState('');
+  const [damagedReplacementsList, setDamagedReplacementsList] = useState<any[]>([]);
+  const [loadingTurkeyBars, setLoadingTurkeyBars] = useState(false);
+
+  // Requirement 6: Damaged Gold High-Stock Alert & Manufacturer Export States
+  const [damagedHighStockAlerts, setDamagedHighStockAlerts] = useState<any[]>([]);
+  const [loadingDamagedAlerts, setLoadingDamagedAlerts] = useState(false);
+  const [showDamagedExportModal, setShowDamagedExportModal] = useState(false);
+  const [damagedExportCandidates, setDamagedExportCandidates] = useState<any[]>([]);
+  const [selectedDamagedExportItemIds, setSelectedDamagedExportItemIds] = useState<number[]>([]);
+  const [exportManifestResult, setExportManifestResult] = useState<any | null>(null);
+  const [exportManifestNotes, setExportManifestNotes] = useState('');
+  const [exportManifestVendorId, setExportManifestVendorId] = useState<number | ''>('');
+  const [exportManifestMetalTypeId, setExportManifestMetalTypeId] = useState<number>(1);
+  const [generatingExportManifest, setGeneratingExportManifest] = useState(false);
+
+  // Requirement 7 & 8: Damaged Gold Export (3-Level Approval) & Serial Reuse States
+  const [pendingDamagedExports, setPendingDamagedExports] = useState<any[]>([]);
+  const [damagedExportHistory, setDamagedExportHistory] = useState<any[]>([]);
+  const [loadingDamagedExports, setLoadingDamagedExports] = useState(false);
+  const [showInitiateDamagedExportModal, setShowInitiateDamagedExportModal] = useState(false);
+  const [selectedDamagedBarForExport, setSelectedDamagedBarForExport] = useState<any | null>(null);
+  const [damagedExportVendorId, setDamagedExportVendorId] = useState<string>('');
+  const [damagedExportCustomsDecl, setDamagedExportCustomsDecl] = useState<string>('');
+  const [damagedExportNotes, setDamagedExportNotes] = useState<string>('');
+  const [showCourierHandoverModal, setShowCourierHandoverModal] = useState(false);
+  const [selectedExportForHandover, setSelectedExportForHandover] = useState<any | null>(null);
+  const [courierCompany, setCourierCompany] = useState<string>('Brinks Global Services');
+  const [courierRep, setCourierRep] = useState<string>('');
+  const [courierTrackingNumber, setCourierTrackingNumber] = useState<string>('');
+  const [courierSecuritySeal, setCourierSecuritySeal] = useState<string>('');
+  const [courierHandoverNotes, setCourierHandoverNotes] = useState<string>('');
+  const [serialLifecycleHistory, setSerialLifecycleHistory] = useState<any[]>([]);
+  const [selectedSerialRecordId, setSelectedSerialRecordId] = useState<number | null>(null);
 
   // Customs Transfer Workflow States
   const [showCustomsTransferModal, setShowCustomsTransferModal] = useState(false);
@@ -2053,11 +2152,37 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     }
   };
 
+  const fetchInventoryHierarchy = async (startDate?: string, endDate?: string) => {
+    try {
+      setLoadingHierarchy(true);
+      const params = new URLSearchParams();
+      if (startDate) params.set('startDate', startDate);
+      if (endDate) params.set('endDate', endDate);
+      const url = `${API_BASE}/dashboard/inventory-hierarchy${params.toString() ? `?${params.toString()}` : ''}`;
+      const res = await fetch(url, {
+        headers: getAuthHeaders(),
+        cache: 'no-store'
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setInventoryHierarchy(data);
+      }
+    } catch (e) {
+      console.warn("Inventory hierarchy endpoint not responding or offline.", e);
+    } finally {
+      setLoadingHierarchy(false);
+    }
+  };
+
   // "Executive Board" -- fetches all inventory KPIs + inventory table without date range constraints
-  const fetchExecutiveBoard = async () => {
+  const fetchExecutiveBoard = async (startDate?: string, endDate?: string) => {
     try {
       setLoadingExecBoard(true);
-      const res = await fetch(`${API_BASE}/dashboard/executive-board`, { cache: 'no-store' });
+      const params = new URLSearchParams();
+      if (startDate) params.set('startDate', startDate);
+      if (endDate) params.set('endDate', endDate);
+      const url = `${API_BASE}/dashboard/executive-board${params.toString() ? `?${params.toString()}` : ''}`;
+      const res = await fetch(url, { headers: getAuthHeaders(), cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         setExecBoard(data);
@@ -2067,6 +2192,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     } finally {
       setLoadingExecBoard(false);
     }
+    fetchInventoryHierarchy(startDate, endDate);
   };
 
   // Compliance Dashboard (Reporting Requirements Gap Analysis, Item 6).
@@ -2326,6 +2452,8 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     fetchReorderThresholds();
     fetchPendingThresholdChanges();
     fetchLowStockAlerts();
+    fetchDamagedHighStockAlerts();
+    fetchDamagedBars();
     fetchBranches();
     fetchAdminData();
     fetchProducts();
@@ -2700,11 +2828,43 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   };
 
   const handleAddThreshold = async () => {
+    if (newThresholdType === 'DAMAGED_HIGH_STOCK') {
+      if (!newThresholdMetalTypeId) return;
+      try {
+        const res = await fetch(`${API_BASE}/inventory/reorder-thresholds`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+          body: JSON.stringify({
+            thresholdType: 'DAMAGED_HIGH_STOCK',
+            metalTypeId: parseInt(newThresholdMetalTypeId),
+            thresholdWeightKg: parseFloat(newThresholdWeightKg) || 5.0,
+            productId: null,
+            vendorId: null,
+            minStockQty: 0,
+            maxStockQty: null,
+            reorderQty: 0,
+            isActive: true
+          })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          alert(currentLang === 'en' ? (data.message || "Damaged metal high-stock threshold submitted for Maker-Checker approval.") : "تم إرسال حد تراكم الذهب التالف للاعتماد (صانع - معتمد).");
+          fetchReorderThresholds();
+          fetchPendingThresholdChanges();
+          fetchWorkflows();
+          fetchDamagedHighStockAlerts();
+        } else {
+          alert(await describeApiError(res, currentLang, 'Failed to submit damaged threshold', 'فشل إرسال حد الذهب التالف'));
+        }
+      } catch (_) {}
+      return;
+    }
+
     if (!newThresholdProductId || !newThresholdVendorId) return;
     try {
       const res = await fetch(`${API_BASE}/inventory/reorder-thresholds`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({
           thresholdType: newThresholdType,
           productId: parseInt(newThresholdProductId),
@@ -3336,6 +3496,570 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     } catch (e) {
       alert('Error reprinting label');
     }
+  };
+
+  // --- Requirement 3: QR Printing & Reprinting Handlers ---
+  const fetchUnprintedBars = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/barcode/unprinted`, { headers: getAuthHeaders() });
+      if (res.ok) {
+        const data = await res.json();
+        setUnprintedBarsList(data);
+      }
+    } catch (e) {
+      console.warn("Error fetching unprinted bars", e);
+    }
+  };
+
+  const fetchQrHistory = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/barcode/history`, { headers: getAuthHeaders() });
+      if (res.ok) {
+        const data = await res.json();
+        setQrHistoryList(data);
+      }
+    } catch (e) {
+      console.warn("Error fetching QR history", e);
+    }
+  };
+
+  const fetchPendingQrReprints = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/barcode/reprint/pending`, { headers: getAuthHeaders() });
+      if (res.ok) {
+        const data = await res.json();
+        setPendingQrReprintsList(data);
+      }
+    } catch (e) {
+      console.warn("Error fetching pending QR reprints", e);
+    }
+  };
+
+  const handlePrintSingleQr = async (itemId: number) => {
+    try {
+      const res = await fetch(`${API_BASE}/barcode/print-single`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({ itemId, reason: 'Initial single bar print' })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setBarcodeCurrentLabel(data.label);
+        alert(currentLang === 'en' ? '✓ Initial QR code printed and logged successfully!' : '✓ تمت طباعة وتسجيل رمز QR بنجاح!');
+        fetchUnprintedBars();
+        fetchQrHistory();
+      } else {
+        alert(await describeApiError(res, currentLang, 'Failed to print QR', 'فشلت طباعة رمز QR'));
+      }
+    } catch (e) {
+      alert('Error printing QR');
+    }
+  };
+
+  const handlePrintBatchQr = async () => {
+    if (selectedUnprintedIds.length === 0) {
+      alert(currentLang === 'en' ? 'Please select at least one bar for batch printing.' : 'يرجى اختيار سبيكة واحدة على الأقل للطباعة المجمعة.');
+      return;
+    }
+    setIsBatchPrinting(true);
+    try {
+      const res = await fetch(`${API_BASE}/barcode/print-batch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({ itemIds: selectedUnprintedIds, reason: 'Manual batch print' })
+      });
+      if (res.ok) {
+        alert(currentLang === 'en' ? `✓ Batch QR printing completed for ${selectedUnprintedIds.length} bars!` : `✓ تمت الطباعة المجمعة لرموز QR لعدد ${selectedUnprintedIds.length} سبيكة!`);
+        setSelectedUnprintedIds([]);
+        fetchUnprintedBars();
+        fetchQrHistory();
+      } else {
+        alert(await describeApiError(res, currentLang, 'Batch print failed', 'فشلت الطباعة المجمعة'));
+      }
+    } catch (e) {
+      alert('Error in batch print');
+    } finally {
+      setIsBatchPrinting(false);
+    }
+  };
+
+  const handleInitiateQrReprint = async () => {
+    if (selectedReprintItemIds.length === 0) {
+      alert(currentLang === 'en' ? 'Please select at least one bar for reprint.' : 'يرجى اختيار سبيكة لإعادة الطباعة.');
+      return;
+    }
+    if (!qrReprintReasonText.trim()) {
+      alert(currentLang === 'en' ? 'Explanatory reason is mandatory for reprint requests.' : 'سبب طلب إعادة الطباعة إلزامي.');
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/barcode/reprint/initiate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({
+          requestType: qrReprintType,
+          itemIds: selectedReprintItemIds,
+          reason: qrReprintReasonText.trim(),
+          attachmentUrl: qrReprintAttachmentUrl.trim() || null
+        })
+      });
+      if (res.ok) {
+        alert(currentLang === 'en' ? '✓ QR reprint request submitted for Checker authorization!' : '✓ تم تقديم طلب إعادة طباعة QR للمراجعة والاعتماد من المراجع!');
+        setShowQrReprintModal(false);
+        setQrReprintReasonText('');
+        setQrReprintAttachmentUrl('');
+        setSelectedReprintItemIds([]);
+        fetchPendingQrReprints();
+      } else {
+        alert(await describeApiError(res, currentLang, 'Reprint submission failed', 'فشل تقديم طلب إعادة الطباعة'));
+      }
+    } catch (e) {
+      alert('Error submitting reprint request');
+    }
+  };
+
+  const handleApproveQrReprint = async (requestId: number) => {
+    try {
+      const res = await fetch(`${API_BASE}/barcode/reprint/${requestId}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() }
+      });
+      if (res.ok) {
+        alert(currentLang === 'en' ? '✓ QR reprint request APPROVED! Labels logged and generated.' : '✓ تم اعتماد طلب إعادة طباعة QR بنجاح!');
+        fetchPendingQrReprints();
+        fetchQrHistory();
+      } else {
+        alert(await describeApiError(res, currentLang, 'Approval failed', 'فشل الاعتماد'));
+      }
+    } catch (e) {
+      alert('Error approving reprint');
+    }
+  };
+
+  const handleRejectQrReprint = async (requestId: number) => {
+    const reason = prompt(currentLang === 'en' ? 'Enter rejection reason:' : 'أدخل سبب الرفض:');
+    if (!reason) return;
+    try {
+      const res = await fetch(`${API_BASE}/barcode/reprint/${requestId}/reject`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({ reason })
+      });
+      if (res.ok) {
+        alert(currentLang === 'en' ? 'QR reprint request REJECTED.' : 'تم رفض طلب إعادة طباعة QR.');
+        fetchPendingQrReprints();
+      } else {
+        alert(await describeApiError(res, currentLang, 'Rejection failed', 'فشل الرفض'));
+      }
+    } catch (e) {
+      alert('Error rejecting reprint');
+    }
+  };
+
+  // --- Requirement 4: Damaged-Bar Replacement with Turkey Consignment Handlers ---
+  const fetchEligibleTurkeyBars = async (damagedItemId: number) => {
+    setLoadingTurkeyBars(true);
+    try {
+      const res = await fetch(`${API_BASE}/inventory/damaged/eligible-replacements/${damagedItemId}`, { headers: getAuthHeaders() });
+      if (res.ok) {
+        const data = await res.json();
+        setEligibleTurkeyBars(data);
+        if (data.length > 0) {
+          setSelectedTurkeyBarId(data[0].item_id);
+        } else {
+          setSelectedTurkeyBarId(null);
+        }
+      }
+    } catch (e) {
+      console.warn("Error fetching eligible Turkey bars", e);
+    } finally {
+      setLoadingTurkeyBars(false);
+    }
+  };
+
+  const fetchDamagedReplacements = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/inventory/damaged/replacements`, { headers: getAuthHeaders() });
+      if (res.ok) {
+        const data = await res.json();
+        setDamagedReplacementsList(data);
+      }
+    } catch (e) {
+      console.warn("Error fetching damaged replacements", e);
+    }
+  };
+
+  const handleInitiateTurkeyReplacement = async () => {
+    if (!selectedDamagedBarForReplace || !selectedTurkeyBarId) {
+      alert(currentLang === 'en' ? 'Please select both the damaged bar and a Turkey replacement bar.' : 'يرجى اختيار السبيكة التالفة وسبيكة الاستبدال التركية.');
+      return;
+    }
+    if (!damageReplaceReason.trim()) {
+      alert(currentLang === 'en' ? 'Explanatory replacement reason is mandatory.' : 'سبب الاستبدال إلزامي.');
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/inventory/damaged/replace/initiate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({
+          damagedItemId: selectedDamagedBarForReplace.item_id || selectedDamagedBarForReplace.itemId,
+          replacementItemId: selectedTurkeyBarId,
+          reason: damageReplaceReason.trim(),
+          attachmentUrl: damageReplaceAttachmentUrl.trim() || null
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        alert(currentLang === 'en' ? `✓ Replacement workflow #${data.replacement_reference} initiated for Checker authorization!` : `✓ تم إنشاء مسار استبدال السبيكة #${data.replacement_reference} بانتظار اعتماد المراجع!`);
+        setShowTurkeyReplaceModal(false);
+        setDamageReplaceReason('');
+        setDamageReplaceAttachmentUrl('');
+        setSelectedDamagedBarForReplace(null);
+        setSelectedTurkeyBarId(null);
+        fetchDamagedBars();
+        fetchDamagedReplacements();
+      } else {
+        alert(await describeApiError(res, currentLang, 'Replacement initiation failed', 'فشل إنشاء طلب الاستبدال'));
+      }
+    } catch (e) {
+      alert('Error initiating Turkey replacement');
+    }
+  };
+
+  const handleApproveTurkeyReplacement = async (replacementId: number) => {
+    try {
+      const res = await fetch(`${API_BASE}/inventory/damaged/replace/${replacementId}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() }
+      });
+      if (res.ok) {
+        alert(currentLang === 'en' ? '✓ Replacement APPROVED! Ownership swapped and customer holdings repointed successfully.' : '✓ تم اعتماد الاستبدال بنجاح! تم تبادل الملكيات وتحديث سجلات الحيازة.');
+        fetchDamagedBars();
+        fetchDamagedReplacements();
+        fetchInventory();
+      } else {
+        alert(await describeApiError(res, currentLang, 'Approval failed', 'فشل اعتماد الاستبدال'));
+      }
+    } catch (e) {
+      alert('Error approving Turkey replacement');
+    }
+  };
+
+  const handleRejectTurkeyReplacement = async (replacementId: number) => {
+    const reason = prompt(currentLang === 'en' ? 'Enter rejection reason:' : 'أدخل سبب الرفض:');
+    if (!reason) return;
+    try {
+      const res = await fetch(`${API_BASE}/inventory/damaged/replace/${replacementId}/reject`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({ reason })
+      });
+      if (res.ok) {
+        alert(currentLang === 'en' ? 'Replacement request REJECTED.' : 'تم رفض طلب الاستبدال.');
+        fetchDamagedBars();
+        fetchDamagedReplacements();
+      } else {
+        alert(await describeApiError(res, currentLang, 'Rejection failed', 'فشل رفض الاستبدال'));
+      }
+    } catch (e) {
+      alert('Error rejecting Turkey replacement');
+    }
+  };
+
+  // Requirement 6: Damaged Gold High-Stock Alert & Manufacturer Export Manifest Handlers
+  const fetchDamagedHighStockAlerts = async () => {
+    setLoadingDamagedAlerts(true);
+    try {
+      const res = await fetch(`${API_BASE}/inventory/damaged/high-stock-alerts`, {
+        headers: getAuthHeaders()
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setDamagedHighStockAlerts(data);
+      }
+    } catch (e) {
+      console.warn("Error fetching damaged high-stock alerts", e);
+    } finally {
+      setLoadingDamagedAlerts(false);
+    }
+  };
+
+  const fetchDamagedExportCandidates = async (metalTypeId?: number, vendorId?: number) => {
+    try {
+      let url = `${API_BASE}/inventory/damaged/export-candidates`;
+      const params = new URLSearchParams();
+      if (metalTypeId) params.append('metalTypeId', metalTypeId.toString());
+      if (vendorId) params.append('vendorId', vendorId.toString());
+      if (params.toString()) url += `?${params.toString()}`;
+
+      const res = await fetch(url, { headers: getAuthHeaders() });
+      if (res.ok) {
+        const data = await res.json();
+        setDamagedExportCandidates(data);
+      }
+    } catch (e) {
+      console.warn("Error fetching damaged export candidates", e);
+    }
+  };
+
+  const handleGenerateDamagedExportManifest = async () => {
+    if (selectedDamagedExportItemIds.length === 0) {
+      alert(currentLang === 'en' ? 'Please select at least one damaged bar to export.' : 'يرجى اختيار سبيكة تالفة واحدة على الأقل للتصدير.');
+      return;
+    }
+    setGeneratingExportManifest(true);
+    try {
+      const res = await fetch(`${API_BASE}/inventory/damaged/export-manifest`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({
+          metalTypeId: exportManifestMetalTypeId,
+          vendorId: exportManifestVendorId ? Number(exportManifestVendorId) : null,
+          itemIds: selectedDamagedExportItemIds,
+          notes: exportManifestNotes.trim() || null
+        })
+      });
+      if (res.ok) {
+        const result = await res.json();
+        setExportManifestResult(result);
+        alert(currentLang === 'en'
+          ? `✓ Manufacturer Export Manifest #${result.manifest_reference} generated successfully (${result.total_bars_count} bars, ${Number(result.total_weight_kg).toFixed(3)} KG)!`
+          : `✓ تم إنشاء بيان تصدير المصنع #${result.manifest_reference} بنجاح (${result.total_bars_count} سبيكة، ${Number(result.total_weight_kg).toFixed(3)} كجم)!`);
+        fetchDamagedHighStockAlerts();
+        fetchDamagedBars();
+        fetchInventory();
+        fetchDamagedExportCandidates(exportManifestMetalTypeId, exportManifestVendorId ? Number(exportManifestVendorId) : undefined);
+      } else {
+        alert(await describeApiError(res, currentLang, 'Failed to generate export manifest', 'فشل إنشاء بيان التصدير للمصنع'));
+      }
+    } catch (e) {
+      alert(currentLang === 'en' ? 'Error generating export manifest' : 'حدث خطأ أثناء إنشاء بيان التصدير');
+    } finally {
+      setGeneratingExportManifest(false);
+    }
+  };
+
+  // Requirement 7 & 8: Damaged Gold Overseas Export & Serial Reuse Handlers
+  const fetchDamagedExports = async () => {
+    setLoadingDamagedExports(true);
+    try {
+      const [pRes, hRes] = await Promise.all([
+        fetch(`${API_BASE}/inventory/damaged/export/pending`, { headers: getAuthHeaders() }),
+        fetch(`${API_BASE}/inventory/damaged/export/history`, { headers: getAuthHeaders() })
+      ]);
+      if (pRes.ok) setPendingDamagedExports(await pRes.json());
+      if (hRes.ok) setDamagedExportHistory(await hRes.json());
+    } catch (e) {
+      console.warn("Error fetching damaged exports", e);
+    } finally {
+      setLoadingDamagedExports(false);
+    }
+  };
+
+  const handleInitiateDamagedExport = async () => {
+    if (!selectedDamagedBarForExport) {
+      alert(currentLang === 'en' ? 'Please select a damaged bar for export.' : 'يرجى اختيار سبيكة تالفة للتصدير.');
+      return;
+    }
+    try {
+      const barId = selectedDamagedBarForExport.itemId || selectedDamagedBarForExport.item_id;
+      const res = await fetch(`${API_BASE}/inventory/damaged/export/initiate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({
+          itemId: barId,
+          vendorId: damagedExportVendorId ? Number(damagedExportVendorId) : null,
+          customsDeclarationNumber: damagedExportCustomsDecl.trim() || null,
+          notes: damagedExportNotes.trim() || null
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        alert(currentLang === 'en'
+          ? `✓ Damaged export #${data.export_reference} initiated successfully! Sent to Level 2 (Checker Review).`
+          : `✓ تم إنشاء طلب تصدير الذهب التالف #${data.export_reference} بنجاح! تم التحويل للمستوى 2 (مراجعة المدقق).`);
+        setShowInitiateDamagedExportModal(false);
+        setSelectedDamagedBarForExport(null);
+        setDamagedExportVendorId('');
+        setDamagedExportCustomsDecl('');
+        setDamagedExportNotes('');
+        fetchDamagedBars();
+        fetchDamagedExports();
+        fetchWorkflows();
+        fetchInventory();
+      } else {
+        alert(await describeApiError(res, currentLang, 'Failed to initiate damaged export', 'فشل إنشاء طلب تصدير الذهب التالف'));
+      }
+    } catch (e) {
+      alert(currentLang === 'en' ? 'Error initiating damaged export' : 'حدث خطأ أثناء إنشاء طلب التصدير');
+    }
+  };
+
+  const handleCourierHandover = async () => {
+    if (!selectedExportForHandover) return;
+    if (!courierCompany.trim() || !courierTrackingNumber.trim()) {
+      alert(currentLang === 'en' ? 'Courier company and tracking number are required.' : 'اسم شركة الشحن ورقم التتبع إلزاميان.');
+      return;
+    }
+    try {
+      const expId = selectedExportForHandover.exportId || selectedExportForHandover.export_id;
+      const res = await fetch(`${API_BASE}/inventory/damaged/export/${expId}/handover`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({
+          courierCompany: courierCompany.trim(),
+          courierRep: courierRep.trim() || null,
+          trackingNumber: courierTrackingNumber.trim(),
+          securitySeal: courierSecuritySeal.trim() || null,
+          notes: courierHandoverNotes.trim() || null
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        alert(currentLang === 'en'
+          ? `✓ Courier handover recorded! Bar status changed to EXPORTED upon courier handover. Serial number is now eligible for future reuse.`
+          : `✓ تم تسجيل التسليم للشاحن بنجاح! تم تحويل حالة السبيكة إلى مصدّرة (EXPORTED). الرقم التسلسلي متاح الآن لإعادة الاستخدام مستقبلاً.`);
+        setShowCourierHandoverModal(false);
+        setSelectedExportForHandover(null);
+        setCourierCompany('Brinks Global Services');
+        setCourierRep('');
+        setCourierTrackingNumber('');
+        setCourierSecuritySeal('');
+        setCourierHandoverNotes('');
+        fetchDamagedExports();
+        fetchDamagedBars();
+        fetchInventory();
+      } else {
+        alert(await describeApiError(res, currentLang, 'Failed to record courier handover', 'فشل تسجيل التسليم للشاحن'));
+      }
+    } catch (e) {
+      alert(currentLang === 'en' ? 'Error during courier handover' : 'حدث خطأ أثناء تسليم الشحنة');
+    }
+  };
+
+  const fetchSerialLifecycleHistory = async (serial: string) => {
+    if (!serial || !serial.trim()) {
+      setSerialLifecycleHistory([]);
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/inventory/bars/history/${encodeURIComponent(serial.trim())}`, {
+        headers: getAuthHeaders()
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSerialLifecycleHistory(data);
+      } else {
+        setSerialLifecycleHistory([]);
+      }
+    } catch (e) {
+      console.warn("Error fetching serial lifecycle history", e);
+      setSerialLifecycleHistory([]);
+    }
+  };
+
+  const handlePrintDamagedExportManifest = (manifest: any) => {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
+    const isAr = currentLang === 'ar';
+    const itemsHtml = (manifest.items || []).map((item: any, idx: number) => `
+      <tr style="border-bottom: 1px solid #e5e7eb; font-size: 11px;">
+        <td style="padding: 6px 8px; text-align: center;">${idx + 1}</td>
+        <td style="padding: 6px 8px; font-weight: bold; font-family: monospace;">${item.serial_number}</td>
+        <td style="padding: 6px 8px;">${item.product_name || item.metal_type_name || 'Gold Bar'}</td>
+        <td style="padding: 6px 8px; text-align: right;">${Number(item.weight_grams).toFixed(2)} g</td>
+        <td style="padding: 6px 8px; text-align: right; font-weight: bold;">${(Number(item.weight_grams) / 1000).toFixed(4)} KG</td>
+        <td style="padding: 6px 8px; text-align: center;">${item.refiner_name || 'Valcambi / Nadir'}</td>
+        <td style="padding: 6px 8px; color: #dc2626;">${item.damage_reason || 'DEFECTIVE'}</td>
+      </tr>
+    `).join('');
+
+    const html = `
+      <!DOCTYPE html>
+      <html dir="${isAr ? 'rtl' : 'ltr'}">
+      <head>
+        <meta charset="utf-8">
+        <title>KFH Treasury - Manufacturer Export Manifest ${manifest.manifest_reference}</title>
+        <style>
+          body { font-family: 'Segoe UI', Tahoma, Arial, sans-serif; margin: 20px; color: #111; }
+          .header { display: flex; justify-content: space-between; border-bottom: 2px solid #009B4E; padding-bottom: 12px; margin-bottom: 16px; }
+          .logo { font-size: 20px; font-weight: 800; color: #009B4E; }
+          .sublogo { font-size: 11px; color: #666; }
+          .badge { background: #fee2e2; color: #991b1b; padding: 4px 10px; border-radius: 4px; font-weight: bold; font-size: 12px; }
+          .meta-box { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 12px; margin-bottom: 16px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; font-size: 12px; }
+          table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+          th { background: #009B4E; color: #fff; padding: 8px; font-size: 11px; text-align: left; }
+          .footer { margin-top: 30px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; padding-top: 20px; border-top: 1px solid #ddd; }
+          .sig-box { border-top: 1px dashed #999; padding-top: 6px; text-align: center; font-size: 11px; }
+          @media print { button { display: none; } }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div>
+            <div class="logo">KUWAIT FINANCE HOUSE (KFH) — TREASURY</div>
+            <div class="sublogo">Precious Metals Physical Inventory & Refining Manifest</div>
+          </div>
+          <div style="text-align: right;">
+            <span class="badge">OFFICIAL REFINER EXPORT MANIFEST</span>
+            <div style="font-family: monospace; font-size: 13px; font-weight: bold; margin-top: 4px;"># ${manifest.manifest_reference}</div>
+          </div>
+        </div>
+
+        <div class="meta-box">
+          <div><strong>${isAr ? 'تاريخ البيان:' : 'Export Date:'}</strong> ${new Date(manifest.generated_at).toLocaleString()}</div>
+          <div><strong>${isAr ? 'نوع المعدن:' : 'Metal Type:'}</strong> ${manifest.metal_type_name || 'Gold'}</div>
+          <div><strong>${isAr ? 'إجمالي عدد القطع:' : 'Total Bar Count:'}</strong> <span style="color: #009B4E; font-weight: bold;">${manifest.total_bars_count} pcs</span></div>
+          <div><strong>${isAr ? 'الوزن الإجمالي الصافي:' : 'Total Net Weight:'}</strong> <span style="color: #dc2626; font-weight: bold;">${Number(manifest.total_weight_kg).toFixed(4)} KG</span></div>
+          <div><strong>${isAr ? 'المصنع / المصفاة الوجهة:' : 'Destination Refiner:'}</strong> ${manifest.vendor_name || 'All Qualified Manufacturers'}</div>
+          <div><strong>${isAr ? 'المسؤول المصدر:' : 'Generated By:'}</strong> ${manifest.generated_by}</div>
+          <div><strong>${isAr ? 'حالة الشحنة:' : 'Status:'}</strong> ${manifest.status}</div>
+          <div><strong>${isAr ? 'ملاحظات:' : 'Notes:'}</strong> ${manifest.notes || '—'}</div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 30px; text-align: center;">#</th>
+              <th>${isAr ? 'الرقم التسلسلي' : 'Bar Serial #'}</th>
+              <th>${isAr ? 'المنتج / الفئة' : 'Product / Spec'}</th>
+              <th style="text-align: right;">${isAr ? 'الوزن (جرام)' : 'Weight (g)'}</th>
+              <th style="text-align: right;">${isAr ? 'الوزن (كجم)' : 'Weight (KG)'}</th>
+              <th style="text-align: center;">${isAr ? 'المصنع / المورد' : 'Refiner / Vendor'}</th>
+              <th>${isAr ? 'سبب التلف' : 'Defect / Reason'}</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${itemsHtml}
+          </tbody>
+        </table>
+
+        <div class="footer">
+          <div class="sig-box">
+            <div><strong>${manifest.generated_by}</strong></div>
+            <div>${isAr ? 'مسؤول الخزينة الرئيسي (Maker)' : 'Treasury Vault Custodian'}</div>
+          </div>
+          <div class="sig-box">
+            <div>__________________________</div>
+            <div>${isAr ? 'مدير العمليات والرقابة (Checker)' : 'Treasury Operations Head'}</div>
+          </div>
+          <div class="sig-box">
+            <div>__________________________</div>
+            <div>${isAr ? 'مندوب الناقل الأمني / الجمارك' : 'Secured Logistics & Customs Officer'}</div>
+          </div>
+        </div>
+
+        <div style="margin-top: 20px; text-align: center;">
+          <button onclick="window.print()" style="padding: 8px 18px; background: #009B4E; color: #fff; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">
+            🖨️ ${isAr ? 'طباعة البيان الرسمي' : 'Print Official Manifest'}
+          </button>
+        </div>
+      </body>
+      </html>
+    `;
+    printWindow.document.write(html);
+    printWindow.document.close();
   };
 
   const splitSerialHelper = (serial: string) => {
@@ -4744,6 +5468,57 @@ const [migrationApproved, setMigrationApproved] = useState(false);
       return;
     }
 
+    // ============================================================
+    // Pre-flight Maker-phase serial validation: check duplicates on server
+    // ============================================================
+    try {
+      const valRes = await fetch(`${API_BASE}/vault/intake/validate-serials`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          serialNumbers: intakeBars.map(b => b.serial.trim()),
+          sourceType: 'SUPPLIER'
+        })
+      });
+      if (valRes.ok) {
+        const valData = await valRes.json();
+        if (!valData.isValid) {
+          alert(currentLang === 'en' 
+            ? `Maker Serial Validation Failed:\n${valData.errors.join('\n')}` 
+            : `فشل التحقق من الأرقام التسلسلية (مرحلة المنشئ):\n${valData.errors.join('\n')}`);
+          return;
+        }
+      }
+    } catch (_) {}
+
+    // ============================================================
+    // Mandatory Production Cost in KWD per (Metal Type, Denomination)
+    // ============================================================
+    const uniquePids = Array.from(new Set(intakeBars.map(b => b.product_id)));
+    const missingCostLabels: string[] = [];
+    const productionCostsList = uniquePids.map(pid => {
+      const prod = products.find((p: any) => p.product_id === pid);
+      const cost = denominationPurchasingCosts[pid] !== undefined ? Number(denominationPurchasingCosts[pid]) : Number(intakeCustomsDuty || 0);
+      if (!cost || cost <= 0) {
+        const label = prod ? `${prod.metal_name} ${prod.denomination_label}` : `#${pid}`;
+        missingCostLabels.push(label);
+      }
+      return {
+        metalTypeId: prod?.metal_type_id || 1,
+        metalTypeName: prod?.metal_name || 'Gold',
+        denominationId: prod?.denomination_id || pid,
+        denominationName: prod?.denomination_label || `${prod?.weight_grams}g`,
+        productionCostKwd: cost || 0
+      };
+    });
+
+    if (missingCostLabels.length > 0) {
+      alert(currentLang === 'en'
+        ? `Mandatory Production Cost (KWD) is missing for:\n${missingCostLabels.join(', ')}\nEvery combination of (Metal Type, Denomination, Shipment) must capture a positive Production Cost in KWD.`
+        : `يجب تحديد تكلفة الإنتاج (د.ك) لكل من:\n${missingCostLabels.join(', ')}\nيرجى إدخال تكلفة إنتاج موجبة بالدينار الكويتي لجميع فئات الشحنة.`);
+      return;
+    }
+
     try {
       const payload = {
         vendorId: intakeVendorId || (suppliersList.length > 0 ? suppliersList[0].vendor_id : 1),
@@ -4760,6 +5535,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
         customsDeclarationNumber: intakeOwnershipType === 'CUSTOMS_OWNED' ? (intakeCustomsDeclarationNo.trim() || null) : null,
         customsDutyAmount: intakeOwnershipType === 'CUSTOMS_OWNED' ? intakeCustomsDuty : null,
         portOfEntry: intakeOwnershipType === 'CUSTOMS_OWNED' ? (intakePortOfEntry.trim() || null) : null,
+        productionCosts: productionCostsList,
         items: intakeBars.map(b => {
           const cost = denominationPurchasingCosts[b.product_id] !== undefined ? denominationPurchasingCosts[b.product_id] : (intakeCustomsDuty || 0);
           return {
@@ -5398,6 +6174,42 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     return { totalBars, totalGrams, totalKg };
   }, [execKpiBreakdown]);
 
+  const selectedOwnerData = useMemo(() => {
+    return inventoryHierarchy?.hierarchy?.find((o: any) => o.owner_code === drilldownOwner);
+  }, [inventoryHierarchy, drilldownOwner]);
+
+  const selectedMetalData = useMemo(() => {
+    return selectedOwnerData?.metals?.find((m: any) => m.metal_name === drilldownMetal);
+  }, [selectedOwnerData, drilldownMetal]);
+
+  const selectedLocationData = useMemo(() => {
+    return selectedMetalData?.locations?.find((l: any) => l.location_key === drilldownLocation);
+  }, [selectedMetalData, drilldownLocation]);
+
+  const selectedDenomData = useMemo(() => {
+    return selectedLocationData?.denominations?.find((d: any) => d.denomination_label === drilldownDenom);
+  }, [selectedLocationData, drilldownDenom]);
+
+  const drilldownBars = useMemo(() => {
+    if (!selectedLocationData) return [];
+    let list: any[] = [];
+    if (selectedDenomData) {
+      list = selectedDenomData.items || [];
+    } else {
+      list = selectedLocationData.denominations?.flatMap((d: any) => d.items || []) || [];
+    }
+    if (drilldownSearch.trim()) {
+      const q = drilldownSearch.toLowerCase().trim();
+      list = list.filter((i: any) =>
+        (i.serial_number && i.serial_number.toLowerCase().includes(q)) ||
+        (i.product_code && i.product_code.toLowerCase().includes(q)) ||
+        (i.brand_name && i.brand_name.toLowerCase().includes(q)) ||
+        (i.courier_info && i.courier_info.toLowerCase().includes(q))
+      );
+    }
+    return list;
+  }, [selectedLocationData, selectedDenomData, drilldownSearch]);
+
   if (activeApp === 'GFS') {
     return <GfsApp onBackToPmims={() => setActiveApp('PMIMS')} initialLang={currentLang} />;
   }
@@ -5488,7 +6300,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     { type: 'item', key: 'screen-customer-receipt', label: t('menu_customer_receipt'), icon: 'fa-solid fa-hand-holding-dollar', permission: 'intake', onClick: () => { setActiveTab('screen-customer-receipt'); resetCustomerReceiptForm(); } },
     { type: 'item', key: 'screen-gfs-delivery', label: currentLang === 'en' ? 'GFS Branch Delivery' : 'طلبات فروع GFS', icon: 'fa-solid fa-truck-fast', permission: 'intake', onClick: () => { setActiveTab('screen-gfs-delivery'); fetchGfsDeliveryRequests(); fetchGfsSyncLogs(); } },
     { type: 'item', key: 'screen-home-delivery', label: currentLang === 'en' ? 'Home Delivery' : 'توصيل المنازل', icon: 'fa-solid fa-house-chimney-user', permission: 'intake', onClick: () => { setActiveTab('screen-home-delivery'); fetchHomeDeliveries(); } },
-    { type: 'item', key: 'screen-damaged-bars', label: currentLang === 'en' ? 'Damaged Bar Approvals' : 'اعتماد السبائك التالفة', icon: 'fa-solid fa-triangle-exclamation', permission: 'custody', onClick: () => { setActiveTab('screen-damaged-bars'); fetchDamagedBars(); } },
+    { type: 'item', key: 'screen-damaged-bars', label: currentLang === 'en' ? 'Damaged Bar Approvals' : 'اعتماد السبائك التالفة', icon: 'fa-solid fa-triangle-exclamation', permission: 'custody', onClick: () => { setActiveTab('screen-damaged-bars'); fetchDamagedBars(); fetchDamagedHighStockAlerts(); fetchDamagedReplacements(); fetchDamagedExports(); } },
     { type: 'item', key: 'screen-barcode-labeling', label: currentLang === 'en' ? 'Barcode & QR Labeling' : 'طباعة وتتبع الباركود و QR', icon: 'fa-solid fa-barcode', permission: 'barcode_qr_labeling', onClick: () => { setActiveTab('screen-barcode-labeling'); fetchInventory(); fetchLocations(); fetchQrReprintPrivilege(); } },
     { type: 'item', key: 'screen-bar-traceability', label: t('menu_bar_traceability'), icon: 'fa-solid fa-passport', permission: 'dashboard', onClick: () => { setActiveTab('screen-bar-traceability'); fetchInventory(); fetchProducts(); } },
 
@@ -5931,7 +6743,684 @@ const [migrationApproved, setMigrationApproved] = useState(false);
 
         {/* SCREEN VIEWPORT: EXECUTIVE BOARD */}
         <section className={`screen-viewport ${activeTab === 'screen-exec' ? 'active' : ''}`}>
-          <div className="kpi-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
+          {/* DASHBOARD MODE TOGGLE & CONTROLS */}
+          <div className="glass-card" style={{ padding: '14px 20px', marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '14px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+              <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: 'linear-gradient(135deg, rgba(212,175,55,0.2), rgba(0,155,78,0.2))', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(212,175,55,0.4)' }}>
+                <i className="fa-solid fa-layer-group" style={{ color: '#D4AF37', fontSize: '18px' }}></i>
+              </div>
+              <div>
+                <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 800, color: 'var(--text-primary)' }}>
+                  {currentLang === 'en' ? 'Inventory Weight & Hierarchy Dashboard' : 'لوحة تحكم واستكشاف أوزان المخزون'}
+                </h2>
+                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                  {currentLang === 'en' ? 'Hierarchical drill-down in KG: Owner → Metal Type → Location / Custody → Denomination' : 'استكشاف هرمي بوحدة الكيلوغرام: المالك ← نوع المعدن ← الموقع والحضانة ← الفئة والسبائك'}
+                </span>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              {/* View Mode Toggle */}
+              <div style={{ display: 'flex', background: 'rgba(0,0,0,0.25)', padding: '3px', borderRadius: '8px', border: '1px solid var(--surface-border)' }}>
+                <button
+                  type="button"
+                  onClick={() => setExecDashboardMode('drilldown')}
+                  style={{
+                    padding: '6px 14px',
+                    borderRadius: '6px',
+                    border: 'none',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                    background: execDashboardMode === 'drilldown' ? 'var(--kfh-green)' : 'transparent',
+                    color: execDashboardMode === 'drilldown' ? '#fff' : 'var(--text-muted)'
+                  }}
+                >
+                  <i className="fa-solid fa-sitemap" style={{ marginRight: '6px' }}></i>
+                  {currentLang === 'en' ? 'Hierarchy Drill-Down (KG)' : 'الاستكشاف الهرمي (كجم)'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setExecDashboardMode('classic')}
+                  style={{
+                    padding: '6px 14px',
+                    borderRadius: '6px',
+                    border: 'none',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                    background: execDashboardMode === 'classic' ? 'var(--kfh-green)' : 'transparent',
+                    color: execDashboardMode === 'classic' ? '#fff' : 'var(--text-muted)'
+                  }}
+                >
+                  <i className="fa-solid fa-chart-pie" style={{ marginRight: '6px' }}></i>
+                  {currentLang === 'en' ? 'Classic Summary' : 'الملخص العام'}
+                </button>
+              </div>
+
+              {/* Refresh Button */}
+              <button
+                className="btn btn-secondary"
+                onClick={() => fetchExecutiveBoard(execStartDate, execEndDate)}
+                disabled={loadingHierarchy || loadingExecBoard}
+                style={{ padding: '7px 14px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}
+              >
+                <i className={`fa-solid fa-rotate ${loadingHierarchy || loadingExecBoard ? 'fa-spin' : ''}`}></i>
+                {currentLang === 'en' ? 'Refresh' : 'تحديث'}
+              </button>
+            </div>
+          </div>
+
+          {/* MODE 1: HIERARCHY DRILL-DOWN (KG) */}
+          {execDashboardMode === 'drilldown' && (
+            <div>
+              {/* TOP SUMMARY CARDS BANNER */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginBottom: '20px' }}>
+                {/* Total Inventory Weight */}
+                <div className="glass-card" style={{ padding: '16px 20px', borderLeft: '4px solid #D4AF37' }}>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>
+                    {currentLang === 'en' ? 'Total Inventory Weight' : 'إجمالي وزن المخزون'}
+                  </div>
+                  <div style={{ fontSize: '26px', fontWeight: 800, color: '#D4AF37', marginTop: '4px' }}>
+                    {(inventoryHierarchy?.total_weight_kg ?? 0).toFixed(3)} <span style={{ fontSize: '16px' }}>KG</span>
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                    <i className="fa-solid fa-boxes-stacked"></i> {inventoryHierarchy?.total_bar_count ?? 0} {currentLang === 'en' ? 'total serialized bars' : 'إجمالي السبائك المرقمنة'}
+                  </div>
+                </div>
+
+                {/* In Transit Classification Banner */}
+                <div className="glass-card" style={{ padding: '16px 20px', borderLeft: '4px solid #8b5cf6', background: 'rgba(139, 92, 246, 0.05)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ fontSize: '11px', color: '#c084fc', fontWeight: 600, textTransform: 'uppercase' }}>
+                      <i className="fa-solid fa-truck-fast" style={{ marginRight: '6px' }}></i>
+                      {currentLang === 'en' ? 'In Transit Custody' : 'حضانة النقل (قيد التوصيل)'}
+                    </div>
+                    <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: 'rgba(139, 92, 246, 0.2)', color: '#c084fc', fontWeight: 'bold' }}>
+                      {currentLang === 'en' ? 'Movement Status' : 'حالة حركة'}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '26px', fontWeight: 800, color: '#c084fc', marginTop: '4px' }}>
+                    {(inventoryHierarchy?.total_in_transit_weight_kg ?? 0).toFixed(3)} <span style={{ fontSize: '16px' }}>KG</span>
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                    {inventoryHierarchy?.total_in_transit_bar_count ?? 0} {currentLang === 'en' ? 'bars with couriers (included under owners)' : 'سبائك بعهدة الناقل (محتسبة ضمن ملاكها)'}
+                  </div>
+                </div>
+
+                {/* Active Hierarchy Depth Badge */}
+                <div className="glass-card" style={{ padding: '16px 20px', borderLeft: '4px solid var(--kfh-green)' }}>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>
+                    {currentLang === 'en' ? 'Current Hierarchy Depth' : 'عمق الاستكشاف الحالي'}
+                  </div>
+                  <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--kfh-green)', marginTop: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ width: '22px', height: '22px', borderRadius: '50%', background: 'var(--kfh-green)', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px' }}>
+                      {drilldownDenom ? 4 : drilldownLocation ? 4 : drilldownMetal ? 3 : drilldownOwner ? 2 : 1}
+                    </span>
+                    {drilldownDenom
+                      ? (currentLang === 'en' ? 'Level 4: Denomination' : 'المستوى 4: الفئة')
+                      : drilldownLocation
+                      ? (currentLang === 'en' ? 'Level 4: Denominations & Bars' : 'المستوى 4: الفئات والسبائك')
+                      : drilldownMetal
+                      ? (currentLang === 'en' ? 'Level 3: Location & Transit' : 'المستوى 3: الموقع وحضانة النقل')
+                      : drilldownOwner
+                      ? (currentLang === 'en' ? 'Level 2: Precious Metal Type' : 'المستوى 2: نوع المعدن الثمين')
+                      : (currentLang === 'en' ? 'Level 1: Owner Selection' : 'المستوى 1: اختيار المالك')}
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                    {currentLang === 'en' ? 'Click any card below to navigate down' : 'انقر على أي بطاقة أدناه للاستكشاف بالتفصيل'}
+                  </div>
+                </div>
+              </div>
+
+              {/* BREADCRUMB NAVIGATION TRAIL */}
+              <div className="glass-card" style={{ padding: '12px 18px', marginBottom: '20px', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px', background: 'rgba(0,0,0,0.2)' }}>
+                <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginRight: '4px' }}>
+                  <i className="fa-solid fa-route" style={{ marginRight: '4px' }}></i>
+                  {currentLang === 'en' ? 'Trail:' : 'المسار:'}
+                </span>
+
+                {/* Level 0: All Owners */}
+                <button
+                  type="button"
+                  onClick={() => { setDrilldownOwner(null); setDrilldownMetal(null); setDrilldownLocation(null); setDrilldownDenom(null); }}
+                  style={{
+                    padding: '4px 10px',
+                    borderRadius: '6px',
+                    border: !drilldownOwner ? '1px solid #D4AF37' : '1px solid var(--surface-border)',
+                    background: !drilldownOwner ? 'rgba(212,175,55,0.15)' : 'rgba(255,255,255,0.05)',
+                    color: !drilldownOwner ? '#D4AF37' : 'var(--text-primary)',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    cursor: 'pointer'
+                  }}
+                >
+                  <i className="fa-solid fa-vault" style={{ marginRight: '5px' }}></i>
+                  {currentLang === 'en' ? 'All Owners' : 'كافة الملاك'} ({(inventoryHierarchy?.total_weight_kg ?? 0).toFixed(3)} KG)
+                </button>
+
+                {/* Level 1: Owner */}
+                {selectedOwnerData && (
+                  <>
+                    <i className="fa-solid fa-chevron-right" style={{ fontSize: '10px', color: 'var(--text-muted)' }}></i>
+                    <button
+                      type="button"
+                      onClick={() => { setDrilldownMetal(null); setDrilldownLocation(null); setDrilldownDenom(null); }}
+                      style={{
+                        padding: '4px 10px',
+                        borderRadius: '6px',
+                        border: !drilldownMetal ? '1px solid var(--kfh-green)' : '1px solid var(--surface-border)',
+                        background: !drilldownMetal ? 'rgba(0,155,78,0.15)' : 'rgba(255,255,255,0.05)',
+                        color: !drilldownMetal ? 'var(--kfh-green)' : 'var(--text-primary)',
+                        fontSize: '12px',
+                        fontWeight: 700,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <i className="fa-solid fa-user-tag" style={{ marginRight: '5px' }}></i>
+                      {selectedOwnerData.owner_label} ({selectedOwnerData.total_weight_kg.toFixed(3)} KG)
+                    </button>
+                  </>
+                )}
+
+                {/* Level 2: Metal */}
+                {selectedMetalData && (
+                  <>
+                    <i className="fa-solid fa-chevron-right" style={{ fontSize: '10px', color: 'var(--text-muted)' }}></i>
+                    <button
+                      type="button"
+                      onClick={() => { setDrilldownLocation(null); setDrilldownDenom(null); }}
+                      style={{
+                        padding: '4px 10px',
+                        borderRadius: '6px',
+                        border: !drilldownLocation ? '1px solid #eab308' : '1px solid var(--surface-border)',
+                        background: !drilldownLocation ? 'rgba(234,179,8,0.15)' : 'rgba(255,255,255,0.05)',
+                        color: !drilldownLocation ? '#eab308' : 'var(--text-primary)',
+                        fontSize: '12px',
+                        fontWeight: 700,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <i className="fa-solid fa-gem" style={{ marginRight: '5px' }}></i>
+                      {selectedMetalData.metal_name} ({selectedMetalData.total_weight_kg.toFixed(3)} KG)
+                    </button>
+                  </>
+                )}
+
+                {/* Level 3: Location */}
+                {selectedLocationData && (
+                  <>
+                    <i className="fa-solid fa-chevron-right" style={{ fontSize: '10px', color: 'var(--text-muted)' }}></i>
+                    <button
+                      type="button"
+                      onClick={() => setDrilldownDenom(null)}
+                      style={{
+                        padding: '4px 10px',
+                        borderRadius: '6px',
+                        border: !drilldownDenom ? '1px solid #8b5cf6' : '1px solid var(--surface-border)',
+                        background: !drilldownDenom ? 'rgba(139,92,246,0.15)' : 'rgba(255,255,255,0.05)',
+                        color: !drilldownDenom ? '#c084fc' : 'var(--text-primary)',
+                        fontSize: '12px',
+                        fontWeight: 700,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <i className={selectedLocationData.is_in_transit ? 'fa-solid fa-truck-fast' : 'fa-solid fa-location-dot'} style={{ marginRight: '5px' }}></i>
+                      {selectedLocationData.location_label} ({selectedLocationData.total_weight_kg.toFixed(3)} KG)
+                    </button>
+                  </>
+                )}
+
+                {/* Level 4: Denomination Filter */}
+                {selectedDenomData && (
+                  <>
+                    <i className="fa-solid fa-chevron-right" style={{ fontSize: '10px', color: 'var(--text-muted)' }}></i>
+                    <span
+                      style={{
+                        padding: '4px 10px',
+                        borderRadius: '6px',
+                        border: '1px solid #3b82f6',
+                        background: 'rgba(59,130,246,0.15)',
+                        color: '#60a5fa',
+                        fontSize: '12px',
+                        fontWeight: 700
+                      }}
+                    >
+                      <i className="fa-solid fa-cubes" style={{ marginRight: '5px' }}></i>
+                      {selectedDenomData.denomination_label} ({selectedDenomData.total_weight_kg.toFixed(3)} KG)
+                    </span>
+                  </>
+                )}
+
+                {drilldownOwner && (
+                  <button
+                    type="button"
+                    onClick={() => { setDrilldownOwner(null); setDrilldownMetal(null); setDrilldownLocation(null); setDrilldownDenom(null); }}
+                    style={{
+                      marginLeft: 'auto',
+                      background: 'none',
+                      border: 'none',
+                      color: 'var(--accent-red)',
+                      cursor: 'pointer',
+                      fontSize: '11px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}
+                  >
+                    <i className="fa-solid fa-xmark"></i> {currentLang === 'en' ? 'Reset to Level 1' : 'إعادة التعيين للمستوى الأول'}
+                  </button>
+                )}
+              </div>
+
+              {/* LEVEL 1: OWNER CARDS DECK */}
+              {!drilldownOwner && (
+                <div>
+                  <div style={{ marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                      <span style={{ color: '#D4AF37', marginRight: '6px' }}>1.</span>
+                      {currentLang === 'en' ? 'Select Owner to Drill Down' : 'اختر المالك للاستكشاف بالتفصيل'}
+                    </h3>
+                    <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                      {inventoryHierarchy?.hierarchy?.length ?? 0} {currentLang === 'en' ? 'Ownership Classifications' : 'تصنيفات ملكية'}
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
+                    {(inventoryHierarchy?.hierarchy ?? []).map((owner: any) => {
+                      const isKfh = owner.owner_code === 'KFH_OWNED';
+                      const isTurkey = owner.owner_code === 'TURKEY_OWNED';
+                      const isCustomer = owner.owner_code === 'CUSTOMER_OWNED';
+                      const isVip = owner.owner_code === 'VIP_OWNED';
+
+                      const themeColor = isKfh ? 'var(--kfh-green)' : isTurkey ? '#D4AF37' : isVip ? '#ec4899' : '#3b82f6';
+                      const icon = isKfh ? 'fa-building-columns' : isTurkey ? 'fa-coins' : isVip ? 'fa-crown' : 'fa-user-shield';
+
+                      return (
+                        <div
+                          key={owner.owner_code}
+                          className="glass-card kpi-card"
+                          onClick={() => { setDrilldownOwner(owner.owner_code); setDrilldownMetal(null); setDrilldownLocation(null); setDrilldownDenom(null); }}
+                          style={{
+                            cursor: 'pointer',
+                            transition: 'all 0.2s ease',
+                            border: `1px solid ${themeColor}`,
+                            position: 'relative',
+                            overflow: 'hidden'
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <i className={`fa-solid ${icon}`} style={{ color: themeColor, fontSize: '18px' }}></i>
+                              <span className="kpi-title" style={{ color: themeColor, fontWeight: 700, fontSize: '14px' }}>
+                                {owner.owner_label}
+                              </span>
+                            </div>
+                            <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: 'rgba(255,255,255,0.08)', color: 'var(--text-muted)', fontWeight: 'bold' }}>
+                              {owner.owner_code}
+                            </span>
+                          </div>
+
+                          <div style={{ marginTop: '12px' }}>
+                            <span className="kpi-value" style={{ color: themeColor, fontSize: '28px', fontWeight: 800 }}>
+                              {owner.total_weight_kg.toFixed(3)} <span style={{ fontSize: '16px' }}>KG</span>
+                            </span>
+                            <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                              <i className="fa-solid fa-scale-balanced"></i> {(owner.total_weight_kg * 1000).toLocaleString()} g • {owner.bar_count} {currentLang === 'en' ? 'Bars' : 'سبيكة'}
+                            </div>
+                          </div>
+
+                          {/* In-Transit Custody Notice */}
+                          {owner.in_transit_weight_kg > 0 && (
+                            <div style={{ marginTop: '10px', padding: '6px 10px', borderRadius: '6px', background: 'rgba(139, 92, 246, 0.12)', border: '1px solid rgba(139, 92, 246, 0.3)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11px', color: '#c084fc' }}>
+                              <span>
+                                <i className="fa-solid fa-truck-fast" style={{ marginRight: '5px' }}></i>
+                                {currentLang === 'en' ? 'In Transit (Courier):' : 'قيد النقل (عهدة الناقل):'} <strong>{owner.in_transit_weight_kg.toFixed(3)} KG</strong>
+                              </span>
+                              <span>({owner.in_transit_bar_count} {currentLang === 'en' ? 'bars' : 'سبيكة'})</span>
+                            </div>
+                          )}
+
+                          <div style={{ marginTop: '14px', paddingTop: '10px', borderTop: '1px solid var(--surface-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: themeColor, fontWeight: 600 }}>
+                            <span>{owner.metals?.length ?? 0} {currentLang === 'en' ? 'Metal Types' : 'أنواع معادن'}</span>
+                            <span>{currentLang === 'en' ? 'Drill Down →' : 'استكشاف ←'}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* LEVEL 2: METAL TYPE CARDS DECK */}
+              {drilldownOwner && !drilldownMetal && selectedOwnerData && (
+                <div>
+                  <div style={{ marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                      <span style={{ color: '#D4AF37', marginRight: '6px' }}>2.</span>
+                      {currentLang === 'en' ? `Select Precious Metal Type for ${selectedOwnerData.owner_label}` : `اختر نوع المعدن الثمين لـ ${selectedOwnerData.owner_label}`}
+                    </h3>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => setDrilldownOwner(null)}
+                      style={{ padding: '4px 10px', fontSize: '11px' }}
+                    >
+                      <i className="fa-solid fa-arrow-left"></i> {currentLang === 'en' ? 'Back to Owners' : 'الرجوع للملاك'}
+                    </button>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '16px' }}>
+                    {(selectedOwnerData.metals ?? []).map((metal: any) => {
+                      const isGold = metal.metal_name.toLowerCase().includes('gold');
+                      const isSilver = metal.metal_name.toLowerCase().includes('silver');
+                      const metalColor = isGold ? '#D4AF37' : isSilver ? '#94a3b8' : '#38bdf8';
+                      const pct = selectedOwnerData.total_weight_kg > 0 ? ((metal.total_weight_kg / selectedOwnerData.total_weight_kg) * 100).toFixed(1) : '0';
+
+                      return (
+                        <div
+                          key={metal.metal_name}
+                          className="glass-card kpi-card"
+                          onClick={() => { setDrilldownMetal(metal.metal_name); setDrilldownLocation(null); setDrilldownDenom(null); }}
+                          style={{
+                            cursor: 'pointer',
+                            transition: 'all 0.2s ease',
+                            border: `1px solid ${metalColor}`,
+                            background: `linear-gradient(135deg, rgba(255,255,255,0.03), ${isGold ? 'rgba(212,175,55,0.08)' : 'rgba(148,163,184,0.08)'})`
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span style={{ fontSize: '20px' }}>{isGold ? '🟡' : isSilver ? '⚪' : '💎'}</span>
+                              <span className="kpi-title" style={{ color: metalColor, fontWeight: 700, fontSize: '16px' }}>
+                                {metal.metal_name}
+                              </span>
+                            </div>
+                            <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '4px', background: `${metalColor}25`, color: metalColor, fontWeight: 'bold' }}>
+                              {pct}% of Owner
+                            </span>
+                          </div>
+
+                          <div style={{ marginTop: '12px' }}>
+                            <span className="kpi-value" style={{ color: metalColor, fontSize: '26px', fontWeight: 800 }}>
+                              {metal.total_weight_kg.toFixed(3)} <span style={{ fontSize: '16px' }}>KG</span>
+                            </span>
+                            <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                              <i className="fa-solid fa-scale-balanced"></i> {(metal.total_weight_kg * 1000).toLocaleString()} g • {metal.bar_count} {currentLang === 'en' ? 'Bars' : 'سبيكة'}
+                            </div>
+                          </div>
+
+                          <div style={{ marginTop: '14px', paddingTop: '10px', borderTop: '1px solid var(--surface-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: metalColor, fontWeight: 600 }}>
+                            <span>{metal.locations?.length ?? 0} {currentLang === 'en' ? 'Storage / Transit Locations' : 'مواقع تخزين / نقل'}</span>
+                            <span>{currentLang === 'en' ? 'View Locations →' : 'عرض المواقع ←'}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* LEVEL 3: LOCATION & IN-TRANSIT CUSTODY CARDS DECK */}
+              {drilldownOwner && drilldownMetal && !drilldownLocation && selectedMetalData && (
+                <div>
+                  <div style={{ marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                      <span style={{ color: '#D4AF37', marginRight: '6px' }}>3.</span>
+                      {currentLang === 'en' ? `Select Location & Custody for ${selectedOwnerData?.owner_label} - ${selectedMetalData.metal_name}` : `اختر الموقع والحضانة لـ ${selectedOwnerData?.owner_label} - ${selectedMetalData.metal_name}`}
+                    </h3>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => setDrilldownMetal(null)}
+                      style={{ padding: '4px 10px', fontSize: '11px' }}
+                    >
+                      <i className="fa-solid fa-arrow-left"></i> {currentLang === 'en' ? 'Back to Metals' : 'الرجوع للمعادن'}
+                    </button>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
+                    {(selectedMetalData.locations ?? []).map((loc: any) => {
+                      const isTransit = loc.is_in_transit;
+                      const cardColor = isTransit ? '#8b5cf6' : 'var(--kfh-green)';
+                      const cardBg = isTransit ? 'linear-gradient(135deg, rgba(139,92,246,0.15), rgba(0,0,0,0.3))' : undefined;
+
+                      return (
+                        <div
+                          key={loc.location_key}
+                          className="glass-card kpi-card"
+                          onClick={() => { setDrilldownLocation(loc.location_key); setDrilldownDenom(null); }}
+                          style={{
+                            cursor: 'pointer',
+                            transition: 'all 0.2s ease',
+                            border: `1px solid ${cardColor}`,
+                            background: cardBg
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <i className={isTransit ? 'fa-solid fa-truck-fast' : 'fa-solid fa-warehouse'} style={{ color: cardColor, fontSize: '18px' }}></i>
+                              <span className="kpi-title" style={{ color: cardColor, fontWeight: 700, fontSize: '14px' }}>
+                                {loc.location_label}
+                              </span>
+                            </div>
+                            {isTransit && (
+                              <span style={{ fontSize: '9px', padding: '2px 6px', borderRadius: '4px', background: '#8b5cf6', color: '#fff', fontWeight: 'bold' }}>
+                                {currentLang === 'en' ? 'IN TRANSIT' : 'قيد النقل'}
+                              </span>
+                            )}
+                          </div>
+
+                          <div style={{ marginTop: '12px' }}>
+                            <span className="kpi-value" style={{ color: cardColor, fontSize: '26px', fontWeight: 800 }}>
+                              {loc.total_weight_kg.toFixed(3)} <span style={{ fontSize: '16px' }}>KG</span>
+                            </span>
+                            <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                              <i className="fa-solid fa-scale-balanced"></i> {(loc.total_weight_kg * 1000).toLocaleString()} g • {loc.bar_count} {currentLang === 'en' ? 'Bars' : 'سبيكة'}
+                            </div>
+                          </div>
+
+                          {isTransit && (
+                            <div style={{ marginTop: '10px', padding: '6px 10px', borderRadius: '6px', background: 'rgba(0,0,0,0.3)', fontSize: '11px', color: '#e2e8f0' }}>
+                              <div><i className="fa-solid fa-id-badge" style={{ color: '#c084fc', marginRight: '4px' }}></i> {currentLang === 'en' ? 'Courier Carrier:' : 'شركة النقل:'} <strong>{loc.courier_info || 'Authorized Armored Transport'}</strong></div>
+                              <div style={{ marginTop: '2px', color: '#94a3b8' }}>
+                                <i className="fa-solid fa-shield-halved" style={{ marginRight: '4px' }}></i>
+                                {currentLang === 'en' ? `Custody: Courier | Owner: ${selectedOwnerData?.owner_label}` : `الحضانة: الناقل | المالك: ${selectedOwnerData?.owner_label}`}
+                              </div>
+                            </div>
+                          )}
+
+                          <div style={{ marginTop: '14px', paddingTop: '10px', borderTop: '1px solid var(--surface-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: cardColor, fontWeight: 600 }}>
+                            <span>{loc.denominations?.length ?? 0} {currentLang === 'en' ? 'Denominations' : 'فئات وزنية'}</span>
+                            <span>{currentLang === 'en' ? 'Inspect Bars →' : 'فحص السبائك ←'}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* LEVEL 4: DENOMINATIONS & SERIALIZED BAR INSPECTION */}
+              {drilldownLocation && selectedLocationData && (
+                <div>
+                  <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                    <div>
+                      <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 800, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ color: '#D4AF37' }}>4.</span>
+                        {selectedLocationData.location_label}
+                        {selectedLocationData.is_in_transit && (
+                          <span style={{ fontSize: '10px', padding: '2px 8px', borderRadius: '4px', background: '#8b5cf6', color: '#fff', fontWeight: 'bold' }}>
+                            {currentLang === 'en' ? 'In Transit Custody' : 'حضانة النقل'}
+                          </span>
+                        )}
+                      </h3>
+                      <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                        {selectedOwnerData?.owner_label} • {selectedMetalData?.metal_name} • <strong>{selectedLocationData.total_weight_kg.toFixed(3)} KG</strong> ({selectedLocationData.bar_count} {currentLang === 'en' ? 'bars' : 'سبيكة'})
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() => setDrilldownLocation(null)}
+                        style={{ padding: '6px 12px', fontSize: '12px' }}
+                      >
+                        <i className="fa-solid fa-arrow-left"></i> {currentLang === 'en' ? 'Back to Locations' : 'الرجوع للمواقع'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Denomination Filter Chips */}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '16px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setDrilldownDenom(null)}
+                      style={{
+                        padding: '6px 14px',
+                        borderRadius: '6px',
+                        border: !drilldownDenom ? '1px solid var(--kfh-green)' : '1px solid var(--surface-border)',
+                        background: !drilldownDenom ? 'var(--kfh-green)' : 'rgba(255,255,255,0.05)',
+                        color: !drilldownDenom ? '#fff' : 'var(--text-primary)',
+                        fontSize: '12px',
+                        fontWeight: 700,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      {currentLang === 'en' ? 'All Denominations' : 'كافة الفئات'} ({selectedLocationData.total_weight_kg.toFixed(3)} KG • {selectedLocationData.bar_count} {currentLang === 'en' ? 'bars' : 'سبيكة'})
+                    </button>
+
+                    {(selectedLocationData.denominations ?? []).map((denom: any) => {
+                      const isSelected = drilldownDenom === denom.denomination_label;
+                      return (
+                        <button
+                          key={denom.denomination_label}
+                          type="button"
+                          onClick={() => setDrilldownDenom(isSelected ? null : denom.denomination_label)}
+                          style={{
+                            padding: '6px 14px',
+                            borderRadius: '6px',
+                            border: isSelected ? '1px solid #D4AF37' : '1px solid var(--surface-border)',
+                            background: isSelected ? 'rgba(212,175,55,0.2)' : 'rgba(255,255,255,0.05)',
+                            color: isSelected ? '#D4AF37' : 'var(--text-primary)',
+                            fontSize: '12px',
+                            fontWeight: 700,
+                            cursor: 'pointer'
+                          }}
+                        >
+                          {denom.denomination_label}: <strong>{denom.total_weight_kg.toFixed(3)} KG</strong> ({denom.bar_count} {currentLang === 'en' ? 'bars' : 'سبيكة'})
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Serial Search & Stats */}
+                  <div className="glass-card" style={{ padding: '12px 16px', marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                    <div style={{ position: 'relative', width: '320px', maxWidth: '100%' }}>
+                      <i className="fa-solid fa-magnifying-glass" style={{ position: 'absolute', left: '10px', top: '10px', color: 'var(--text-muted)', fontSize: '12px' }}></i>
+                      <input
+                        type="text"
+                        value={drilldownSearch}
+                        onChange={e => setDrilldownSearch(e.target.value)}
+                        placeholder={currentLang === 'en' ? 'Search serial number, product, brand...' : 'البحث بالرقم التسلسلي، المنتج، العلامة...'}
+                        className="form-control"
+                        style={{ paddingLeft: '30px', fontSize: '12px', height: '34px' }}
+                      />
+                    </div>
+
+                    <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                      {currentLang === 'en' ? 'Displaying' : 'عرض'} <strong>{drilldownBars.length}</strong> {currentLang === 'en' ? 'bars' : 'سبيكة'} (<strong>{drilldownBars.reduce((s: number, b: any) => s + (b.weight_kg || (b.weight_grams ? b.weight_grams / 1000 : 0)), 0).toFixed(3)} KG</strong>)
+                    </div>
+                  </div>
+
+                  {/* Serialized Bar Grid Table */}
+                  <div className="glass-card" style={{ overflowX: 'auto', padding: '0', borderRadius: '8px' }}>
+                    <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                      <thead>
+                        <tr style={{ background: 'rgba(0,0,0,0.25)', borderBottom: '1px solid var(--surface-border)' }}>
+                          <th style={{ padding: '10px 14px', textAlign: 'left' }}>{currentLang === 'en' ? 'Serial Number' : 'الرقم التسلسلي'}</th>
+                          <th style={{ padding: '10px 14px', textAlign: 'left' }}>{currentLang === 'en' ? 'Product Code' : 'رمز المنتج'}</th>
+                          <th style={{ padding: '10px 14px', textAlign: 'left' }}>{currentLang === 'en' ? 'Metal & Denomination' : 'المعدن والفئة'}</th>
+                          <th style={{ padding: '10px 14px', textAlign: 'right' }}>{currentLang === 'en' ? 'Weight (KG)' : 'الوزن (كجم)'}</th>
+                          <th style={{ padding: '10px 14px', textAlign: 'right' }}>{currentLang === 'en' ? 'Weight (Grams)' : 'الوزن (جرام)'}</th>
+                          <th style={{ padding: '10px 14px', textAlign: 'center' }}>{currentLang === 'en' ? 'Purity' : 'النقاء'}</th>
+                          <th style={{ padding: '10px 14px', textAlign: 'left' }}>{currentLang === 'en' ? 'Brand / Refiner' : 'المصفاة / العلامة'}</th>
+                          <th style={{ padding: '10px 14px', textAlign: 'center' }}>{currentLang === 'en' ? 'Custody / Status' : 'الحضانة / الحالة'}</th>
+                          <th style={{ padding: '10px 14px', textAlign: 'center' }}>{currentLang === 'en' ? 'GDL / Assay' : 'اعتماد LBMA'}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {drilldownBars.length === 0 ? (
+                          <tr>
+                            <td colSpan={9} style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)' }}>
+                              <i className="fa-solid fa-box-open fa-2x" style={{ display: 'block', marginBottom: '8px', opacity: 0.5 }}></i>
+                              {currentLang === 'en' ? 'No serialized bars match the selected filters.' : 'لا توجد سبائك مطابقة للتصفية المحددة.'}
+                            </td>
+                          </tr>
+                        ) : (
+                          drilldownBars.map((bar: any, idx: number) => {
+                            const isTransit = bar.is_in_transit;
+                            return (
+                              <tr key={bar.item_id || idx} style={{ borderBottom: '1px solid var(--surface-border)', background: idx % 2 === 0 ? 'rgba(255,255,255,0.01)' : 'transparent' }}>
+                                <td style={{ padding: '10px 14px', fontWeight: 700, color: '#D4AF37' }}>
+                                  <i className="fa-solid fa-barcode" style={{ marginRight: '6px', fontSize: '11px', color: 'var(--text-muted)' }}></i>
+                                  {bar.serial_number}
+                                </td>
+                                <td style={{ padding: '10px 14px', fontFamily: 'monospace' }}>
+                                  {bar.product_code || 'AU-BAR'}
+                                </td>
+                                <td style={{ padding: '10px 14px' }}>
+                                  <span style={{ fontWeight: 600 }}>{bar.metal_name}</span> • {bar.weight_grams}g
+                                </td>
+                                <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 700, color: 'var(--kfh-green)' }}>
+                                  {(bar.weight_kg || (bar.weight_grams / 1000)).toFixed(3)} KG
+                                </td>
+                                <td style={{ padding: '10px 14px', textAlign: 'right', color: 'var(--text-muted)' }}>
+                                  {bar.weight_grams.toLocaleString()} g
+                                </td>
+                                <td style={{ padding: '10px 14px', textAlign: 'center' }}>
+                                  <span style={{ padding: '2px 6px', borderRadius: '4px', background: 'rgba(212,175,55,0.1)', color: '#D4AF37', fontSize: '11px', fontWeight: 'bold' }}>
+                                    {bar.purity}
+                                  </span>
+                                </td>
+                                <td style={{ padding: '10px 14px' }}>
+                                  {bar.brand_name || 'Valcambi Suisse'}
+                                </td>
+                                <td style={{ padding: '10px 14px', textAlign: 'center' }}>
+                                  {isTransit ? (
+                                    <span style={{ padding: '3px 8px', borderRadius: '4px', background: 'rgba(139,92,246,0.2)', color: '#c084fc', fontSize: '10px', fontWeight: 'bold', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                      <i className="fa-solid fa-truck-fast"></i> {currentLang === 'en' ? 'Courier In Transit' : 'قيد النقل مع الناقل'}
+                                    </span>
+                                  ) : (
+                                    <span style={{ padding: '3px 8px', borderRadius: '4px', background: 'rgba(0,155,78,0.15)', color: 'var(--kfh-green)', fontSize: '10px', fontWeight: 'bold' }}>
+                                      {bar.status || 'READY'}
+                                    </span>
+                                  )}
+                                </td>
+                                <td style={{ padding: '10px 14px', textAlign: 'center' }}>
+                                  <span style={{ padding: '2px 6px', borderRadius: '4px', background: 'rgba(59,130,246,0.15)', color: '#60a5fa', fontSize: '10px', fontWeight: 600 }}>
+                                    {bar.gdl_status || 'GDL_LISTED'}
+                                  </span>
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* MODE 2: CLASSIC SUMMARY VIEW */}
+          {execDashboardMode === 'classic' && (
+            <div>
+              <div className="kpi-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
             {/* 1. TOTAL PRECIOUS METALS SUMMATION CARD */}
             <div
               className="glass-card kpi-card"
@@ -6196,6 +7685,117 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                   ))}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* REQUIREMENT 6: DAMAGED GOLD / SILVER HIGH-STOCK ACCUMULATION ALERT BANNER */}
+          {damagedHighStockAlerts.length > 0 && (
+            <div className="glass-card" style={{
+              marginBottom: '20px',
+              border: damagedHighStockAlerts.some((a: any) => a.is_threshold_breached) ? '2px solid var(--accent-red)' : '1px solid var(--surface-border)',
+              background: damagedHighStockAlerts.some((a: any) => a.is_threshold_breached) ? 'rgba(239, 68, 68, 0.08)' : 'rgba(212, 175, 55, 0.04)',
+              padding: '16px 20px'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <div style={{
+                    width: '42px',
+                    height: '42px',
+                    borderRadius: '8px',
+                    background: damagedHighStockAlerts.some((a: any) => a.is_threshold_breached) ? 'rgba(239, 68, 68, 0.2)' : 'rgba(212, 175, 55, 0.15)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: damagedHighStockAlerts.some((a: any) => a.is_threshold_breached) ? 'var(--accent-red)' : '#D4AF37',
+                    fontSize: '20px'
+                  }}>
+                    <i className="fa-solid fa-triangle-exclamation"></i>
+                  </div>
+                  <div>
+                    <h4 style={{ margin: 0, fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>{currentLang === 'en' ? 'Damaged Precious Metals High-Stock Accumulation Alerts' : 'تنبيهات تراكم المعادن الثمينة التالفة (الحد الأقصى)'}</span>
+                      {damagedHighStockAlerts.some((a: any) => a.is_threshold_breached) && (
+                        <span className="badge" style={{ background: '#dc2626', color: '#fff', fontSize: '11px', animation: 'pulse 2s infinite' }}>
+                          {currentLang === 'en' ? 'BREACHED / ACTION REQUIRED' : 'تجاوز الحد / يتطلب إجراء'}
+                        </span>
+                      )}
+                    </h4>
+                    <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: 'var(--text-muted)' }}>
+                      {currentLang === 'en'
+                        ? 'Monitors accumulated damaged weight in KG vs configurable manufacturer export thresholds.'
+                        : 'مراقبة تراكم أوزان الذهب والفضة التالفة (بالكيلوجرام) ومقارنتها بالحدود المعتمدة لتصديرها إلى المصنع والمصفاة.'}
+                    </p>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                  <button
+                    className="btn btn-primary"
+                    style={{ background: '#dc2626', borderColor: '#dc2626', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                    onClick={() => {
+                      const breached = damagedHighStockAlerts.find((a: any) => a.is_threshold_breached) || damagedHighStockAlerts[0];
+                      const metalId = breached?.metal_type_id || 1;
+                      setExportManifestMetalTypeId(metalId);
+                      setExportManifestVendorId('');
+                      setSelectedDamagedExportItemIds([]);
+                      setExportManifestResult(null);
+                      setExportManifestNotes('');
+                      fetchDamagedExportCandidates(metalId);
+                      setShowDamagedExportModal(true);
+                    }}
+                  >
+                    <i className="fa-solid fa-box-archive"></i>
+                    <span>{currentLang === 'en' ? 'Export Damaged Bars to Refiner' : 'تصدير السبائك التالفة للمصنع'}</span>
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px', marginTop: '16px' }}>
+                {damagedHighStockAlerts.map((alert: any) => {
+                  const isBreached = alert.is_threshold_breached;
+                  const ratio = alert.threshold_weight_kg > 0 ? (alert.total_damaged_weight_kg / alert.threshold_weight_kg) * 100 : 0;
+                  return (
+                    <div key={alert.metal_type_id} style={{
+                      background: 'rgba(255, 255, 255, 0.03)',
+                      border: isBreached ? '1px solid #dc2626' : '1px solid var(--surface-border)',
+                      borderRadius: '8px',
+                      padding: '12px 16px'
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <span style={{ fontWeight: 'bold', fontSize: '14px', color: alert.metal_type_name?.toLowerCase().includes('silver') ? '#94a3b8' : '#D4AF37' }}>
+                          <i className="fa-solid fa-gem" style={{ marginRight: '6px' }}></i>
+                          {alert.metal_type_name} {currentLang === 'en' ? 'Damaged Stock' : 'المخزون التالف'}
+                        </span>
+                        <span className={`badge ${isBreached ? 'badge-quarantined' : 'badge-ready'}`} style={{ fontSize: '11px' }}>
+                          {isBreached ? (currentLang === 'en' ? 'Over Limit' : 'تجاوز الحد') : (currentLang === 'en' ? 'Within Limit' : 'ضمن الحد')}
+                        </span>
+                      </div>
+
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '6px' }}>
+                        <span style={{ color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Damaged Weight:' : 'الوزن التالف:'}</span>
+                        <strong style={{ color: isBreached ? 'var(--accent-red)' : 'var(--text-primary)' }}>
+                          {Number(alert.total_damaged_weight_kg).toFixed(3)} KG ({alert.damaged_bars_count} {currentLang === 'en' ? 'bars' : 'سبيكة'})
+                        </strong>
+                      </div>
+
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '8px' }}>
+                        <span>{currentLang === 'en' ? 'Configured Limit:' : 'الحد الأقصى المعتمد:'}</span>
+                        <span>{Number(alert.threshold_weight_kg).toFixed(3)} KG</span>
+                      </div>
+
+                      {/* Progress Bar */}
+                      <div style={{ width: '100%', height: '6px', background: 'rgba(255,255,255,0.1)', borderRadius: '3px', overflow: 'hidden' }}>
+                        <div style={{
+                          width: `${Math.min(ratio, 100)}%`,
+                          height: '100%',
+                          background: isBreached ? '#dc2626' : ratio > 75 ? '#f59e0b' : '#009B4E',
+                          transition: 'width 0.3s ease'
+                        }}></div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
 
@@ -6486,7 +8086,9 @@ const [migrationApproved, setMigrationApproved] = useState(false);
               </div>
             )}
           </div>
-        </section>
+        </div>
+      )}
+    </section>
 
 
 
@@ -6880,11 +8482,16 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                         if (uniquePids.length === 0) return null;
                         return (
                           <div style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px solid rgba(217, 119, 6, 0.2)' }}>
-                            <div style={{ fontSize: '11px', fontWeight: 600, color: '#F59E0B', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                              <i className="fa-solid fa-coins"></i>
+                            <div style={{ fontSize: '12px', fontWeight: 700, color: '#F59E0B', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <i className="fa-solid fa-calculator"></i>
                               {currentLang === 'en' 
-                                ? 'Purchasing Cost per Denomination in this Shipment (KWD):' 
-                                : 'تكلفة الشراء لكل فئة في هذه الشحنة (د.ك):'}
+                                ? 'Mandatory Shipment Production Cost per Metal Type & Denomination (KWD):' 
+                                : 'تكلفة إنتاج الشحنة الإلزامية لكل نوع معدن وفئة (د.ك):'}
+                            </div>
+                            <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '8px' }}>
+                              {currentLang === 'en'
+                                ? 'Production cost in KWD captured for this specific received shipment (different shipments may have different production costs).'
+                                : 'يتم تسجيل تكلفة الإنتاج بالدينار الكويتي لهذه الشحنة تحديداً (قد تختلف تكلفة الإنتاج بين الشحنات لنفس الفئة).'}
                             </div>
                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '8px' }}>
                               {uniquePids.map(pid => {
@@ -7863,24 +9470,88 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     : 'حوكمة مبدأ الرقابة الثنائية (Maker-Checker) للسبائك التالفة. يقوم الصانع بالإبلاغ عن العيوب، ويقوم المراجع بالاعتماد المستقل للعزل أو الرفض.'}
                 </p>
               </div>
-              <button
-                className="btn btn-primary"
-                style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', background: '#dc3545', borderColor: '#dc3545', padding: '10px 18px', fontSize: '13px', fontWeight: 'bold' }}
-                onClick={() => {
-                  setDamageItemId(null);
-                  setDamageMatchedBar(null);
-                  setDamageScanSerial('');
-                  setDamageScanStatus('idle');
-                  setDamageReason('SCRATCHED_HALLMARK');
-                  setDamageDesc('');
-                  setDamageDocId('');
-                  setShowDamageModal(true);
-                }}
-              >
-                <i className="fa-solid fa-triangle-exclamation"></i>
-                <span>{currentLang === 'en' ? 'Initiate Damage Workflow / Report Bar' : 'بدء دورة اعتماد تلف سبيكة / إبلاغ'}</span>
-              </button>
+              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                <button
+                  className="btn btn-outline"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', borderColor: '#D4AF37', color: '#D4AF37', padding: '10px 16px', fontSize: '13px', fontWeight: 'bold' }}
+                  onClick={() => {
+                    const breached = damagedHighStockAlerts.find((a: any) => a.is_threshold_breached) || damagedHighStockAlerts[0];
+                    const metalId = breached?.metal_type_id || 1;
+                    setExportManifestMetalTypeId(metalId);
+                    setExportManifestVendorId('');
+                    setSelectedDamagedExportItemIds([]);
+                    setExportManifestResult(null);
+                    setExportManifestNotes('');
+                    fetchDamagedExportCandidates(metalId);
+                    setShowDamagedExportModal(true);
+                  }}
+                >
+                  <i className="fa-solid fa-box-archive"></i>
+                  <span>{currentLang === 'en' ? 'Export Damaged Bars to Manufacturer (Refiner)' : 'تصدير السبائك التالفة للمصنع / المصفاة'}</span>
+                </button>
+                <button
+                  className="btn btn-primary"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', background: '#dc3545', borderColor: '#dc3545', padding: '10px 18px', fontSize: '13px', fontWeight: 'bold' }}
+                  onClick={() => {
+                    setDamageItemId(null);
+                    setDamageMatchedBar(null);
+                    setDamageScanSerial('');
+                    setDamageScanStatus('idle');
+                    setDamageReason('SCRATCHED_HALLMARK');
+                    setDamageDesc('');
+                    setDamageDocId('');
+                    setShowDamageModal(true);
+                  }}
+                >
+                  <i className="fa-solid fa-triangle-exclamation"></i>
+                  <span>{currentLang === 'en' ? 'Initiate Damage Workflow / Report Bar' : 'بدء دورة اعتماد تلف سبيكة / إبلاغ'}</span>
+                </button>
+              </div>
             </div>
+
+            {/* HIGH-STOCK ACCUMULATION ALERT MONITOR WIDGET */}
+            {damagedHighStockAlerts.length > 0 && (
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+                gap: '12px',
+                marginBottom: '20px'
+              }}>
+                {damagedHighStockAlerts.map((alert: any) => {
+                  const isBreached = alert.is_threshold_breached;
+                  return (
+                    <div
+                      key={alert.metal_type_id}
+                      style={{
+                        padding: '14px 18px',
+                        borderRadius: '8px',
+                        background: isBreached ? 'rgba(239, 68, 68, 0.12)' : 'rgba(255, 255, 255, 0.04)',
+                        border: isBreached ? '2px solid #dc2626' : '1px solid var(--surface-border)',
+                        boxShadow: isBreached ? '0 0 12px rgba(220, 38, 38, 0.25)' : undefined
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <span style={{ fontWeight: 700, fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <i className="fa-solid fa-scale-balanced" style={{ color: alert.metal_type_name?.toLowerCase().includes('silver') ? '#94a3b8' : '#D4AF37' }}></i>
+                          {alert.metal_type_name} {currentLang === 'en' ? 'Damaged Stock Alert' : 'تنبيه المخزون التالف'}
+                        </span>
+                        <span className={`badge ${isBreached ? 'badge-quarantined' : 'badge-ready'}`} style={{ fontSize: '11px' }}>
+                          {isBreached ? (currentLang === 'en' ? '⚠️ High-Stock Breached' : '⚠️ تجاوز حد التراكم') : (currentLang === 'en' ? 'Normal Level' : 'المستوى طبيعي')}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: '4px' }}>
+                        <div style={{ fontSize: '18px', fontWeight: 800, color: isBreached ? 'var(--accent-red)' : 'var(--text-primary)' }}>
+                          {Number(alert.total_damaged_weight_kg).toFixed(3)} <span style={{ fontSize: '12px', fontWeight: 600 }}>KG</span>
+                        </div>
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                          {currentLang === 'en' ? 'Limit:' : 'الحد:'} <strong>{Number(alert.threshold_weight_kg).toFixed(3)} KG</strong> ({alert.damaged_bars_count} {currentLang === 'en' ? 'bars' : 'سبيكة'})
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
 
             <div className="table-responsive">
               <table>
@@ -7893,6 +9564,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     <th>{currentLang === 'en' ? 'MOCI Assay / Inspection Doc' : 'مستند الفحص / وزارة التجارة'}</th>
                     <th>{currentLang === 'en' ? 'Approval Status' : 'حالة الاعتماد'}</th>
                     <th>{currentLang === 'en' ? 'Workflow Status' : 'حالة سير العمل'}</th>
+                    <th>{currentLang === 'en' ? 'Consignment Exchange' : 'استبدال الأمانة التركية'}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -7900,6 +9572,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     const isPending = bar.damageApprovalStatus === 'PENDING_APPROVAL';
                     const isApproved = bar.damageApprovalStatus === 'APPROVED' || bar.status === 'DAMAGED';
                     const isRejected = bar.damageApprovalStatus === 'REJECTED';
+                    const isAlreadyReplaced = bar.ownership_type === 'TURKEY_OWNED' || bar.replacedByItemId;
                     return (
                       <tr key={idx}>
                         <td><strong>{bar.serialNumber}</strong></td>
@@ -7976,12 +9649,50 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                             </span>
                           )}
                         </td>
+                        <td>
+                          {isApproved && !isAlreadyReplaced ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                              <button
+                                className="btn btn-sm"
+                                style={{ background: 'rgba(217, 119, 6, 0.2)', border: '1px solid #d97706', color: '#f59e0b', fontSize: '11px', fontWeight: 'bold' }}
+                                onClick={() => {
+                                  setSelectedDamagedBarForReplace(bar);
+                                  fetchEligibleTurkeyBars(bar.itemId || bar.item_id);
+                                  setShowTurkeyReplaceModal(true);
+                                }}
+                              >
+                                <i className="fa-solid fa-repeat"></i> {currentLang === 'en' ? 'Exchange (Consignment)' : 'استبدال بأمانة تركيا'}
+                              </button>
+                              {(bar.ownership_type === 'TURKEY_OWNED' || bar.ownershipType === 'TURKEY_OWNED') && (
+                                <button
+                                  className="btn btn-sm"
+                                  style={{ background: 'rgba(220, 38, 38, 0.15)', border: '1px solid #dc2626', color: '#ef4444', fontSize: '11px', fontWeight: 'bold' }}
+                                  onClick={() => {
+                                    setSelectedDamagedBarForExport(bar);
+                                    setDamagedExportVendorId(bar.vendor_id || bar.vendorId || '');
+                                    setDamagedExportCustomsDecl('');
+                                    setDamagedExportNotes('');
+                                    setShowInitiateDamagedExportModal(true);
+                                  }}
+                                >
+                                  <i className="fa-solid fa-plane-departure"></i> {currentLang === 'en' ? 'Overseas Export (3-Level)' : 'تصدير للخارج (3 مستويات)'}
+                                </button>
+                              )}
+                            </div>
+                          ) : isAlreadyReplaced ? (
+                            <span style={{ fontSize: '11px', color: 'var(--accent-green)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                              <i className="fa-solid fa-check-double"></i> {currentLang === 'en' ? 'Exchanged (Turkey)' : 'تم الاستبدال (تركيا)'}
+                            </span>
+                          ) : (
+                            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>—</span>
+                          )}
+                        </td>
                       </tr>
                     );
                   })}
                   {damagedBarsList.length === 0 && (
                     <tr>
-                      <td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '36px 20px' }}>
+                      <td colSpan={8} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '36px 20px' }}>
                         <i className="fa-solid fa-shield-halved" style={{ fontSize: '28px', color: 'var(--accent-green)', marginBottom: '10px', display: 'block' }}></i>
                         <p style={{ margin: '0 0 12px 0', fontSize: '14px' }}>
                           {currentLang === 'en' ? 'No damaged bars currently reported or pending review.' : 'لا توجد سبائك تالفة معلقة أو مسجلة حالياً.'}
@@ -8008,8 +9719,605 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                 </tbody>
               </table>
             </div>
+
+            {/* REQUIREMENT 4: DAMAGED-BAR REPLACEMENT WORKFLOW REVIEW CARD */}
+            <div style={{ marginTop: '28px', borderTop: '1px solid var(--surface-border)', paddingTop: '20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+                <h4 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <i className="fa-solid fa-arrow-right-arrow-left" style={{ color: 'var(--accent-gold)' }}></i>
+                  {currentLang === 'en' ? 'Turkey Consignment Damaged-Bar Replacements (Maker-Checker)' : 'استبدال السبائك التالفة مع أمانات تركيا (صانع / مدقق)'}
+                </h4>
+                <button className="btn btn-outline btn-sm" onClick={fetchDamagedReplacements}>
+                  <i className="fa-solid fa-rotate"></i> {currentLang === 'en' ? 'Refresh Requests' : 'تحديث الطلبات'}
+                </button>
+              </div>
+
+              <div className="table-responsive">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>{currentLang === 'en' ? 'Reference' : 'المرجع'}</th>
+                      <th>{currentLang === 'en' ? 'Damaged Bar (Old Owner)' : 'السبيكة التالفة (المالك السابق)'}</th>
+                      <th>{currentLang === 'en' ? 'Turkey Replacement Bar' : 'سبيكة الاستبدال التركية'}</th>
+                      <th>{currentLang === 'en' ? 'Metal / Weight' : 'المعدن / الوزن'}</th>
+                      <th>{currentLang === 'en' ? 'Reason / Attachment' : 'السبب / المرفق'}</th>
+                      <th>{currentLang === 'en' ? 'Status' : 'الحالة'}</th>
+                      <th>{currentLang === 'en' ? 'Actions' : 'الإجراءات'}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {damagedReplacementsList.map((rep: any, idx: number) => {
+                      const isPending = rep.status === 'PENDING_APPROVAL';
+                      return (
+                        <tr key={idx}>
+                          <td><strong>{rep.replacement_reference}</strong></td>
+                          <td>
+                            <div style={{ color: 'var(--accent-red)', fontWeight: 'bold' }}>{rep.damaged_serial_number}</div>
+                            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                              {rep.damaged_original_owner === 'CUSTOMER_OWNED' 
+                                ? `Customer: ${rep.customer_name || rep.customer_id} (${rep.account_number || 'Custody'})` 
+                                : 'KFH-Kuwait (Proprietary)'}
+                            </div>
+                          </td>
+                          <td>
+                            <div style={{ color: 'var(--accent-green)', fontWeight: 'bold' }}>{rep.replacement_serial_number}</div>
+                            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                              {isPending 
+                                ? (currentLang === 'en' ? 'Assigned upon approval' : 'تؤول للمالك بعد الاعتماد')
+                                : (currentLang === 'en' ? `Adopted: ${rep.damaged_original_owner}` : `انتقلت إلى: ${rep.damaged_original_owner}`)}
+                            </div>
+                          </td>
+                          <td>{rep.weight_grams}g {rep.metal_name} ({rep.denomination})</td>
+                          <td>
+                            <div>{rep.reason}</div>
+                            {rep.attachment_url && (
+                              <a href={rep.attachment_url} target="_blank" rel="noreferrer" style={{ fontSize: '11px', color: 'var(--accent-gold)' }}>
+                                <i className="fa-solid fa-paperclip"></i> {currentLang === 'en' ? 'View Attachment' : 'عرض المرفق'}
+                              </a>
+                            )}
+                          </td>
+                          <td>
+                            <span className={`badge ${rep.status === 'APPROVED' ? 'badge-ready' : rep.status === 'REJECTED' ? 'badge-sold' : 'badge-reserved'}`}>
+                              {rep.status}
+                            </span>
+                          </td>
+                          <td>
+                            {isPending ? (
+                              <div style={{ display: 'flex', gap: '6px' }}>
+                                <button
+                                  className="btn btn-primary btn-sm"
+                                  style={{ padding: '4px 8px', fontSize: '11px', background: 'var(--accent-green)', borderColor: 'var(--accent-green)' }}
+                                  onClick={() => handleApproveTurkeyReplacement(rep.replacement_id)}
+                                >
+                                  <i className="fa-solid fa-check"></i> {currentLang === 'en' ? 'Approve' : 'اعتماد'}
+                                </button>
+                                <button
+                                  className="btn btn-outline btn-sm"
+                                  style={{ padding: '4px 8px', fontSize: '11px', borderColor: 'var(--accent-red)', color: 'var(--accent-red)' }}
+                                  onClick={() => handleRejectTurkeyReplacement(rep.replacement_id)}
+                                >
+                                  <i className="fa-solid fa-xmark"></i> {currentLang === 'en' ? 'Reject' : 'رفض'}
+                                </button>
+                              </div>
+                            ) : (
+                              <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                                {rep.approved_by ? `${currentLang === 'en' ? 'By' : 'بواسطة'}: ${rep.approved_by}` : '—'}
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {damagedReplacementsList.length === 0 && (
+                      <tr>
+                        <td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '20px' }}>
+                          {currentLang === 'en' ? 'No consignment replacement requests recorded.' : 'لا توجد طلبات استبدال أمانات مسجلة.'}
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* REQUIREMENT 7: DAMAGED GOLD OVERSEAS EXPORT (3-LEVEL MAKER-CHECKER-SENIOR_MANAGER GOVERNANCE) */}
+            <div style={{ marginTop: '28px', borderTop: '1px solid var(--surface-border)', paddingTop: '20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
+                <div>
+                  <h4 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px', color: '#ef4444' }}>
+                    <i className="fa-solid fa-plane-departure"></i>
+                    {currentLang === 'en' ? 'Damaged Gold Export to Overseas Refiner / Manufacturer (3-Level Workflow)' : 'تصدير الذهب التالف للمصفاة / المصنع الخارجي (اعتماد ثلاثي المستويات)'}
+                  </h4>
+                  <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: 'var(--text-muted)' }}>
+                    {currentLang === 'en'
+                      ? 'Strict 3-Level Governance: Level 1 (Maker Initiation) → Level 2 (Checker Review) → Level 3 (Senior Treasury Manager Executive Authorization) → Courier Handover (Sets Status to EXPORTED & Enables Serial Reuse).'
+                      : 'حوكمة مشددة بثلاثة مستويات: المستوى الأول (الصانع) ← المستوى الثاني (المدقق) ← المستوى الثالث (المدير التنفيذي للخزينة) ← التسليم للشاحن (يحول الحالة إلى EXPORTED ويتيح إعادة استخدام الرقم التسلسلي).'}
+                  </p>
+                </div>
+                <button className="btn btn-outline btn-sm" onClick={fetchDamagedExports}>
+                  <i className="fa-solid fa-rotate"></i> {currentLang === 'en' ? 'Refresh Exports' : 'تحديث طلبات التصدير'}
+                </button>
+              </div>
+
+              {/* Pending 3-Level Approval Exports Table */}
+              <div style={{ marginBottom: '20px' }}>
+                <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--accent-gold)', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <i className="fa-solid fa-hourglass-half"></i>
+                  {currentLang === 'en' ? 'Active / In-Flight Overseas Damaged Exports:' : 'طلبات التصدير الجارية / قيد الاعتماد:'}
+                </div>
+                <div className="table-responsive">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>{currentLang === 'en' ? 'Export Reference' : 'مرجع التصدير'}</th>
+                        <th>{currentLang === 'en' ? 'Bar Serial / Metal' : 'الرقم التسلسلي / المعدن'}</th>
+                        <th>{currentLang === 'en' ? 'Refiner / Vendor' : 'المصفاة / المورد'}</th>
+                        <th>{currentLang === 'en' ? 'Customs Decl #' : 'رقم البيان الجمركي'}</th>
+                        <th>{currentLang === 'en' ? '3-Level Approval Stepper' : 'مراحل الاعتماد الثلاثية'}</th>
+                        <th>{currentLang === 'en' ? 'Status' : 'الحالة'}</th>
+                        <th>{currentLang === 'en' ? 'Actions' : 'الإجراءات'}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pendingDamagedExports.map((exp: any, idx: number) => {
+                        const isApproved = exp.status_code === 'APPROVED';
+                        const isPending = exp.status_code === 'PENDING_APPROVAL';
+                        const hasChecker = !!exp.checker_approved_by;
+                        const hasSenior = !!exp.senior_manager_approved_by;
+
+                        return (
+                          <tr key={idx}>
+                            <td><strong>{exp.export_reference}</strong></td>
+                            <td>
+                              <div style={{ fontWeight: 'bold', color: 'var(--accent-red)' }}>{exp.serial_number}</div>
+                              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                                {exp.weight_grams}g {exp.metal_name || 'Gold'} (Turkey Consignment)
+                              </div>
+                            </td>
+                            <td>{exp.vendor_name || 'Nadir Gold Refinery'}</td>
+                            <td>
+                              <span style={{ fontSize: '11px', fontFamily: 'monospace', background: 'rgba(255,255,255,0.05)', padding: '2px 6px', borderRadius: '4px' }}>
+                                {exp.customs_declaration_number || 'BAYAN-KW-EXPORT'}
+                              </span>
+                            </td>
+                            <td>
+                              {/* 3-Level Progress Badge Stepper */}
+                              <div style={{ display: 'flex', gap: '4px', alignItems: 'center', flexWrap: 'wrap' }}>
+                                <span style={{
+                                  padding: '2px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 600,
+                                  background: 'rgba(16, 185, 129, 0.15)', color: 'var(--accent-green)', border: '1px solid rgba(16, 185, 129, 0.3)'
+                                }}>
+                                  ✓ L1: Maker ({exp.requested_by})
+                                </span>
+                                <i className="fa-solid fa-chevron-right" style={{ fontSize: '9px', color: 'var(--text-muted)' }}></i>
+                                <span style={{
+                                  padding: '2px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 600,
+                                  background: hasChecker ? 'rgba(16, 185, 129, 0.15)' : 'rgba(245, 158, 11, 0.15)',
+                                  color: hasChecker ? 'var(--accent-green)' : '#f59e0b',
+                                  border: hasChecker ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(245, 158, 11, 0.3)'
+                                }}>
+                                  {hasChecker ? `✓ L2: Checker (${exp.checker_approved_by})` : '⏳ L2: Checker Review'}
+                                </span>
+                                <i className="fa-solid fa-chevron-right" style={{ fontSize: '9px', color: 'var(--text-muted)' }}></i>
+                                <span style={{
+                                  padding: '2px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 600,
+                                  background: hasSenior ? 'rgba(16, 185, 129, 0.15)' : 'rgba(148, 163, 184, 0.15)',
+                                  color: hasSenior ? 'var(--accent-green)' : 'var(--text-muted)',
+                                  border: hasSenior ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid var(--surface-border)'
+                                }}>
+                                  {hasSenior ? `✓ L3: Senior Mgr (${exp.senior_manager_approved_by})` : '⏳ L3: Senior Manager'}
+                                </span>
+                              </div>
+                            </td>
+                            <td>
+                              <span className={`badge ${isApproved ? 'badge-ready' : isPending ? 'badge-reserved' : 'badge-sold'}`}>
+                                {exp.status_code}
+                              </span>
+                            </td>
+                            <td>
+                              {isApproved ? (
+                                <button
+                                  className="btn btn-primary btn-sm"
+                                  style={{ background: '#0284c7', borderColor: '#0284c7', fontSize: '11px', fontWeight: 'bold', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                                  onClick={() => {
+                                    setSelectedExportForHandover(exp);
+                                    setCourierCompany('Brinks Global Services');
+                                    setCourierRep('');
+                                    setCourierTrackingNumber('');
+                                    setCourierSecuritySeal('');
+                                    setCourierHandoverNotes('');
+                                    setShowCourierHandoverModal(true);
+                                  }}
+                                >
+                                  <i className="fa-solid fa-truck-fast"></i> {currentLang === 'en' ? 'Courier Handover' : 'تسليم للشاحن'}
+                                </button>
+                              ) : (
+                                <span style={{ fontSize: '11px', color: '#f59e0b', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                  <i className="fa-solid fa-clock"></i> {currentLang === 'en' ? 'Awaiting Approvals' : 'بانتظار دورة الاعتماد'}
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {pendingDamagedExports.length === 0 && (
+                        <tr>
+                          <td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '16px' }}>
+                            {currentLang === 'en' ? 'No in-flight overseas damaged export requests currently pending.' : 'لا توجد طلبات تصدير معلقة حالياً.'}
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Completed Exports History Table */}
+              {damagedExportHistory.length > 0 && (
+                <div>
+                  <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--accent-green)', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <i className="fa-solid fa-circle-check"></i>
+                    {currentLang === 'en' ? 'Exported Damaged Bars Ledger (Completed Courier Handovers):' : 'سجل السبائك التالفة المصدّرة للخارج (تم التسليم للشاحن):'}
+                  </div>
+                  <div className="table-responsive">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>{currentLang === 'en' ? 'Export Ref' : 'مرجع التصدير'}</th>
+                          <th>{currentLang === 'en' ? 'Bar Serial' : 'الرقم التسلسلي'}</th>
+                          <th>{currentLang === 'en' ? 'Courier / Logistics' : 'شركة الشحن'}</th>
+                          <th>{currentLang === 'en' ? 'AWB / Tracking #' : 'بوليصة الشحن / التتبع'}</th>
+                          <th>{currentLang === 'en' ? 'Security Seal' : 'الختم الأمني'}</th>
+                          <th>{currentLang === 'en' ? 'Handover Date' : 'تاريخ التسليم'}</th>
+                          <th>{currentLang === 'en' ? 'Serial Reuse Status' : 'حالة إعادة الاستخدام'}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {damagedExportHistory.map((exp: any, idx: number) => (
+                          <tr key={idx}>
+                            <td><strong>{exp.export_reference}</strong></td>
+                            <td>
+                              <span style={{ fontWeight: 'bold', color: 'var(--accent-gold)' }}>{exp.serial_number}</span>
+                            </td>
+                            <td>
+                              <div>{exp.courier_company || 'Brinks Global Services'}</div>
+                              {exp.courier_representative && (
+                                <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Rep: {exp.courier_representative}</div>
+                              )}
+                            </td>
+                            <td><span style={{ fontFamily: 'monospace', fontSize: '11px' }}>{exp.courier_tracking_number}</span></td>
+                            <td><span style={{ fontFamily: 'monospace', fontSize: '11px' }}>{exp.security_seal_number || 'N/A'}</span></td>
+                            <td>{exp.exported_at ? new Date(exp.exported_at).toLocaleString() : 'N/A'}</td>
+                            <td>
+                              <span style={{
+                                display: 'inline-flex', alignItems: 'center', gap: '4px',
+                                padding: '3px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 600,
+                                background: 'rgba(16, 185, 129, 0.15)', color: 'var(--accent-green)', border: '1px solid rgba(16, 185, 129, 0.3)'
+                              }}>
+                                <i className="fa-solid fa-arrows-rotate"></i> {currentLang === 'en' ? 'Serial Eligible for Reuse' : 'الرقم متاح لإعادة الاستخدام'}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </section>
+
+        {/* MODAL: TURKEY CONSIGNMENT REPLACEMENT DIALOG (REQUIREMENT 4) */}
+        {/* MODAL: INITIATE DAMAGED OVERSEAS EXPORT (REQUIREMENT 7) */}
+        {showInitiateDamagedExportModal && selectedDamagedBarForExport && (
+          <div className="modal-overlay" style={{ display: 'flex', zIndex: 1050 }}>
+            <div className="modal-content glass-card" style={{ maxWidth: '600px', width: '100%' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px', color: '#ef4444' }}>
+                  <i className="fa-solid fa-plane-departure"></i>
+                  {currentLang === 'en' ? 'Initiate Overseas Damaged Bar Export (3-Level Workflow)' : 'بدء دورة تصدير سبيكة تالفة للخارج (اعتماد ثلاثي)'}
+                </h3>
+                <button className="btn btn-outline btn-sm" onClick={() => setShowInitiateDamagedExportModal(false)}>✕</button>
+              </div>
+
+              {/* Bar Specs Card */}
+              <div style={{ background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '8px', padding: '12px', marginBottom: '14px' }}>
+                <div style={{ fontSize: '12px', color: 'var(--accent-red)', fontWeight: 'bold', marginBottom: '4px' }}>
+                  {currentLang === 'en' ? 'Selected Turkey Consignment Damaged Bar:' : 'السبيكة التالفة المختارة من أمانات تركيا:'}
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '13px' }}>
+                  <div><strong>{currentLang === 'en' ? 'Serial Number:' : 'الرقم التسلسلي:'}</strong> {selectedDamagedBarForExport.serialNumber}</div>
+                  <div><strong>{currentLang === 'en' ? 'Gross Weight:' : 'الوزن الإجمالي:'}</strong> {selectedDamagedBarForExport.weightGrams || 1000}g Gold</div>
+                  <div><strong>{currentLang === 'en' ? 'Ownership:' : 'الملكية:'}</strong> TURKEY_OWNED (KFH-Turkey)</div>
+                  <div><strong>{currentLang === 'en' ? 'Defect / Reason:' : 'العيب المسجل:'}</strong> {selectedDamagedBarForExport.damageReason || 'SCRATCHED_HALLMARK'}</div>
+                </div>
+              </div>
+
+              {/* Input Fields */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '16px' }}>
+                <div>
+                  <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>
+                    {currentLang === 'en' ? 'Destination Refiner / Manufacturer:' : 'المصفاة / المصنع المستلم في الخارج:'}
+                  </label>
+                  <select
+                    className="form-control"
+                    value={damagedExportVendorId}
+                    onChange={e => setDamagedExportVendorId(e.target.value)}
+                    style={{ width: '100%', padding: '8px', borderRadius: '6px' }}
+                  >
+                    <option value="">{currentLang === 'en' ? '-- Select Destination Refiner --' : '-- اختر المصفاة المستلمة --'}</option>
+                    {suppliersList.map((v: any) => (
+                      <option key={v.vendor_id || v.vendorId} value={v.vendor_id || v.vendorId}>
+                        {v.vendor_name || v.vendorName} ({v.country_of_origin || v.countryOfOrigin})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>
+                    {currentLang === 'en' ? 'Customs Export Declaration Number (Bayan):' : 'رقم البيان الجمركي للصادر (بيان):'}
+                  </label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder="e.g. BAYAN-EXP-2026-9021"
+                    value={damagedExportCustomsDecl}
+                    onChange={e => setDamagedExportCustomsDecl(e.target.value)}
+                    style={{ width: '100%', padding: '8px', borderRadius: '6px' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>
+                    {currentLang === 'en' ? 'Export Justification & Handling Notes:' : 'مبررات التصدير وملاحظات الشحن:'}
+                  </label>
+                  <textarea
+                    className="form-control"
+                    rows={3}
+                    placeholder={currentLang === 'en' ? 'Return to refinery for re-melting / re-casting due to assay defect...' : 'إعادة للمصفاة لإعادة الصهر والسك بسبب عيب بالفحص...'}
+                    value={damagedExportNotes}
+                    onChange={e => setDamagedExportNotes(e.target.value)}
+                    style={{ width: '100%', padding: '8px', borderRadius: '6px' }}
+                  />
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                <button className="btn btn-outline" onClick={() => setShowInitiateDamagedExportModal(false)}>
+                  {currentLang === 'en' ? 'Cancel' : 'إلغاء'}
+                </button>
+                <button
+                  className="btn btn-primary"
+                  style={{ background: '#ef4444', borderColor: '#ef4444', fontWeight: 'bold' }}
+                  onClick={handleInitiateDamagedExport}
+                >
+                  <i className="fa-solid fa-paper-plane"></i> {currentLang === 'en' ? 'Submit for 3-Level Approval' : 'إرسال للاعتماد الثلاثي'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL: COURIER HANDOVER CONFIRMATION (REQUIREMENT 7) */}
+        {showCourierHandoverModal && selectedExportForHandover && (
+          <div className="modal-overlay" style={{ display: 'flex', zIndex: 1050 }}>
+            <div className="modal-content glass-card" style={{ maxWidth: '600px', width: '100%' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px', color: '#0284c7' }}>
+                  <i className="fa-solid fa-truck-fast"></i>
+                  {currentLang === 'en' ? 'Record Courier Handover & Complete Export' : 'تسجيل تسليم الشحنة للناقل وإتمام التصدير'}
+                </h3>
+                <button className="btn btn-outline btn-sm" onClick={() => setShowCourierHandoverModal(false)}>✕</button>
+              </div>
+
+              <div style={{ background: 'rgba(2, 132, 199, 0.08)', border: '1px solid rgba(2, 132, 199, 0.3)', borderRadius: '8px', padding: '12px', marginBottom: '14px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '13px' }}>
+                  <div><strong>{currentLang === 'en' ? 'Export Reference:' : 'مرجع التصدير:'}</strong> {selectedExportForHandover.export_reference}</div>
+                  <div><strong>{currentLang === 'en' ? 'Bar Serial:' : 'الرقم التسلسلي:'}</strong> {selectedExportForHandover.serial_number}</div>
+                  <div><strong>{currentLang === 'en' ? 'Level 2 Checker:' : 'معتمد المستوى 2:'}</strong> {selectedExportForHandover.checker_approved_by}</div>
+                  <div><strong>{currentLang === 'en' ? 'Level 3 Senior Mgr:' : 'معتمد المستوى 3:'}</strong> {selectedExportForHandover.senior_manager_approved_by}</div>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '16px' }}>
+                <div>
+                  <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>
+                    {currentLang === 'en' ? 'Armored Courier / Logistics Company *:' : 'شركة النقل والشحن المؤمن *:'}
+                  </label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder="e.g. Brinks Global Services / Malca-Amit"
+                    value={courierCompany}
+                    onChange={e => setCourierCompany(e.target.value)}
+                    style={{ width: '100%', padding: '8px', borderRadius: '6px' }}
+                  />
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>
+                      {currentLang === 'en' ? 'Air Waybill / Tracking Number *:' : 'رقم البوليصة / التتبع *:'}
+                    </label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder="e.g. BGS-KW-889922"
+                      value={courierTrackingNumber}
+                      onChange={e => setCourierTrackingNumber(e.target.value)}
+                      style={{ width: '100%', padding: '8px', borderRadius: '6px' }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>
+                      {currentLang === 'en' ? 'Security Tamper-Proof Seal Number:' : 'رقم الختم الأمني المحكم:'}
+                    </label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder="e.g. SEAL-KFH-0909"
+                      value={courierSecuritySeal}
+                      onChange={e => setCourierSecuritySeal(e.target.value)}
+                      style={{ width: '100%', padding: '8px', borderRadius: '6px' }}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>
+                    {currentLang === 'en' ? 'Courier Representative Name / Civil ID:' : 'اسم مندوب شركة الشحن / الرقم المدني:'}
+                  </label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder="e.g. Tariq Al-Sabah (Civil ID: 289101201928)"
+                    value={courierRep}
+                    onChange={e => setCourierRep(e.target.value)}
+                    style={{ width: '100%', padding: '8px', borderRadius: '6px' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>
+                    {currentLang === 'en' ? 'Handover Dispatch Notes / Location:' : 'ملاحظات التسليم والموقع:'}
+                  </label>
+                  <textarea
+                    className="form-control"
+                    rows={2}
+                    placeholder={currentLang === 'en' ? 'Handed over at Kuwait Airport Cargo Terminal under customs supervision...' : 'تم التسليم في قرية الشحن بمطار الكويت تحت إشراف الجمارك...'}
+                    value={courierHandoverNotes}
+                    onChange={e => setCourierHandoverNotes(e.target.value)}
+                    style={{ width: '100%', padding: '8px', borderRadius: '6px' }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                <button className="btn btn-outline" onClick={() => setShowCourierHandoverModal(false)}>
+                  {currentLang === 'en' ? 'Cancel' : 'إلغاء'}
+                </button>
+                <button
+                  className="btn btn-primary"
+                  style={{ background: '#0284c7', borderColor: '#0284c7', fontWeight: 'bold' }}
+                  onClick={handleCourierHandover}
+                >
+                  <i className="fa-solid fa-check-double"></i> {currentLang === 'en' ? 'Confirm Handover & Mark EXPORTED' : 'تأكيد التسليم وتغيير الحالة لمصدّرة'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showTurkeyReplaceModal && selectedDamagedBarForReplace && (
+          <div className="modal-overlay" style={{ display: 'flex', zIndex: 1050 }}>
+            <div className="modal-content glass-card" style={{ maxWidth: '640px', width: '100%' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--accent-gold)' }}>
+                  <i className="fa-solid fa-arrow-right-arrow-left"></i>
+                  {currentLang === 'en' ? 'Exchange Damaged Bar with Turkey Consignment' : 'استبدال سبيكة تالفة بأمانة تركيا'}
+                </h3>
+                <button className="btn btn-outline btn-sm" onClick={() => setShowTurkeyReplaceModal(false)}>✕</button>
+              </div>
+
+              {/* Damaged Bar Card */}
+              <div style={{ background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '8px', padding: '12px', marginBottom: '14px' }}>
+                <div style={{ fontSize: '12px', color: 'var(--accent-red)', fontWeight: 'bold', marginBottom: '4px' }}>
+                  {currentLang === 'en' ? '1. Damaged Bar to Surrender (Will become TURKEY_OWNED):' : '١. السبيكة التالفة المراد تسليمها (ستصبح ملكيتها لأمانة تركيا):'}
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '13px' }}>
+                  <div><strong>{currentLang === 'en' ? 'Serial:' : 'الرقم التسلسلي:'}</strong> {selectedDamagedBarForReplace.serialNumber}</div>
+                  <div><strong>{currentLang === 'en' ? 'Weight:' : 'الوزن:'}</strong> {selectedDamagedBarForReplace.weightGrams || 1000}g Gold</div>
+                  <div>
+                    <strong>{currentLang === 'en' ? 'Current Owner:' : 'المالك الحالي:'}</strong> {selectedDamagedBarForReplace.ownership_type || selectedDamagedBarForReplace.ownershipType || 'KFH_OWNED'}
+                  </div>
+                  <div><strong>{currentLang === 'en' ? 'Defect:' : 'العيب:'}</strong> {selectedDamagedBarForReplace.damageReason || 'SCRATCHED_HALLMARK'}</div>
+                </div>
+              </div>
+
+              {/* Turkey Replacement Bar Selection */}
+              <div style={{ background: 'rgba(16, 185, 129, 0.08)', border: '1px solid rgba(16, 185, 129, 0.3)', borderRadius: '8px', padding: '12px', marginBottom: '14px' }}>
+                <div style={{ fontSize: '12px', color: 'var(--accent-green)', fontWeight: 'bold', marginBottom: '6px' }}>
+                  {currentLang === 'en' ? '2. Select Pristine Turkey Bar (Will assume previous owner):' : '٢. اختيار السبيكة التركية السليمة (ستكتسب ملكية السبيكة التالفة):'}
+                </div>
+                {loadingTurkeyBars ? (
+                  <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
+                    <i className="fa-solid fa-spinner fa-spin"></i> {currentLang === 'en' ? 'Loading matching Turkey consignment bars...' : 'جاري تحميل السبائك التركية المتطابقة...'}
+                  </div>
+                ) : eligibleTurkeyBars.length > 0 ? (
+                  <div>
+                    <select
+                      className="form-control"
+                      value={selectedTurkeyBarId || ''}
+                      onChange={(e) => setSelectedTurkeyBarId(Number(e.target.value))}
+                      style={{ width: '100%', padding: '8px', borderRadius: '6px', background: 'var(--surface-bg)', color: 'var(--text-color)', border: '1px solid var(--surface-border)' }}
+                    >
+                      {eligibleTurkeyBars.map((tb: any) => (
+                        <option key={tb.item_id} value={tb.item_id}>
+                          {tb.serial_number} — {tb.weight_grams}g {tb.metal_name} ({tb.vault_name} / {tb.location_code})
+                        </option>
+                      ))}
+                    </select>
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                      {currentLang === 'en' ? `Found ${eligibleTurkeyBars.length} eligible Turkey bars matching metal & weight.` : `تم العثور على ${eligibleTurkeyBars.length} سبيكة تركية مطابقة.`}
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ fontSize: '13px', color: 'var(--accent-red)' }}>
+                    <i className="fa-solid fa-circle-exclamation"></i> {currentLang === 'en' ? 'No eligible Turkey consignment bars found with matching metal/weight specifications.' : 'لا توجد سبائك تركية مطابقة في الأمانات حالياً.'}
+                  </div>
+                )}
+              </div>
+
+              {/* Form inputs */}
+              <div style={{ marginBottom: '12px' }}>
+                <label style={{ fontSize: '12px', display: 'block', marginBottom: '4px' }}>
+                  {currentLang === 'en' ? 'Explanatory Exchange Reason (Mandatory):' : 'سبب الاستبدال التوضيحي (إلزامي):'}
+                </label>
+                <textarea
+                  className="form-control"
+                  rows={2}
+                  value={damageReplaceReason}
+                  onChange={(e) => setDamageReplaceReason(e.target.value)}
+                  placeholder={currentLang === 'en' ? 'e.g., Vault coordinate inspection dent replacement per Sharia guidelines' : 'مثال: استبدال سبيكة بها انبعاج ناتج عن الفحص وفق الضوابط الشرعية'}
+                  style={{ width: '100%', padding: '8px', borderRadius: '6px', background: 'var(--surface-bg)', color: 'var(--text-color)', border: '1px solid var(--surface-border)' }}
+                />
+              </div>
+
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ fontSize: '12px', display: 'block', marginBottom: '4px' }}>
+                  {currentLang === 'en' ? 'Supporting Document / Evidence URL (Optional):' : 'رابط مستند الفحص / الإثبات (اختياري):'}
+                </label>
+                <input
+                  type="text"
+                  className="form-control"
+                  value={damageReplaceAttachmentUrl}
+                  onChange={(e) => setDamageReplaceAttachmentUrl(e.target.value)}
+                  placeholder="https://docs.kfh.com/inspection-report-2026.pdf"
+                  style={{ width: '100%', padding: '8px', borderRadius: '6px', background: 'var(--surface-bg)', color: 'var(--text-color)', border: '1px solid var(--surface-border)' }}
+                />
+              </div>
+
+              {/* Actions */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                <button className="btn btn-outline" onClick={() => setShowTurkeyReplaceModal(false)}>
+                  {currentLang === 'en' ? 'Cancel' : 'إلغاء'}
+                </button>
+                <button
+                  className="btn btn-primary"
+                  disabled={!selectedTurkeyBarId || !damageReplaceReason.trim()}
+                  onClick={handleInitiateTurkeyReplacement}
+                  style={{ background: 'var(--accent-gold)', borderColor: 'var(--accent-gold)', color: '#000', fontWeight: 'bold' }}
+                >
+                  <i className="fa-solid fa-paper-plane"></i> {currentLang === 'en' ? 'Submit for Checker Sign-off' : 'تقديم للاعتماد من المراجع'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* SCREEN VIEWPORT: BARCODE & QR CODE TRACKING (UC01 - GS1-128 & ISO/IEC 18004) */}
         <section className={`screen-viewport ${activeTab === 'screen-barcode-labeling' ? 'active' : ''}`}>
@@ -8028,7 +10336,21 @@ const [migrationApproved, setMigrationApproved] = useState(false);
               </div>
 
               {/* Viewport Sub-Tabs */}
-              <div style={{ display: 'flex', gap: '8px', background: 'rgba(255,255,255,0.05)', padding: '4px', borderRadius: '8px', border: '1px solid var(--surface-border)' }}>
+              <div style={{ display: 'flex', gap: '8px', background: 'rgba(255,255,255,0.05)', padding: '4px', borderRadius: '8px', border: '1px solid var(--surface-border)', flexWrap: 'wrap' }}>
+                <button
+                  className={`btn ${barcodeTab === 'unprinted' ? 'btn-primary' : 'btn-outline'}`}
+                  style={{ fontSize: '12px', padding: '6px 12px' }}
+                  onClick={() => { setBarcodeTab('unprinted'); fetchUnprintedBars(); }}
+                >
+                  <i className="fa-solid fa-print"></i> {currentLang === 'en' ? 'Unprinted Main Vault Bars (Req 3)' : 'السبائك غير المطبوعة (الخزينة)'}
+                </button>
+                <button
+                  className={`btn ${barcodeTab === 'reprint_approvals' ? 'btn-primary' : 'btn-outline'}`}
+                  style={{ fontSize: '12px', padding: '6px 12px' }}
+                  onClick={() => { setBarcodeTab('reprint_approvals'); fetchPendingQrReprints(); }}
+                >
+                  <i className="fa-solid fa-clipboard-check"></i> {currentLang === 'en' ? 'Reprint Maker-Checker' : 'اعتمادات إعادة الطباعة'}
+                </button>
                 <button
                   className={`btn ${barcodeTab === 'generate' ? 'btn-primary' : 'btn-outline'}`}
                   style={{ fontSize: '12px', padding: '6px 12px' }}
@@ -8037,22 +10359,411 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                   <i className="fa-solid fa-qrcode"></i> {currentLang === 'en' ? 'Single Bar Label' : 'ملصق سبيكة فردي'}
                 </button>
                 <button
-                  className={`btn ${barcodeTab === 'reprint' ? 'btn-primary' : 'btn-outline'}`}
-                  style={{ fontSize: '12px', padding: '6px 12px' }}
-                  onClick={() => { setBarcodeTab('reprint'); fetchQrReprintPrivilege(); }}
-                >
-                  <i className="fa-solid fa-rotate"></i> {currentLang === 'en' ? 'Reprint (Reason Log - A1)' : 'إعادة طباعة معتمدة (A1)'}
-                </button>
-                <button
                   className={`btn ${barcodeTab === 'bulk' ? 'btn-primary' : 'btn-outline'}`}
                   style={{ fontSize: '12px', padding: '6px 12px' }}
                   onClick={() => setBarcodeTab('bulk')}
                 >
-                  <i className="fa-solid fa-layer-group"></i> {currentLang === 'en' ? 'Bulk Lot Sheet (A2)' : 'طباعة جماعية للشحنات (A2)'}
+                  <i className="fa-solid fa-layer-group"></i> {currentLang === 'en' ? 'Bulk Lot Sheet' : 'طباعة جماعية للشحنات'}
+                </button>
+                <button
+                  className={`btn ${barcodeTab === 'history' ? 'btn-primary' : 'btn-outline'}`}
+                  style={{ fontSize: '12px', padding: '6px 12px' }}
+                  onClick={() => { setBarcodeTab('history'); fetchQrHistory(); }}
+                >
+                  <i className="fa-solid fa-clock-rotate-left"></i> {currentLang === 'en' ? 'Printing Audit Log' : 'سجل طباعة QR'}
                 </button>
               </div>
             </div>
           </div>
+
+          {/* TAB: UNPRINTED MAIN VAULT BARS (MANUAL BATCH & SINGLE PRINT - REQUIREMENT 3) */}
+          {barcodeTab === 'unprinted' && (
+            <div className="glass-card">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
+                <div>
+                  <h4 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <i className="fa-solid fa-barcode" style={{ color: 'var(--accent-gold)' }}></i>
+                    {currentLang === 'en' ? 'Unprinted Main Vault Bars — Manual Batch & Single QR Print' : 'سبائك الخزينة الرئيسية غير المطبوعة — طباعة فردية ومجمعة يدوية'}
+                  </h4>
+                  <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: '4px 0 0 0' }}>
+                    {currentLang === 'en'
+                      ? 'Bars received into Main Vault whose QR barcode labels have not yet been printed. Select bars for manual batch printing or print individually.'
+                      : 'السبائك المستلمة في الخزينة الرئيسية والتي لم تطبع ملصقات QR الخاصة بها. اختر السبائك للطباعة المجمعة أو اطبع بشكل فردي.'}
+                  </p>
+                </div>
+
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                  <button className="btn btn-outline btn-sm" onClick={fetchUnprintedBars}>
+                    <i className="fa-solid fa-rotate"></i> {currentLang === 'en' ? 'Refresh' : 'تحديث'}
+                  </button>
+                  <button
+                    className="btn btn-primary"
+                    disabled={selectedUnprintedIds.length === 0 || isBatchPrinting}
+                    onClick={handlePrintBatchQr}
+                    style={{ background: 'var(--accent-gold)', borderColor: 'var(--accent-gold)', color: '#000', fontWeight: 'bold' }}
+                  >
+                    <i className="fa-solid fa-print"></i>{' '}
+                    {isBatchPrinting
+                      ? (currentLang === 'en' ? 'Printing...' : 'جاري الطباعة...')
+                      : (currentLang === 'en' ? `Manual Batch Print (${selectedUnprintedIds.length} Selected)` : `طباعة دفعة يدوية (${selectedUnprintedIds.length} محددة)`)}
+                  </button>
+                </div>
+              </div>
+
+              <div className="table-responsive">
+                <table>
+                  <thead>
+                    <tr>
+                      <th style={{ width: '40px' }}>
+                        <input
+                          type="checkbox"
+                          checked={unprintedBarsList.length > 0 && selectedUnprintedIds.length === unprintedBarsList.length}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedUnprintedIds(unprintedBarsList.map((b: any) => b.item_id));
+                            } else {
+                              setSelectedUnprintedIds([]);
+                            }
+                          }}
+                        />
+                      </th>
+                      <th>{currentLang === 'en' ? 'Serial Number' : 'الرقم التسلسلي'}</th>
+                      <th>{currentLang === 'en' ? 'Metal / Denomination' : 'المعدن / الفئة'}</th>
+                      <th>{currentLang === 'en' ? 'Weight' : 'الوزن'}</th>
+                      <th>{currentLang === 'en' ? 'Vault Location' : 'موقع الخزينة'}</th>
+                      <th>{currentLang === 'en' ? 'Ownership' : 'الملكية'}</th>
+                      <th>{currentLang === 'en' ? 'Action' : 'الإجراء'}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {unprintedBarsList.map((bar: any) => (
+                      <tr key={bar.item_id}>
+                        <td>
+                          <input
+                            type="checkbox"
+                            checked={selectedUnprintedIds.includes(bar.item_id)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedUnprintedIds([...selectedUnprintedIds, bar.item_id]);
+                              } else {
+                                setSelectedUnprintedIds(selectedUnprintedIds.filter(id => id !== bar.item_id));
+                              }
+                            }}
+                          />
+                        </td>
+                        <td><strong>{bar.serial_number}</strong></td>
+                        <td>{bar.metal_name} ({bar.denomination})</td>
+                        <td>{bar.weight_grams}g</td>
+                        <td>{bar.vault_name} — {bar.location_code}</td>
+                        <td>
+                          <span className="badge badge-ready">{bar.ownership_type}</span>
+                        </td>
+                        <td>
+                          <button
+                            className="btn btn-sm btn-outline"
+                            onClick={() => handlePrintSingleQr(bar.item_id)}
+                            style={{ fontSize: '11px', padding: '3px 8px' }}
+                          >
+                            <i className="fa-solid fa-qrcode"></i> {currentLang === 'en' ? 'Print Single QR' : 'طباعة QR فردي'}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {unprintedBarsList.length === 0 && (
+                      <tr>
+                        <td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '30px 20px' }}>
+                          <i className="fa-solid fa-circle-check" style={{ fontSize: '28px', color: 'var(--accent-green)', marginBottom: '8px', display: 'block' }}></i>
+                          {currentLang === 'en' ? 'All eligible Main Vault bars have QR labels printed.' : 'جميع سبائك الخزينة الرئيسية المؤهلة تم طباعة ملصقات QR لها.'}
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* TAB: REPRINT MAKER-CHECKER WORKFLOW (REQUIREMENT 3) */}
+          {barcodeTab === 'reprint_approvals' && (
+            <div className="glass-card">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
+                <div>
+                  <h4 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <i className="fa-solid fa-clipboard-check" style={{ color: 'var(--accent-gold)' }}></i>
+                    {currentLang === 'en' ? 'QR Code Reprint Approvals (Maker-Checker 2-Stage)' : 'اعتمادات إعادة طباعة QR (رقابة ثنائية Maker-Checker)'}
+                  </h4>
+                  <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: '4px 0 0 0' }}>
+                    {currentLang === 'en'
+                      ? 'No maximum reprint limit. Initiator provides mandatory reason text and optional supporting files for Checker authorization.'
+                      : 'لا يوجد حد أقصى لمرات إعادة الطباعة. يُدخل الصانع سبباً إلزامياً وملفات مؤيدة للاعتماد من المراجع.'}
+                  </p>
+                </div>
+
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <button className="btn btn-outline btn-sm" onClick={fetchPendingQrReprints}>
+                    <i className="fa-solid fa-rotate"></i> {currentLang === 'en' ? 'Refresh' : 'تحديث'}
+                  </button>
+                  <button
+                    className="btn btn-primary btn-sm"
+                    onClick={() => {
+                      setQrReprintType('SINGLE');
+                      setQrReprintReasonText('');
+                      setQrReprintAttachmentUrl('');
+                      setSelectedReprintItemIds([]);
+                      setShowQrReprintModal(true);
+                    }}
+                    style={{ background: '#d97706', borderColor: '#d97706', fontWeight: 'bold' }}
+                  >
+                    <i className="fa-solid fa-plus"></i> {currentLang === 'en' ? 'New Reprint Request' : 'طلب إعادة طباعة جديد'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="table-responsive">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>{currentLang === 'en' ? 'Request ID' : 'رقم الطلب'}</th>
+                      <th>{currentLang === 'en' ? 'Type' : 'النوع'}</th>
+                      <th>{currentLang === 'en' ? 'Bars Count' : 'عدد السبائك'}</th>
+                      <th>{currentLang === 'en' ? 'Reason / Attachment' : 'السبب / المرفق'}</th>
+                      <th>{currentLang === 'en' ? 'Initiated By' : 'مقدم الطلب'}</th>
+                      <th>{currentLang === 'en' ? 'Status' : 'الحالة'}</th>
+                      <th>{currentLang === 'en' ? 'Actions' : 'الإجراءات'}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pendingQrReprintsList.map((req: any) => {
+                      const isPending = req.status === 'PENDING_APPROVAL';
+                      return (
+                        <tr key={req.reprintRequestId || req.reprint_request_id}>
+                          <td><strong>#{req.reprintRequestId || req.reprint_request_id}</strong></td>
+                          <td>
+                            <span className="badge badge-ready">{req.requestType || req.request_type}</span>
+                          </td>
+                          <td><strong>{req.itemCount || req.item_count || 1}</strong> {currentLang === 'en' ? 'bars' : 'سبيكة'}</td>
+                          <td>
+                            <div>{req.reason}</div>
+                            {(req.attachmentUrl || req.attachment_url) && (
+                              <a href={req.attachmentUrl || req.attachment_url} target="_blank" rel="noreferrer" style={{ fontSize: '11px', color: 'var(--accent-gold)' }}>
+                                <i className="fa-solid fa-paperclip"></i> {currentLang === 'en' ? 'Attachment' : 'المرفق'}
+                              </a>
+                            )}
+                          </td>
+                          <td>
+                            <div>{req.initiatedBy || req.initiated_by}</div>
+                            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                              {new Date(req.initiatedAt || req.initiated_at).toLocaleDateString()}
+                            </div>
+                          </td>
+                          <td>
+                            <span className={`badge ${req.status === 'APPROVED' ? 'badge-ready' : req.status === 'REJECTED' ? 'badge-sold' : 'badge-reserved'}`}>
+                              {req.status}
+                            </span>
+                          </td>
+                          <td>
+                            {isPending ? (
+                              <div style={{ display: 'flex', gap: '6px' }}>
+                                <button
+                                  className="btn btn-primary btn-sm"
+                                  style={{ padding: '3px 8px', fontSize: '11px', background: 'var(--accent-green)', borderColor: 'var(--accent-green)' }}
+                                  onClick={() => handleApproveQrReprint(req.reprintRequestId || req.reprint_request_id)}
+                                >
+                                  <i className="fa-solid fa-check"></i> {currentLang === 'en' ? 'Approve' : 'اعتماد'}
+                                </button>
+                                <button
+                                  className="btn btn-outline btn-sm"
+                                  style={{ padding: '3px 8px', fontSize: '11px', borderColor: 'var(--accent-red)', color: 'var(--accent-red)' }}
+                                  onClick={() => handleRejectQrReprint(req.reprintRequestId || req.reprint_request_id)}
+                                >
+                                  <i className="fa-solid fa-xmark"></i> {currentLang === 'en' ? 'Reject' : 'رفض'}
+                                </button>
+                              </div>
+                            ) : (
+                              <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                                {req.approvedBy || req.approved_by ? `${currentLang === 'en' ? 'By' : 'بواسطة'}: ${req.approvedBy || req.approved_by}` : '—'}
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {pendingQrReprintsList.length === 0 && (
+                      <tr>
+                        <td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '24px 20px' }}>
+                          {currentLang === 'en' ? 'No QR reprint requests recorded.' : 'لا توجد طلبات إعادة طباعة مسجلة.'}
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* TAB: QR PRINTING AUDIT HISTORY (REQUIREMENT 3) */}
+          {barcodeTab === 'history' && (
+            <div className="glass-card">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                <h4 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <i className="fa-solid fa-clock-rotate-left" style={{ color: 'var(--accent-gold)' }}></i>
+                  {currentLang === 'en' ? 'QR Code Print & Reprint Audit Trail' : 'سجل تدقيق طباعة وإعادة طباعة رموز QR'}
+                </h4>
+                <button className="btn btn-outline btn-sm" onClick={fetchQrHistory}>
+                  <i className="fa-solid fa-rotate"></i> {currentLang === 'en' ? 'Refresh' : 'تحديث'}
+                </button>
+              </div>
+
+              <div className="table-responsive">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>{currentLang === 'en' ? 'Log ID' : 'رقم القيد'}</th>
+                      <th>{currentLang === 'en' ? 'Serial Number' : 'الرقم التسلسلي'}</th>
+                      <th>{currentLang === 'en' ? 'Print Type' : 'نوع الطباعة'}</th>
+                      <th>{currentLang === 'en' ? 'Reason / Reference' : 'السبب / المرجع'}</th>
+                      <th>{currentLang === 'en' ? 'Printed By' : 'طُبع بواسطة'}</th>
+                      <th>{currentLang === 'en' ? 'Timestamp' : 'التاريخ والوقت'}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {qrHistoryList.map((log: any) => (
+                      <tr key={log.log_id}>
+                        <td><strong>#{log.log_id}</strong></td>
+                        <td><strong>{log.serial_number}</strong></td>
+                        <td>
+                          <span className={`badge ${log.print_type.includes('REPRINT') ? 'badge-quarantined' : 'badge-ready'}`}>
+                            {log.print_type}
+                          </span>
+                        </td>
+                        <td>{log.reason || (log.reprint_request_id ? `Req #${log.reprint_request_id}` : 'Initial Intake')}</td>
+                        <td>{log.printed_by}</td>
+                        <td>{new Date(log.printed_at).toLocaleString()}</td>
+                      </tr>
+                    ))}
+                    {qrHistoryList.length === 0 && (
+                      <tr>
+                        <td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '24px 20px' }}>
+                          {currentLang === 'en' ? 'No QR print logs available.' : 'لا توجد سجلات طباعة حتى الآن.'}
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* MODAL: QR REPRINT REQUEST MODAL */}
+          {showQrReprintModal && (
+            <div className="modal-overlay" style={{ display: 'flex', zIndex: 1050 }}>
+              <div className="modal-content glass-card" style={{ maxWidth: '600px', width: '100%' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                  <h3 style={{ margin: 0, color: 'var(--accent-gold)' }}>
+                    <i className="fa-solid fa-rotate"></i> {currentLang === 'en' ? 'Initiate QR Code Reprint Request' : 'طلب إعادة طباعة رمز QR'}
+                  </h3>
+                  <button className="btn btn-outline btn-sm" onClick={() => setShowQrReprintModal(false)}>✕</button>
+                </div>
+
+                <div style={{ marginBottom: '12px' }}>
+                  <label style={{ fontSize: '12px', display: 'block', marginBottom: '4px' }}>
+                    {currentLang === 'en' ? 'Request Mode:' : 'نوع الطلب:'}
+                  </label>
+                  <div style={{ display: 'flex', gap: '10px' }}>
+                    <label style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <input
+                        type="radio"
+                        checked={qrReprintType === 'SINGLE'}
+                        onChange={() => setQrReprintType('SINGLE')}
+                      />
+                      {currentLang === 'en' ? 'Single Bar' : 'سبيكة واحدة'}
+                    </label>
+                    <label style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <input
+                        type="radio"
+                        checked={qrReprintType === 'BATCH'}
+                        onChange={() => setQrReprintType('BATCH')}
+                      />
+                      {currentLang === 'en' ? 'Batch Selection' : 'مجموعة سبائك'}
+                    </label>
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: '12px' }}>
+                  <label style={{ fontSize: '12px', display: 'block', marginBottom: '4px' }}>
+                    {currentLang === 'en' ? 'Select Bar(s) from Inventory:' : 'اختر السبيكة / السبائك من المخزون:'}
+                  </label>
+                  <select
+                    className="form-control"
+                    multiple={qrReprintType === 'BATCH'}
+                    value={selectedReprintItemIds.map(String)}
+                    onChange={(e) => {
+                      if (qrReprintType === 'BATCH') {
+                        const options = Array.from(e.target.selectedOptions).map(o => Number(o.value));
+                        setSelectedReprintItemIds(options);
+                      } else {
+                        setSelectedReprintItemIds([Number(e.target.value)]);
+                      }
+                    }}
+                    style={{ width: '100%', padding: '8px', minHeight: qrReprintType === 'BATCH' ? '120px' : '40px', background: 'var(--surface-bg)', color: 'var(--text-color)', border: '1px solid var(--surface-border)', borderRadius: '6px' }}
+                  >
+                    {inventoryList.slice(0, 100).map((item: any) => (
+                      <option key={item.item_id} value={item.item_id}>
+                        {item.serial_number} — {item.denomination || '1kg'} {item.metal || 'Gold'} ({item.location || 'Vault'})
+                      </option>
+                    ))}
+                  </select>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                    {qrReprintType === 'BATCH' 
+                      ? (currentLang === 'en' ? 'Hold Ctrl / Cmd to select multiple bars.' : 'اضغط Ctrl لاختيار أكثر من سبيكة.') 
+                      : (currentLang === 'en' ? 'Select the bar requiring label reprint.' : 'اختر السبيكة المراد إعادة طباعة ملصقها.')}
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: '12px' }}>
+                  <label style={{ fontSize: '12px', display: 'block', marginBottom: '4px' }}>
+                    {currentLang === 'en' ? 'Explanatory Reason (Mandatory):' : 'السبب التوضيحي (إلزامي):'}
+                  </label>
+                  <textarea
+                    className="form-control"
+                    rows={2}
+                    value={qrReprintReasonText}
+                    onChange={(e) => setQrReprintReasonText(e.target.value)}
+                    placeholder={currentLang === 'en' ? 'e.g. Scratched QR label during coordinate audit; replacement needed' : 'مثال: تلف ملصق QR أثناء التدقيق الدوري ويتطلب استبدال'}
+                    style={{ width: '100%', padding: '8px', background: 'var(--surface-bg)', color: 'var(--text-color)', border: '1px solid var(--surface-border)', borderRadius: '6px' }}
+                  />
+                </div>
+
+                <div style={{ marginBottom: '16px' }}>
+                  <label style={{ fontSize: '12px', display: 'block', marginBottom: '4px' }}>
+                    {currentLang === 'en' ? 'Supporting Document / Evidence URL (Optional):' : 'رابط المستند المؤيد (اختياري):'}
+                  </label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={qrReprintAttachmentUrl}
+                    onChange={(e) => setQrReprintAttachmentUrl(e.target.value)}
+                    placeholder="https://docs.kfh.com/reprint-evidence.pdf"
+                    style={{ width: '100%', padding: '8px', background: 'var(--surface-bg)', color: 'var(--text-color)', border: '1px solid var(--surface-border)', borderRadius: '6px' }}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                  <button className="btn btn-outline" onClick={() => setShowQrReprintModal(false)}>
+                    {currentLang === 'en' ? 'Cancel' : 'إلغاء'}
+                  </button>
+                  <button
+                    className="btn btn-primary"
+                    disabled={selectedReprintItemIds.length === 0 || !qrReprintReasonText.trim()}
+                    onClick={handleInitiateQrReprint}
+                    style={{ background: 'var(--accent-gold)', borderColor: 'var(--accent-gold)', color: '#000', fontWeight: 'bold' }}
+                  >
+                    <i className="fa-solid fa-paper-plane"></i> {currentLang === 'en' ? 'Submit to Checker' : 'تقديم للاعتماد'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* TAB 1: SINGLE BAR GENERATOR & PRINT */}
           {barcodeTab === 'generate' && (() => {
@@ -12390,7 +15101,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                   </div>
                 </div>
 
-                {/* Filter Controls: All / Low-Stock / High-Stock */}
+                {/* Filter Controls: All / Low-Stock / High-Stock / Damaged Accumulation */}
                 <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', flexWrap: 'wrap' }}>
                   <button 
                     className={`btn ${thresholdFilterType === 'ALL' ? 'btn-primary' : 'btn-secondary'}`}
@@ -12404,14 +15115,21 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     style={{ padding: '6px 14px', fontSize: '12px', background: thresholdFilterType === 'LOW_STOCK' ? 'var(--accent-orange)' : undefined, borderColor: thresholdFilterType === 'LOW_STOCK' ? 'var(--accent-orange)' : undefined, color: thresholdFilterType === 'LOW_STOCK' ? '#000' : undefined }}
                     onClick={() => setThresholdFilterType('LOW_STOCK')}
                   >
-                    <i className="fa-solid fa-arrow-trend-down"></i> {currentLang === 'ar' ? 'حدود نقص المخزون (الحد الأدنى)' : 'Low-Stock Limits (Min Floor)'} ({reorderThresholds.filter(t => t.threshold_type === 'LOW_STOCK' || !t.threshold_type).length})
+                    <i className="fa-solid fa-arrow-trend-down"></i> {currentLang === 'ar' ? 'حدود نقص المخزون (الحد الأدنى)' : 'Low-Stock Limits (Min Floor)'} ({reorderThresholds.filter((t: any) => t.threshold_type === 'LOW_STOCK' || !t.threshold_type).length})
                   </button>
                   <button 
                     className={`btn ${thresholdFilterType === 'HIGH_STOCK' ? 'btn-primary' : 'btn-secondary'}`}
                     style={{ padding: '6px 14px', fontSize: '12px', background: thresholdFilterType === 'HIGH_STOCK' ? '#8B5CF6' : undefined, borderColor: thresholdFilterType === 'HIGH_STOCK' ? '#8B5CF6' : undefined, color: thresholdFilterType === 'HIGH_STOCK' ? '#FFF' : undefined }}
                     onClick={() => setThresholdFilterType('HIGH_STOCK')}
                   >
-                    <i className="fa-solid fa-arrow-trend-up"></i> {currentLang === 'ar' ? 'حدود فائض المخزون (الحد الأقصى)' : 'High-Stock Limits (Max Ceiling)'} ({reorderThresholds.filter(t => t.threshold_type === 'HIGH_STOCK').length})
+                    <i className="fa-solid fa-arrow-trend-up"></i> {currentLang === 'ar' ? 'حدود فائض المخزون (الحد الأقصى)' : 'High-Stock Limits (Max Ceiling)'} ({reorderThresholds.filter((t: any) => t.threshold_type === 'HIGH_STOCK').length})
+                  </button>
+                  <button 
+                    className={`btn ${thresholdFilterType === 'DAMAGED_HIGH_STOCK' ? 'btn-primary' : 'btn-secondary'}`}
+                    style={{ padding: '6px 14px', fontSize: '12px', background: thresholdFilterType === 'DAMAGED_HIGH_STOCK' ? '#DC2626' : undefined, borderColor: thresholdFilterType === 'DAMAGED_HIGH_STOCK' ? '#DC2626' : undefined, color: thresholdFilterType === 'DAMAGED_HIGH_STOCK' ? '#FFF' : undefined }}
+                    onClick={() => setThresholdFilterType('DAMAGED_HIGH_STOCK')}
+                  >
+                    <i className="fa-solid fa-triangle-exclamation"></i> {currentLang === 'ar' ? 'حدود تراكم الذهب التالف (بالكيلوجرام)' : 'Damaged Stock Limits (KG)'} ({reorderThresholds.filter((t: any) => t.threshold_type === 'DAMAGED_HIGH_STOCK').length})
                   </button>
                 </div>
 
@@ -12436,7 +15154,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                           <tr>
                             <th>{currentLang === 'ar' ? 'نوع الإجراء' : 'Change Type'}</th>
                             <th>{currentLang === 'ar' ? 'نوع الحد' : 'Threshold Type'}</th>
-                            <th>{currentLang === 'ar' ? 'المنتج' : 'Product'}</th>
+                            <th>{currentLang === 'ar' ? 'المنتج / المعدن' : 'Product / Metal'}</th>
                             <th>{currentLang === 'ar' ? 'مستوى التنبيه' : 'Alert Level'}</th>
                             <th>{currentLang === 'ar' ? 'كمية إعادة الطلب' : 'Reorder Qty'}</th>
                             <th>{currentLang === 'ar' ? 'مقدم الطلب' : 'Requested By'}</th>
@@ -12446,22 +15164,27 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                         <tbody>
                           {pendingThresholdChanges.map((pc: any) => {
                             const isHigh = pc.threshold_type === 'HIGH_STOCK';
+                            const isDamaged = pc.threshold_type === 'DAMAGED_HIGH_STOCK';
                             return (
                               <tr key={pc.pending_change_id}>
                                 <td><span className="badge badge-ready">{pc.change_type}</span></td>
                                 <td>
-                                  <span className="badge" style={{ background: isHigh ? 'rgba(139, 92, 246, 0.2)' : 'rgba(255, 145, 0, 0.2)', color: isHigh ? '#A78BFA' : 'var(--accent-orange)', border: `1px solid ${isHigh ? '#8B5CF6' : 'var(--accent-orange)'}` }}>
-                                    {isHigh ? (currentLang === 'ar' ? '📈 حد أقصى' : 'HIGH_STOCK') : (currentLang === 'ar' ? '📉 حد أدنى' : 'LOW_STOCK')}
+                                  <span className="badge" style={{
+                                    background: isDamaged ? 'rgba(220, 38, 38, 0.2)' : isHigh ? 'rgba(139, 92, 246, 0.2)' : 'rgba(255, 145, 0, 0.2)',
+                                    color: isDamaged ? '#FCA5A5' : isHigh ? '#A78BFA' : 'var(--accent-orange)',
+                                    border: `1px solid ${isDamaged ? '#DC2626' : isHigh ? '#8B5CF6' : 'var(--accent-orange)'}`
+                                  }}>
+                                    {isDamaged ? (currentLang === 'ar' ? '⚠️ تراكم تالف (كجم)' : 'DAMAGED_HIGH_STOCK') : isHigh ? (currentLang === 'ar' ? '📈 حد أقصى' : 'HIGH_STOCK') : (currentLang === 'ar' ? '📉 حد أدنى' : 'LOW_STOCK')}
                                   </span>
                                 </td>
-                                <td><strong>{pc.product_name || pc.product_code}</strong></td>
+                                <td><strong>{isDamaged ? (pc.metal_type_id === 2 ? 'Silver' : 'Gold') : (pc.product_name || pc.product_code)}</strong></td>
                                 <td>
                                   <span className="badge badge-reserved">
-                                    {isHigh ? `Max: ${pc.max_stock_qty || pc.min_stock_qty} pcs` : `Min: ${pc.min_stock_qty} pcs`}
+                                    {isDamaged ? `${pc.threshold_weight_kg || 5} KG` : isHigh ? `Max: ${pc.max_stock_qty || pc.min_stock_qty} pcs` : `Min: ${pc.min_stock_qty} pcs`}
                                   </span>
                                 </td>
                                 <td>
-                                  {isHigh ? <span style={{ color: 'var(--text-muted)' }}>—</span> : <span className="badge badge-ready">{pc.reorder_qty} pcs</span>}
+                                  {isHigh || isDamaged ? <span style={{ color: 'var(--text-muted)' }}>—</span> : <span className="badge badge-ready">{pc.reorder_qty} pcs</span>}
                                 </td>
                                 <td>{pc.requested_by}</td>
                                 <td><span className="badge badge-quarantined">{pc.status_code}</span></td>
@@ -12495,6 +15218,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                           if (thresholdFilterType === 'ALL') return true;
                           if (thresholdFilterType === 'LOW_STOCK') return th.threshold_type === 'LOW_STOCK' || !th.threshold_type;
                           if (thresholdFilterType === 'HIGH_STOCK') return th.threshold_type === 'HIGH_STOCK';
+                          if (thresholdFilterType === 'DAMAGED_HIGH_STOCK') return th.threshold_type === 'DAMAGED_HIGH_STOCK';
                           return true;
                         });
 
@@ -12508,7 +15232,72 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                         }
 
                         return filtered.map((th: any) => {
+                          const isDamaged = th.threshold_type === 'DAMAGED_HIGH_STOCK';
                           const isHigh = th.threshold_type === 'HIGH_STOCK';
+
+                          if (isDamaged) {
+                            const matchingAlert = damagedHighStockAlerts.find((a: any) => a.metal_type_id === th.metal_type_id);
+                            const curWeightKg = matchingAlert ? matchingAlert.total_damaged_weight_kg : 0;
+                            const curBars = matchingAlert ? matchingAlert.damaged_bars_count : 0;
+                            const isBreached = matchingAlert ? matchingAlert.is_threshold_breached : (curWeightKg >= (th.threshold_weight_kg || 5));
+                            const metalName = th.metal_type_id === 2 ? 'Silver' : 'Gold';
+
+                            return (
+                              <tr key={th.threshold_id}>
+                                <td>
+                                  <span className="badge" style={{ background: 'rgba(220, 38, 38, 0.15)', color: '#FCA5A5', border: '1px solid #DC2626', fontSize: '11px' }}>
+                                    ⚠️ {currentLang === 'ar' ? 'تراكم التالف (كجم)' : 'DAMAGED_HIGH'}
+                                  </span>
+                                </td>
+                                <td>
+                                  <strong>{metalName} {currentLang === 'ar' ? 'المخزون التالف' : 'Damaged Stock'}</strong>
+                                  <span style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)' }}>{currentLang === 'ar' ? 'مراقبة الوزن بالكيلوجرام' : 'Weight Monitored in KG'}</span>
+                                </td>
+                                <td>{currentLang === 'ar' ? 'المصافي والمصانع المعتمدة' : 'Refiner / Mint Export'}</td>
+                                <td>
+                                  <span className="badge badge-quarantined" style={{ fontSize: '12px' }}>
+                                    Limit: {Number(th.threshold_weight_kg || 5).toFixed(3)} KG
+                                  </span>
+                                </td>
+                                <td>
+                                  <span style={{ color: 'var(--text-muted)' }}>—</span>
+                                </td>
+                                <td>
+                                  <strong style={{ fontSize: '13px', color: isBreached ? 'var(--accent-red)' : undefined }}>
+                                    {Number(curWeightKg).toFixed(3)} KG
+                                  </strong>
+                                  <span style={{ display: 'block', fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                                    ({curBars} {currentLang === 'ar' ? 'سبيكة' : 'bars'})
+                                  </span>
+                                </td>
+                                <td>
+                                  {isBreached ? (
+                                    <span className="badge badge-quarantined" style={{ fontSize: '11px' }}>
+                                      <i className="fa-solid fa-triangle-exclamation"></i> {currentLang === 'ar' ? '⚠️ تجاوز الحد' : '⚠️ Limit Breached'}
+                                    </span>
+                                  ) : (
+                                    <span className="badge badge-ready" style={{ fontSize: '11px' }}>
+                                      <i className="fa-solid fa-check"></i> {currentLang === 'ar' ? 'مستوى طبيعي' : 'Normal'}
+                                    </span>
+                                  )}
+                                </td>
+                                <td>
+                                  <span className={`badge ${th.is_active ? 'badge-ready' : 'badge-sold'}`}>
+                                    {th.is_active ? (currentLang === 'ar' ? 'نشط' : 'Active') : (currentLang === 'ar' ? 'معطل' : 'Disabled')}
+                                  </span>
+                                </td>
+                                {canModify('master_data') && (
+                                  <td style={{ textAlign: 'center' }}>
+                                    <button className="btn" style={{ padding: '4px 8px', fontSize: '12px', color: 'var(--accent-red)', borderColor: '#FECACA' }}
+                                      onClick={() => handleDeleteThreshold(th.threshold_id)} title="Delete">
+                                      <i className="fa-solid fa-trash"></i>
+                                    </button>
+                                  </td>
+                                )}
+                              </tr>
+                            );
+                          }
+
                           const matchingProd = products.find((p: any) => p.product_id === th.product_id);
                           const weightGrams = matchingProd?.weight_grams || 1000;
                           const limitQty = isHigh ? (th.max_stock_qty || th.min_stock_qty) : th.min_stock_qty;
@@ -12519,7 +15308,6 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                           
                           const isLowBreached = !isHigh && currentItemStock <= th.min_stock_qty;
                           const isHighBreached = isHigh && currentItemStock >= limitQty && limitQty > 0;
-                          const hasAlert = isLowBreached || isHighBreached;
 
                           return (
                             <tr key={th.threshold_id}>
@@ -12600,7 +15388,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                   </h4>
 
                   {/* Threshold Type Picker */}
-                  <div style={{ display: 'flex', gap: '15px', marginBottom: '16px', padding: '12px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', border: '1px solid var(--surface-border)' }}>
+                  <div style={{ display: 'flex', gap: '15px', marginBottom: '16px', padding: '12px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', border: '1px solid var(--surface-border)', flexWrap: 'wrap' }}>
                     <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontWeight: newThresholdType === 'LOW_STOCK' ? 'bold' : 'normal' }}>
                       <input 
                         type="radio" 
@@ -12621,69 +15409,108 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       />
                       <span>📈 {currentLang === 'ar' ? 'حد أقصى للمخزون (فائض المخزون وسقف التخزين)' : 'High-Stock Ceiling Limit (Max Capacity Alert)'}</span>
                     </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontWeight: newThresholdType === 'DAMAGED_HIGH_STOCK' ? 'bold' : 'normal' }}>
+                      <input 
+                        type="radio" 
+                        name="newThresholdType" 
+                        value="DAMAGED_HIGH_STOCK" 
+                        checked={newThresholdType === 'DAMAGED_HIGH_STOCK'} 
+                        onChange={() => setNewThresholdType('DAMAGED_HIGH_STOCK')} 
+                      />
+                      <span>⚠️ {currentLang === 'ar' ? 'حد تراكم الذهب/الفضة التالف (بالكيلوجرام) - تصدير المصنع' : 'Damaged Stock Accumulation Limit (KG) - Refiner Export'}</span>
+                    </label>
                   </div>
 
-                  <div className="split-grid-2" style={{ gap: '16px' }}>
-                    <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label>{currentLang === 'ar' ? 'المنتج والفئة' : 'Product & Denomination'}</label>
-                      <select value={newThresholdProductId} onChange={e => setNewThresholdProductId(e.target.value)} style={{ color: '#000' }}>
-                        <option value="">{currentLang === 'ar' ? '-- اختر المنتج --' : '-- Select Product --'}</option>
-                        {products.map((p: any) => (
-                          <option key={p.product_id} value={p.product_id}>{p.metal_name || p.metal} {p.denomination_label || p.denomination} ({p.weight_grams || 1000}g) - {p.product_code}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label>{currentLang === 'ar' ? 'المورد المفضل' : 'Preferred Vendor'}</label>
-                      <select value={newThresholdVendorId} onChange={e => setNewThresholdVendorId(e.target.value)} style={{ color: '#000' }}>
-                        <option value="">{currentLang === 'ar' ? '-- اختر المورد --' : '-- Select Vendor --'}</option>
-                        {suppliersList.map((v: any) => (
-                          <option key={v.vendor_id || v.code} value={v.vendor_id}>{v.vendor_name || v.name}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    {newThresholdType === 'LOW_STOCK' ? (
-                      <>
-                        <div className="form-group" style={{ marginBottom: 0 }}>
-                          <label>
-                            {currentLang === 'ar' ? 'الحد الأدنى للمخزون (بالقطع)' : 'Minimum Stock Floor Limit (Pieces)'}
-                            {newThresholdProductId && (
-                              <span style={{ fontSize: '11px', color: 'var(--accent-gold)', marginLeft: '6px' }}>
-                                ≈ {(((parseInt(newThresholdMinQty) || 0) * (products.find((p: any) => p.product_id === parseInt(newThresholdProductId))?.weight_grams || 1000)) / 1000).toFixed(2)} KG
-                              </span>
-                            )}
-                          </label>
-                          <input type="number" className="form-control" value={newThresholdMinQty} onChange={e => setNewThresholdMinQty(e.target.value)} min="1" />
-                        </div>
-                        <div className="form-group" style={{ marginBottom: 0 }}>
-                          <label>
-                            {currentLang === 'ar' ? 'كمية إعادة الطلب المقترحة (بالقطع)' : 'Reorder Quantity (Pieces)'}
-                            {newThresholdProductId && (
-                              <span style={{ fontSize: '11px', color: 'var(--accent-green)', marginLeft: '6px' }}>
-                                ≈ {(((parseInt(newThresholdReorderQty) || 0) * (products.find((p: any) => p.product_id === parseInt(newThresholdProductId))?.weight_grams || 1000)) / 1000).toFixed(2)} KG
-                              </span>
-                            )}
-                          </label>
-                          <input type="number" className="form-control" value={newThresholdReorderQty} onChange={e => setNewThresholdReorderQty(e.target.value)} min="1" />
-                        </div>
-                      </>
-                    ) : (
-                      <div className="form-group" style={{ marginBottom: 0, gridColumn: '1 / -1' }}>
-                        <label>
-                          {currentLang === 'ar' ? 'الحد الأقصى لسعة المخزون (بالقطع - تنبيه الفائض)' : 'Maximum Stock Ceiling Limit (Pieces - Over-Stock Alert)'}
-                          {newThresholdProductId && (
-                            <span style={{ fontSize: '11px', color: '#A78BFA', marginLeft: '6px' }}>
-                              ≈ {(((parseInt(newThresholdMaxQty) || 0) * (products.find((p: any) => p.product_id === parseInt(newThresholdProductId))?.weight_grams || 1000)) / 1000).toFixed(2)} KG
-                            </span>
-                          )}
-                        </label>
-                        <input type="number" className="form-control" value={newThresholdMaxQty} onChange={e => setNewThresholdMaxQty(e.target.value)} min="1" />
+                  {newThresholdType === 'DAMAGED_HIGH_STOCK' ? (
+                    <div className="split-grid-2" style={{ gap: '16px' }}>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label>{currentLang === 'ar' ? 'نوع المعدن الثمين' : 'Precious Metal Type'}</label>
+                        <select
+                          value={newThresholdMetalTypeId}
+                          onChange={e => setNewThresholdMetalTypeId(e.target.value)}
+                          style={{ color: '#000' }}
+                        >
+                          <option value="1">{currentLang === 'ar' ? 'ذهب (Gold)' : 'Gold'}</option>
+                          <option value="2">{currentLang === 'ar' ? 'فضة (Silver)' : 'Silver'}</option>
+                        </select>
                       </div>
-                    )}
-                  </div>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label>{currentLang === 'ar' ? 'الحد الأقصى لتراكم الوزن التالف (بالكيلوجرام - KG)' : 'Damaged Weight High-Stock Threshold (KG)'}</label>
+                        <input
+                          type="number"
+                          step="0.001"
+                          min="0.1"
+                          className="form-control"
+                          value={newThresholdWeightKg}
+                          onChange={e => setNewThresholdWeightKg(e.target.value)}
+                          placeholder="e.g. 5.000"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="split-grid-2" style={{ gap: '16px' }}>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label>{currentLang === 'ar' ? 'المنتج والفئة' : 'Product & Denomination'}</label>
+                        <select value={newThresholdProductId} onChange={e => setNewThresholdProductId(e.target.value)} style={{ color: '#000' }}>
+                          <option value="">{currentLang === 'ar' ? '-- اختر المنتج --' : '-- Select Product --'}</option>
+                          {products.map((p: any) => (
+                            <option key={p.product_id} value={p.product_id}>{p.metal_name || p.metal} {p.denomination_label || p.denomination} ({p.weight_grams || 1000}g) - {p.product_code}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label>{currentLang === 'ar' ? 'المورد المفضل' : 'Preferred Vendor'}</label>
+                        <select value={newThresholdVendorId} onChange={e => setNewThresholdVendorId(e.target.value)} style={{ color: '#000' }}>
+                          <option value="">{currentLang === 'ar' ? '-- اختر المورد --' : '-- Select Vendor --'}</option>
+                          {suppliersList.map((v: any) => (
+                            <option key={v.vendor_id || v.code} value={v.vendor_id}>{v.vendor_name || v.name}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {newThresholdType === 'LOW_STOCK' ? (
+                        <>
+                          <div className="form-group" style={{ marginBottom: 0 }}>
+                            <label>
+                              {currentLang === 'ar' ? 'الحد الأدنى للمخزون (بالقطع)' : 'Minimum Stock Floor Limit (Pieces)'}
+                              {newThresholdProductId && (
+                                <span style={{ fontSize: '11px', color: 'var(--accent-gold)', marginLeft: '6px' }}>
+                                  ≈ {(((parseInt(newThresholdMinQty) || 0) * (products.find((p: any) => p.product_id === parseInt(newThresholdProductId))?.weight_grams || 1000)) / 1000).toFixed(2)} KG
+                                </span>
+                              )}
+                            </label>
+                            <input type="number" className="form-control" value={newThresholdMinQty} onChange={e => setNewThresholdMinQty(e.target.value)} min="1" />
+                          </div>
+                          <div className="form-group" style={{ marginBottom: 0 }}>
+                            <label>
+                              {currentLang === 'ar' ? 'كمية إعادة الطلب المقترحة (بالقطع)' : 'Reorder Quantity (Pieces)'}
+                              {newThresholdProductId && (
+                                <span style={{ fontSize: '11px', color: 'var(--accent-green)', marginLeft: '6px' }}>
+                                  ≈ {(((parseInt(newThresholdReorderQty) || 0) * (products.find((p: any) => p.product_id === parseInt(newThresholdProductId))?.weight_grams || 1000)) / 1000).toFixed(2)} KG
+                                </span>
+                              )}
+                            </label>
+                            <input type="number" className="form-control" value={newThresholdReorderQty} onChange={e => setNewThresholdReorderQty(e.target.value)} min="1" />
+                          </div>
+                        </>
+                      ) : (
+                        <div className="form-group" style={{ marginBottom: 0, gridColumn: '1 / -1' }}>
+                          <label>
+                            {currentLang === 'ar' ? 'الحد الأقصى لسعة المخزون (بالقطع - تنبيه الفائض)' : 'Maximum Stock Ceiling Limit (Pieces - Over-Stock Alert)'}
+                            {newThresholdProductId && (
+                              <span style={{ fontSize: '11px', color: '#A78BFA', marginLeft: '6px' }}>
+                                ≈ {(((parseInt(newThresholdMaxQty) || 0) * (products.find((p: any) => p.product_id === parseInt(newThresholdProductId))?.weight_grams || 1000)) / 1000).toFixed(2)} KG
+                              </span>
+                            )}
+                          </label>
+                          <input type="number" className="form-control" value={newThresholdMaxQty} onChange={e => setNewThresholdMaxQty(e.target.value)} min="1" />
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   <button className="btn btn-primary" style={{ marginTop: '16px' }} onClick={handleAddThreshold}
-                    disabled={!newThresholdProductId || !newThresholdVendorId}>
+                    disabled={newThresholdType === 'DAMAGED_HIGH_STOCK' ? !newThresholdMetalTypeId || !newThresholdWeightKg : !newThresholdProductId || !newThresholdVendorId}>
                     <i className="fa-solid fa-paper-plane"></i> {currentLang === 'ar' ? 'إرسال حد المخزون للاعتماد (صانع)' : 'Submit Stock Limit for Verification (Maker)'}
                   </button>
                 </div>
@@ -13937,6 +16764,44 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                                       ))}
                                     </tbody>
                                   </table>
+                                </div>
+                              </div>
+                            );
+                          })()}
+
+                          {/* Production Costs by (Metal Type, Denomination) for Checker Review */}
+                          {(() => {
+                            let prodCostsList: any[] = [];
+                            try {
+                              if (selectedWfInstance.details.production_costs_json) {
+                                prodCostsList = JSON.parse(selectedWfInstance.details.production_costs_json);
+                              }
+                            } catch (_) {}
+
+                            if (!prodCostsList || prodCostsList.length === 0) return null;
+
+                            return (
+                              <div style={{ marginTop: '8px', borderTop: '1px solid var(--surface-border)', paddingTop: '10px' }}>
+                                <div style={{ fontSize: '12px', fontWeight: 'bold', marginBottom: '6px', color: '#F59E0B', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <i className="fa-solid fa-calculator"></i>
+                                  {currentLang === 'en' ? 'Shipment Production Cost (KWD) Breakdown:' : 'بيان تكلفة إنتاج الشحنة (د.ك):'}
+                                </div>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                                  {prodCostsList.map((c: any, cIdx: number) => (
+                                    <div key={cIdx} style={{
+                                      padding: '6px 12px',
+                                      background: 'rgba(245, 158, 11, 0.1)',
+                                      border: '1px solid rgba(245, 158, 11, 0.25)',
+                                      borderRadius: '6px',
+                                      fontSize: '11px',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '8px'
+                                    }}>
+                                      <strong style={{ color: 'var(--text-primary)' }}>{c.MetalTypeName || c.metalTypeName || 'Metal'} - {c.DenominationName || c.denominationName || 'Denomination'}</strong>
+                                      <span style={{ color: '#F59E0B', fontWeight: 700 }}>{Number(c.ProductionCostKwd || c.productionCostKwd || 0).toFixed(3)} KWD</span>
+                                    </div>
+                                  ))}
                                 </div>
                               </div>
                             );
@@ -15847,6 +18712,234 @@ const [migrationApproved, setMigrationApproved] = useState(false);
             setIntakeCustomsDuty(cost);
           }}
         />
+
+        {/* REQUIREMENT 6: DAMAGED GOLD/SILVER REFINER EXPORT MANIFEST MODAL */}
+        {showDamagedExportModal && (
+          <div className="modal-overlay active" onClick={() => setShowDamagedExportModal(false)}>
+            <div className="glass-card modal-content-box" onClick={e => e.stopPropagation()} style={{ maxWidth: '850px', width: '90vw', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
+              <div className="modal-header">
+                <div>
+                  <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <i className="fa-solid fa-box-archive" style={{ color: '#D4AF37' }}></i>
+                    {currentLang === 'ar' ? 'بيان تصدير السبائك التالفة للمصنع / المصفاة' : 'Manufacturer (Refiner) Damaged-Bar Export Manifest'}
+                  </h3>
+                  <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '4px 0 0 0' }}>
+                    {currentLang === 'ar'
+                      ? 'تحديد السبائك التالفة المتراكمة وإنشاء بيان تصدير رسمي للمصفاة مع تسجيل سلسلة العهدة وسجلات التدقيق.'
+                      : 'Select accumulated damaged bars for factory return, generate official export manifest, and update chain of custody.'}
+                  </p>
+                </div>
+                <span className="modal-close-btn" onClick={() => setShowDamagedExportModal(false)}>&times;</span>
+              </div>
+
+              {exportManifestResult ? (
+                <div style={{ padding: '24px', textAlign: 'center' }}>
+                  <div style={{ width: '64px', height: '64px', borderRadius: '50%', background: 'rgba(0, 155, 78, 0.15)', color: 'var(--kfh-green)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '28px', marginBottom: '16px' }}>
+                    <i className="fa-solid fa-check-double"></i>
+                  </div>
+                  <h3 style={{ margin: '0 0 8px 0', color: 'var(--kfh-green)' }}>
+                    {currentLang === 'ar' ? 'تم إنشاء بيان التصدير بنجاح!' : 'Manufacturer Export Manifest Generated!'}
+                  </h3>
+                  <div style={{ fontFamily: 'monospace', fontSize: '18px', fontWeight: 'bold', background: 'rgba(255,255,255,0.05)', padding: '10px 20px', borderRadius: '8px', display: 'inline-block', margin: '8px 0 16px 0', border: '1px solid var(--surface-border)' }}>
+                    #{exportManifestResult.manifest_reference}
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', maxWidth: '500px', margin: '0 auto 24px auto', textAlign: 'center', fontSize: '13px' }}>
+                    <div style={{ background: 'rgba(255,255,255,0.03)', padding: '10px', borderRadius: '6px' }}>
+                      <div style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{currentLang === 'ar' ? 'المعدن' : 'Metal'}</div>
+                      <strong>{exportManifestResult.metal_type_name}</strong>
+                    </div>
+                    <div style={{ background: 'rgba(255,255,255,0.03)', padding: '10px', borderRadius: '6px' }}>
+                      <div style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{currentLang === 'ar' ? 'عدد القطع' : 'Bars Count'}</div>
+                      <strong>{exportManifestResult.total_bars_count} pcs</strong>
+                    </div>
+                    <div style={{ background: 'rgba(255,255,255,0.03)', padding: '10px', borderRadius: '6px' }}>
+                      <div style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{currentLang === 'ar' ? 'الوزن الإجمالي' : 'Total Weight'}</div>
+                      <strong style={{ color: '#dc2626' }}>{Number(exportManifestResult.total_weight_kg).toFixed(3)} KG</strong>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'center', gap: '12px' }}>
+                    <button
+                      className="btn btn-primary"
+                      style={{ background: 'var(--kfh-green)', borderColor: 'var(--kfh-green)', display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '10px 22px' }}
+                      onClick={() => handlePrintDamagedExportManifest(exportManifestResult)}
+                    >
+                      <i className="fa-solid fa-print"></i>
+                      <span>{currentLang === 'ar' ? 'طباعة بيان التصدير الرسمي' : 'Print Official Manifest'}</span>
+                    </button>
+                    <button
+                      className="btn btn-outline"
+                      onClick={() => {
+                        setExportManifestResult(null);
+                        setShowDamagedExportModal(false);
+                      }}
+                    >
+                      {currentLang === 'ar' ? 'إغلاق' : 'Close'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: '16px 20px' }}>
+                  {/* FILTERS & SUMMARY */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '16px', background: 'rgba(255,255,255,0.02)', padding: '12px', borderRadius: '8px', border: '1px solid var(--surface-border)' }}>
+                    <div>
+                      <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+                        {currentLang === 'ar' ? 'نوع المعدن الثمين' : 'Precious Metal Type'}
+                      </label>
+                      <select
+                        className="form-control"
+                        style={{ color: '#000', fontSize: '12px' }}
+                        value={exportManifestMetalTypeId}
+                        onChange={e => {
+                          const mid = parseInt(e.target.value);
+                          setExportManifestMetalTypeId(mid);
+                          setSelectedDamagedExportItemIds([]);
+                          fetchDamagedExportCandidates(mid, exportManifestVendorId ? Number(exportManifestVendorId) : undefined);
+                        }}
+                      >
+                        <option value="1">{currentLang === 'ar' ? 'ذهب (Gold)' : 'Gold'}</option>
+                        <option value="2">{currentLang === 'ar' ? 'فضة (Silver)' : 'Silver'}</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+                        {currentLang === 'ar' ? 'المصنع / المصفاة الوجهة (اختياري)' : 'Destination Refiner (Optional)'}
+                      </label>
+                      <select
+                        className="form-control"
+                        style={{ color: '#000', fontSize: '12px' }}
+                        value={exportManifestVendorId}
+                        onChange={e => {
+                          const vid = e.target.value;
+                          setExportManifestVendorId(vid ? Number(vid) : '');
+                          fetchDamagedExportCandidates(exportManifestMetalTypeId, vid ? Number(vid) : undefined);
+                        }}
+                      >
+                        <option value="">{currentLang === 'ar' ? '-- جميع المصانع المؤهلة --' : '-- All Qualified Refiners --'}</option>
+                        {suppliersList.map((s: any) => (
+                          <option key={s.vendor_id} value={s.vendor_id}>{s.vendor_name}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                      <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{currentLang === 'ar' ? 'السبائك المحددة للتصدير:' : 'Selected for Export:'}</span>
+                      <strong style={{ fontSize: '15px', color: selectedDamagedExportItemIds.length > 0 ? 'var(--kfh-green)' : 'var(--text-muted)' }}>
+                        {selectedDamagedExportItemIds.length} {currentLang === 'en' ? 'bars' : 'سبيكة'} (
+                        {(() => {
+                          const sel = damagedExportCandidates.filter(c => selectedDamagedExportItemIds.includes(c.item_id));
+                          const totalG = sel.reduce((acc, c) => acc + (c.weight_grams || 0), 0);
+                          return (totalG / 1000).toFixed(3);
+                        })()} KG)
+                      </strong>
+                    </div>
+                  </div>
+
+                  {/* CANDIDATE BARS TABLE */}
+                  <div style={{ flex: 1, overflowY: 'auto', border: '1px solid var(--surface-border)', borderRadius: '6px', marginBottom: '16px' }}>
+                    <table style={{ width: '100%', fontSize: '12px', borderCollapse: 'collapse' }}>
+                      <thead style={{ position: 'sticky', top: 0, background: 'var(--bg-secondary)', borderBottom: '2px solid var(--surface-border)', zIndex: 1 }}>
+                        <tr>
+                          <th style={{ width: '40px', textAlign: 'center', padding: '8px' }}>
+                            <input
+                              type="checkbox"
+                              checked={damagedExportCandidates.length > 0 && selectedDamagedExportItemIds.length === damagedExportCandidates.length}
+                              onChange={e => {
+                                if (e.target.checked) {
+                                  setSelectedDamagedExportItemIds(damagedExportCandidates.map(c => c.item_id));
+                                } else {
+                                  setSelectedDamagedExportItemIds([]);
+                                }
+                              }}
+                              style={{ cursor: 'pointer' }}
+                            />
+                          </th>
+                          <th style={{ padding: '8px', textAlign: 'left' }}>{currentLang === 'ar' ? 'الرقم التسلسلي' : 'Serial Number'}</th>
+                          <th style={{ padding: '8px', textAlign: 'left' }}>{currentLang === 'ar' ? 'الفئة / المنتج' : 'Product / Spec'}</th>
+                          <th style={{ padding: '8px', textAlign: 'right' }}>{currentLang === 'ar' ? 'الوزن (جرام)' : 'Weight (g)'}</th>
+                          <th style={{ padding: '8px', textAlign: 'right' }}>{currentLang === 'ar' ? 'الوزن (كجم)' : 'Weight (KG)'}</th>
+                          <th style={{ padding: '8px', textAlign: 'left' }}>{currentLang === 'ar' ? 'المورد / المصفاة' : 'Refiner / Vendor'}</th>
+                          <th style={{ padding: '8px', textAlign: 'left' }}>{currentLang === 'ar' ? 'سبب التلف' : 'Defect Reason'}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {damagedExportCandidates.map((bar: any) => {
+                          const isChecked = selectedDamagedExportItemIds.includes(bar.item_id);
+                          return (
+                            <tr key={bar.item_id} style={{ borderBottom: '1px solid var(--surface-border)', background: isChecked ? 'rgba(0,155,78,0.06)' : undefined }}>
+                              <td style={{ textAlign: 'center', padding: '8px' }}>
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={e => {
+                                    if (e.target.checked) {
+                                      setSelectedDamagedExportItemIds([...selectedDamagedExportItemIds, bar.item_id]);
+                                    } else {
+                                      setSelectedDamagedExportItemIds(selectedDamagedExportItemIds.filter(id => id !== bar.item_id));
+                                    }
+                                  }}
+                                  style={{ cursor: 'pointer' }}
+                                />
+                              </td>
+                              <td style={{ padding: '8px', fontFamily: 'monospace', fontWeight: 600, color: '#D4AF37' }}>{bar.serial_number}</td>
+                              <td style={{ padding: '8px' }}>{bar.product_name}</td>
+                              <td style={{ padding: '8px', textAlign: 'right' }}>{Number(bar.weight_grams).toFixed(2)} g</td>
+                              <td style={{ padding: '8px', textAlign: 'right', fontWeight: 'bold' }}>{(Number(bar.weight_grams) / 1000).toFixed(4)} KG</td>
+                              <td style={{ padding: '8px' }}>{bar.vendor_name || '—'}</td>
+                              <td style={{ padding: '8px', color: 'var(--accent-red)', fontSize: '11px' }}>{bar.damage_reason || 'DAMAGED'}</td>
+                            </tr>
+                          );
+                        })}
+                        {damagedExportCandidates.length === 0 && (
+                          <tr>
+                            <td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '30px' }}>
+                              <i className="fa-solid fa-circle-check" style={{ fontSize: '24px', color: 'var(--accent-green)', marginBottom: '8px', display: 'block' }}></i>
+                              {currentLang === 'ar' ? 'لا توجد سبائك تالفة مرشحة للتصدير لهذا المعدن حالياً.' : 'No candidate damaged bars pending export for this metal type.'}
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* NOTES & SUBMIT */}
+                  <div style={{ marginBottom: '12px' }}>
+                    <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+                      {currentLang === 'ar' ? 'ملاحظات التصدير ومراجع الجمارك / الشحن' : 'Export & Customs Bayan Notes'}
+                    </label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder={currentLang === 'en' ? 'e.g. Returned for re-melting/assay rectification via Valcambi/Nadir...' : 'مثال: تصدير لإعادة الصهر / تعديل العيار لدى المصفاة...'}
+                      value={exportManifestNotes}
+                      onChange={e => setExportManifestNotes(e.target.value)}
+                      style={{ fontSize: '12px' }}
+                    />
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                    <button
+                      className="btn btn-secondary"
+                      onClick={() => setShowDamagedExportModal(false)}
+                    >
+                      {currentLang === 'ar' ? 'إلغاء' : 'Cancel'}
+                    </button>
+                    <button
+                      className="btn btn-primary"
+                      style={{ background: '#009B4E', borderColor: '#009B4E', display: 'inline-flex', alignItems: 'center', gap: '8px' }}
+                      onClick={handleGenerateDamagedExportManifest}
+                      disabled={selectedDamagedExportItemIds.length === 0 || generatingExportManifest}
+                    >
+                      <i className={`fa-solid ${generatingExportManifest ? 'fa-spinner fa-spin' : 'fa-file-export'}`}></i>
+                      <span>{generatingExportManifest ? (currentLang === 'en' ? 'Generating Manifest...' : 'جاري الإنشاء...') : (currentLang === 'en' ? 'Generate Export Manifest' : 'إنشاء بيان التصدير للمصنع')}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
       </main>
     </div>

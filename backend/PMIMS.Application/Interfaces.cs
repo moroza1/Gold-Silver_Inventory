@@ -21,7 +21,7 @@ public interface IInventoryRepository
         string sourceType = "SUPPLIER", int? customerId = null, int? accountId = null, string? receiptReason = null,
         int? vendorId = null, string? shipmentReference = null, string? deliveryNoteNumber = null, string? airwayBillNumber = null,
         string? supportingDocumentUrl = null, string? discrepancyNotes = null, DateTime? receivingDate = null, string ownershipType = "KFH_OWNED",
-        string? customsDeclarationNumber = null, string? portOfEntry = null, decimal? customsDutyAmount = null);
+        string? customsDeclarationNumber = null, string? portOfEntry = null, decimal? customsDutyAmount = null, string? productionCostsJson = null);
     Task<IEnumerable<dynamic>> QueryAvailableStockAsync(int? branchId, int? metalTypeId, string? originCountry, int? denominationId);
     Task<Guid?> ReserveStockAsync(int customerId, int productId, int branchId, int channelId, string idempotencyKey, int ttlSeconds);
     Task<string> ConfirmPurchaseWithCustodyAsync(Guid reservationToken, int accountId, decimal salePrice, decimal markupAmount, string invoiceNumber, string? custodyAgreementNumber);
@@ -122,17 +122,20 @@ public interface IInventoryRepository
     // Effective Permissions (merged from all groups — highest wins)
     Task<Dictionary<string, string>> GetEffectivePermissionsForUserAsync(string username);
 
-    // Stock Thresholds (Low-Stock Floor & High-Stock Ceiling Governed by Maker-Checker Workflow)
+    // Stock Thresholds (Low-Stock Floor, High-Stock Ceiling & Damaged High-Stock Governed by Maker-Checker Workflow)
     Task<IEnumerable<ReorderThreshold>> GetReorderThresholdsAsync(string? thresholdType = null);
-    Task<ReorderThreshold> SaveReorderThresholdAsync(int? thresholdId, int productId, int vendorId, int minStockQty, int? maxStockQty, int reorderQty, bool isActive, string thresholdType = "LOW_STOCK");
+    Task<ReorderThreshold> SaveReorderThresholdAsync(int? thresholdId, int? productId, int? vendorId, int minStockQty, int? maxStockQty, int reorderQty, bool isActive, string thresholdType = "LOW_STOCK", int? metalTypeId = null, decimal? thresholdWeightKg = null);
     Task<bool> DeleteReorderThresholdAsync(int thresholdId);
-    Task<PendingThresholdChange> SubmitThresholdChangeRequestAsync(string thresholdType, int? thresholdId, int productId, int vendorId, int minStockQty, int? maxStockQty, int reorderQty, bool isActive, string requestedBy, string? comments = null);
+    Task<PendingThresholdChange> SubmitThresholdChangeRequestAsync(string thresholdType, int? thresholdId, int? productId, int? vendorId, int minStockQty, int? maxStockQty, int reorderQty, bool isActive, string requestedBy, string? comments = null, int? metalTypeId = null, decimal? thresholdWeightKg = null);
     Task<PendingThresholdChange> SubmitThresholdDeleteRequestAsync(int thresholdId, string requestedBy, string? comments = null);
     Task<PendingThresholdChange?> GetPendingThresholdChangeByIdAsync(int pendingChangeId);
     Task<IEnumerable<PendingThresholdChange>> GetPendingThresholdChangesAsync(string? thresholdType = null);
     Task<IEnumerable<StockAlertItem>> CheckStockAlertsAsync();
     Task<IEnumerable<StockAlertItem>> CheckLowStockAlertsAsync();
     Task<(int poId, string result)> CreateDraftPurchaseOrderAsync(int thresholdId, string createdBy);
+    Task<IEnumerable<DamagedHighStockAlert>> GetDamagedHighStockAlertsAsync(int? metalTypeId = null);
+    Task<IEnumerable<DamagedBarExportCandidate>> GetDamagedExportCandidatesAsync(int? metalTypeId = null, int? vendorId = null);
+    Task<DamagedExportManifestResult> GenerateDamagedExportManifestAsync(int metalTypeId, int? vendorId, List<int> itemIds, string generatedBy, string? notes);
 
     // KFH Branch settings CRUD & Workflow Transfers
     Task<IEnumerable<Branch>> GetBranchesAsync();
@@ -146,7 +149,9 @@ public interface IInventoryRepository
         string sourceType = "SUPPLIER", int? customerId = null, int? accountId = null, string? receiptReason = null,
         int? vendorId = null, string? shipmentReference = null, string? deliveryNoteNumber = null, string? airwayBillNumber = null,
         string? supportingDocumentUrl = null, string? discrepancyNotes = null, DateTime? receivingDate = null, string ownershipType = "KFH_OWNED",
-        string? customsDeclarationNumber = null, decimal? customsDutyAmount = null, string? portOfEntry = null);
+        string? customsDeclarationNumber = null, decimal? customsDutyAmount = null, string? portOfEntry = null, string? productionCostsJson = null);
+    Task<IntakeSerialValidationResult> ValidateIntakeSerialsAsync(List<string> serialNumbers, string sourceType = "SUPPLIER", int? productId = null);
+    Task<IEnumerable<ShipmentProductionCost>> GetShipmentProductionCostsAsync(int? pendingIntakeId = null, int? lotId = null);
     Task<string> ClearCustomsShipmentAsync(int pendingIntakeIdOrLotId, string targetOwnership, string approvedBy, string? clearanceNotes = null);
     Task<PendingCustomsTransfer> InitiateCustomsTransferWorkflowAsync(int? lotId, int? itemId, string targetOwnership, string requestedBy,
         string? clearanceNotes = null, string? customsDeclarationNumber = null, decimal? customsDutyAmount = null, string? portOfEntry = null);
@@ -254,6 +259,32 @@ public interface IInventoryRepository
     Task<InventoryItem?> GetItemByIdWithDetailsAsync(int itemId);
     Task<InventoryLot?> GetLotByNumberAsync(string lotNumber);
     Task<IEnumerable<InventoryItem>> GetItemsByLotIdAsync(int lotId);
+    Task<QrPrintLog> RecordQrPrintAsync(int itemId, string printType, string printedBy, string? reason = null, int? requestId = null, string? labelPayload = null);
+    Task<IEnumerable<QrPrintLog>> RecordBatchQrPrintAsync(List<int> itemIds, string printType, string printedBy, string? reason = null, int? requestId = null);
+    Task<PendingQrReprint> InitiateQrReprintAsync(string requestType, List<int> itemIds, string reason, string? attachmentUrl, string user);
+    Task<string> ApproveQrReprintAsync(int requestId, string user);
+    Task<string> RejectQrReprintAsync(int requestId, string reason, string user);
+    Task<IEnumerable<PendingQrReprint>> GetPendingQrReprintsAsync();
+    Task<IEnumerable<QrPrintLog>> GetQrPrintLogsAsync(int? itemId = null);
+    Task<IEnumerable<InventoryItem>> GetUnprintedMainVaultBarsAsync();
+
+    // =========================================================================
+    // Damaged-Bar Replacement with Turkey Consignment
+    // =========================================================================
+    Task<DamagedBarReplacement> InitiateDamagedBarReplacementAsync(int damagedItemId, int replacementItemId, string reason, string? attachmentUrl, string user);
+    Task<string> ApproveDamagedBarReplacementAsync(int replacementId, string user);
+    Task<string> RejectDamagedBarReplacementAsync(int replacementId, string reason, string user);
+    Task<IEnumerable<DamagedBarReplacement>> GetDamagedBarReplacementsAsync(string? status = null);
+    Task<IEnumerable<InventoryItem>> GetEligibleTurkeyReplacementsAsync(int damagedItemId);
+
+    // =========================================================================
+    // Damaged Gold Export (3-Level Maker-Checker-SeniorManager Approval & Courier Handover)
+    // =========================================================================
+    Task<PendingDamagedExport> InitiateDamagedExportAsync(int itemId, string requestedBy, string? notes, int? vendorId, string? customsDeclNumber);
+    Task<IEnumerable<PendingDamagedExport>> GetPendingDamagedExportsAsync();
+    Task<IEnumerable<PendingDamagedExport>> GetDamagedExportHistoryAsync();
+    Task<PendingDamagedExport> HandoverDamagedExportToCourierAsync(int exportId, string courierCompany, string courierRep, string trackingNumber, string securitySeal, string handedOverBy, string? notes);
+    Task<IEnumerable<InventoryItem>> GetItemHistoryBySerialNumberAsync(string serialNumber);
 
     // =========================================================================
     // Auditable, traceable movement records

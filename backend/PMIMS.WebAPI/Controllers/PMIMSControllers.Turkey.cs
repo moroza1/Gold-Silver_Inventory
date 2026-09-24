@@ -539,6 +539,149 @@ public partial class PMIMSControllers
             return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
         }
     }
+
+    // =========================================================================
+    // Damaged-Bar Replacement with Turkey Consignment (Requirement 4)
+    // =========================================================================
+
+    [HttpGet("inventory/damaged/eligible-replacements/{damagedItemId:int}")]
+    [Authorize(Policy = "purchase_orders.read")]
+    public async Task<IActionResult> GetEligibleTurkeyReplacements(int damagedItemId)
+    {
+        try
+        {
+            var replacements = await _repository.GetEligibleTurkeyReplacementsAsync(damagedItemId);
+            return Ok(replacements.Select(i => new
+            {
+                item_id = i.ItemId,
+                serial_number = i.SerialNumber,
+                metal_name = i.Product?.MetalType?.MetalName ?? "Gold",
+                denomination = i.Product?.Denomination?.Label ?? "1kg Bar",
+                weight_grams = i.Product?.Denomination?.WeightGrams ?? 0,
+                location_code = i.Location != null ? $"{i.Location.ZoneRoom} / {i.Location.ShelfRow} / {i.Location.SlotBin}" : "Main Vault",
+                vault_name = i.Location?.Vault?.VaultName ?? "Main Vault",
+                ownership_type = i.OwnershipType,
+                status_code = i.StatusCode
+            }));
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
+    [HttpPost("inventory/damaged/replace/initiate")]
+    [Authorize(Policy = "pending_actions.write")]
+    public async Task<IActionResult> InitiateDamagedBarReplacement([FromBody] InitiateDamagedBarReplacementRequest req)
+    {
+        var user = User.Identity?.Name ?? "system-maker";
+        try
+        {
+            var result = await _repository.InitiateDamagedBarReplacementAsync(
+                req.DamagedItemId,
+                req.ReplacementItemId,
+                req.Reason,
+                req.AttachmentUrl,
+                user);
+
+            return Ok(new
+            {
+                replacement_id = result.ReplacementId,
+                replacement_reference = result.ReplacementReference,
+                damaged_serial = result.DamagedSerialNumber,
+                replacement_serial = result.ReplacementSerialNumber,
+                status = result.Status,
+                message = $"Replacement request {result.ReplacementReference} created and submitted for Checker authorization."
+            });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
+    [HttpGet("inventory/damaged/replacements")]
+    [Authorize(Policy = "purchase_orders.read")]
+    public async Task<IActionResult> GetDamagedBarReplacements([FromQuery] string? status)
+    {
+        try
+        {
+            var list = await _repository.GetDamagedBarReplacementsAsync(status);
+            return Ok(list.Select(r => new
+            {
+                replacement_id = r.ReplacementId,
+                replacement_reference = r.ReplacementReference,
+                damaged_item_id = r.DamagedItemId,
+                damaged_serial_number = r.DamagedSerialNumber,
+                damaged_original_owner = r.DamagedOriginalOwner,
+                customer_id = r.CustomerId,
+                customer_name = r.Customer?.CustomerName,
+                account_number = r.Account?.AccountNumber,
+                replacement_item_id = r.ReplacementItemId,
+                replacement_serial_number = r.ReplacementSerialNumber,
+                metal_name = r.DamagedItem?.Product?.MetalType?.MetalName ?? "Gold",
+                denomination = r.DamagedItem?.Product?.Denomination?.Label ?? "1kg Bar",
+                weight_grams = r.WeightGrams,
+                reason = r.Reason,
+                attachment_url = r.AttachmentUrl,
+                status = r.Status,
+                initiated_by = r.InitiatedBy,
+                initiated_at = r.InitiatedAt,
+                approved_by = r.ApprovedBy,
+                approved_at = r.ApprovedAt,
+                rejection_reason = r.RejectionReason
+            }));
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
+    [HttpPost("inventory/damaged/replace/{id:int}/approve")]
+    [Authorize(Policy = "pending_actions.write")]
+    public async Task<IActionResult> ApproveDamagedBarReplacement(int id)
+    {
+        var checker = User.Identity?.Name ?? "system-checker";
+        try
+        {
+            var result = await _repository.ApproveDamagedBarReplacementAsync(id, checker);
+            return Ok(new { status = result, message = "Damaged bar replacement approved, ownership swapped, and holdings updated." });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
+    [HttpPost("inventory/damaged/replace/{id:int}/reject")]
+    [Authorize(Policy = "pending_actions.write")]
+    public async Task<IActionResult> RejectDamagedBarReplacement(int id, [FromBody] RejectDamageReplacementRequest req)
+    {
+        var checker = User.Identity?.Name ?? "system-checker";
+        try
+        {
+            var result = await _repository.RejectDamagedBarReplacementAsync(id, req?.Reason ?? "Rejected by Checker", checker);
+            return Ok(new { status = result, message = "Damaged bar replacement request rejected." });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+}
+
+public class InitiateDamagedBarReplacementRequest
+{
+    public int DamagedItemId { get; set; }
+    public int ReplacementItemId { get; set; }
+    public string Reason { get; set; } = null!;
+    public string? AttachmentUrl { get; set; }
+}
+
+public class RejectDamageReplacementRequest
+{
+    public string Reason { get; set; } = null!;
 }
 
 public class MissingItemsReportRequest
@@ -577,4 +720,5 @@ public class TurkeyReturnRequest
     public string? RequestedBy { get; set; }
     public string? Notes { get; set; }
 }
+
 

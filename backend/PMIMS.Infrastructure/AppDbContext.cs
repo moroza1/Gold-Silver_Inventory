@@ -126,7 +126,12 @@ public class AppDbContext : DbContext
     public DbSet<PendingVipDispense> PendingVipDispenses { get; set; } = null!;
     public DbSet<PendingTurkeyReturn> PendingTurkeyReturns { get; set; } = null!;
     public DbSet<PendingMissingItemReport> PendingMissingItemReports { get; set; } = null!;
+    public DbSet<ShipmentProductionCost> ShipmentProductionCosts { get; set; } = null!;
     public DbSet<SystemSetting> SystemSettings { get; set; } = null!;
+    public DbSet<QrPrintLog> QrPrintLogs { get; set; } = null!;
+    public DbSet<PendingQrReprint> PendingQrReprints { get; set; } = null!;
+    public DbSet<DamagedBarReplacement> DamagedBarReplacements { get; set; } = null!;
+    public DbSet<PendingDamagedExport> PendingDamagedExports { get; set; } = null!;
 
     // FIM Integration Module
     public DbSet<FimUserAttribute> FimUserAttributes { get; set; } = null!;
@@ -343,7 +348,7 @@ public class AppDbContext : DbContext
         {
             entity.HasKey(e => e.ItemId);
             entity.ToTable("inventory_items");
-            entity.HasIndex(e => e.SerialNumber).IsUnique();
+            entity.HasIndex(e => e.SerialNumber);
             entity.HasOne(e => e.Product).WithMany().HasForeignKey(e => e.ProductId);
             entity.HasOne(e => e.Lot).WithMany().HasForeignKey(e => e.LotId);
             entity.HasOne(e => e.Location).WithMany().HasForeignKey(e => e.LocationId);
@@ -685,8 +690,10 @@ public class AppDbContext : DbContext
         {
             entity.HasKey(e => e.ThresholdId);
             entity.ToTable("reorder_thresholds");
-            entity.HasOne(e => e.Product).WithMany().HasForeignKey(e => e.ProductId);
-            entity.HasOne(e => e.Vendor).WithMany().HasForeignKey(e => e.VendorId);
+            entity.Property(e => e.ThresholdWeightKg).HasColumnType("decimal(18,4)");
+            entity.HasOne(e => e.Product).WithMany().HasForeignKey(e => e.ProductId).IsRequired(false);
+            entity.HasOne(e => e.Vendor).WithMany().HasForeignKey(e => e.VendorId).IsRequired(false);
+            entity.HasOne(e => e.MetalType).WithMany().HasForeignKey(e => e.MetalTypeId).IsRequired(false);
         });
 
         // BranchTransfer Configuration
@@ -716,9 +723,23 @@ public class AppDbContext : DbContext
         {
             entity.HasKey(e => e.PendingChangeId);
             entity.ToTable("pending_threshold_changes");
-            entity.HasOne(e => e.Product).WithMany().HasForeignKey(e => e.ProductId);
-            entity.HasOne(e => e.Vendor).WithMany().HasForeignKey(e => e.VendorId);
+            entity.Property(e => e.ThresholdWeightKg).HasColumnType("decimal(18,4)");
+            entity.HasOne(e => e.Product).WithMany().HasForeignKey(e => e.ProductId).IsRequired(false);
+            entity.HasOne(e => e.Vendor).WithMany().HasForeignKey(e => e.VendorId).IsRequired(false);
+            entity.HasOne(e => e.MetalType).WithMany().HasForeignKey(e => e.MetalTypeId).IsRequired(false);
             entity.HasOne(e => e.Threshold).WithMany().HasForeignKey(e => e.ThresholdId).IsRequired(false);
+        });
+
+        // ShipmentProductionCost Configuration
+        modelBuilder.Entity<ShipmentProductionCost>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.ToTable("shipment_production_costs");
+            entity.Property(e => e.ProductionCostKwd).HasColumnType("decimal(18,4)");
+            entity.HasOne(e => e.PendingIntake).WithMany().HasForeignKey(e => e.PendingIntakeId).IsRequired(false);
+            entity.HasOne(e => e.Lot).WithMany().HasForeignKey(e => e.LotId).IsRequired(false);
+            entity.HasOne(e => e.MetalType).WithMany().HasForeignKey(e => e.MetalTypeId);
+            entity.HasOne(e => e.Denomination).WithMany().HasForeignKey(e => e.DenominationId);
         });
 
         // ============================================================
@@ -921,6 +942,45 @@ public class AppDbContext : DbContext
         {
             entity.HasKey(e => e.SettingKey);
             entity.ToTable("system_settings");
+        });
+
+        // QrPrintLog Configuration
+        modelBuilder.Entity<QrPrintLog>(entity =>
+        {
+            entity.HasKey(e => e.PrintLogId);
+            entity.ToTable("qr_print_logs");
+            entity.HasOne(e => e.Item).WithMany().HasForeignKey(e => e.ItemId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ReprintRequest).WithMany().HasForeignKey(e => e.ReprintRequestId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        // PendingQrReprint Configuration
+        modelBuilder.Entity<PendingQrReprint>(entity =>
+        {
+            entity.HasKey(e => e.ReprintRequestId);
+            entity.ToTable("pending_qr_reprints");
+        });
+
+        // DamagedBarReplacement Configuration
+        modelBuilder.Entity<DamagedBarReplacement>(entity =>
+        {
+            entity.HasKey(e => e.ReplacementId);
+            entity.ToTable("damaged_bar_replacements");
+            entity.HasOne(e => e.DamagedItem).WithMany().HasForeignKey(e => e.DamagedItemId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ReplacementItem).WithMany().HasForeignKey(e => e.ReplacementItemId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Customer).WithMany().HasForeignKey(e => e.CustomerId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Account).WithMany().HasForeignKey(e => e.AccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.CustomerHolding).WithMany().HasForeignKey(e => e.CustomerHoldingId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // PendingDamagedExport Configuration
+        modelBuilder.Entity<PendingDamagedExport>(entity =>
+        {
+            entity.HasKey(e => e.ExportId);
+            entity.ToTable("pending_damaged_exports");
+            entity.HasIndex(e => e.ExportReference).IsUnique();
+            entity.HasOne(e => e.Item).WithMany().HasForeignKey(e => e.ItemId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.MetalType).WithMany().HasForeignKey(e => e.MetalTypeId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Vendor).WithMany().HasForeignKey(e => e.VendorId).OnDelete(DeleteBehavior.Restrict);
         });
 
         // Loop over all entities and convert property/column names to snake_case

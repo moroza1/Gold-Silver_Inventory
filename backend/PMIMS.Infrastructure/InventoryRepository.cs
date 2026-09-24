@@ -277,7 +277,7 @@ public class InventoryRepository : IInventoryRepository
         string sourceType = "SUPPLIER", int? customerId = null, int? accountId = null, string? receiptReason = null,
         int? vendorId = null, string? shipmentReference = null, string? deliveryNoteNumber = null, string? airwayBillNumber = null,
         string? supportingDocumentUrl = null, string? discrepancyNotes = null, DateTime? receivingDate = null, string ownershipType = "KFH_OWNED",
-        string? customsDeclarationNumber = null, string? portOfEntry = null, decimal? customsDutyAmount = null)
+        string? customsDeclarationNumber = null, string? portOfEntry = null, decimal? customsDutyAmount = null, string? productionCostsJson = null)
     {
         sourceType = string.IsNullOrWhiteSpace(sourceType) ? "SUPPLIER" : sourceType.Trim().ToUpperInvariant();
         bool isCustomerReceipt = sourceType == "CUSTOMER";
@@ -406,6 +406,41 @@ public class InventoryRepository : IInventoryRepository
                         ? "CUSTOMS_OWNED"
                         : "KFH_OWNED"));
 
+            // Shipment Production Cost (KWD) mapping per (MetalTypeId, DenominationId)
+            var prodCostMap = new Dictionary<(int MetalTypeId, int DenominationId), decimal>();
+            if (!string.IsNullOrWhiteSpace(productionCostsJson))
+            {
+                try
+                {
+                    var parsedCosts = JsonSerializer.Deserialize<List<ShipmentProductionCostInput>>(productionCostsJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                    if (parsedCosts != null)
+                    {
+                        foreach (var pc in parsedCosts)
+                        {
+                            prodCostMap[(pc.MetalTypeId, pc.DenominationId)] = pc.ProductionCostKwd;
+                        }
+                    }
+                }
+                catch { }
+            }
+
+            var existingCosts = await _dbContext.ShipmentProductionCosts
+                .Where(c => (!string.IsNullOrEmpty(shipmentReference) && c.ShipmentReference == shipmentReference) ||
+                            (!string.IsNullOrEmpty(lotNumber) && c.ShipmentReference == lotNumber) ||
+                            (c.LotId == lot.LotId))
+                .ToListAsync();
+            foreach (var c in existingCosts)
+            {
+                if (!prodCostMap.ContainsKey((c.MetalTypeId, c.DenominationId)))
+                {
+                    prodCostMap[(c.MetalTypeId, c.DenominationId)] = c.ProductionCostKwd;
+                }
+                if (c.LotId == null)
+                {
+                    c.LotId = lot.LotId;
+                }
+            }
+
             var affectedProducts = new HashSet<int>();
             var newItems = new List<InventoryItem>();
             foreach (var element in doc.RootElement.EnumerateArray())
@@ -502,6 +537,13 @@ public class InventoryRepository : IInventoryRepository
                     itemUnitCost = avgCost;
                 }
 
+                var productInfo = await _dbContext.MetalProducts.FindAsync(productId);
+                decimal? itemProdCost = null;
+                if (productInfo != null && prodCostMap.TryGetValue((productInfo.MetalTypeId, productInfo.DenominationId), out var pcVal))
+                {
+                    itemProdCost = pcVal;
+                }
+
                 var item = new InventoryItem
                 {
                     SerialNumber = serial,
@@ -511,6 +553,7 @@ public class InventoryRepository : IInventoryRepository
                     OwnershipType = finalOwnershipType,
                     StatusCode = "READY",
                     AveragePurchaseCost = itemUnitCost > 0 ? itemUnitCost : (avgCost > 0 ? avgCost : null),
+                    ProductionCostKwd = itemProdCost,
                     IsDamaged = isDamaged,
                     DamageReason = isDamaged ? (damageReason ?? (isCustomerReceipt ? "Damaged upon receipt from customer" : "Damaged upon receipt from supplier")) : null,
                     InspectionDate = isDamaged ? DateTime.UtcNow : null,
@@ -2112,6 +2155,20 @@ public class InventoryRepository : IInventoryRepository
                 var rep = await _dbContext.PendingMissingItemReports.FindAsync(instance.EntityId);
                 if (rep != null) rep.StatusCode = "REJECTED";
             }
+            else if (instance.WorkflowType == "DAMAGED_EXPORT")
+            {
+                var exp = await _dbContext.PendingDamagedExports.FindAsync(instance.EntityId);
+                if (exp != null)
+                {
+                    exp.StatusCode = "REJECTED";
+                    exp.RejectionReason = comments;
+                    var item = await _dbContext.InventoryItems.FindAsync(exp.ItemId);
+                    if (item != null)
+                    {
+                        item.StatusCode = "DAMAGED"; // release export lock back to damaged
+                    }
+                }
+            }
         }
         else if (action == "RETURNED")
         {
@@ -2180,14 +2237,38 @@ public class InventoryRepository : IInventoryRepository
                 var rep = await _dbContext.PendingMissingItemReports.FindAsync(instance.EntityId);
                 if (rep != null) rep.StatusCode = "PENDING_APPROVAL";
             }
+            else if (instance.WorkflowType == "DAMAGED_EXPORT")
+            {
+                var exp = await _dbContext.PendingDamagedExports.FindAsync(instance.EntityId);
+                if (exp != null) exp.StatusCode = "PENDING_APPROVAL";
+            }
         }
         else if (action == "APPROVED")
         {
             instance.CurrentStepOrder++;
+            if (instance.WorkflowType == "DAMAGED_EXPORT" && instance.CurrentStepOrder == 3)
+            {
+                var exp = await _dbContext.PendingDamagedExports.FindAsync(instance.EntityId);
+                if (exp != null)
+                {
+                    exp.CheckerApprovedBy = username;
+                }
+            }
+
             if (steps.Count == 0 || instance.CurrentStepOrder > steps.Count)
             {
                 instance.StatusCode = "APPROVED";
-                if (instance.WorkflowType == "PURCHASE_ORDER")
+                if (instance.WorkflowType == "DAMAGED_EXPORT")
+                {
+                    var exp = await _dbContext.PendingDamagedExports.FindAsync(instance.EntityId);
+                    if (exp != null)
+                    {
+                        exp.StatusCode = "APPROVED";
+                        exp.SeniorManagerApprovedBy = username;
+                        exp.ApprovedAt = DateTime.UtcNow;
+                    }
+                }
+                else if (instance.WorkflowType == "PURCHASE_ORDER")
                 {
                     var po = await _dbContext.PurchaseOrders.FindAsync(instance.EntityId);
                     if (po != null)
@@ -2266,7 +2347,7 @@ public class InventoryRepository : IInventoryRepository
                             pending.SourceType, pending.CustomerId, pending.AccountId, pending.ReceiptReason,
                             pending.VendorId, pending.ShipmentReference, pending.DeliveryNoteNumber, pending.AirwayBillNumber,
                             pending.SupportingDocumentUrl, pending.DiscrepancyNotes, pending.ReceivingDate, pending.OwnershipType,
-                            pending.CustomsDeclarationNumber, pending.PortOfEntry, pending.CustomsDutyAmount);
+                            pending.CustomsDeclarationNumber, pending.PortOfEntry, pending.CustomsDutyAmount, pending.ProductionCostsJson);
                         if (result != "SUCCESS")
                         {
                             throw new InvalidOperationException($"Intake execution failed: {result}");
@@ -2298,6 +2379,7 @@ public class InventoryRepository : IInventoryRepository
                     var change = await _dbContext.PendingThresholdChanges
                         .Include(p => p.Product)
                         .Include(p => p.Vendor)
+                        .Include(p => p.MetalType)
                         .FirstOrDefaultAsync(p => p.PendingChangeId == instance.EntityId);
                     if (change != null)
                     {
@@ -2311,8 +2393,10 @@ public class InventoryRepository : IInventoryRepository
                                 ThresholdType = string.IsNullOrWhiteSpace(change.ThresholdType) ? "LOW_STOCK" : change.ThresholdType,
                                 ProductId = change.ProductId,
                                 VendorId = change.VendorId,
+                                MetalTypeId = change.MetalTypeId,
                                 MinStockQty = change.MinStockQty,
                                 MaxStockQty = change.MaxStockQty ?? (change.ThresholdType == "HIGH_STOCK" ? change.MinStockQty : null),
+                                ThresholdWeightKg = change.ThresholdWeightKg,
                                 ReorderQty = change.ReorderQty,
                                 IsActive = change.IsActive,
                                 CreatedAt = DateTime.UtcNow,
@@ -2332,8 +2416,10 @@ public class InventoryRepository : IInventoryRepository
                                     threshold.ThresholdType = string.IsNullOrWhiteSpace(change.ThresholdType) ? threshold.ThresholdType : change.ThresholdType;
                                     threshold.ProductId = change.ProductId;
                                     threshold.VendorId = change.VendorId;
+                                    threshold.MetalTypeId = change.MetalTypeId;
                                     threshold.MinStockQty = change.MinStockQty;
                                     threshold.MaxStockQty = change.MaxStockQty ?? (change.ThresholdType == "HIGH_STOCK" ? change.MinStockQty : threshold.MaxStockQty);
+                                    threshold.ThresholdWeightKg = change.ThresholdWeightKg ?? threshold.ThresholdWeightKg;
                                     threshold.ReorderQty = change.ReorderQty;
                                     threshold.IsActive = change.IsActive;
                                     threshold.UpdatedAt = DateTime.UtcNow;
@@ -2821,6 +2907,7 @@ public class InventoryRepository : IInventoryRepository
             .Include(t => t.Product).ThenInclude(p => p!.MetalType)
             .Include(t => t.Product).ThenInclude(p => p!.Denomination)
             .Include(t => t.Vendor)
+            .Include(t => t.MetalType)
             .AsQueryable();
 
         if (!string.IsNullOrWhiteSpace(thresholdType))
@@ -2829,10 +2916,22 @@ public class InventoryRepository : IInventoryRepository
             query = query.Where(t => t.ThresholdType == norm);
         }
 
-        return await query.OrderBy(t => t.ProductId).ThenBy(t => t.ThresholdType).ToListAsync();
+        return await query.OrderBy(t => t.MetalTypeId).ThenBy(t => t.ProductId).ThenBy(t => t.ThresholdType).ToListAsync();
     }
 
-    public async Task<PendingThresholdChange> SubmitThresholdChangeRequestAsync(string thresholdType, int? thresholdId, int productId, int vendorId, int minStockQty, int? maxStockQty, int reorderQty, bool isActive, string requestedBy, string? comments = null)
+    public async Task<PendingThresholdChange> SubmitThresholdChangeRequestAsync(
+        string thresholdType,
+        int? thresholdId,
+        int? productId,
+        int? vendorId,
+        int minStockQty,
+        int? maxStockQty,
+        int reorderQty,
+        bool isActive,
+        string requestedBy,
+        string? comments = null,
+        int? metalTypeId = null,
+        decimal? thresholdWeightKg = null)
     {
         string type = string.IsNullOrWhiteSpace(thresholdType) ? "LOW_STOCK" : thresholdType.ToUpperInvariant();
         string changeType = "CREATE";
@@ -2852,12 +2951,27 @@ public class InventoryRepository : IInventoryRepository
             type = existing.ThresholdType;
         }
 
-        var product = await _dbContext.MetalProducts.FindAsync(productId)
-            ?? throw new InvalidOperationException("Specified precious metal product not found.");
-        var vendor = await _dbContext.Vendors.FindAsync(vendorId)
-            ?? throw new InvalidOperationException("Specified vendor not found.");
+        MetalProduct? product = null;
+        if (productId.HasValue && productId.Value > 0)
+        {
+            product = await _dbContext.MetalProducts.FindAsync(productId.Value);
+        }
 
-        int effectiveMaxQty = maxStockQty ?? (type == "HIGH_STOCK" ? minStockQty : minStockQty * 3);
+        Vendor? vendor = null;
+        if (vendorId.HasValue && vendorId.Value > 0)
+        {
+            vendor = await _dbContext.Vendors.FindAsync(vendorId.Value);
+        }
+
+        MetalType? metalType = null;
+        if (metalTypeId.HasValue && metalTypeId.Value > 0)
+        {
+            metalType = await _dbContext.MetalTypes.FindAsync(metalTypeId.Value);
+        }
+        else if (product != null)
+        {
+            metalTypeId = product.MetalTypeId;
+        }
 
         var pending = new PendingThresholdChange
         {
@@ -2866,8 +2980,10 @@ public class InventoryRepository : IInventoryRepository
             ThresholdId = thresholdId,
             ProductId = productId,
             VendorId = vendorId,
+            MetalTypeId = metalTypeId,
             MinStockQty = minStockQty,
             MaxStockQty = type == "HIGH_STOCK" ? (maxStockQty ?? minStockQty) : maxStockQty,
+            ThresholdWeightKg = thresholdWeightKg,
             ReorderQty = reorderQty,
             IsActive = isActive,
             StatusCode = "PENDING_APPROVAL",
@@ -2882,8 +2998,12 @@ public class InventoryRepository : IInventoryRepository
         // Start THRESHOLD_CONFIG workflow instance for Maker-Checker approval
         await StartWorkflowInstanceAsync("THRESHOLD_CONFIG", pending.PendingChangeId, requestedBy);
 
-        await _dbContext.Entry(pending).Reference(p => p.Product).LoadAsync();
-        await _dbContext.Entry(pending).Reference(p => p.Vendor).LoadAsync();
+        if (pending.ProductId.HasValue)
+            await _dbContext.Entry(pending).Reference(p => p.Product).LoadAsync();
+        if (pending.VendorId.HasValue)
+            await _dbContext.Entry(pending).Reference(p => p.Vendor).LoadAsync();
+        if (pending.MetalTypeId.HasValue)
+            await _dbContext.Entry(pending).Reference(p => p.MetalType).LoadAsync();
         if (pending.Product != null)
         {
             await _dbContext.Entry(pending.Product).Reference(p => p.MetalType).LoadAsync();
@@ -2899,6 +3019,7 @@ public class InventoryRepository : IInventoryRepository
             .Include(t => t.Product).ThenInclude(p => p!.MetalType)
             .Include(t => t.Product).ThenInclude(p => p!.Denomination)
             .Include(t => t.Vendor)
+            .Include(t => t.MetalType)
             .FirstOrDefaultAsync(t => t.ThresholdId == thresholdId)
             ?? throw new InvalidOperationException("Threshold configuration not found for deletion.");
 
@@ -2909,8 +3030,10 @@ public class InventoryRepository : IInventoryRepository
             ThresholdId = thresholdId,
             ProductId = existing.ProductId,
             VendorId = existing.VendorId,
+            MetalTypeId = existing.MetalTypeId,
             MinStockQty = existing.MinStockQty,
             MaxStockQty = existing.MaxStockQty,
+            ThresholdWeightKg = existing.ThresholdWeightKg,
             ReorderQty = existing.ReorderQty,
             IsActive = false,
             StatusCode = "PENDING_APPROVAL",
@@ -2927,6 +3050,7 @@ public class InventoryRepository : IInventoryRepository
 
         pending.Product = existing.Product;
         pending.Vendor = existing.Vendor;
+        pending.MetalType = existing.MetalType;
         return pending;
     }
 
@@ -2936,6 +3060,7 @@ public class InventoryRepository : IInventoryRepository
             .Include(p => p.Product).ThenInclude(prod => prod!.MetalType)
             .Include(p => p.Product).ThenInclude(prod => prod!.Denomination)
             .Include(p => p.Vendor)
+            .Include(p => p.MetalType)
             .FirstOrDefaultAsync(p => p.PendingChangeId == pendingChangeId);
     }
 
@@ -2946,6 +3071,7 @@ public class InventoryRepository : IInventoryRepository
             .Include(p => p.Product).ThenInclude(prod => prod!.MetalType)
             .Include(p => p.Product).ThenInclude(prod => prod!.Denomination)
             .Include(p => p.Vendor)
+            .Include(p => p.MetalType)
             .AsQueryable();
 
         if (!string.IsNullOrWhiteSpace(thresholdType))
@@ -2957,7 +3083,17 @@ public class InventoryRepository : IInventoryRepository
         return await query.OrderByDescending(p => p.CreatedAt).ToListAsync();
     }
 
-    public async Task<ReorderThreshold> SaveReorderThresholdAsync(int? thresholdId, int productId, int vendorId, int minStockQty, int? maxStockQty, int reorderQty, bool isActive, string thresholdType = "LOW_STOCK")
+    public async Task<ReorderThreshold> SaveReorderThresholdAsync(
+        int? thresholdId,
+        int? productId,
+        int? vendorId,
+        int minStockQty,
+        int? maxStockQty,
+        int reorderQty,
+        bool isActive,
+        string thresholdType = "LOW_STOCK",
+        int? metalTypeId = null,
+        decimal? thresholdWeightKg = null)
     {
         string normType = string.IsNullOrWhiteSpace(thresholdType) ? "LOW_STOCK" : thresholdType.ToUpperInvariant();
         ReorderThreshold threshold;
@@ -2968,8 +3104,10 @@ public class InventoryRepository : IInventoryRepository
             threshold.ThresholdType = normType;
             threshold.ProductId = productId;
             threshold.VendorId = vendorId;
+            threshold.MetalTypeId = metalTypeId;
             threshold.MinStockQty = minStockQty;
             threshold.MaxStockQty = normType == "HIGH_STOCK" ? (maxStockQty ?? minStockQty) : maxStockQty;
+            threshold.ThresholdWeightKg = thresholdWeightKg ?? threshold.ThresholdWeightKg;
             threshold.ReorderQty = reorderQty;
             threshold.IsActive = isActive;
             threshold.UpdatedAt = DateTime.UtcNow;
@@ -2981,8 +3119,10 @@ public class InventoryRepository : IInventoryRepository
                 ThresholdType = normType,
                 ProductId = productId,
                 VendorId = vendorId,
+                MetalTypeId = metalTypeId,
                 MinStockQty = minStockQty,
                 MaxStockQty = normType == "HIGH_STOCK" ? (maxStockQty ?? minStockQty) : maxStockQty,
+                ThresholdWeightKg = thresholdWeightKg,
                 ReorderQty = reorderQty,
                 IsActive = isActive
             };
@@ -2991,8 +3131,12 @@ public class InventoryRepository : IInventoryRepository
         await _dbContext.SaveChangesAsync();
 
         // Reload with nav properties
-        await _dbContext.Entry(threshold).Reference(t => t.Product).LoadAsync();
-        await _dbContext.Entry(threshold).Reference(t => t.Vendor).LoadAsync();
+        if (threshold.ProductId.HasValue)
+            await _dbContext.Entry(threshold).Reference(t => t.Product).LoadAsync();
+        if (threshold.VendorId.HasValue)
+            await _dbContext.Entry(threshold).Reference(t => t.Vendor).LoadAsync();
+        if (threshold.MetalTypeId.HasValue)
+            await _dbContext.Entry(threshold).Reference(t => t.MetalType).LoadAsync();
         return threshold;
     }
 
@@ -3005,10 +3149,206 @@ public class InventoryRepository : IInventoryRepository
         return true;
     }
 
+    public async Task<IEnumerable<DamagedHighStockAlert>> GetDamagedHighStockAlertsAsync(int? metalTypeId = null)
+    {
+        var metalTypesQuery = _dbContext.MetalTypes.AsQueryable();
+        if (metalTypeId.HasValue && metalTypeId.Value > 0)
+        {
+            metalTypesQuery = metalTypesQuery.Where(m => m.MetalTypeId == metalTypeId.Value);
+        }
+        var metalTypes = await metalTypesQuery.ToListAsync();
+
+        var damagedThresholds = await _dbContext.ReorderThresholds
+            .Where(t => t.IsActive && t.ThresholdType == "DAMAGED_HIGH_STOCK")
+            .Include(t => t.MetalType)
+            .ToListAsync();
+
+        var damagedItems = await _dbContext.InventoryItems
+            .Include(i => i.Product).ThenInclude(p => p!.MetalType)
+            .Include(i => i.Product).ThenInclude(p => p!.Denomination)
+            .Include(i => i.Lot).ThenInclude(l => l!.Vendor)
+            .Include(i => i.Location)
+            .Where(i => i.IsDamaged || i.StatusCode == "DAMAGED" || i.DamageApprovalStatus == "APPROVED")
+            .ToListAsync();
+
+        var result = new List<DamagedHighStockAlert>();
+
+        foreach (var metal in metalTypes)
+        {
+            var metalDamagedItems = damagedItems
+                .Where(i => (i.Product?.MetalTypeId ?? 1) == metal.MetalTypeId)
+                .ToList();
+
+            decimal totalGrams = metalDamagedItems.Sum(i => i.Product?.Denomination?.WeightGrams ?? 0m);
+            decimal totalKg = Math.Round(totalGrams / 1000m, 4);
+
+            var threshold = damagedThresholds.FirstOrDefault(t => t.MetalTypeId == metal.MetalTypeId);
+            decimal thresholdKg = threshold?.ThresholdWeightKg ?? (metal.MetalTypeId == 1 ? 5.0m : 20.0m);
+            bool isBreached = totalKg >= thresholdKg && thresholdKg > 0;
+            decimal excessKg = isBreached ? Math.Max(0m, totalKg - thresholdKg) : 0m;
+
+            var candidateBars = metalDamagedItems.Select(i => new DamagedBarExportCandidate
+            {
+                ItemId = i.ItemId,
+                SerialNumber = i.SerialNumber,
+                MetalTypeId = metal.MetalTypeId,
+                MetalName = metal.MetalName,
+                DenominationLabel = i.Product?.Denomination?.Label ?? $"{i.Product?.Denomination?.WeightGrams ?? 0}g",
+                WeightGrams = i.Product?.Denomination?.WeightGrams ?? 0m,
+                WeightKg = Math.Round((i.Product?.Denomination?.WeightGrams ?? 0m) / 1000m, 4),
+                FinenessPpt = i.FinenessPpt,
+                RefinerName = i.RefinerName ?? i.Lot?.Vendor?.VendorName ?? "N/A",
+                VendorId = i.Lot?.VendorId,
+                VendorName = i.Lot?.Vendor?.VendorName ?? "N/A",
+                OwnershipType = i.OwnershipType,
+                StatusCode = i.StatusCode,
+                DamageReason = i.DamageReason ?? "DEFECT",
+                DamageDescription = i.DamageDescription ?? "",
+                LocationDescription = i.Location?.Description ?? "Main Vault",
+                InspectionDate = i.InspectionDate,
+                DamageApprovedAt = i.DamageApprovedAt,
+                DamageApprovedBy = i.DamageApprovedBy ?? ""
+            }).OrderByDescending(c => c.WeightGrams).ToList();
+
+            result.Add(new DamagedHighStockAlert
+            {
+                MetalTypeId = metal.MetalTypeId,
+                MetalName = metal.MetalName,
+                TotalDamagedWeightGrams = totalGrams,
+                TotalDamagedWeightKg = totalKg,
+                TotalDamagedBarsCount = metalDamagedItems.Count,
+                ThresholdWeightKg = thresholdKg,
+                IsBreached = isBreached,
+                ExcessWeightKg = excessKg,
+                ThresholdId = threshold?.ThresholdId,
+                AlertStatus = isBreached ? "ALERT_BREACHED" : "NORMAL",
+                Message = isBreached
+                    ? $"High-Stock Alert: Accumulated damaged {metal.MetalName} has reached/exceeded threshold ({totalKg:F3} KG >= {thresholdKg:F3} KG). Recommended for export to gold manufacturer/refiner."
+                    : $"Accumulated damaged {metal.MetalName} is within normal holding limits ({totalKg:F3} KG < {thresholdKg:F3} KG).",
+                CandidateBars = candidateBars
+            });
+        }
+
+        return result;
+    }
+
+    public async Task<IEnumerable<DamagedBarExportCandidate>> GetDamagedExportCandidatesAsync(int? metalTypeId = null, int? vendorId = null)
+    {
+        var query = _dbContext.InventoryItems
+            .Include(i => i.Product).ThenInclude(p => p!.MetalType)
+            .Include(i => i.Product).ThenInclude(p => p!.Denomination)
+            .Include(i => i.Lot).ThenInclude(l => l!.Vendor)
+            .Include(i => i.Location)
+            .Where(i => i.IsDamaged || i.StatusCode == "DAMAGED" || i.DamageApprovalStatus == "APPROVED")
+            .AsQueryable();
+
+        if (metalTypeId.HasValue && metalTypeId.Value > 0)
+        {
+            query = query.Where(i => i.Product != null && i.Product.MetalTypeId == metalTypeId.Value);
+        }
+
+        if (vendorId.HasValue && vendorId.Value > 0)
+        {
+            query = query.Where(i => i.Lot != null && i.Lot.VendorId == vendorId.Value);
+        }
+
+        var items = await query.ToListAsync();
+
+        return items.Select(i => new DamagedBarExportCandidate
+        {
+            ItemId = i.ItemId,
+            SerialNumber = i.SerialNumber,
+            MetalTypeId = i.Product?.MetalTypeId ?? 1,
+            MetalName = i.Product?.MetalType?.MetalName ?? "Gold",
+            DenominationLabel = i.Product?.Denomination?.Label ?? $"{i.Product?.Denomination?.WeightGrams ?? 0}g",
+            WeightGrams = i.Product?.Denomination?.WeightGrams ?? 0m,
+            WeightKg = Math.Round((i.Product?.Denomination?.WeightGrams ?? 0m) / 1000m, 4),
+            FinenessPpt = i.FinenessPpt,
+            RefinerName = i.RefinerName ?? i.Lot?.Vendor?.VendorName ?? "N/A",
+            VendorId = i.Lot?.VendorId,
+            VendorName = i.Lot?.Vendor?.VendorName ?? "N/A",
+            OwnershipType = i.OwnershipType,
+            StatusCode = i.StatusCode,
+            DamageReason = i.DamageReason ?? "DEFECT",
+            DamageDescription = i.DamageDescription ?? "",
+            LocationDescription = i.Location?.Description ?? "Main Vault",
+            InspectionDate = i.InspectionDate,
+            DamageApprovedAt = i.DamageApprovedAt,
+            DamageApprovedBy = i.DamageApprovedBy ?? ""
+        }).OrderByDescending(c => c.WeightGrams);
+    }
+
+    public async Task<DamagedExportManifestResult> GenerateDamagedExportManifestAsync(int metalTypeId, int? vendorId, List<int> itemIds, string generatedBy, string? notes)
+    {
+        var items = await _dbContext.InventoryItems
+            .Include(i => i.Product).ThenInclude(p => p!.MetalType)
+            .Include(i => i.Product).ThenInclude(p => p!.Denomination)
+            .Include(i => i.Lot).ThenInclude(l => l!.Vendor)
+            .Where(i => itemIds.Contains(i.ItemId))
+            .ToListAsync();
+
+        if (!items.Any()) throw new InvalidOperationException("No valid items selected for manufacturer export manifest.");
+
+        var metal = await _dbContext.MetalTypes.FindAsync(metalTypeId)
+            ?? items.FirstOrDefault()?.Product?.MetalType
+            ?? new MetalType { MetalTypeId = metalTypeId, MetalName = "Gold" };
+
+        Vendor? vendor = null;
+        if (vendorId.HasValue && vendorId.Value > 0)
+        {
+            vendor = await _dbContext.Vendors.FindAsync(vendorId.Value);
+        }
+        vendor ??= items.FirstOrDefault(i => i.Lot?.Vendor != null)?.Lot?.Vendor;
+
+        string manifestNumber = $"MANIF-EXP-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString().Substring(0, 6).ToUpper()}";
+        decimal totalWeightGrams = items.Sum(i => i.Product?.Denomination?.WeightGrams ?? 0m);
+        decimal totalWeightKg = Math.Round(totalWeightGrams / 1000m, 4);
+
+        foreach (var item in items)
+        {
+            await RecordChainOfCustodyEventAsync(
+                item.ItemId,
+                "EXPORT_MANIFEST_GENERATED",
+                generatedBy,
+                item.LocationId,
+                manifestNumber,
+                $"Included in Manufacturer Export Manifest '{manifestNumber}' to {vendor?.VendorName ?? "Manufacturer/Refiner"} for damaged bar recovery/refining."
+            );
+        }
+
+        await SaveAuditLogAsync(generatedBy, "SYSTEM", "DAMAGED_EXPORT_MANIFEST", $"Generated export manifest {manifestNumber} for {items.Count} damaged bars ({totalWeightKg} KG) to {vendor?.VendorName ?? "Manufacturer"}.", entityType: "ExportManifest", entityId: manifestNumber);
+
+        return new DamagedExportManifestResult
+        {
+            manifest_number = manifestNumber,
+            metal_type_id = metal.MetalTypeId,
+            metal_name = metal.MetalName,
+            vendor_id = vendor?.VendorId,
+            vendor_name = vendor?.VendorName ?? "Gold Manufacturer / Refiner",
+            total_items_count = items.Count,
+            total_weight_grams = totalWeightGrams,
+            total_weight_kg = totalWeightKg,
+            generated_by = generatedBy,
+            generated_at = DateTime.UtcNow,
+            notes = notes ?? "Damaged gold bars batch consolidated for manufacturer export & refining.",
+            items = items.Select(i => new DamagedExportManifestItem
+            {
+                item_id = i.ItemId,
+                serial_number = i.SerialNumber,
+                denomination = i.Product?.Denomination?.Label ?? "",
+                weight_grams = i.Product?.Denomination?.WeightGrams ?? 0,
+                weight_kg = Math.Round((i.Product?.Denomination?.WeightGrams ?? 0) / 1000m, 4),
+                fineness = i.FinenessPpt,
+                damage_reason = i.DamageReason ?? "",
+                refiner = i.RefinerName ?? vendor?.VendorName ?? ""
+            }).ToList()
+        };
+    }
+
     public async Task<IEnumerable<StockAlertItem>> CheckStockAlertsAsync()
     {
         var thresholds = await _dbContext.ReorderThresholds
-            .Where(t => t.IsActive)
+            .Where(t => t.IsActive && t.ThresholdType != "DAMAGED_HIGH_STOCK")
             .Include(t => t.Product).ThenInclude(p => p!.MetalType)
             .Include(t => t.Product).ThenInclude(p => p!.Denomination)
             .Include(t => t.Vendor)
@@ -3020,9 +3360,11 @@ public class InventoryRepository : IInventoryRepository
 
         foreach (var t in thresholds)
         {
+            if (!t.ProductId.HasValue) continue;
+
             // Sum all READY stock for this product across all locations
             var currentStock = await _dbContext.InventoryItems
-                .Where(i => i.ProductId == t.ProductId && i.StatusCode == "READY" && i.OwnershipType == "KFH_OWNED")
+                .Where(i => i.ProductId == t.ProductId.Value && i.StatusCode == "READY" && i.OwnershipType == "KFH_OWNED")
                 .CountAsync();
 
             if (t.ThresholdType == "HIGH_STOCK")
@@ -3035,7 +3377,7 @@ public class InventoryRepository : IInventoryRepository
                         threshold_id = t.ThresholdId,
                         threshold_type = "HIGH_STOCK",
                         alert_type = "HIGH_STOCK",
-                        product_id = t.ProductId,
+                        product_id = t.ProductId.Value,
                         product_code = t.Product?.ProductCode ?? "",
                         product_name = $"{t.Product?.MetalType?.MetalName ?? ""} {t.Product?.Denomination?.Label ?? ""}",
                         vendor_name = t.Vendor?.VendorName ?? "",
@@ -3060,7 +3402,7 @@ public class InventoryRepository : IInventoryRepository
                         threshold_id = t.ThresholdId,
                         threshold_type = "LOW_STOCK",
                         alert_type = "LOW_STOCK",
-                        product_id = t.ProductId,
+                        product_id = t.ProductId.Value,
                         product_code = t.Product?.ProductCode ?? "",
                         product_name = $"{t.Product?.MetalType?.MetalName ?? ""} {t.Product?.Denomination?.Label ?? ""}",
                         vendor_name = t.Vendor?.VendorName ?? "",
@@ -3098,8 +3440,9 @@ public class InventoryRepository : IInventoryRepository
         var poNumber = $"PO-AUTO-{DateTime.UtcNow:yyyyMMdd}-{thresholdId:D3}";
 
         // Check if a DRAFT PO already exists for this threshold to avoid duplicates
+        var vendorId = threshold.VendorId ?? 1;
         var existingDraft = await _dbContext.PurchaseOrders
-            .FirstOrDefaultAsync(po => po.PoNumber.StartsWith($"PO-AUTO-") && po.VendorId == threshold.VendorId && po.StatusCode == "DRAFT");
+            .FirstOrDefaultAsync(po => po.PoNumber.StartsWith($"PO-AUTO-") && po.VendorId == vendorId && po.StatusCode == "DRAFT");
         if (existingDraft != null)
             return (existingDraft.PoId, "DRAFT_EXISTS");
 
@@ -3109,7 +3452,7 @@ public class InventoryRepository : IInventoryRepository
         var po = new PurchaseOrder
         {
             PoNumber = poNumber,
-            VendorId = threshold.VendorId,
+            VendorId = vendorId,
             TotalWeightGrams = totalWeight,
             TotalCost = 0m, // To be filled by treasury
             Currency = "USD",
@@ -3285,11 +3628,143 @@ public class InventoryRepository : IInventoryRepository
         return "SUCCESS";
     }
 
+    public async Task<IntakeSerialValidationResult> ValidateIntakeSerialsAsync(List<string> serialNumbers, string sourceType = "SUPPLIER", int? productId = null)
+    {
+        var result = new IntakeSerialValidationResult();
+        if (serialNumbers == null || serialNumbers.Count == 0)
+        {
+            return result;
+        }
+
+        sourceType = string.IsNullOrWhiteSpace(sourceType) ? "SUPPLIER" : sourceType.Trim().ToUpperInvariant();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // 1. Check duplicate within current input batch
+        foreach (var s in serialNumbers)
+        {
+            if (string.IsNullOrWhiteSpace(s)) continue;
+            var trimmed = s.Trim();
+            if (!seen.Add(trimmed))
+            {
+                result.IsValid = false;
+                if (!result.DuplicateSerials.Contains(trimmed, StringComparer.OrdinalIgnoreCase))
+                {
+                    result.DuplicateSerials.Add(trimmed);
+                    result.Errors.Add($"Duplicate serial number '{trimmed}' within intake batch.");
+                }
+            }
+        }
+
+        var distinctSerials = seen.ToList();
+
+        if (sourceType == "SUPPLIER")
+        {
+            // 2. Check duplicate against existing inventory (excluding EXPORTED bars -- Requirement 8 serial reuse)
+            var activeExisting = await _dbContext.InventoryItems
+                .Where(i => distinctSerials.Contains(i.SerialNumber) && i.StatusCode != "EXPORTED")
+                .Select(i => i.SerialNumber)
+                .ToListAsync();
+
+            if (activeExisting.Count > 0)
+            {
+                result.IsValid = false;
+                foreach (var ex in activeExisting)
+                {
+                    if (!result.ExistingInventorySerials.Contains(ex, StringComparer.OrdinalIgnoreCase))
+                    {
+                        result.ExistingInventorySerials.Add(ex);
+                        result.Errors.Add($"Serial number '{ex}' already exists in inventory records. An existing serial number may only be reused in a future received shipment if the previous damaged bar carrying that serial number has reached EXPORTED status.");
+                    }
+                }
+            }
+
+            // 3. Check duplicate against in-flight pending intakes
+            var inFlightPending = await _dbContext.PendingIntakes
+                .Where(pi => pi.StatusCode == "PENDING_APPROVAL")
+                .Select(pi => pi.SerialsJsonList)
+                .ToListAsync();
+
+            foreach (var inFlightJson in inFlightPending)
+            {
+                if (string.IsNullOrWhiteSpace(inFlightJson)) continue;
+                try
+                {
+                    using var pDoc = JsonDocument.Parse(inFlightJson);
+                    if (pDoc.RootElement.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var el in pDoc.RootElement.EnumerateArray())
+                        {
+                            string? ps = el.TryGetProperty("serial", out var s) ? s.GetString() : (el.TryGetProperty("serial_number", out var sn) ? sn.GetString() : null);
+                            if (!string.IsNullOrWhiteSpace(ps))
+                            {
+                                var trimmedPs = ps.Trim();
+                                if (seen.Contains(trimmedPs) && !result.InFlightPendingSerials.Contains(trimmedPs, StringComparer.OrdinalIgnoreCase))
+                                {
+                                    result.IsValid = false;
+                                    result.InFlightPendingSerials.Add(trimmedPs);
+                                    result.Errors.Add($"Serial number '{trimmedPs}' is already pending approval in another intake request.");
+                                }
+                            }
+                        }
+                    }
+                }
+                catch (JsonException) { }
+            }
+        }
+        else // CUSTOMER
+        {
+            // Customer receipt: bar MUST exist in stock history and NOT currently be active in vault as KFH/Turkey owned
+            foreach (var s in distinctSerials)
+            {
+                var existingItem = productId.HasValue && productId.Value > 0
+                    ? await _dbContext.InventoryItems.FirstOrDefaultAsync(i => i.ProductId == productId.Value && i.SerialNumber.ToUpper() == s.ToUpper())
+                    : await _dbContext.InventoryItems.FirstOrDefaultAsync(i => i.SerialNumber.ToUpper() == s.ToUpper());
+
+                if (existingItem == null)
+                {
+                    result.IsValid = false;
+                    result.Errors.Add($"Cannot receive bar '{s}' from customer: This product and serial number was never recorded in KFH stock history. Only precious metals previously existing in stock records can be received from customers.");
+                }
+                else
+                {
+                    bool isKfhOrTurkeyOwned = existingItem.OwnershipType.Equals("KFH_OWNED", StringComparison.OrdinalIgnoreCase) || 
+                                              existingItem.OwnershipType.Equals("TURKEY_OWNED", StringComparison.OrdinalIgnoreCase);
+                    if (isKfhOrTurkeyOwned && (existingItem.StatusCode == "READY" || existingItem.StatusCode == "RESERVED" || existingItem.StatusCode == "IN_TRANSFER"))
+                    {
+                        result.IsValid = false;
+                        result.Errors.Add($"Cannot receive bar '{s}' from customer: This bar is currently active in vault inventory as '{existingItem.OwnershipType}' (Status: {existingItem.StatusCode}). Customer receipt is not permitted while actively owned by KFH or Turkey supplier.");
+                    }
+                }
+            }
+        }
+
+        return result;
+    }
+
+    public async Task<IEnumerable<ShipmentProductionCost>> GetShipmentProductionCostsAsync(int? pendingIntakeId = null, int? lotId = null)
+    {
+        var query = _dbContext.ShipmentProductionCosts
+            .Include(c => c.MetalType)
+            .Include(c => c.Denomination)
+            .AsQueryable();
+
+        if (pendingIntakeId.HasValue)
+        {
+            query = query.Where(c => c.PendingIntakeId == pendingIntakeId.Value);
+        }
+        else if (lotId.HasValue)
+        {
+            query = query.Where(c => c.LotId == lotId.Value);
+        }
+
+        return await query.ToListAsync();
+    }
+
     public async Task<PendingIntake> InitiateWorkflowIntakeAsync(int? poId, string lotNumber, int locationId, string receivedBy, string serialsJsonList,
         string sourceType = "SUPPLIER", int? customerId = null, int? accountId = null, string? receiptReason = null,
         int? vendorId = null, string? shipmentReference = null, string? deliveryNoteNumber = null, string? airwayBillNumber = null,
         string? supportingDocumentUrl = null, string? discrepancyNotes = null, DateTime? receivingDate = null, string ownershipType = "KFH_OWNED",
-        string? customsDeclarationNumber = null, decimal? customsDutyAmount = null, string? portOfEntry = null)
+        string? customsDeclarationNumber = null, decimal? customsDutyAmount = null, string? portOfEntry = null, string? productionCostsJson = null)
     {
         sourceType = string.IsNullOrWhiteSpace(sourceType) ? "SUPPLIER" : sourceType.Trim().ToUpperInvariant();
         if (sourceType != "SUPPLIER" && sourceType != "CUSTOMER")
@@ -3297,61 +3772,43 @@ public class InventoryRepository : IInventoryRepository
             throw new ArgumentException("sourceType must be SUPPLIER or CUSTOMER.");
         }
 
-        if (sourceType == "SUPPLIER")
+        // ============================================================
+        // Maker-phase serial number validation: enforced synchronously here
+        // ============================================================
+        var inputSerials = new List<string>();
+        var requiredCombinations = new HashSet<(int MetalTypeId, int DenominationId)>();
+
+        if (!string.IsNullOrWhiteSpace(serialsJsonList))
         {
-            // Duplicate serial number validation: globally unique across all products & denominations
-            if (!string.IsNullOrWhiteSpace(serialsJsonList))
+            using var jsonDoc = JsonDocument.Parse(serialsJsonList);
+            foreach (var element in jsonDoc.RootElement.EnumerateArray())
             {
-                using var jsonDoc = JsonDocument.Parse(serialsJsonList);
-                var serialsSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                foreach (var element in jsonDoc.RootElement.EnumerateArray())
+                string? serial = element.TryGetProperty("serial", out var s) ? s.GetString() : (element.TryGetProperty("serial_number", out var sn) ? sn.GetString() : null);
+                if (!string.IsNullOrWhiteSpace(serial))
                 {
-                    string? serial = element.TryGetProperty("serial", out var s) ? s.GetString() : (element.TryGetProperty("serial_number", out var sn) ? sn.GetString() : null);
-
-                    if (!string.IsNullOrWhiteSpace(serial))
-                    {
-                        string trimmed = serial.Trim();
-                        if (!serialsSet.Add(trimmed))
-                        {
-                            throw new InvalidOperationException($"Duplicate Serial Number in shipment batch: '{trimmed}'. Every gold bar serial number must be globally unique across all products and denominations.");
-                        }
-
-                        string trimmedUpper = trimmed.ToUpper();
-                        if (await _dbContext.InventoryItems.AnyAsync(i => i.SerialNumber.ToUpper() == trimmedUpper))
-                        {
-                            throw new InvalidOperationException($"Duplicate Serial Number: '{trimmed}' already exists in inventory records. Every gold bar serial number must be globally unique across all products and denominations.");
-                        }
-                    }
+                    inputSerials.Add(serial.Trim());
                 }
 
-                // Also verify against other in-flight pending intakes
-                var inFlightPending = await _dbContext.PendingIntakes
-                    .Where(pi => pi.StatusCode == "PENDING_APPROVAL")
-                    .Select(pi => pi.SerialsJsonList)
-                    .ToListAsync();
-
-                foreach (var inFlightJson in inFlightPending)
+                int productId = element.TryGetProperty("product_id", out var p) ? p.GetInt32() : (element.TryGetProperty("productId", out var p2) ? p2.GetInt32() : 0);
+                if (productId > 0)
                 {
-                    if (string.IsNullOrWhiteSpace(inFlightJson)) continue;
-                    try
+                    var prod = await _dbContext.MetalProducts.FindAsync(productId);
+                    if (prod != null)
                     {
-                        using var pDoc = JsonDocument.Parse(inFlightJson);
-                        if (pDoc.RootElement.ValueKind == JsonValueKind.Array)
-                        {
-                            foreach (var el in pDoc.RootElement.EnumerateArray())
-                            {
-                                string? ps = el.TryGetProperty("serial", out var s) ? s.GetString() : (el.TryGetProperty("serial_number", out var sn) ? sn.GetString() : null);
-                                if (!string.IsNullOrWhiteSpace(ps) && serialsSet.Contains(ps.Trim()))
-                                {
-                                    throw new InvalidOperationException($"Duplicate Serial Number: '{ps.Trim()}' is already pending approval in another intake request.");
-                                }
-                            }
-                        }
+                        requiredCombinations.Add((prod.MetalTypeId, prod.DenominationId));
                     }
-                    catch (JsonException) { }
                 }
             }
+        }
 
+        var validationResult = await ValidateIntakeSerialsAsync(inputSerials, sourceType);
+        if (!validationResult.IsValid)
+        {
+            throw new InvalidOperationException($"Maker validation failed: {string.Join(" | ", validationResult.Errors)}");
+        }
+
+        if (sourceType == "SUPPLIER")
+        {
             if (poId != null)
             {
                 var po = await _dbContext.PurchaseOrders.FindAsync(poId.Value);
@@ -3362,6 +3819,32 @@ public class InventoryRepository : IInventoryRepository
                 if (po.StatusCode != "APPROVED")
                 {
                     throw new InvalidOperationException("Associated Purchase Order is not approved yet.");
+                }
+            }
+
+            // ============================================================
+            // Mandatory Production Cost in KWD validation per (MetalType, Denomination, Shipment)
+            // ============================================================
+            if (requiredCombinations.Count > 0 && !string.IsNullOrWhiteSpace(productionCostsJson))
+            {
+                var parsedCosts = new List<ShipmentProductionCostInput>();
+                try
+                {
+                    parsedCosts = JsonSerializer.Deserialize<List<ShipmentProductionCostInput>>(productionCostsJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new();
+                }
+                catch { }
+
+                var costMap = parsedCosts.ToDictionary(c => (c.MetalTypeId, c.DenominationId), c => c.ProductionCostKwd);
+
+                foreach (var combo in requiredCombinations)
+                {
+                    if (!costMap.TryGetValue(combo, out var costKwd) || costKwd <= 0)
+                    {
+                        var mType = await _dbContext.MetalTypes.FindAsync(combo.MetalTypeId);
+                        var denom = await _dbContext.MetalDenominations.FindAsync(combo.DenominationId);
+                        string label = $"{(mType?.MetalName ?? "Metal")} - {(denom?.WeightGrams >= 1000 ? $"{denom.WeightGrams / 1000m} KG" : $"{denom?.WeightGrams}g")}";
+                        throw new InvalidOperationException($"Mandatory Production Cost in KWD is required for: {label}. Every combination of (Metal Type, Denomination, Shipment) must capture a positive production cost in KWD.");
+                    }
                 }
             }
         }
@@ -3389,49 +3872,6 @@ public class InventoryRepository : IInventoryRepository
             if (receiptReason == "CUSTODY_DEPOSIT" && accountId == null)
             {
                 throw new InvalidOperationException("A customer account is required to hold a custody deposit.");
-            }
-
-            // Customer Receipt Validation:
-            // 1. We can only accept Product Type and Serial Number that previously existed in out stock records.
-            // 2. Bar status must NOT currently be active KFH_OWNED or TURKEY_OWNED in vault.
-            if (!string.IsNullOrWhiteSpace(serialsJsonList))
-            {
-                using var jsonDoc = JsonDocument.Parse(serialsJsonList);
-                var serialsSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                foreach (var element in jsonDoc.RootElement.EnumerateArray())
-                {
-                    string? serial = element.TryGetProperty("serial", out var s) ? s.GetString() : (element.TryGetProperty("serial_number", out var sn) ? sn.GetString() : null);
-                    int productId = element.TryGetProperty("product_id", out var p) ? p.GetInt32() : (element.TryGetProperty("productId", out var p2) ? p2.GetInt32() : 0);
-
-                    if (string.IsNullOrWhiteSpace(serial))
-                    {
-                        throw new InvalidOperationException("Serial number is required for customer receipt.");
-                    }
-
-                    serial = serial.Trim();
-
-                    if (!serialsSet.Add(serial))
-                    {
-                        throw new InvalidOperationException($"Duplicate Serial Number in customer receipt batch: '{serial}'.");
-                    }
-
-                    var existingItem = productId > 0
-                        ? await _dbContext.InventoryItems.FirstOrDefaultAsync(i => i.ProductId == productId && i.SerialNumber.ToUpper() == serial.ToUpper())
-                        : await _dbContext.InventoryItems.FirstOrDefaultAsync(i => i.SerialNumber.ToUpper() == serial.ToUpper());
-
-                    if (existingItem == null)
-                    {
-                        throw new InvalidOperationException($"Cannot receive bar '{serial}' from customer: This product and serial number was never recorded in KFH stock history. Only precious metals previously existing in stock records can be received from customers.");
-                    }
-
-                    // Validate that it's NOT currently active KFH_OWNED or TURKEY_OWNED in vault
-                    bool isKfhOrTurkeyOwned = existingItem.OwnershipType.Equals("KFH_OWNED", StringComparison.OrdinalIgnoreCase) || 
-                                              existingItem.OwnershipType.Equals("TURKEY_OWNED", StringComparison.OrdinalIgnoreCase);
-                    if (isKfhOrTurkeyOwned && (existingItem.StatusCode == "READY" || existingItem.StatusCode == "RESERVED" || existingItem.StatusCode == "IN_TRANSFER"))
-                    {
-                        throw new InvalidOperationException($"Cannot receive bar '{serial}' from customer: This bar is currently active in vault inventory as '{existingItem.OwnershipType}' (Status: {existingItem.StatusCode}). Customer receipt is not permitted while actively owned by KFH or Turkey supplier.");
-                    }
-                }
             }
         }
 
@@ -3464,11 +3904,38 @@ public class InventoryRepository : IInventoryRepository
             CustomsDeclarationNumber = customsDeclarationNumber,
             CustomsDutyAmount = customsDutyAmount,
             PortOfEntry = portOfEntry,
+            ProductionCostsJson = productionCostsJson,
             StatusCode = "PENDING_APPROVAL",
             CreatedAt = DateTime.UtcNow
         };
         _dbContext.PendingIntakes.Add(pending);
         await _dbContext.SaveChangesAsync();
+
+        // Persist ShipmentProductionCost records linked to this pending intake
+        if (!string.IsNullOrWhiteSpace(productionCostsJson))
+        {
+            try
+            {
+                var parsedCosts = JsonSerializer.Deserialize<List<ShipmentProductionCostInput>>(productionCostsJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                if (parsedCosts != null)
+                {
+                    foreach (var pc in parsedCosts.Where(c => c.ProductionCostKwd > 0))
+                    {
+                        _dbContext.ShipmentProductionCosts.Add(new ShipmentProductionCost
+                        {
+                            PendingIntakeId = pending.PendingIntakeId,
+                            ShipmentReference = shipmentReference ?? lotNumber,
+                            MetalTypeId = pc.MetalTypeId,
+                            DenominationId = pc.DenominationId,
+                            ProductionCostKwd = pc.ProductionCostKwd,
+                            CreatedAt = DateTime.UtcNow
+                        });
+                    }
+                    await _dbContext.SaveChangesAsync();
+                }
+            }
+            catch { }
+        }
 
         // Spawn a workflow instance of type "INTAKE_SHIPMENT" -- the same Maker-Checker
         // approval workflow handles both supplier and customer sourced receipts.
@@ -6632,5 +7099,621 @@ public class InventoryRepository : IInventoryRepository
 
         return true;
     }
+
+    // =========================================================================
+    // QR Printing and Reprinting Implementation
+    // =========================================================================
+
+    public async Task<IEnumerable<InventoryItem>> GetUnprintedMainVaultBarsAsync()
+    {
+        var mainVaultItems = await _dbContext.InventoryItems
+            .Include(i => i.Product).ThenInclude(p => p!.MetalType)
+            .Include(i => i.Product).ThenInclude(p => p!.Denomination)
+            .Include(i => i.Location).ThenInclude(l => l!.Vault)
+            .Include(i => i.Lot)
+            .Where(i => i.Location != null && (i.Location.VaultId == 1 || (i.Location.Vault != null && i.Location.Vault.VaultName == "Main Vault")))
+            .Where(i => i.StatusCode != "INACTIVE" && i.StatusCode != "WITHDRAWN")
+            .ToListAsync();
+
+        var itemIds = mainVaultItems.Select(i => i.ItemId).ToList();
+        var printedIds = await GetPrintedLabelItemIdsAsync(itemIds);
+
+        return mainVaultItems.Where(i => !printedIds.Contains(i.ItemId)).OrderByDescending(i => i.ItemId).ToList();
+    }
+
+    public async Task<QrPrintLog> RecordQrPrintAsync(int itemId, string printType, string printedBy, string? reason = null, int? requestId = null, string? labelPayload = null)
+    {
+        var item = await _dbContext.InventoryItems.FindAsync(itemId);
+        if (item == null) throw new InvalidOperationException("Item not found.");
+
+        var log = new QrPrintLog
+        {
+            ItemId = itemId,
+            SerialNumber = item.SerialNumber,
+            PrintType = printType,
+            PrintReason = reason,
+            ReprintRequestId = requestId,
+            PrintedBy = printedBy,
+            PrintedAt = DateTime.UtcNow,
+            LabelPayload = labelPayload
+        };
+        _dbContext.QrPrintLogs.Add(log);
+
+        string eventType = printType.StartsWith("REPRINT") ? "LABEL_REPRINTED" : "LABEL_PRINTED";
+        string notes = string.IsNullOrWhiteSpace(reason) 
+            ? $"QR code printed ({printType})" 
+            : $"QR code reprinted ({printType}) - Reason: {reason}";
+
+        await RecordChainOfCustodyEventAsync(itemId, eventType, printedBy, item.LocationId, referenceNumber: requestId?.ToString(), notes: notes);
+        await SaveAuditLogAsync(printedBy, "SYSTEM", "QR_PRINT", $"{printType} for bar '{item.SerialNumber}'", entityType: "InventoryItem", entityId: item.SerialNumber);
+
+        await _dbContext.SaveChangesAsync();
+        return log;
+    }
+
+    public async Task<IEnumerable<QrPrintLog>> RecordBatchQrPrintAsync(List<int> itemIds, string printType, string printedBy, string? reason = null, int? requestId = null)
+    {
+        var items = await _dbContext.InventoryItems.Where(i => itemIds.Contains(i.ItemId)).ToListAsync();
+        var logs = new List<QrPrintLog>();
+
+        foreach (var item in items)
+        {
+            var log = new QrPrintLog
+            {
+                ItemId = item.ItemId,
+                SerialNumber = item.SerialNumber,
+                PrintType = printType,
+                PrintReason = reason,
+                ReprintRequestId = requestId,
+                PrintedBy = printedBy,
+                PrintedAt = DateTime.UtcNow
+            };
+            _dbContext.QrPrintLogs.Add(log);
+            logs.Add(log);
+
+            string eventType = printType.StartsWith("REPRINT") ? "LABEL_REPRINTED" : "LABEL_PRINTED";
+            string notes = string.IsNullOrWhiteSpace(reason)
+                ? $"Batch QR code printed ({printType})"
+                : $"Batch QR code reprinted ({printType}) - Reason: {reason}";
+
+            _dbContext.ChainOfCustodyEvents.Add(new ChainOfCustodyEvent
+            {
+                ItemId = item.ItemId,
+                EventType = eventType,
+                RecordedBy = printedBy,
+                LocationId = item.LocationId,
+                ReferenceNumber = requestId?.ToString(),
+                Notes = notes,
+                RecordedAt = DateTime.UtcNow
+            });
+        }
+
+        await SaveAuditLogAsync(printedBy, "SYSTEM", "QR_PRINT_BATCH", $"Batch QR {printType} executed for {items.Count} bars", entityType: "InventoryBatch", entityId: requestId?.ToString() ?? "0");
+        await _dbContext.SaveChangesAsync();
+        return logs;
+    }
+
+    public async Task<PendingQrReprint> InitiateQrReprintAsync(string requestType, List<int> itemIds, string reason, string? attachmentUrl, string user)
+    {
+        if (itemIds == null || itemIds.Count == 0)
+        {
+            throw new ArgumentException("At least one bar must be selected for QR reprint.");
+        }
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            throw new ArgumentException("Explanatory reason is mandatory for QR reprint requests.");
+        }
+
+        var json = System.Text.Json.JsonSerializer.Serialize(itemIds);
+        var pending = new PendingQrReprint
+        {
+            RequestType = requestType.ToUpperInvariant() == "BATCH" ? "BATCH" : "SINGLE",
+            ItemIdsJson = json,
+            ItemCount = itemIds.Count,
+            Reason = reason.Trim(),
+            AttachmentUrl = attachmentUrl,
+            Status = "PENDING_APPROVAL",
+            InitiatedBy = user,
+            InitiatedAt = DateTime.UtcNow
+        };
+
+        _dbContext.PendingQrReprints.Add(pending);
+        await _dbContext.SaveChangesAsync();
+
+        await SaveAuditLogAsync(user, "SYSTEM", "QR_REPRINT_REQUEST", $"Initiated QR reprint request #{pending.ReprintRequestId} for {itemIds.Count} bars (Reason: {reason})", entityType: "PendingQrReprint", entityId: pending.ReprintRequestId.ToString());
+        return pending;
+    }
+
+    public async Task<string> ApproveQrReprintAsync(int requestId, string user)
+    {
+        var pending = await _dbContext.PendingQrReprints.FindAsync(requestId);
+        if (pending == null) throw new InvalidOperationException("Reprint request not found.");
+        if (pending.Status != "PENDING_APPROVAL") throw new InvalidOperationException($"Request is already {pending.Status}.");
+
+        if (pending.InitiatedBy.Equals(user, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Maker-Checker violation: Initiator cannot approve their own QR reprint request.");
+        }
+
+        pending.Status = "APPROVED";
+        pending.ApprovedBy = user;
+        pending.ApprovedAt = DateTime.UtcNow;
+
+        var itemIds = System.Text.Json.JsonSerializer.Deserialize<List<int>>(pending.ItemIdsJson) ?? new List<int>();
+        string printType = pending.RequestType == "BATCH" ? "REPRINT_BATCH" : "REPRINT_SINGLE";
+
+        await RecordBatchQrPrintAsync(itemIds, printType, user, pending.Reason, pending.ReprintRequestId);
+        await SaveAuditLogAsync(user, "SYSTEM", "QR_REPRINT_APPROVAL", $"Approved QR reprint request #{pending.ReprintRequestId} for {itemIds.Count} bars", entityType: "PendingQrReprint", entityId: pending.ReprintRequestId.ToString());
+
+        await _dbContext.SaveChangesAsync();
+        return "SUCCESS";
+    }
+
+    public async Task<string> RejectQrReprintAsync(int requestId, string reason, string user)
+    {
+        var pending = await _dbContext.PendingQrReprints.FindAsync(requestId);
+        if (pending == null) throw new InvalidOperationException("Reprint request not found.");
+        if (pending.Status != "PENDING_APPROVAL") throw new InvalidOperationException($"Request is already {pending.Status}.");
+
+        pending.Status = "REJECTED";
+        pending.ApprovedBy = user;
+        pending.ApprovedAt = DateTime.UtcNow;
+        pending.RejectionReason = reason;
+
+        await SaveAuditLogAsync(user, "SYSTEM", "QR_REPRINT_REJECT", $"Rejected QR reprint request #{pending.ReprintRequestId} (Reason: {reason})", entityType: "PendingQrReprint", entityId: pending.ReprintRequestId.ToString());
+        await _dbContext.SaveChangesAsync();
+        return "REJECTED";
+    }
+
+    public async Task<IEnumerable<PendingQrReprint>> GetPendingQrReprintsAsync()
+    {
+        return await _dbContext.PendingQrReprints
+            .OrderByDescending(r => r.InitiatedAt)
+            .ToListAsync();
+    }
+
+    public async Task<IEnumerable<QrPrintLog>> GetQrPrintLogsAsync(int? itemId = null)
+    {
+        var query = _dbContext.QrPrintLogs
+            .Include(l => l.Item).ThenInclude(i => i!.Product)
+            .Include(l => l.ReprintRequest)
+            .AsQueryable();
+
+        if (itemId.HasValue)
+        {
+            query = query.Where(l => l.ItemId == itemId.Value);
+        }
+
+        return await query.OrderByDescending(l => l.PrintedAt).Take(200).ToListAsync();
+    }
+
+    // =========================================================================
+    // Damaged-Bar Replacement with Turkey Consignment Implementation
+    // =========================================================================
+
+    public async Task<IEnumerable<InventoryItem>> GetEligibleTurkeyReplacementsAsync(int damagedItemId)
+    {
+        var damagedItem = await _dbContext.InventoryItems
+            .Include(i => i.Product).ThenInclude(p => p!.MetalType)
+            .Include(i => i.Product).ThenInclude(p => p!.Denomination)
+            .FirstOrDefaultAsync(i => i.ItemId == damagedItemId);
+
+        if (damagedItem == null) throw new InvalidOperationException("Damaged item not found.");
+
+        var pendingReplacementItemIds = await _dbContext.DamagedBarReplacements
+            .Where(r => r.Status == "PENDING_APPROVAL")
+            .Select(r => r.ReplacementItemId)
+            .ToListAsync();
+
+        int metalTypeId = damagedItem.Product?.MetalTypeId ?? 0;
+        int denominationId = damagedItem.Product?.DenominationId ?? 0;
+        decimal weightGrams = damagedItem.Product?.Denomination?.WeightGrams ?? 0;
+
+        return await _dbContext.InventoryItems
+            .Include(i => i.Product).ThenInclude(p => p!.MetalType)
+            .Include(i => i.Product).ThenInclude(p => p!.Denomination)
+            .Include(i => i.Location).ThenInclude(l => l!.Vault)
+            .Where(i => i.OwnershipType == "TURKEY_OWNED" && (i.StatusCode == "READY" || i.StatusCode == "IN_VAULT"))
+            .Where(i => !i.IsDamaged)
+            .Where(i => !pendingReplacementItemIds.Contains(i.ItemId))
+            .Where(i => i.Product != null && i.Product.MetalTypeId == metalTypeId && 
+                       (i.Product.DenominationId == denominationId || (i.Product.Denomination != null && i.Product.Denomination.WeightGrams == weightGrams)))
+            .OrderBy(i => i.SerialNumber)
+            .ToListAsync();
+    }
+
+    public async Task<DamagedBarReplacement> InitiateDamagedBarReplacementAsync(int damagedItemId, int replacementItemId, string reason, string? attachmentUrl, string user)
+    {
+        var damagedItem = await _dbContext.InventoryItems
+            .Include(i => i.Product).ThenInclude(p => p!.MetalType)
+            .Include(i => i.Product).ThenInclude(p => p!.Denomination)
+            .FirstOrDefaultAsync(i => i.ItemId == damagedItemId);
+
+        if (damagedItem == null) throw new InvalidOperationException("Damaged bar not found.");
+
+        if (damagedItem.OwnershipType != "CUSTOMER_OWNED" && damagedItem.OwnershipType != "KFH_OWNED")
+        {
+            throw new InvalidOperationException($"Damaged bar ownership must be CUSTOMER_OWNED or KFH_OWNED. Current: {damagedItem.OwnershipType}");
+        }
+
+        var replacementItem = await _dbContext.InventoryItems
+            .Include(i => i.Product).ThenInclude(p => p!.MetalType)
+            .Include(i => i.Product).ThenInclude(p => p!.Denomination)
+            .FirstOrDefaultAsync(i => i.ItemId == replacementItemId);
+
+        if (replacementItem == null) throw new InvalidOperationException("Replacement bar not found.");
+
+        if (replacementItem.OwnershipType != "TURKEY_OWNED")
+        {
+            throw new InvalidOperationException($"Replacement bar must be owned by KFH-Turkey (TURKEY_OWNED). Current: {replacementItem.OwnershipType}");
+        }
+
+        if (replacementItem.IsDamaged || (replacementItem.StatusCode != "READY" && replacementItem.StatusCode != "IN_VAULT"))
+        {
+            throw new InvalidOperationException($"Replacement bar '{replacementItem.SerialNumber}' is not available (Status: {replacementItem.StatusCode}).");
+        }
+
+        // Validate metal type & weight equivalence
+        if (damagedItem.Product?.MetalTypeId != replacementItem.Product?.MetalTypeId)
+        {
+            throw new InvalidOperationException($"Metal type mismatch: Damaged bar is {damagedItem.Product?.MetalType?.MetalName}, Replacement is {replacementItem.Product?.MetalType?.MetalName}.");
+        }
+
+        decimal damagedWeight = damagedItem.Product?.Denomination?.WeightGrams ?? 0;
+        decimal repWeight = replacementItem.Product?.Denomination?.WeightGrams ?? 0;
+        if (damagedWeight != repWeight)
+        {
+            throw new InvalidOperationException($"Weight mismatch: Damaged bar is {damagedWeight}g, Replacement is {repWeight}g.");
+        }
+
+        // Check customer holding if customer owned
+        CustomerHolding? customerHolding = null;
+        if (damagedItem.OwnershipType == "CUSTOMER_OWNED")
+        {
+            customerHolding = await _dbContext.CustomerHoldings
+                .FirstOrDefaultAsync(h => h.ItemId == damagedItemId && h.StatusCode == "HELD_IN_CUSTODY");
+        }
+
+        // Lock replacement bar
+        replacementItem.StatusCode = "RESERVED_FOR_REPLACEMENT";
+
+        string refCode = $"DBR-{DateTime.UtcNow:yyyyMMdd}-{new Random().Next(1000, 9999)}";
+        var replacement = new DamagedBarReplacement
+        {
+            ReplacementReference = refCode,
+            DamagedItemId = damagedItemId,
+            DamagedSerialNumber = damagedItem.SerialNumber,
+            DamagedOriginalOwner = damagedItem.OwnershipType,
+            CustomerId = customerHolding?.CustomerId,
+            AccountId = customerHolding?.AccountId,
+            CustomerHoldingId = customerHolding?.HoldingId,
+            ReplacementItemId = replacementItemId,
+            ReplacementSerialNumber = replacementItem.SerialNumber,
+            MetalTypeId = damagedItem.Product!.MetalTypeId,
+            DenominationId = damagedItem.Product!.DenominationId,
+            WeightGrams = damagedWeight,
+            Reason = reason,
+            AttachmentUrl = attachmentUrl,
+            Status = "PENDING_APPROVAL",
+            InitiatedBy = user,
+            InitiatedAt = DateTime.UtcNow
+        };
+
+        _dbContext.DamagedBarReplacements.Add(replacement);
+        await _dbContext.SaveChangesAsync();
+
+        await SaveAuditLogAsync(user, "SYSTEM", "DAMAGED_BAR_REPLACEMENT_INITIATED", 
+            $"Initiated replacement request {refCode}: Damaged bar '{damagedItem.SerialNumber}' ({damagedItem.OwnershipType}) with Turkey bar '{replacementItem.SerialNumber}'",
+            entityType: "DamagedBarReplacement", entityId: refCode);
+
+        return replacement;
+    }
+
+    public async Task<string> ApproveDamagedBarReplacementAsync(int replacementId, string user)
+    {
+        var record = await _dbContext.DamagedBarReplacements
+            .Include(r => r.DamagedItem)
+            .Include(r => r.ReplacementItem)
+            .FirstOrDefaultAsync(r => r.ReplacementId == replacementId);
+
+        if (record == null) throw new InvalidOperationException("Replacement request not found.");
+        if (record.Status != "PENDING_APPROVAL") throw new InvalidOperationException($"Request is already {record.Status}.");
+
+        if (record.InitiatedBy.Equals(user, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Maker-Checker violation: Initiator cannot approve their own damaged bar replacement request.");
+        }
+
+        var damagedItem = record.DamagedItem ?? await _dbContext.InventoryItems.FindAsync(record.DamagedItemId);
+        var replacementItem = record.ReplacementItem ?? await _dbContext.InventoryItems.FindAsync(record.ReplacementItemId);
+
+        if (damagedItem == null || replacementItem == null)
+        {
+            throw new InvalidOperationException("One or both items could not be found for replacement.");
+        }
+
+        string originalOwner = record.DamagedOriginalOwner;
+
+        // 1. Damaged bar becomes TURKEY_OWNED
+        damagedItem.OwnershipType = "TURKEY_OWNED";
+        damagedItem.StatusCode = "DAMAGED";
+        damagedItem.IsDamaged = true;
+        damagedItem.DamageApprovalStatus = "APPROVED";
+        damagedItem.DamageApprovedBy = user;
+        damagedItem.DamageApprovedAt = DateTime.UtcNow;
+        damagedItem.ReplacedByItemId = replacementItem.ItemId;
+        damagedItem.ReplacementDate = DateTime.UtcNow;
+
+        // 2. Replacement bar assumes original owner
+        replacementItem.OwnershipType = originalOwner;
+        replacementItem.StatusCode = originalOwner == "CUSTOMER_OWNED" ? "HELD_IN_CUSTODY" : "READY";
+        replacementItem.ReplacesItemId = damagedItem.ItemId;
+        replacementItem.ReplacementDate = DateTime.UtcNow;
+
+        // 3. Customer holding transfer if customer-owned
+        if (originalOwner == "CUSTOMER_OWNED")
+        {
+            var holdings = await _dbContext.CustomerHoldings
+                .Where(h => h.ItemId == damagedItem.ItemId)
+                .ToListAsync();
+
+            foreach (var h in holdings)
+            {
+                h.ItemId = replacementItem.ItemId;
+            }
+            replacementItem.CustomerAccountNumber = damagedItem.CustomerAccountNumber;
+        }
+
+        // 4. Record Inventory Transactions
+        var txOut = new InventoryTransaction
+        {
+            TransactionNumber = $"TX-DBR-OUT-{record.ReplacementId}-{DateTime.UtcNow.Ticks % 10000}",
+            ItemId = damagedItem.ItemId,
+            TransactionType = "DAMAGE_EXCHANGE_OUT",
+            SourceLocationId = damagedItem.LocationId,
+            DestinationLocationId = damagedItem.LocationId,
+            SourceOwnership = originalOwner,
+            DestinationOwnership = "TURKEY_OWNED",
+            InitiatedBy = record.InitiatedBy,
+            ApprovedBy = user,
+            TransactionTimestamp = DateTime.UtcNow
+        };
+        _dbContext.InventoryTransactions.Add(txOut);
+
+        var txIn = new InventoryTransaction
+        {
+            TransactionNumber = $"TX-DBR-IN-{record.ReplacementId}-{DateTime.UtcNow.Ticks % 10000}",
+            ItemId = replacementItem.ItemId,
+            TransactionType = "DAMAGE_EXCHANGE_IN",
+            SourceLocationId = replacementItem.LocationId,
+            DestinationLocationId = replacementItem.LocationId,
+            SourceOwnership = "TURKEY_OWNED",
+            DestinationOwnership = originalOwner,
+            InitiatedBy = record.InitiatedBy,
+            ApprovedBy = user,
+            TransactionTimestamp = DateTime.UtcNow
+        };
+        _dbContext.InventoryTransactions.Add(txIn);
+
+        // 5. Record Chain of Custody for complete traceability
+        await RecordChainOfCustodyEventAsync(damagedItem.ItemId, "DAMAGE_EXCHANGE_OUT", user, damagedItem.LocationId, 
+            referenceNumber: record.ReplacementReference, 
+            notes: $"Damaged bar surrendered to Turkey Consignment; replaced by bar '{replacementItem.SerialNumber}'");
+
+        await RecordChainOfCustodyEventAsync(replacementItem.ItemId, "DAMAGE_EXCHANGE_IN", user, replacementItem.LocationId, 
+            referenceNumber: record.ReplacementReference, 
+            notes: $"Replacement bar assumed {originalOwner} ownership for damaged bar '{damagedItem.SerialNumber}'");
+
+        // 6. Complete record
+        record.Status = "APPROVED";
+        record.ApprovedBy = user;
+        record.ApprovedAt = DateTime.UtcNow;
+
+        await SaveAuditLogAsync(user, "SYSTEM", "DAMAGED_BAR_REPLACEMENT_APPROVED", 
+            $"Approved replacement {record.ReplacementReference}: Bar '{damagedItem.SerialNumber}' -> TURKEY_OWNED, Bar '{replacementItem.SerialNumber}' -> {originalOwner}",
+            entityType: "DamagedBarReplacement", entityId: record.ReplacementReference);
+
+        await _dbContext.SaveChangesAsync();
+        return "SUCCESS";
+    }
+
+    public async Task<string> RejectDamagedBarReplacementAsync(int replacementId, string reason, string user)
+    {
+        var record = await _dbContext.DamagedBarReplacements
+            .Include(r => r.ReplacementItem)
+            .FirstOrDefaultAsync(r => r.ReplacementId == replacementId);
+
+        if (record == null) throw new InvalidOperationException("Replacement request not found.");
+        if (record.Status != "PENDING_APPROVAL") throw new InvalidOperationException($"Request is already {record.Status}.");
+
+        var replacementItem = record.ReplacementItem ?? await _dbContext.InventoryItems.FindAsync(record.ReplacementItemId);
+        if (replacementItem != null && replacementItem.StatusCode == "RESERVED_FOR_REPLACEMENT")
+        {
+            replacementItem.StatusCode = "READY";
+        }
+
+        record.Status = "REJECTED";
+        record.ApprovedBy = user;
+        record.ApprovedAt = DateTime.UtcNow;
+        record.RejectionReason = reason;
+
+        await SaveAuditLogAsync(user, "SYSTEM", "DAMAGED_BAR_REPLACEMENT_REJECTED", 
+            $"Rejected replacement {record.ReplacementReference} (Reason: {reason})",
+            entityType: "DamagedBarReplacement", entityId: record.ReplacementReference);
+
+        await _dbContext.SaveChangesAsync();
+        return "REJECTED";
+    }
+
+    public async Task<IEnumerable<DamagedBarReplacement>> GetDamagedBarReplacementsAsync(string? status = null)
+    {
+        var query = _dbContext.DamagedBarReplacements
+            .Include(r => r.DamagedItem).ThenInclude(i => i!.Product).ThenInclude(p => p!.MetalType)
+            .Include(r => r.DamagedItem).ThenInclude(i => i!.Product).ThenInclude(p => p!.Denomination)
+            .Include(r => r.ReplacementItem).ThenInclude(i => i!.Product)
+            .Include(r => r.Customer)
+            .Include(r => r.Account)
+            .AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            query = query.Where(r => r.Status == status);
+        }
+
+        return await query.OrderByDescending(r => r.InitiatedAt).ToListAsync();
+    }
+
+    // =========================================================================
+    // Damaged Gold Export (3-Level Maker-Checker-SeniorManager Approval & Courier Handover)
+    // =========================================================================
+    public async Task<PendingDamagedExport> InitiateDamagedExportAsync(int itemId, string requestedBy, string? notes, int? vendorId, string? customsDeclNumber)
+    {
+        var item = await _dbContext.InventoryItems
+            .Include(i => i.Product).ThenInclude(p => p.MetalType)
+            .Include(i => i.Product).ThenInclude(p => p.Denomination)
+            .Include(i => i.Lot).ThenInclude(l => l.Vendor)
+            .FirstOrDefaultAsync(i => i.ItemId == itemId);
+        if (item == null) throw new InvalidOperationException("Inventory item not found.");
+
+        // Invariant Check 1: The bar must be marked as damaged
+        if (!item.IsDamaged && item.StatusCode != "DAMAGED")
+        {
+            throw new InvalidOperationException($"Bar '{item.SerialNumber}' cannot be exported: The bar must be marked as damaged before export.");
+        }
+
+        // Invariant Check 2: Ownership must be KFH-Turkey (TURKEY_OWNED)
+        bool isTurkeyOwned = item.OwnershipType.Equals("TURKEY_OWNED", StringComparison.OrdinalIgnoreCase) ||
+                             item.OwnershipType.Equals("KFH_TURKEY", StringComparison.OrdinalIgnoreCase);
+        if (!isTurkeyOwned)
+        {
+            throw new InvalidOperationException($"Bar '{item.SerialNumber}' cannot be exported: Ownership must be KFH-Turkey (TURKEY_OWNED) for overseas refiner export.");
+        }
+
+        // Invariant Check 3: The bar must not be involved in another active movement or transaction
+        if (item.StatusCode == "IN_TRANSFER" || item.StatusCode == "RESERVED" || item.StatusCode == "EXPORTED")
+        {
+            throw new InvalidOperationException($"Bar '{item.SerialNumber}' cannot be exported: Bar is currently involved in an active movement or transaction (Status: {item.StatusCode}).");
+        }
+
+        bool hasActiveWorkflow = await _dbContext.WorkflowInstances
+            .AnyAsync(w => w.EntityId == item.ItemId && w.StatusCode == "PENDING_MAKER" && w.WorkflowType != "DAMAGED_EXPORT");
+        if (hasActiveWorkflow)
+        {
+            throw new InvalidOperationException($"Bar '{item.SerialNumber}' cannot be exported: Bar is currently involved in another active workflow.");
+        }
+
+        bool hasActiveExport = await _dbContext.PendingDamagedExports
+            .AnyAsync(e => e.ItemId == item.ItemId && (e.StatusCode == "PENDING_APPROVAL" || e.StatusCode == "APPROVED"));
+        if (hasActiveExport)
+        {
+            throw new InvalidOperationException($"Bar '{item.SerialNumber}' is already undergoing an export approval workflow.");
+        }
+
+        // Pessimistic lock item for export
+        item.StatusCode = "RESERVED";
+
+        string refNum = $"EXP-DMG-{DateTime.UtcNow:yyyyMMdd}-{Random.Shared.Next(1000, 9999)}";
+        var export = new PendingDamagedExport
+        {
+            ExportReference = refNum,
+            ItemId = item.ItemId,
+            SerialNumber = item.SerialNumber,
+            MetalTypeId = item.Product?.MetalTypeId ?? 1,
+            WeightGrams = item.Product?.Denomination?.WeightGrams ?? 1000,
+            VendorId = vendorId ?? item.Lot?.VendorId,
+            VendorName = item.Lot?.Vendor?.VendorName,
+            Reason = "Damaged Turkey consignment bar return to overseas manufacturer/refiner",
+            CustomsDeclarationNumber = customsDeclNumber,
+            StatusCode = "PENDING_APPROVAL",
+            RequestedBy = requestedBy,
+            CreatedAt = DateTime.UtcNow,
+            Notes = notes
+        };
+        _dbContext.PendingDamagedExports.Add(export);
+        await _dbContext.SaveChangesAsync();
+
+        // Start 3-step DAMAGED_EXPORT workflow instance (Step 1 Maker completed, now at Step 2 Checker)
+        var wf = await StartWorkflowInstanceAsync("DAMAGED_EXPORT", export.ExportId, requestedBy);
+        if (wf != null && wf.CurrentStepOrder == 1)
+        {
+            wf.CurrentStepOrder = 2; // Advanced to Checker review
+            await _dbContext.SaveChangesAsync();
+        }
+
+        await RecordChainOfCustodyEventAsync(item.ItemId, "DAMAGED_EXPORT_INITIATED", requestedBy, item.LocationId, refNum, $"Damaged Turkey gold bar export initiated for refiner return. Ref: {refNum}");
+        await SaveAuditLogAsync(requestedBy, "CUSTODY", "DAMAGED_EXPORT_INITIATED", $"Initiated 3-level damaged export workflow for bar '{item.SerialNumber}' (Ref: {refNum}).", entityType: "InventoryItem", entityId: item.SerialNumber);
+
+        return export;
+    }
+
+    public async Task<IEnumerable<PendingDamagedExport>> GetPendingDamagedExportsAsync()
+    {
+        return await _dbContext.PendingDamagedExports
+            .Include(e => e.Item).ThenInclude(i => i!.Product)
+            .Include(e => e.MetalType)
+            .Include(e => e.Vendor)
+            .Where(e => e.StatusCode == "PENDING_APPROVAL" || e.StatusCode == "APPROVED")
+            .OrderByDescending(e => e.CreatedAt)
+            .ToListAsync();
+    }
+
+    public async Task<IEnumerable<PendingDamagedExport>> GetDamagedExportHistoryAsync()
+    {
+        return await _dbContext.PendingDamagedExports
+            .Include(e => e.Item).ThenInclude(i => i!.Product)
+            .Include(e => e.MetalType)
+            .Include(e => e.Vendor)
+            .OrderByDescending(e => e.CreatedAt)
+            .ToListAsync();
+    }
+
+    public async Task<PendingDamagedExport> HandoverDamagedExportToCourierAsync(int exportId, string courierCompany, string courierRep, string trackingNumber, string securitySeal, string handedOverBy, string? notes)
+    {
+        var export = await _dbContext.PendingDamagedExports
+            .Include(e => e.Item)
+            .FirstOrDefaultAsync(e => e.ExportId == exportId);
+        if (export == null) throw new InvalidOperationException("Export request not found.");
+        if (export.StatusCode != "APPROVED")
+        {
+            throw new InvalidOperationException($"Cannot handover export '{export.ExportReference}': Export must be in APPROVED status (current: {export.StatusCode}).");
+        }
+
+        var item = await _dbContext.InventoryItems.FindAsync(export.ItemId);
+        if (item == null) throw new InvalidOperationException("Associated inventory item not found.");
+
+        export.StatusCode = "EXPORTED";
+        export.CourierCompany = courierCompany;
+        export.CourierTrackingNumber = trackingNumber;
+        export.HandoverCourierRep = courierRep;
+        export.SecuritySealNumber = securitySeal;
+        export.HandoverTimestamp = DateTime.UtcNow;
+        export.ExportedAt = DateTime.UtcNow;
+        if (!string.IsNullOrWhiteSpace(notes)) export.Notes = (export.Notes + " " + notes).Trim();
+
+        int? previousLocationId = item.LocationId;
+        item.StatusCode = "EXPORTED";
+        item.LocationId = null;
+
+        if (previousLocationId.HasValue)
+        {
+            await RecalculateInventoryBalanceAsync(previousLocationId.Value, item.ProductId, item.OwnershipType);
+        }
+
+        await _dbContext.SaveChangesAsync();
+
+        await RecordChainOfCustodyEventAsync(item.ItemId, "COURIER_EXPORT_HANDOVER", handedOverBy, previousLocationId, export.ExportReference, $"Damaged bar handed over to courier '{courierCompany}' (Rep: {courierRep}, Tracking: {trackingNumber}, Seal: {securitySeal}) for Turkey manufacturer return.");
+        await SaveAuditLogAsync(handedOverBy, "CUSTODY", "EXPORT_HANDOVER_COMPLETED", $"Completed courier export handover for bar '{item.SerialNumber}' (Ref: {export.ExportReference}, Courier: {courierCompany}).", entityType: "InventoryItem", entityId: item.SerialNumber);
+
+        return export;
+    }
+
+    public async Task<IEnumerable<InventoryItem>> GetItemHistoryBySerialNumberAsync(string serialNumber)
+    {
+        return await ItemsWithLabelDetails()
+            .Where(i => i.SerialNumber == serialNumber)
+            .OrderByDescending(i => i.ItemId)
+            .ToListAsync();
+    }
 }
+
 
