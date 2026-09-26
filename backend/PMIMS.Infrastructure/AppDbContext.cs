@@ -711,6 +711,9 @@ public class AppDbContext : DbContext
         {
             entity.HasKey(e => e.TransferId);
             entity.ToTable("branch_transfers");
+            entity.Property(e => e.TransferType).HasMaxLength(50);
+            entity.Property(e => e.ReturnReason).HasMaxLength(500);
+            entity.Property(e => e.Notes).HasMaxLength(1000);
             entity.HasOne(e => e.Item).WithMany().HasForeignKey(e => e.ItemId);
             entity.HasOne(e => e.SourceBranch).WithMany().HasForeignKey(e => e.SourceBranchId);
             entity.HasOne(e => e.DestinationBranch).WithMany().HasForeignKey(e => e.DestinationBranchId);
@@ -721,11 +724,13 @@ public class AppDbContext : DbContext
         {
             entity.HasKey(e => e.PendingIntakeId);
             entity.ToTable("pending_intakes");
+            entity.Property(e => e.CourierInfo).HasMaxLength(200);
             // Optional now -- a CUSTOMER-sourced receipt (buyback/custody deposit/return) has
             // no Purchase Order at all. SUPPLIER receipts still always set PoId.
             entity.HasOne(e => e.PurchaseOrder).WithMany().HasForeignKey(e => e.PoId).IsRequired(false);
             entity.HasOne(e => e.Location).WithMany().HasForeignKey(e => e.LocationId);
             entity.HasOne(e => e.Customer).WithMany().HasForeignKey(e => e.CustomerId).IsRequired(false);
+            entity.HasOne(e => e.DestinationBranch).WithMany().HasForeignKey(e => e.DestinationBranchId).IsRequired(false);
         });
 
         // PendingThresholdChange Configuration

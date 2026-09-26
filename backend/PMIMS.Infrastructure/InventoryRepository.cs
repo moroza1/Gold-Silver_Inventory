@@ -1193,7 +1193,7 @@ public class InventoryRepository : IInventoryRepository
     }
 
     // sp_InitiateBranchTransfer execution / emulation
-    public async Task<string> InitiateBranchTransferAsync(int itemId, int destLocationId, string courierInfo, string initiatedBy)
+    public async Task<string> InitiateBranchTransferAsync(int itemId, int destLocationId, string courierInfo, string initiatedBy, string? transferType = null, string? returnReason = null, string? notes = null)
     {
         if (IsSqlServer)
         {
@@ -1209,13 +1209,17 @@ public class InventoryRepository : IInventoryRepository
         else
         {
             var item = await _dbContext.InventoryItems.FindAsync(itemId);
-            if (item == null || item.StatusCode != "READY")
+            if (item == null || (item.StatusCode != "READY" && item.StatusCode != "HELD_IN_CUSTODY"))
             {
                 throw new InvalidOperationException("Selected item is not ready for transfer.");
             }
             if (item.IsDamaged)
             {
                 throw new InvalidOperationException("Outbound movement blocked: Selected item is marked as damaged.");
+            }
+            if (item.OwnershipType != "CUSTOMER_OWNED")
+            {
+                throw new InvalidOperationException("Branch transfer is restricted to customer-owned bars only. KFH proprietary bars cannot be transferred through branch transfers.");
             }
 
             int srcLoc = item.LocationId ?? 1;
@@ -1247,8 +1251,13 @@ public class InventoryRepository : IInventoryRepository
 
             await RecalculateInventoryBalanceAsync(srcLoc, item.ProductId, item.OwnershipType);
             await RecordChainOfCustodyEventAsync(itemId, "TRANSFERRED", initiatedBy, destLocationId, tx.TransactionNumber, courierInfo);
+            string auditMsg = $"Direct transfer initiated for serial {item.SerialNumber} to location #{destLocationId}. Type: {transferType ?? "OUTBOUND_TO_BRANCH"}, Courier: {courierInfo}.";
+            if (!string.IsNullOrWhiteSpace(returnReason))
+            {
+                auditMsg += $" Return Reason: {returnReason}.";
+            }
             await SaveAuditLogAsync(initiatedBy, "SYSTEM", "TRANSFER",
-                $"Direct transfer initiated for serial {item.SerialNumber} to location #{destLocationId}. Courier: {courierInfo}.",
+                auditMsg,
                 entityType: "INVENTORY_TRANSACTION", entityId: tx.TransactionId.ToString());
             return "SUCCESS";
         }
@@ -2074,11 +2083,12 @@ public class InventoryRepository : IInventoryRepository
                 if (transfer != null)
                 {
                     transfer.StatusCode = "REJECTED";
-                    // Release locked item back to READY
+                    // Release locked item back to READY / HELD_IN_CUSTODY
                     var item = await _dbContext.InventoryItems.FindAsync(transfer.ItemId);
                     if (item != null)
                     {
-                        item.StatusCode = "READY";
+                        var holding = await _dbContext.CustomerHoldings.FirstOrDefaultAsync(h => h.ItemId == item.ItemId && (h.StatusCode == "ACTIVE" || h.StatusCode == "HELD_IN_CUSTODY"));
+                        item.StatusCode = (holding != null || item.OwnershipType == "CUSTOMER_OWNED") ? "HELD_IN_CUSTODY" : "READY";
                     }
                 }
             }
@@ -2362,6 +2372,47 @@ public class InventoryRepository : IInventoryRepository
                         if (result != "SUCCESS")
                         {
                             throw new InvalidOperationException($"Intake execution failed: {result}");
+                        }
+
+                        // If received from customer at a branch and TransferToMainVault is enabled,
+                        // automatically initiate branch transfer to Central Main Vault by courier
+                        if (pending.SourceType == "CUSTOMER" && pending.TransferToMainVault)
+                        {
+                            var intakeLoc = await _dbContext.InventoryLocations.FindAsync(pending.LocationId);
+                            int srcBranchId = intakeLoc?.BranchId ?? 1;
+                            int destBranchId = pending.DestinationBranchId ?? 1;
+
+                            if (srcBranchId != destBranchId)
+                            {
+                                try
+                                {
+                                    using var pDoc = JsonDocument.Parse(pending.SerialsJsonList);
+                                    foreach (var element in pDoc.RootElement.EnumerateArray())
+                                    {
+                                        string? serial = element.TryGetProperty("serial", out var sProp) ? sProp.GetString() : (element.TryGetProperty("serial_number", out var snProp) ? snProp.GetString() : null);
+                                        if (!string.IsNullOrWhiteSpace(serial))
+                                        {
+                                            var item = await _dbContext.InventoryItems.FirstOrDefaultAsync(i => i.SerialNumber.ToUpper() == serial.ToUpper() && i.LocationId == pending.LocationId);
+                                            if (item != null && !item.IsDamaged)
+                                            {
+                                                await InitiateWorkflowBranchTransferAsync(
+                                                    item.ItemId,
+                                                    destBranchId,
+                                                    !string.IsNullOrWhiteSpace(pending.CourierInfo) ? pending.CourierInfo : "Secured Courier Service (Customer Custody Transfer)",
+                                                    pending.ReceivedBy,
+                                                    transferType: "RETURN_TO_VAULT",
+                                                    returnReason: "Customer custody deposit transport to Central Main Vault",
+                                                    notes: $"Auto-initiated secured courier transfer to central main vault for customer deposit lot {pending.LotNumber}."
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    await SaveAuditLogAsync(username, "WARNING", "TRANSFER_INITIATION_FAILED", $"Automatic branch transfer for intake {pending.PendingIntakeId} had an error: {ex.Message}", entityType: "PendingIntake", entityId: pending.PendingIntakeId.ToString());
+                                }
+                            }
                         }
                     }
                 }
@@ -3551,16 +3602,20 @@ public class InventoryRepository : IInventoryRepository
             .FirstOrDefaultAsync(t => t.TransferId == transferId);
     }
 
-    public async Task<BranchTransfer> InitiateWorkflowBranchTransferAsync(int itemId, int destinationBranchId, string courierInfo, string initiatedBy)
+    public async Task<BranchTransfer> InitiateWorkflowBranchTransferAsync(int itemId, int destinationBranchId, string courierInfo, string initiatedBy, string? transferType = null, string? returnReason = null, string? notes = null)
     {
         var item = await _dbContext.InventoryItems.FindAsync(itemId);
-        if (item == null || item.StatusCode != "READY")
+        if (item == null || (item.StatusCode != "READY" && item.StatusCode != "HELD_IN_CUSTODY"))
         {
             throw new InvalidOperationException("Selected item is not ready for transfer.");
         }
         if (item.IsDamaged)
         {
             throw new InvalidOperationException("Outbound movement blocked: Selected item is marked as damaged.");
+        }
+        if (item.OwnershipType != "CUSTOMER_OWNED")
+        {
+            throw new InvalidOperationException("Branch transfer is restricted to customer-owned bars only. KFH proprietary bars cannot be transferred through branch transfers.");
         }
 
         var template = await _dbContext.WorkflowTemplates.Include(t => t.Steps)
@@ -3574,6 +3629,8 @@ public class InventoryRepository : IInventoryRepository
         var loc = await _dbContext.InventoryLocations.FindAsync(item.LocationId);
         int srcBranchId = loc?.BranchId ?? 1; // Default to Main/HO Branch if not specified
 
+        string determinedTransferType = transferType ?? (destinationBranchId == 1 && srcBranchId != 1 ? "RETURN_TO_VAULT" : (srcBranchId != 1 && destinationBranchId != 1 ? "INTER_BRANCH" : "OUTBOUND_TO_BRANCH"));
+
         // Create the BranchTransfer entity
         var transfer = new BranchTransfer
         {
@@ -3581,6 +3638,9 @@ public class InventoryRepository : IInventoryRepository
             SourceBranchId = srcBranchId,
             DestinationBranchId = destinationBranchId,
             CourierInfo = courierInfo,
+            TransferType = determinedTransferType,
+            ReturnReason = returnReason,
+            Notes = notes,
             StatusCode = "PENDING_APPROVAL",
             CreatedBy = initiatedBy,
             CreatedAt = DateTime.UtcNow
@@ -3594,6 +3654,10 @@ public class InventoryRepository : IInventoryRepository
 
         // Spawn a workflow instance of type "BRANCH_TRANSFER"
         await StartWorkflowInstanceAsync("BRANCH_TRANSFER", transfer.TransferId, initiatedBy);
+
+        await SaveAuditLogAsync(initiatedBy, "SYSTEM", "TRANSFER",
+            $"Branch transfer workflow initiated for serial {item.SerialNumber} ({item.OwnershipType}) from branch #{srcBranchId} to branch #{destinationBranchId}. Type: {transfer.TransferType}. Reason: {returnReason ?? "N/A"}. Courier: {courierInfo}.",
+            entityType: "BRANCH_TRANSFER", entityId: transfer.TransferId.ToString());
 
         await _dbContext.Entry(transfer).Reference(t => t.Item).LoadAsync();
         await _dbContext.Entry(transfer).Reference(t => t.SourceBranch).LoadAsync();
@@ -3614,8 +3678,16 @@ public class InventoryRepository : IInventoryRepository
         var item = transfer.Item;
         if (item != null)
         {
-            // Update item status back to READY
-            item.StatusCode = "READY";
+            // Check if holding exists for customer-owned item
+            var holding = await _dbContext.CustomerHoldings.FirstOrDefaultAsync(h => h.ItemId == item.ItemId && (h.StatusCode == "ACTIVE" || h.StatusCode == "HELD_IN_CUSTODY"));
+            if (holding != null)
+            {
+                item.StatusCode = "HELD_IN_CUSTODY";
+            }
+            else
+            {
+                item.StatusCode = "READY";
+            }
             
             // Recalculate balances
             var loc = await _dbContext.InventoryLocations.FirstOrDefaultAsync(l => l.BranchId == transfer.DestinationBranchId);
@@ -3624,8 +3696,20 @@ public class InventoryRepository : IInventoryRepository
             
             item.LocationId = destLocId;
 
+            // Also update CustomerAllocation assigned location if any
+            if (holding != null)
+            {
+                var allocs = await _dbContext.CustomerAllocations.Where(a => a.HoldingId == holding.HoldingId && a.ReleasedAt == null).ToListAsync();
+                foreach (var alloc in allocs)
+                {
+                    alloc.AssignedLocationId = destLocId;
+                }
+            }
+
             await RecalculateInventoryBalanceAsync(srcLoc, item.ProductId, item.OwnershipType);
             await RecalculateInventoryBalanceAsync(destLocId, item.ProductId, item.OwnershipType);
+
+            await RecordChainOfCustodyEventAsync(item.ItemId, "RECEIVED_AT_BRANCH", receivedBy, destLocId, $"TR-{transfer.TransferId}", $"Transfer received at branch #{transfer.DestinationBranchId}. Type: {transfer.TransferType ?? "OUTBOUND_TO_BRANCH"}. Return Reason: {transfer.ReturnReason ?? "N/A"}.");
         }
 
         transfer.StatusCode = "RECEIVED";
@@ -3642,7 +3726,7 @@ public class InventoryRepository : IInventoryRepository
             }
         }
 
-        await SaveAuditLogAsync(receivedBy, "SYSTEM", "OPERATIONS", $"Received Branch Transfer ID: {transferId}");
+        await SaveAuditLogAsync(receivedBy, "SYSTEM", "OPERATIONS", $"Received Branch Transfer ID: {transferId} (Type: {transfer.TransferType ?? "OUTBOUND_TO_BRANCH"}, Item: #{transfer.ItemId}, Dest Branch: #{transfer.DestinationBranchId}, Return Reason: {transfer.ReturnReason ?? "N/A"})", entityType: "BRANCH_TRANSFER", entityId: transferId.ToString());
         await _dbContext.SaveChangesAsync();
         return "SUCCESS";
     }
@@ -3785,7 +3869,8 @@ public class InventoryRepository : IInventoryRepository
         string sourceType = "SUPPLIER", int? customerId = null, int? accountId = null, string? receiptReason = null,
         int? vendorId = null, string? shipmentReference = null, string? deliveryNoteNumber = null, string? airwayBillNumber = null,
         string? supportingDocumentUrl = null, string? discrepancyNotes = null, DateTime? receivingDate = null, string ownershipType = "KFH_OWNED",
-        string? customsDeclarationNumber = null, decimal? customsDutyAmount = null, string? portOfEntry = null, string? productionCostsJson = null)
+        string? customsDeclarationNumber = null, decimal? customsDutyAmount = null, string? portOfEntry = null, string? productionCostsJson = null,
+        bool transferToMainVault = false, string? courierInfo = null, int? destinationBranchId = null)
     {
         sourceType = string.IsNullOrWhiteSpace(sourceType) ? "SUPPLIER" : sourceType.Trim().ToUpperInvariant();
         if (sourceType != "SUPPLIER" && sourceType != "CUSTOMER")
@@ -3921,11 +4006,14 @@ public class InventoryRepository : IInventoryRepository
             LocationId = locationId,
             ReceivedBy = receivedBy,
             SerialsJsonList = serialsJsonList,
-            OwnershipType = string.IsNullOrWhiteSpace(ownershipType) ? "KFH_OWNED" : ownershipType.Trim(),
+            OwnershipType = sourceType == "CUSTOMER" && receiptReason == "CUSTODY_DEPOSIT" ? "CUSTOMER_OWNED" : (string.IsNullOrWhiteSpace(ownershipType) ? "KFH_OWNED" : ownershipType.Trim()),
             CustomsDeclarationNumber = customsDeclarationNumber,
             CustomsDutyAmount = customsDutyAmount,
             PortOfEntry = portOfEntry,
             ProductionCostsJson = productionCostsJson,
+            TransferToMainVault = transferToMainVault,
+            CourierInfo = courierInfo,
+            DestinationBranchId = destinationBranchId,
             StatusCode = "PENDING_APPROVAL",
             CreatedAt = DateTime.UtcNow
         };

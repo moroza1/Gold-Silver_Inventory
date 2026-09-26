@@ -812,7 +812,8 @@ public partial class PMIMSControllers : ControllerBase
 
             string itemsJson = JsonSerializer.Serialize(req.Items);
             var pending = await _repository.InitiateWorkflowIntakeAsync(null, req.LotNumber, req.LocationId, req.ReceivedBy, itemsJson,
-                sourceType: "CUSTOMER", customerId: req.CustomerId, accountId: req.AccountId, receiptReason: req.ReceiptReason);
+                sourceType: "CUSTOMER", customerId: req.CustomerId, accountId: req.AccountId, receiptReason: req.ReceiptReason,
+                transferToMainVault: req.TransferToMainVault, courierInfo: req.CourierInfo, destinationBranchId: req.DestinationBranchId);
             return Ok(new { pending_id = pending.PendingIntakeId, message = "Customer receipt verification request initiated and routed to the Maker-Checker workflow approval." });
         }
         catch (Exception ex)
@@ -825,10 +826,17 @@ public partial class PMIMSControllers : ControllerBase
     [HttpPost("transfers")]
     public async Task<IActionResult> TransferStock([FromBody] TransferRequest req)
     {
-        string result = await _repository.InitiateBranchTransferAsync(req.ItemId, req.DestinationLocationId, req.CourierInfo, req.InitiatedBy);
-        if (result != "SUCCESS") return BadRequest(result);
+        try
+        {
+            string result = await _repository.InitiateBranchTransferAsync(req.ItemId, req.DestinationLocationId, req.CourierInfo, req.InitiatedBy, req.TransferType, req.ReturnReason, req.Notes);
+            if (result != "SUCCESS") return BadRequest(result);
 
-        return Ok(new { message = "Branch transfer initiated successfully. Stock locked in TRANSIT status." });
+            return Ok(new { message = "Branch transfer initiated successfully. Stock locked in TRANSIT status." });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
     }
 
     [Authorize(Policy = "intake.write")]
@@ -856,7 +864,7 @@ public partial class PMIMSControllers : ControllerBase
 
             string initiator = User?.Identity?.Name ?? req.InitiatedBy;
             var transfer = await _repository.InitiateWorkflowBranchTransferAsync(
-                req.ItemId, req.DestinationBranchId, req.CourierInfo, initiator);
+                req.ItemId, req.DestinationBranchId, req.CourierInfo, initiator, req.TransferType, req.ReturnReason, req.Notes);
 
             return Ok(new { transfer_id = transfer.TransferId, message = "Branch transfer workflow initiated successfully." });
         }
@@ -877,11 +885,17 @@ public partial class PMIMSControllers : ControllerBase
             serial_number = t.Item?.SerialNumber ?? "Unknown",
             metal = t.Item?.Product?.MetalType?.MetalName ?? "Gold",
             denomination = t.Item?.Product?.Denomination?.Label ?? "Bar",
+            weight_grams = t.Item?.Product?.Denomination?.WeightGrams ?? 0,
+            purity = t.Item?.Product?.Purity?.PurityValue ?? 0.9999m,
+            ownership_type = t.Item?.OwnershipType ?? "CUSTOMER_OWNED",
             source_branch_id = t.SourceBranchId,
             source_branch = t.SourceBranch?.BranchName ?? "Main Vault",
             destination_branch_id = t.DestinationBranchId,
             destination_branch = t.DestinationBranch?.BranchName ?? "Branch",
             courier_info = t.CourierInfo,
+            transfer_type = t.TransferType ?? "OUTBOUND_TO_BRANCH",
+            return_reason = t.ReturnReason,
+            notes = t.Notes,
             status_code = t.StatusCode,
             created_by = t.CreatedBy,
             created_at = t.CreatedAt,
@@ -1379,9 +1393,13 @@ public partial class PMIMSControllers : ControllerBase
                         item_id = tr.ItemId,
                         serial_number = tr.Item?.SerialNumber ?? "Unknown",
                         product_name = tr.Item?.Product?.ProductCode ?? "Bar",
+                        ownership_type = tr.Item?.OwnershipType ?? "CUSTOMER_OWNED",
                         source_branch = tr.SourceBranch?.BranchName ?? "Main Vault",
                         destination_branch = tr.DestinationBranch?.BranchName ?? "Branch",
                         courier_info = tr.CourierInfo,
+                        transfer_type = tr.TransferType ?? "OUTBOUND_TO_BRANCH",
+                        return_reason = tr.ReturnReason,
+                        notes = tr.Notes,
                         status_code = tr.StatusCode,
                         created_by = tr.CreatedBy
                     };
@@ -1696,7 +1714,10 @@ public partial class PMIMSControllers : ControllerBase
             if (workflowType == "BRANCH_TRANSFER")
             {
                 var tr = transfers.FirstOrDefault(t => t.TransferId == entityId);
-                return tr != null ? $"Transfer {tr.Item?.SerialNumber ?? "item"} -> {tr.DestinationBranch?.BranchName ?? "branch"}" : $"Transfer #{entityId}";
+                if (tr == null) return $"Transfer #{entityId}";
+                string typePrefix = tr.TransferType == "RETURN_TO_VAULT" ? "Return to Vault" : (tr.TransferType == "INTER_BRANCH" ? "Inter-Branch Transfer" : "Branch Transfer");
+                string extra = !string.IsNullOrWhiteSpace(tr.ReturnReason) ? $" ({tr.ReturnReason})" : "";
+                return $"{typePrefix} {tr.Item?.SerialNumber ?? "item"} -> {tr.DestinationBranch?.BranchName ?? "branch"}{extra}";
             }
             if (workflowType == "TURKEY_PURCHASE")
             {
@@ -2929,9 +2950,21 @@ public class CustomerReceiptRequest
     public string LotNumber { get; set; } = null!;
     public int LocationId { get; set; }
     public string ReceivedBy { get; set; } = null!;
+    public bool TransferToMainVault { get; set; } = true;
+    public string? CourierInfo { get; set; }
+    public int? DestinationBranchId { get; set; }
     public List<IntakeItemDTO> Items { get; set; } = new();
 }
-public class TransferRequest { public int ItemId { get; set; } public int DestinationLocationId { get; set; } public string CourierInfo { get; set; } = null!; public string InitiatedBy { get; set; } = null!; }
+public class TransferRequest
+{
+    public int ItemId { get; set; }
+    public int DestinationLocationId { get; set; }
+    public string CourierInfo { get; set; } = null!;
+    public string InitiatedBy { get; set; } = null!;
+    public string? TransferType { get; set; }
+    public string? ReturnReason { get; set; }
+    public string? Notes { get; set; }
+}
 public class ReserveRequest { public int CustomerId { get; set; } public int ProductId { get; set; } public int BranchId { get; set; } public int ChannelId { get; set; } }
 public class PurchaseConfirmRequest { public Guid ReservationToken { get; set; } public int AccountId { get; set; } public decimal SalePrice { get; set; } public decimal MarkupAmount { get; set; } public string InvoiceNumber { get; set; } = null!; public string? CustodyAgreementNumber { get; set; } }
 public class WithdrawalRequestModel { public int HoldingId { get; set; } public int BranchId { get; set; } }
@@ -3085,6 +3118,9 @@ public class TransferWorkflowRequest
     public int DestinationBranchId { get; set; }
     public string CourierInfo { get; set; } = null!;
     public string InitiatedBy { get; set; } = null!;
+    public string? TransferType { get; set; }
+    public string? ReturnReason { get; set; }
+    public string? Notes { get; set; }
 }
 
 public class ReceiveTransferRequest

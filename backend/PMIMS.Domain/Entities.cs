@@ -996,10 +996,13 @@ public class BranchTransfer
     public int SourceBranchId { get; set; }
     public int DestinationBranchId { get; set; }
     public string CourierInfo { get; set; } = null!;
-    public string StatusCode { get; set; } = "PENDING_APPROVAL"; // PENDING_APPROVAL, APPROVED, REJECTED, IN_TRANSIT, COMPLETED
+    public string StatusCode { get; set; } = "PENDING_APPROVAL"; // PENDING_APPROVAL, APPROVED, REJECTED, IN_TRANSIT, RECEIVED
     public string CreatedBy { get; set; } = null!;
     public string? ApprovedBy { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public string? TransferType { get; set; } = "OUTBOUND_TO_BRANCH"; // OUTBOUND_TO_BRANCH, INTER_BRANCH, RETURN_TO_VAULT
+    public string? ReturnReason { get; set; } // Reason if returning bar back to Main Vault / Branch
+    public string? Notes { get; set; }
 
     public InventoryItem? Item { get; set; }
     public Branch? SourceBranch { get; set; }
@@ -1052,6 +1055,9 @@ public class PendingIntake
     public string? PortOfEntry { get; set; }
     public DateTime? CustomsClearanceDate { get; set; }
     public string? ProductionCostsJson { get; set; }
+    public bool TransferToMainVault { get; set; }
+    public string? CourierInfo { get; set; }
+    public int? DestinationBranchId { get; set; }
     public string StatusCode { get; set; } = "PENDING_APPROVAL"; // PENDING_APPROVAL, APPROVED, REJECTED
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
@@ -1059,6 +1065,7 @@ public class PendingIntake
     public Vendor? Vendor { get; set; }
     public InventoryLocation? Location { get; set; }
     public Customer? Customer { get; set; }
+    public Branch? DestinationBranch { get; set; }
 }
 
 public class ShipmentProductionCost

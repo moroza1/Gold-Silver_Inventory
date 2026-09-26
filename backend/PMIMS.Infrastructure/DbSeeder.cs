@@ -324,6 +324,42 @@ public static class DbSeeder
                         }
                     }
 
+                    // 1d. Ensure columns on branch_transfers
+                    var transferCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    using (var pragmaTransferCmd = connection.CreateCommand())
+                    {
+                        pragmaTransferCmd.CommandText = "PRAGMA table_info(branch_transfers);";
+                        using var reader = await pragmaTransferCmd.ExecuteReaderAsync();
+                        while (await reader.ReadAsync())
+                        {
+                            var colName = reader["name"]?.ToString();
+                            if (!string.IsNullOrEmpty(colName)) transferCols.Add(colName);
+                        }
+                    }
+                    if (transferCols.Count > 0)
+                    {
+                        var transferColsToAdd = new List<(string Name, string Def)>
+                        {
+                            ("transfer_type", "TEXT NOT NULL DEFAULT 'OUTBOUND_TO_BRANCH'"),
+                            ("return_reason", "TEXT"),
+                            ("notes", "TEXT")
+                        };
+                        foreach (var (col, def) in transferColsToAdd)
+                        {
+                            if (!transferCols.Contains(col))
+                            {
+                                try
+                                {
+                                    using var alterCmd = connection.CreateCommand();
+                                    alterCmd.CommandText = $"ALTER TABLE branch_transfers ADD COLUMN {col} {def};";
+                                    await alterCmd.ExecuteNonQueryAsync();
+                                    transferCols.Add(col);
+                                }
+                                catch { }
+                            }
+                        }
+                    }
+
                     // 2. Ensure columns on pending_intakes
                     using var cmd = connection.CreateCommand();
                     cmd.CommandText = "PRAGMA table_info(pending_intakes);";
@@ -357,7 +393,10 @@ public static class DbSeeder
                             ("customs_duty_amount", "DECIMAL(18,4)"),
                             ("port_of_entry", "TEXT"),
                             ("customs_clearance_date", "TEXT"),
-                            ("production_costs_json", "TEXT")
+                            ("production_costs_json", "TEXT"),
+                            ("transfer_to_main_vault", "INTEGER NOT NULL DEFAULT 0"),
+                            ("courier_info", "TEXT"),
+                            ("destination_branch_id", "INTEGER")
                         };
 
                         foreach (var (col, def) in colsToAdd)

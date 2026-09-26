@@ -1059,6 +1059,9 @@ export default function App() {
   const [receiptSelectedProductId, setReceiptSelectedProductId] = useState<number>(1);
   const [receiptScannedSerials, setReceiptScannedSerials] = useState<{ serial: string; product_id: number }[]>([]);
   const [currentReceiptScanSerial, setCurrentReceiptScanSerial] = useState('');
+  const [receiptTransferToMainVault, setReceiptTransferToMainVault] = useState(true);
+  const [receiptCourierInfo, setReceiptCourierInfo] = useState('Secured Armored Courier & Security Escort');
+  const [receiptDestinationBranchId, setReceiptDestinationBranchId] = useState<number>(1);
   const [transferBarcodeQuery, setTransferBarcodeQuery] = useState('');
   const [newZoneRoom, setNewZoneRoom] = useState('Zone Alpha');
   const [newShelfRow, setNewShelfRow] = useState('Shelf Row 4');
@@ -1559,6 +1562,10 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   const [transferItemSerial, setTransferItemSerial] = useState('');
   const [transferDestBranchId, setTransferDestBranchId] = useState('');
   const [transferCourierInfo, setTransferCourierInfo] = useState('');
+  const [transferType, setTransferType] = useState<'OUTBOUND_TO_BRANCH' | 'INTER_BRANCH' | 'RETURN_TO_VAULT'>('OUTBOUND_TO_BRANCH');
+  const [transferReturnReasonPreset, setTransferReturnReasonPreset] = useState('');
+  const [transferReturnReasonCustom, setTransferReturnReasonCustom] = useState('');
+  const [transferNotes, setTransferNotes] = useState('');
 
   // GFS & Stock Threshold states
   const [gfsDeliveryRequests, setGfsDeliveryRequests] = useState<any[]>([]);
@@ -4479,6 +4486,14 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   const handleInitiateBranchTransfer = async () => {
     if (!transferItemId || !transferDestBranchId) return;
     try {
+      const effectiveReturnReason = transferType === 'RETURN_TO_VAULT'
+        ? (transferReturnReasonPreset === 'OTHER'
+            ? (transferReturnReasonCustom || (currentLang === 'en' ? 'Unspecified return reason' : 'سبب إرجاع غير محدد'))
+            : (transferReturnReasonCustom
+                ? `${transferReturnReasonPreset}: ${transferReturnReasonCustom}`
+                : (transferReturnReasonPreset || (currentLang === 'en' ? 'Customer Unclaimed / Return' : 'عدم استلام العميل / إرجاع'))))
+        : null;
+
       const res = await fetch(`${API_BASE}/transfers/workflow-initiate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -4486,7 +4501,10 @@ const [migrationApproved, setMigrationApproved] = useState(false);
           itemId: transferItemId,
           destinationBranchId: parseInt(transferDestBranchId),
           courierInfo: transferCourierInfo || 'Standard Courier Shipment',
-          initiatedBy: username || 'SYSTEM'
+          initiatedBy: username || 'SYSTEM',
+          transferType: transferType,
+          returnReason: effectiveReturnReason,
+          notes: transferNotes || null
         })
       });
       if (res.ok) {
@@ -4496,8 +4514,13 @@ const [migrationApproved, setMigrationApproved] = useState(false);
         setTransferItemSerial('');
         setTransferDestBranchId('');
         setTransferCourierInfo('');
+        setTransferReturnReasonPreset('');
+        setTransferReturnReasonCustom('');
+        setTransferNotes('');
+        setTransferType('OUTBOUND_TO_BRANCH');
         fetchInventory(); // Reload inventory
         fetchWorkflows(); // Reload active workflow approvals list
+        fetchTransfers(); // Reload transfers list
       } else {
         alert(await describeApiError(res, currentLang, 'Failed to initiate transfer', 'فشل بدء حركة التحويل'));
       }
@@ -4509,6 +4532,14 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   const handleInitiateBranchTransferTab = async () => {
     if (!transferItemId || !transferDestBranchId) return;
     try {
+      const effectiveReturnReason = transferType === 'RETURN_TO_VAULT'
+        ? (transferReturnReasonPreset === 'OTHER'
+            ? (transferReturnReasonCustom || (currentLang === 'en' ? 'Unspecified return reason' : 'سبب إرجاع غير محدد'))
+            : (transferReturnReasonCustom
+                ? `${transferReturnReasonPreset}: ${transferReturnReasonCustom}`
+                : (transferReturnReasonPreset || (currentLang === 'en' ? 'Customer Unclaimed / Return' : 'عدم استلام العميل / إرجاع'))))
+        : null;
+
       const res = await fetch(`${API_BASE}/transfers/workflow-initiate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -4516,7 +4547,10 @@ const [migrationApproved, setMigrationApproved] = useState(false);
           itemId: transferItemId,
           destinationBranchId: parseInt(transferDestBranchId),
           courierInfo: transferCourierInfo || 'Standard Courier Shipment',
-          initiatedBy: username || 'SYSTEM'
+          initiatedBy: username || 'SYSTEM',
+          transferType: transferType,
+          returnReason: effectiveReturnReason,
+          notes: transferNotes || null
         })
       });
       if (res.ok) {
@@ -4526,6 +4560,10 @@ const [migrationApproved, setMigrationApproved] = useState(false);
         setTransferDestBranchId('');
         setTransferCourierInfo('');
         setTransferBarcodeQuery('');
+        setTransferReturnReasonPreset('');
+        setTransferReturnReasonCustom('');
+        setTransferNotes('');
+        setTransferType('OUTBOUND_TO_BRANCH');
         fetchInventory(); // Reload inventory
         fetchWorkflows(); // Reload active workflow approvals list
         fetchTransfers(); // Reload transfers list
@@ -5933,6 +5971,9 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     setReceiptLotNum(`RCPT-CUST-${Date.now()}`);
     setReceiptScannedSerials([]);
     setCurrentReceiptScanSerial('');
+    setReceiptTransferToMainVault(true);
+    setReceiptCourierInfo('Secured Armored Courier & Security Escort');
+    setReceiptDestinationBranchId(1);
     const flatSlots = locations.flatMap(loc => loc.slots);
     const firstFreeSlot = flatSlots.find((s: any) => !s.occupied);
     setReceiptSelectedLocation(firstFreeSlot ? firstFreeSlot.id : 1);
@@ -5968,6 +6009,9 @@ const [migrationApproved, setMigrationApproved] = useState(false);
           lotNumber: receiptLotNum,
           locationId: receiptSelectedLocation,
           receivedBy: displayName,
+          transferToMainVault: receiptTransferToMainVault,
+          courierInfo: receiptTransferToMainVault ? receiptCourierInfo : null,
+          destinationBranchId: receiptTransferToMainVault ? receiptDestinationBranchId : null,
           items: receiptScannedSerials.map(s => ({ serial: s.serial, product_id: s.product_id }))
         })
       });
@@ -9778,6 +9822,65 @@ const [migrationApproved, setMigrationApproved] = useState(false);
               )}
             </div>
 
+            {/* Courier Dispatch / Transport to Central Main Vault */}
+            <div className="glass-card" style={{ padding: '14px', background: 'rgba(59, 130, 246, 0.05)', border: '1px solid rgba(59, 130, 246, 0.25)', borderRadius: '8px', marginBottom: '15px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: receiptTransferToMainVault ? '12px' : '0' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', margin: 0, fontWeight: 600, color: '#2563eb' }}>
+                  <input
+                    type="checkbox"
+                    checked={receiptTransferToMainVault}
+                    onChange={e => setReceiptTransferToMainVault(e.target.checked)}
+                    style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                  />
+                  <span>
+                    <i className="fa-solid fa-truck-shield" style={{ marginRight: '6px' }}></i>
+                    {currentLang === 'en'
+                      ? 'Initiate Secured Courier Transport to Central Main Vault'
+                      : 'بدء نقل آمن بواسطة شركة حراسة/شحن إلى الخزينة المركزية الرئيسية'}
+                  </span>
+                </label>
+                <span className="badge" style={{ background: 'rgba(59, 130, 246, 0.12)', color: '#2563eb', fontSize: '11px' }}>
+                  {receiptTransferToMainVault ? (currentLang === 'en' ? 'Auto-Dispatch Enabled' : 'النقل التلقائي مفعّل') : (currentLang === 'en' ? 'Branch Storage Only' : 'تخزين بالفرع فقط')}
+                </span>
+              </div>
+
+              {receiptTransferToMainVault && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '10px' }}>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Destination Central Vault / Branch' : 'الخزينة المركزية / الفرع المستهدف'}</label>
+                    <select
+                      value={receiptDestinationBranchId}
+                      onChange={e => setReceiptDestinationBranchId(parseInt(e.target.value, 10))}
+                      style={{ color: '#000' }}
+                    >
+                      {branchesList.map((b: any, idx: number) => (
+                        <option key={idx} value={b.branch_id}>
+                          {b.branch_name} {b.branch_code === 'MAIN_HO' || b.branch_id === 1 ? `(${currentLang === 'en' ? 'Main Central Vault' : 'الخزينة المركزية الرئيسية'})` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Courier & Security Escort Details' : 'بيانات شركة النقل والحراسة الأمنية'}</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      value={receiptCourierInfo}
+                      onChange={e => setReceiptCourierInfo(e.target.value)}
+                      placeholder={currentLang === 'en' ? 'e.g. Armored Security Logistics & Escort' : 'مثال: شركة الحراسة ونقل الأموال المصفحة'}
+                    />
+                  </div>
+                </div>
+              )}
+
+              <p style={{ margin: '8px 0 0 0', fontSize: '11px', color: 'var(--text-muted)' }}>
+                <i className="fa-solid fa-circle-info" style={{ marginRight: '4px' }}></i>
+                {currentLang === 'en'
+                  ? 'Upon approval of this customer deposit workflow, a Return-to-Vault transfer workflow will be automatically triggered to securely move the customer bar(s) from this branch intake location to the Central Main Vault by courier.'
+                  : 'عند اعتماد مسار استلام العميل، سيتم إنشاء حركة تحويل فرعي تلقائياً لنقل سبائك العميل بأمان من موقع الاستلام إلى الخزينة المركزية الرئيسية بواسطة الشاحن والحراسة.'}
+              </p>
+            </div>
+
             {canModify('intake') && (
               <button
                 className="btn btn-primary"
@@ -9794,11 +9897,16 @@ const [migrationApproved, setMigrationApproved] = useState(false);
         <section className={`screen-viewport ${activeTab === 'screen-transfers' ? 'active' : ''}`}>
           <div className="split-grid-3">
             <div className="glass-card" style={{ gridColumn: 'span 2' }}>
-              <h3>{currentLang === 'en' ? 'Active Branch Transfers' : 'حركات تحويل الفروع النشطة'}</h3>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <h3 style={{ margin: 0 }}>{currentLang === 'en' ? 'Active Branch Transfers' : 'حركات تحويل الفروع النشطة'}</h3>
+                <span className="badge" style={{ background: 'rgba(59, 130, 246, 0.12)', color: '#2563eb', border: '1px solid rgba(59, 130, 246, 0.3)', padding: '4px 10px', fontSize: '11px' }}>
+                  <i className="fa-solid fa-shield-halved"></i> {currentLang === 'en' ? 'Customer Stock Movement Ledger' : 'سجل تحويلات سبائك العملاء'}
+                </span>
+              </div>
               <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>
                 {currentLang === 'en' 
-                  ? 'Track physical metal bar movements in transit between vaults and branches.' 
-                  : 'متابعة حركات السبائك المادية أثناء النقل بين الخزائن والفروع المختلفة.'}
+                  ? 'Track customer-owned metal movements between Central Main Vault and KFH branches, including return-to-vault workflows for unclaimed holdings.' 
+                  : 'متابعة حركات سبائك العملاء بين الخزينة المركزية وفروع بيتك، بما في ذلك إجراءات إرجاع السبائك غير المستلمة إلى الخزينة الرئيسية.'}
               </p>
               <div className="table-responsive">
                 <table>
@@ -9806,9 +9914,11 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     <tr>
                       <th>{t('th_serial')}</th>
                       <th>{t('th_metal')}</th>
-                      <th>{currentLang === 'en' ? 'From Branch' : 'من فرع'}</th>
-                      <th>{currentLang === 'en' ? 'To Branch' : 'إلى فرع'}</th>
-                      <th>{currentLang === 'en' ? 'Courier Details' : 'تفاصيل الشاحن'}</th>
+                      <th>{currentLang === 'en' ? 'Type' : 'النوع'}</th>
+                      <th>{currentLang === 'en' ? 'From' : 'من'}</th>
+                      <th>{currentLang === 'en' ? 'To' : 'إلى'}</th>
+                      <th>{currentLang === 'en' ? 'Return Reason / Notes' : 'سبب الإرجاع / البيان'}</th>
+                      <th>{currentLang === 'en' ? 'Courier' : 'الشاحن'}</th>
                       <th>{t('th_status')}</th>
                       <th>{t('th_action')}</th>
                     </tr>
@@ -9816,18 +9926,56 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                   <tbody>
                     {transfersList.length === 0 ? (
                       <tr>
-                        <td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '20px' }}>
+                        <td colSpan={9} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '20px' }}>
                           {currentLang === 'en' ? 'No branch transfers found.' : 'لا توجد حركات تحويل فرعي حالياً.'}
                         </td>
                       </tr>
                     ) : (
                       transfersList.map((tr: any, idx: number) => (
                         <tr key={idx}>
-                          <td><strong>{tr.serial_number}</strong></td>
-                          <td>{translateDb(tr.metal)} - {tr.denomination}</td>
+                          <td>
+                            <strong>{tr.serial_number}</strong>
+                            <div style={{ marginTop: '2px' }}>
+                              <span className="badge" style={{ background: 'rgba(59, 130, 246, 0.1)', color: '#2563eb', fontSize: '10px' }}>
+                                <i className="fa-solid fa-user-tag"></i> {currentLang === 'en' ? 'Customer Owned' : 'ملكية عميل'}
+                              </span>
+                            </div>
+                          </td>
+                          <td>
+                            {translateDb(tr.metal)} - {tr.denomination}
+                            {tr.weight_grams ? <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{tr.weight_grams}g</div> : null}
+                          </td>
+                          <td>
+                            {tr.transfer_type === 'RETURN_TO_VAULT' ? (
+                              <span className="badge" style={{ background: 'rgba(239, 68, 68, 0.12)', color: '#dc2626', border: '1px solid rgba(239, 68, 68, 0.3)', fontSize: '11px', whiteSpace: 'nowrap' }}>
+                                <i className="fa-solid fa-arrow-rotate-left"></i> {currentLang === 'en' ? 'Return to Vault' : 'إرجاع للخزينة'}
+                              </span>
+                            ) : tr.transfer_type === 'INTER_BRANCH' ? (
+                              <span className="badge" style={{ background: 'rgba(168, 85, 247, 0.12)', color: '#9333ea', border: '1px solid rgba(168, 85, 247, 0.3)', fontSize: '11px', whiteSpace: 'nowrap' }}>
+                                <i className="fa-solid fa-arrows-rotate"></i> {currentLang === 'en' ? 'Inter-Branch' : 'بين الفروع'}
+                              </span>
+                            ) : (
+                              <span className="badge" style={{ background: 'rgba(16, 185, 129, 0.12)', color: '#059669', border: '1px solid rgba(16, 185, 129, 0.3)', fontSize: '11px', whiteSpace: 'nowrap' }}>
+                                <i className="fa-solid fa-truck"></i> {currentLang === 'en' ? 'Outbound' : 'إرسال لفرع'}
+                              </span>
+                            )}
+                          </td>
                           <td>{translateDb(tr.source_branch)}</td>
                           <td>{translateDb(tr.destination_branch)}</td>
-                          <td>{tr.courier_info}</td>
+                          <td>
+                            {tr.return_reason ? (
+                              <div style={{ fontSize: '12px', color: '#dc2626', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                <i className="fa-solid fa-triangle-exclamation"></i> {tr.return_reason}
+                              </div>
+                            ) : null}
+                            {tr.notes ? (
+                              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: tr.return_reason ? '2px' : 0 }}>
+                                {tr.notes}
+                              </div>
+                            ) : null}
+                            {!tr.return_reason && !tr.notes && <span style={{ color: 'var(--text-muted)' }}>-</span>}
+                          </td>
+                          <td><span style={{ fontSize: '12px' }}>{tr.courier_info}</span></td>
                           <td>
                             <span className={`badge badge-${tr.status_code.toLowerCase()}`}>
                               {translateDb(tr.status_code)}
@@ -9837,10 +9985,10 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                             {tr.status_code === 'APPROVED' && canModify('purchase_orders') && (
                               <button 
                                 className="btn btn-primary" 
-                                style={{ padding: '4px 10px', fontSize: '11px' }}
+                                style={{ padding: '4px 10px', fontSize: '11px', whiteSpace: 'nowrap' }}
                                 onClick={() => handleReceiveTransfer(tr.transfer_id)}
                               >
-                                {currentLang === 'en' ? 'Receive' : 'استلام'}
+                                <i className="fa-solid fa-box-open"></i> {currentLang === 'en' ? 'Receive' : 'استلام'}
                               </button>
                             )}
                           </td>
@@ -9859,10 +10007,34 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                   <i className="fa-solid fa-circle-exclamation"></i> {currentLang === 'en' ? 'Read-Only Mode: You cannot initiate branch transfers.' : 'وضع القراءة فقط: لا يمكنك بدء عملية تحويل الفروع.'}
                 </div>
               )}
-              <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>
-                {currentLang === 'en' ? 'Send a ready metal item to another branch/channel.' : 'إرسال سبيكة جاهزة من الخزينة الحالية إلى فرع أو قناة أخرى.'}
-              </p>
               
+              <div style={{ padding: '10px 12px', background: 'rgba(59, 130, 246, 0.08)', border: '1px solid rgba(59, 130, 246, 0.25)', borderRadius: '8px', color: '#2563eb', fontSize: '12px', marginBottom: '15px', lineHeight: '1.4' }}>
+                <i className="fa-solid fa-circle-info"></i> <strong>{currentLang === 'en' ? 'Customer Gold Only:' : 'سبائك العملاء فقط:'}</strong> {currentLang === 'en' ? 'Branch Transfers are strictly restricted to customer-owned gold bars. KFH proprietary bars cannot be transferred.' : 'تحويلات الفروع مقتصرة حصرياً على سبائك العملاء، ولا يمكن تحويل سبائك بيتك الخاصة.'}
+              </div>
+
+              <div className="form-group">
+                <label style={{ fontWeight: 600 }}>{currentLang === 'en' ? 'Transfer Purpose / Direction' : 'غرض واتجاه التحويل'}</label>
+                <select
+                  value={transferType}
+                  onChange={e => {
+                    const val = e.target.value as any;
+                    setTransferType(val);
+                    if (val === 'RETURN_TO_VAULT') {
+                      const mainVault = branchesList.find((b: any) => b.branch_code === 'MAIN_HO' || b.branch_id === 1);
+                      if (mainVault) {
+                        setTransferDestBranchId(mainVault.branch_id.toString());
+                      }
+                    }
+                  }}
+                  style={{ color: '#000', fontWeight: 600 }}
+                  disabled={!canModify('purchase_orders')}
+                >
+                  <option value="OUTBOUND_TO_BRANCH">{currentLang === 'en' ? '🚚 Outbound to Branch (Customer Delivery / Pickup)' : '🚚 إرسال للفرع (تسليم / استلام عميل)'}</option>
+                  <option value="INTER_BRANCH">{currentLang === 'en' ? '🔄 Inter-Branch Transfer' : '🔄 تحويل بين الفروع'}</option>
+                  <option value="RETURN_TO_VAULT">{currentLang === 'en' ? '↩️ Return Back to Main Vault (Customer Unclaimed / Return)' : '↩️ إرجاع إلى الخزينة الرئيسية (عدم استلام العميل / إرجاع)'}</option>
+                </select>
+              </div>
+
               <div className="form-group" style={{ background: 'rgba(0, 155, 78, 0.03)', padding: '10px', borderRadius: '8px', border: '1px solid rgba(0, 155, 78, 0.15)', marginBottom: '15px' }}>
                 <label style={{ color: 'var(--kfh-green)', fontWeight: 'bold' }}>
                   <i className="fa-solid fa-barcode"></i> {currentLang === 'en' ? 'Scan Barcode / Serial' : 'مسح الباركود / الرقم التسلسلي'}
@@ -9885,6 +10057,12 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                             : `⚠️ حظر حركة الخروج: السبيكة ${found.serial_number} موسومة كـ تالفة (${found.damage_reason || 'عيب'}). لا يمكن نقلها أو إخراجها من الخزينة الرئيسية.`);
                           setTransferItemId(null);
                           setTransferItemSerial('');
+                        } else if (found.ownership_type && found.ownership_type !== 'CUSTOMER_OWNED') {
+                          alert(currentLang === 'en'
+                            ? `⚠️ Branch Transfer Blocked: Bar ${found.serial_number} belongs to ${found.ownership_type}. Branch transfers are strictly restricted to customer-owned bars (CUSTOMER_OWNED).`
+                            : `⚠️ حظر تحويل الفرع: السبيكة ${found.serial_number} ملكية (${found.ownership_type}). تحويلات الفروع مخصصة فقط لسبائك العملاء (CUSTOMER_OWNED).`);
+                          setTransferItemId(null);
+                          setTransferItemSerial('');
                         } else {
                           setTransferItemId(found.item_id);
                           setTransferItemSerial(found.serial_number);
@@ -9902,7 +10080,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
               </div>
 
               <div className="form-group">
-                <label>{currentLang === 'en' ? 'Select Metal Item (Ready)' : 'اختر السبيكة (الجاهزة)'}</label>
+                <label>{currentLang === 'en' ? 'Select Metal Item (Customer Owned Only)' : 'اختر السبيكة (سبائك العملاء فقط)'}</label>
                 <select 
                   value={transferItemId || ''} 
                   onChange={e => {
@@ -9914,29 +10092,93 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                   style={{ color: '#000' }}
                   disabled={!canModify('purchase_orders')}
                 >
-                  <option value="">-- {currentLang === 'en' ? 'Choose Bar' : 'اختر السبيكة'} --</option>
-                  {inventoryList.filter((i: any) => i.status === 'READY').map((item: any, idx: number) => (
+                  <option value="">-- {currentLang === 'en' ? 'Choose Customer Bar' : 'اختر سبيكة العميل'} --</option>
+                  {inventoryList.filter((i: any) => (i.ownership_type === 'CUSTOMER_OWNED' || !i.ownership_type) && (i.status === 'READY' || i.status === 'HELD_IN_CUSTODY')).map((item: any, idx: number) => (
                     <option key={idx} value={item.item_id}>
-                      {item.serial_number} - {item.metal} ({item.denomination})
+                      {item.serial_number} - {item.metal} ({item.denomination}) [{currentLang === 'en' ? 'Customer' : 'عميل'}]
                     </option>
                   ))}
                 </select>
               </div>
 
               <div className="form-group">
-                <label>{currentLang === 'en' ? 'Destination Branch' : 'الفرع المستهدف'}</label>
+                <label>{currentLang === 'en' ? 'Destination Branch / Vault' : 'الفرع أو الخزينة المستهدفة'}</label>
                 <select 
                   value={transferDestBranchId} 
                   onChange={e => setTransferDestBranchId(e.target.value)} 
                   style={{ color: '#000' }}
                   disabled={!canModify('purchase_orders')}
                 >
-                  <option value="">-- {currentLang === 'en' ? 'Select Branch' : 'اختر الفرع'} --</option>
+                  <option value="">-- {currentLang === 'en' ? 'Select Destination' : 'اختر الوجهة'} --</option>
                   {branchesList.map((b: any, idx: number) => (
-                    <option key={idx} value={b.branch_id}>{b.branch_name}</option>
+                    <option key={idx} value={b.branch_id}>
+                      {b.branch_name} {b.branch_code === 'MAIN_HO' || b.branch_id === 1 ? `(${currentLang === 'en' ? 'Main Central Vault' : 'الخزينة المركزية الرئيسية'})` : ''}
+                    </option>
                   ))}
                 </select>
               </div>
+
+              {transferType === 'RETURN_TO_VAULT' && (
+                <div className="form-group" style={{ background: 'rgba(239, 68, 68, 0.04)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(239, 68, 68, 0.25)', marginBottom: '15px' }}>
+                  <label style={{ color: '#dc2626', fontWeight: 'bold' }}>
+                    <i className="fa-solid fa-arrow-rotate-left"></i> {currentLang === 'en' ? 'Reason for Return to Vault' : 'سبب الإرجاع إلى الخزينة الرئيسية'} *
+                  </label>
+                  <select
+                    value={transferReturnReasonPreset}
+                    onChange={e => setTransferReturnReasonPreset(e.target.value)}
+                    style={{ color: '#000', marginBottom: '8px' }}
+                    disabled={!canModify('purchase_orders')}
+                  >
+                    <option value="">-- {currentLang === 'en' ? 'Select Reason' : 'اختر السبب'} --</option>
+                    <option value={currentLang === 'en' ? 'Customer did not pickup within SLA (Unclaimed)' : 'عدم استلام العميل للطلب خلال المهلة المحددة'}>
+                      {currentLang === 'en' ? 'Customer did not pickup within SLA (Unclaimed)' : 'عدم استلام العميل للطلب خلال المهلة المحددة'}
+                    </option>
+                    <option value={currentLang === 'en' ? 'Customer requested delivery cancellation' : 'طلب العميل إلغاء استلام السبيكة'}>
+                      {currentLang === 'en' ? 'Customer requested delivery cancellation' : 'طلب العميل إلغاء استلام السبيكة'}
+                    </option>
+                    <option value={currentLang === 'en' ? 'Customer changed pickup branch location' : 'تغيير العميل لفرع الاستلام المطلوب'}>
+                      {currentLang === 'en' ? 'Customer changed pickup branch location' : 'تغيير العميل لفرع الاستلام المطلوب'}
+                    </option>
+                    <option value={currentLang === 'en' ? 'Branch vault security / capacity consolidation' : 'دواعي أمان الخزينة / إعادة تجميع المخزون'}>
+                      {currentLang === 'en' ? 'Branch vault security / capacity consolidation' : 'دواعي أمان الخزينة / إعادة تجميع المخزون'}
+                    </option>
+                    <option value="OTHER">{currentLang === 'en' ? 'Other custom return reason' : 'سبب إرجاع مخصص آخر'}</option>
+                  </select>
+
+                  {(transferReturnReasonPreset === 'OTHER' || transferReturnReasonPreset === 'سبب إرجاع مخصص آخر') && (
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder={currentLang === 'en' ? 'Specify custom return reason...' : 'حدد سبب الإرجاع المخصص بالتفصيل...'}
+                      value={transferReturnReasonCustom}
+                      onChange={e => setTransferReturnReasonCustom(e.target.value)}
+                      style={{ marginBottom: '8px' }}
+                    />
+                  )}
+
+                  <textarea
+                    className="form-control"
+                    placeholder={currentLang === 'en' ? 'Additional operational notes / remarks...' : 'ملاحظات تشغيلية إضافية / بيان...'}
+                    value={transferNotes}
+                    onChange={e => setTransferNotes(e.target.value)}
+                    rows={2}
+                  />
+                </div>
+              )}
+
+              {transferType !== 'RETURN_TO_VAULT' && (
+                <div className="form-group">
+                  <label>{currentLang === 'en' ? 'Transfer Notes / Remarks (Optional)' : 'ملاحظات التحويل (اختياري)'}</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder={currentLang === 'en' ? 'e.g. Customer branch pickup booking #1234' : 'مثال: حجز استلام عميل رقم 1234'}
+                    value={transferNotes}
+                    onChange={e => setTransferNotes(e.target.value)}
+                    disabled={!canModify('purchase_orders')}
+                  />
+                </div>
+              )}
 
               <div className="form-group">
                 <label>{currentLang === 'en' ? 'Courier & Escort Info' : 'معلومات الشاحن والمرافق الأمني'}</label>
@@ -9954,7 +10196,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                 className="btn btn-primary"
                 style={{ width: '100%', marginTop: '10px' }}
                 onClick={handleInitiateBranchTransferTab}
-                disabled={!transferItemId || !transferDestBranchId || !canModify('purchase_orders')}
+                disabled={!transferItemId || !transferDestBranchId || !canModify('purchase_orders') || (transferType === 'RETURN_TO_VAULT' && !transferReturnReasonPreset && !transferReturnReasonCustom)}
               >
                 <i className="fa-solid fa-paper-plane"></i> {currentLang === 'en' ? 'Initiate Transfer Workflow' : 'بدء مسار التحويل'}
               </button>
@@ -18823,32 +19065,106 @@ const [migrationApproved, setMigrationApproved] = useState(false);
         {/* BRANCH TRANSFER MODAL */}
         {showTransferModal && (
           <div className="modal-overlay active" onClick={() => setShowTransferModal(false)}>
-            <div className="glass-card modal-content-box" onClick={e => e.stopPropagation()} style={{ maxWidth: '450px' }}>
+            <div className="glass-card modal-content-box" onClick={e => e.stopPropagation()} style={{ maxWidth: '480px' }}>
               <div className="modal-header">
                 <h3>{currentLang === 'ar' ? 'بدء تحويل فرعي' : 'Initiate Branch Transfer'}</h3>
                 <span className="modal-close-btn" onClick={() => setShowTransferModal(false)}>&times;</span>
               </div>
               <div style={{ padding: '10px 0' }}>
-                <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '15px' }}>
-                  {currentLang === 'ar' ? `السبيكة المحددة: ${transferItemSerial}` : `Selected Bar: ${transferItemSerial}`}
-                </p>
+                <div style={{ padding: '8px 12px', background: 'rgba(59, 130, 246, 0.08)', border: '1px solid rgba(59, 130, 246, 0.25)', borderRadius: '8px', color: '#2563eb', fontSize: '12px', marginBottom: '12px' }}>
+                  <i className="fa-solid fa-user-tag"></i> <strong>{currentLang === 'en' ? 'Customer Owned Bar' : 'سبيكة ملكية عميل'}:</strong> {transferItemSerial}
+                </div>
+
                 <div className="form-group">
-                  <label>{currentLang === 'ar' ? 'فرع الوجهة' : 'Destination Branch'}</label>
+                  <label style={{ fontWeight: 600 }}>{currentLang === 'ar' ? 'غرض واتجاه التحويل' : 'Transfer Purpose / Direction'}</label>
+                  <select
+                    value={transferType}
+                    onChange={e => {
+                      const val = e.target.value as any;
+                      setTransferType(val);
+                      if (val === 'RETURN_TO_VAULT') {
+                        const mainVault = branchesList.find((b: any) => b.branch_code === 'MAIN_HO' || b.branch_id === 1);
+                        if (mainVault) {
+                          setTransferDestBranchId(mainVault.branch_id.toString());
+                        }
+                      }
+                    }}
+                    style={{ color: '#000', fontWeight: 600 }}
+                  >
+                    <option value="OUTBOUND_TO_BRANCH">{currentLang === 'ar' ? '🚚 إرسال للفرع (تسليم / استلام عميل)' : '🚚 Outbound to Branch (Customer Delivery / Pickup)'}</option>
+                    <option value="INTER_BRANCH">{currentLang === 'ar' ? '🔄 تحويل بين الفروع' : '🔄 Inter-Branch Transfer'}</option>
+                    <option value="RETURN_TO_VAULT">{currentLang === 'ar' ? '↩️ إرجاع إلى الخزينة الرئيسية (عدم استلام العميل / إرجاع)' : '↩️ Return Back to Main Vault (Customer Unclaimed / Return)'}</option>
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label>{currentLang === 'ar' ? 'فرع أو خزينة الوجهة' : 'Destination Branch / Vault'}</label>
                   <select value={transferDestBranchId} onChange={e => setTransferDestBranchId(e.target.value)} style={{ color: '#000' }}>
-                    <option value="">{currentLang === 'ar' ? '-- اختر فرع الوجهة --' : '-- Select Destination Branch --'}</option>
+                    <option value="">{currentLang === 'ar' ? '-- اختر الوجهة --' : '-- Select Destination --'}</option>
                     {branchesList.filter(b => b.is_active).map((b: any) => (
-                      <option key={b.branch_id} value={b.branch_id}>{b.branch_name} ({b.branch_code})</option>
+                      <option key={b.branch_id} value={b.branch_id}>
+                        {b.branch_name} ({b.branch_code}) {b.branch_code === 'MAIN_HO' || b.branch_id === 1 ? `[${currentLang === 'en' ? 'Central Vault' : 'الخزينة المركزية'}]` : ''}
+                      </option>
                     ))}
                   </select>
                 </div>
+
+                {transferType === 'RETURN_TO_VAULT' && (
+                  <div className="form-group" style={{ background: 'rgba(239, 68, 68, 0.04)', padding: '10px', borderRadius: '8px', border: '1px solid rgba(239, 68, 68, 0.25)', marginBottom: '12px' }}>
+                    <label style={{ color: '#dc2626', fontWeight: 'bold' }}>
+                      <i className="fa-solid fa-arrow-rotate-left"></i> {currentLang === 'ar' ? 'سبب الإرجاع إلى الخزينة الرئيسية' : 'Reason for Return to Vault'} *
+                    </label>
+                    <select
+                      value={transferReturnReasonPreset}
+                      onChange={e => setTransferReturnReasonPreset(e.target.value)}
+                      style={{ color: '#000', marginBottom: '8px' }}
+                    >
+                      <option value="">-- {currentLang === 'ar' ? 'اختر السبب' : 'Select Reason'} --</option>
+                      <option value={currentLang === 'ar' ? 'عدم استلام العميل للطلب خلال المهلة المحددة' : 'Customer did not pickup within SLA (Unclaimed)'}>
+                        {currentLang === 'ar' ? 'عدم استلام العميل للطلب خلال المهلة المحددة' : 'Customer did not pickup within SLA (Unclaimed)'}
+                      </option>
+                      <option value={currentLang === 'ar' ? 'طلب العميل إلغاء استلام السبيكة' : 'Customer requested delivery cancellation'}>
+                        {currentLang === 'ar' ? 'طلب العميل إلغاء استلام السبيكة' : 'Customer requested delivery cancellation'}
+                      </option>
+                      <option value={currentLang === 'ar' ? 'تغيير العميل لفرع الاستلام المطلوب' : 'Customer changed pickup branch location'}>
+                        {currentLang === 'ar' ? 'تغيير العميل لفرع الاستلام المطلوب' : 'Customer changed pickup branch location'}
+                      </option>
+                      <option value={currentLang === 'ar' ? 'دواعي أمان الخزينة / إعادة تجميع المخزون' : 'Branch vault security / capacity consolidation'}>
+                        {currentLang === 'ar' ? 'دواعي أمان الخزينة / إعادة تجميع المخزون' : 'Branch vault security / capacity consolidation'}
+                      </option>
+                      <option value="OTHER">{currentLang === 'ar' ? 'سبب إرجاع مخصص آخر' : 'Other custom return reason'}</option>
+                    </select>
+
+                    {(transferReturnReasonPreset === 'OTHER' || transferReturnReasonPreset === 'سبب إرجاع مخصص آخر') && (
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder={currentLang === 'ar' ? 'حدد سبب الإرجاع المخصص بالتفصيل...' : 'Specify custom return reason...'}
+                        value={transferReturnReasonCustom}
+                        onChange={e => setTransferReturnReasonCustom(e.target.value)}
+                        style={{ marginBottom: '8px' }}
+                      />
+                    )}
+
+                    <textarea
+                      className="form-control"
+                      placeholder={currentLang === 'ar' ? 'ملاحظات تشغيلية إضافية...' : 'Additional operational notes...'}
+                      value={transferNotes}
+                      onChange={e => setTransferNotes(e.target.value)}
+                      rows={2}
+                    />
+                  </div>
+                )}
+
                 <div className="form-group">
                   <label>{currentLang === 'ar' ? 'معلومات شركة الشحن / النقل' : 'Courier / Security Details'}</label>
                   <input type="text" className="form-control" placeholder="e.g. KFH Security Escort Group Alpha"
                     value={transferCourierInfo} onChange={e => setTransferCourierInfo(e.target.value)} />
                 </div>
+
                 <button className="btn btn-primary" style={{ width: '100%', marginTop: '15px' }}
                   onClick={handleInitiateBranchTransfer}
-                  disabled={!transferDestBranchId}>
+                  disabled={!transferDestBranchId || (transferType === 'RETURN_TO_VAULT' && !transferReturnReasonPreset && !transferReturnReasonCustom)}>
                   <i className="fa-solid fa-paper-plane"></i> {currentLang === 'ar' ? 'بدء حركة التحويل الفرعي' : 'Initiate Transfer Workflow'}
                 </button>
               </div>

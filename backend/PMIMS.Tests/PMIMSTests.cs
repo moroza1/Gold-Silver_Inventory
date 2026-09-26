@@ -903,7 +903,7 @@ public class PMIMSTests
             LocationId = 1, // Branch 1
             SerialNumber = "SN-TRANSFER-TEST",
             StatusCode = "READY",
-            OwnershipType = "KFH_OWNED"
+            OwnershipType = "CUSTOMER_OWNED"
         };
         setup.Context.InventoryItems.Add(item);
         await setup.Context.SaveChangesAsync();
@@ -1080,7 +1080,7 @@ public class PMIMSTests
             ProductId = 1,
             LotId = 1,
             LocationId = 1,
-            OwnershipType = "KFH_OWNED",
+            OwnershipType = "CUSTOMER_OWNED",
             StatusCode = "READY",
             IsDamaged = true
         };
@@ -1918,7 +1918,7 @@ public class PMIMSTests
             ProductId = 1,
             LotId = 1,
             LocationId = 1, // Main Vault
-            OwnershipType = "KFH_OWNED",
+            OwnershipType = "CUSTOMER_OWNED",
             StatusCode = "DAMAGED",
             IsDamaged = true,
             DamageApprovalStatus = "APPROVED",
@@ -2487,7 +2487,7 @@ public class PMIMSTests
         string checkerStartSteps = "[{\"step_name\":\"Checker Audit First\",\"required_role\":\"Treasury Operations (Checker)\",\"description\":\"Checker start\"}]";
         await repo.SaveWorkflowTemplateAsync("BRANCH_TRANSFER", "Transfer Audit Flow", "Checker starting flow", checkerStartSteps);
 
-        var item = new InventoryItem { SerialNumber = "BAR-WF-CHK-01", ProductId = 1, LocationId = 1, LotId = 1, StatusCode = "READY", OwnershipType = "KFH_OWNED" };
+        var item = new InventoryItem { SerialNumber = "BAR-WF-CHK-01", ProductId = 1, LocationId = 1, LotId = 1, StatusCode = "READY", OwnershipType = "CUSTOMER_OWNED" };
         setup.Context.InventoryItems.Add(item);
         await setup.Context.SaveChangesAsync();
 
@@ -4218,6 +4218,300 @@ public class PMIMSTests
             var countReprint = await cmdReprint.ExecuteScalarAsync();
             Assert.NotNull(countReprint);
         }
+    }
+
+    [Fact]
+    public async Task BranchTransfers_EnforcesCustomerOwnedOnly_And_SupportsReturnToVaultWorkflowWithReason()
+    {
+        using var setup = CreateContext();
+        await SeedBasicDataAsync(setup.Context);
+
+        var repo = new InventoryRepository(setup.Context);
+
+        // 1. Setup Branch 2 (Fahaheel) and locations
+        var branchFahaheel = new Branch { BranchCode = "FAHAHEEL", BranchName = "Fahaheel Branch", VaultId = 1 };
+        setup.Context.Branches.Add(branchFahaheel);
+        await setup.Context.SaveChangesAsync();
+
+        var destLocBranch2 = new InventoryLocation
+        {
+            VaultId = 1,
+            BranchId = branchFahaheel.BranchId,
+            ZoneRoom = "Fahaheel Safe",
+            ShelfRow = "Row 1",
+            SlotBin = "Slot 1"
+        };
+        setup.Context.InventoryLocations.Add(destLocBranch2);
+
+        // 2. Setup Workflow Template for Branch Transfers
+        var transferWorkflow = new WorkflowTemplate
+        {
+            WorkflowType = "BRANCH_TRANSFER",
+            Name = "Branch Transfer Workflow",
+            Description = "Approval for transfers between vaults and branches.",
+            IsActive = true
+        };
+        setup.Context.WorkflowTemplates.Add(transferWorkflow);
+        await setup.Context.SaveChangesAsync();
+
+        var step1 = new WorkflowStep
+        {
+            TemplateId = transferWorkflow.TemplateId,
+            StepOrder = 1,
+            StepName = "Checker Approval",
+            RequiredRole = "Operations Checker",
+            Description = "Review and approve metal movement."
+        };
+        setup.Context.WorkflowSteps.Add(step1);
+        await setup.Context.SaveChangesAsync();
+
+        // 3. Create a KFH_OWNED bar and verify that transferring it is blocked
+        var kfhBar = new InventoryItem
+        {
+            ItemId = 7701,
+            LotId = 1,
+            ProductId = 1,
+            LocationId = 1,
+            SerialNumber = "KFH-PROP-BAR-001",
+            StatusCode = "READY",
+            OwnershipType = "KFH_OWNED"
+        };
+        setup.Context.InventoryItems.Add(kfhBar);
+        await setup.Context.SaveChangesAsync();
+
+        var exKfhDirect = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await repo.InitiateBranchTransferAsync(kfhBar.ItemId, destLocBranch2.LocationId, "Secured Courier", "treasury-maker");
+        });
+        Assert.Contains("customer-owned bars only", exKfhDirect.Message, StringComparison.OrdinalIgnoreCase);
+
+        var exKfhWf = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await repo.InitiateWorkflowBranchTransferAsync(kfhBar.ItemId, branchFahaheel.BranchId, "Secured Courier", "treasury-maker");
+        });
+        Assert.Contains("customer-owned bars only", exKfhWf.Message, StringComparison.OrdinalIgnoreCase);
+
+        // 4. Create a CUSTOMER_OWNED bar and initiate OUTBOUND transfer from Main Vault to Fahaheel Branch
+        var customerBar = new InventoryItem
+        {
+            ItemId = 7702,
+            LotId = 1,
+            ProductId = 1,
+            LocationId = 1, // Main Vault (Branch 1)
+            SerialNumber = "CUST-GOLD-BAR-888",
+            StatusCode = "READY",
+            OwnershipType = "CUSTOMER_OWNED"
+        };
+        setup.Context.InventoryItems.Add(customerBar);
+        await setup.Context.SaveChangesAsync();
+
+        var outboundTransfer = await repo.InitiateWorkflowBranchTransferAsync(
+            customerBar.ItemId,
+            branchFahaheel.BranchId,
+            "Armored Van #4",
+            "treasury-maker",
+            transferType: "OUTBOUND_TO_BRANCH",
+            returnReason: null,
+            notes: "Customer scheduled for pickup at Fahaheel"
+        );
+
+        Assert.NotNull(outboundTransfer);
+        Assert.Equal("OUTBOUND_TO_BRANCH", outboundTransfer.TransferType);
+        Assert.Equal("PENDING_APPROVAL", outboundTransfer.StatusCode);
+        Assert.Equal("RESERVED", customerBar.StatusCode);
+
+        // Approve outbound transfer
+        var groupChecker = new PrivilegeGroup { GroupName = "Operations Checker", Description = "Checker group", IsSystem = true };
+        setup.Context.PrivilegeGroups.Add(groupChecker);
+        await setup.Context.SaveChangesAsync();
+
+        var userChecker = new AppUser { Username = "branch-xfr-checker", DisplayName = "Transfer Checker", Email = "xfr-checker@test.local", PasswordHash = "test-hash" };
+        setup.Context.AppUsers.Add(userChecker);
+        await setup.Context.SaveChangesAsync();
+        setup.Context.UserGroupMemberships.Add(new UserGroupMembership { UserId = userChecker.UserId, GroupId = groupChecker.GroupId, AssignedBy = "TEST" });
+        await setup.Context.SaveChangesAsync();
+
+        var activeInstances = (await repo.GetActiveWorkflowInstancesAsync()).ToList();
+        var outboundWf = activeInstances.First(i => i.EntityId == outboundTransfer.TransferId && i.WorkflowType == "BRANCH_TRANSFER");
+        var approveOutbound = await repo.ProcessWorkflowActionAsync(outboundWf.InstanceId, "branch-xfr-checker", "APPROVED", "Approved transfer to Fahaheel");
+        Assert.Equal("SUCCESS", approveOutbound);
+
+        // Receive at Fahaheel Branch
+        var receiveOutbound = await repo.ReceiveBranchTransferAsync(outboundTransfer.TransferId, "fahaheel-vault-mgr");
+        Assert.Equal("SUCCESS", receiveOutbound);
+        Assert.Equal("READY", customerBar.StatusCode);
+        Assert.Equal(destLocBranch2.LocationId, customerBar.LocationId);
+
+        // 5. Customer did not pickup -> Initiate RETURN_TO_VAULT from Fahaheel Branch back to Main Vault
+        var returnTransfer = await repo.InitiateWorkflowBranchTransferAsync(
+            customerBar.ItemId,
+            destinationBranchId: 1, // Main HO central vault
+            courierInfo: "Armored Van #2",
+            initiatedBy: "fahaheel-maker",
+            transferType: "RETURN_TO_VAULT",
+            returnReason: "Customer did not pickup within SLA (Unclaimed)",
+            notes: "Customer failed to claim within 14 days, returning to Central Vault"
+        );
+
+        Assert.NotNull(returnTransfer);
+        Assert.Equal("RETURN_TO_VAULT", returnTransfer.TransferType);
+        Assert.Equal("Customer did not pickup within SLA (Unclaimed)", returnTransfer.ReturnReason);
+        Assert.Equal(branchFahaheel.BranchId, returnTransfer.SourceBranchId);
+        Assert.Equal(1, returnTransfer.DestinationBranchId);
+        Assert.Equal("RESERVED", customerBar.StatusCode);
+
+        // Approve return transfer
+        var activeReturnInstances = (await repo.GetActiveWorkflowInstancesAsync()).ToList();
+        var returnWf = activeReturnInstances.First(i => i.EntityId == returnTransfer.TransferId && i.WorkflowType == "BRANCH_TRANSFER");
+        var approveReturn = await repo.ProcessWorkflowActionAsync(returnWf.InstanceId, "branch-xfr-checker", "APPROVED", "Approved return back to main vault");
+        Assert.Equal("SUCCESS", approveReturn);
+
+        // Receive return transfer at Main Central Vault
+        var receiveReturn = await repo.ReceiveBranchTransferAsync(returnTransfer.TransferId, "main-vault-receptionist");
+        Assert.Equal("SUCCESS", receiveReturn);
+        Assert.Equal("RECEIVED", returnTransfer.StatusCode);
+        Assert.Equal("READY", customerBar.StatusCode);
+        Assert.Equal(1, customerBar.LocationId); // Successfully back in main vault location
+    }
+
+    [Fact]
+    public async Task CustomerReceipt_CustodyDeposit_ValidatesPriorKfhHistory_AndTransfersToMainVaultByCourier()
+    {
+        using var setup = CreateContext();
+        await SeedBasicDataAsync(setup.Context);
+        var repo = new InventoryRepository(setup.Context);
+
+        // 1. Setup Customer and Account
+        var cust = new Customer { CustomerId = 10, CustomerName = "Zaid Al-Kuwaiti", CivilId = "290010101010", Email = "zaid@test.local", MobileNumber = "96590001010", IsActive = true };
+        var acc = new CustomerAccount { AccountId = 20, CustomerId = 10, AccountNumber = "ACC-ZAID-01", Currency = "KWD" };
+        setup.Context.Customers.Add(cust);
+        setup.Context.CustomerAccounts.Add(acc);
+
+        // Branch 2 (Salmiya) and location
+        var branchSalmiya = await setup.Context.Branches.FindAsync(2);
+        var branch2Loc = new InventoryLocation { LocationId = 102, VaultId = 1, BranchId = 2, ZoneRoom = "Salmiya Vault", ShelfRow = "R1", SlotBin = "S1" };
+        setup.Context.InventoryLocations.Add(branch2Loc);
+
+        // Prior KFH bar sold to customer (was in KFH stock, now status DISPENSED / CUSTOMER_OWNED)
+        var priorBar = new InventoryItem
+        {
+            ItemId = 55,
+            LotId = 1,
+            SerialNumber = "KFH-GOLD-PRIOR-01",
+            ProductId = 1,
+            LocationId = null,
+            OwnershipType = "CUSTOMER_OWNED",
+            StatusCode = "DISPENSED"
+        };
+        // Active KFH bar in vault
+        var activeKfhBar = new InventoryItem
+        {
+            ItemId = 56,
+            LotId = 1,
+            SerialNumber = "KFH-GOLD-ACTIVE-01",
+            ProductId = 1,
+            LocationId = 1,
+            OwnershipType = "KFH_OWNED",
+            StatusCode = "READY"
+        };
+        setup.Context.InventoryItems.AddRange(priorBar, activeKfhBar);
+        await setup.Context.SaveChangesAsync();
+
+        // 2. Validation Checks
+        // A. Bar never in KFH records must fail
+        var nonExistentVal = await repo.ValidateIntakeSerialsAsync(new List<string> { "UNKNOWN-NON-KFH-999" }, sourceType: "CUSTOMER", productId: 1);
+        Assert.False(nonExistentVal.IsValid);
+        Assert.Contains(nonExistentVal.Errors, e => e.Contains("never recorded in KFH stock history"));
+
+        // B. Active KFH bar currently in vault must fail
+        var activeKfhVal = await repo.ValidateIntakeSerialsAsync(new List<string> { "KFH-GOLD-ACTIVE-01" }, sourceType: "CUSTOMER", productId: 1);
+        Assert.False(activeKfhVal.IsValid);
+        Assert.Contains(activeKfhVal.Errors, e => e.Contains("Customer receipt is not permitted while actively owned by KFH"));
+
+        // C. Customer-owned prior KFH bar must pass validation
+        var validCustVal = await repo.ValidateIntakeSerialsAsync(new List<string> { "KFH-GOLD-PRIOR-01" }, sourceType: "CUSTOMER", productId: 1);
+        Assert.True(validCustVal.IsValid);
+
+        // 3. Setup INTAKE_SHIPMENT and BRANCH_TRANSFER workflow templates
+        var intakeTemplate = new WorkflowTemplate { TemplateId = 201, WorkflowType = "INTAKE_SHIPMENT", Name = "Intake Verification Workflow", Description = "Verification", IsActive = true };
+        intakeTemplate.Steps.Add(new WorkflowStep { StepId = 201, StepOrder = 1, StepName = "Operations Approval", RequiredRole = "Operations Checker", Description = "Checker step" });
+
+        var transferTemplate = new WorkflowTemplate { TemplateId = 202, WorkflowType = "BRANCH_TRANSFER", Name = "Branch Transfer Workflow", Description = "Transfer", IsActive = true };
+        transferTemplate.Steps.Add(new WorkflowStep { StepId = 202, StepOrder = 1, StepName = "Transfer Approval", RequiredRole = "Operations Checker", Description = "Checker step" });
+
+        setup.Context.WorkflowTemplates.AddRange(intakeTemplate, transferTemplate);
+        await setup.Context.SaveChangesAsync();
+
+        // 4. Initiate Customer Custody Deposit at Salmiya Branch (Location 102) with TransferToMainVault = true
+        var itemsJson = JsonSerializer.Serialize(new[] { new { serial = "KFH-GOLD-PRIOR-01", product_id = 1 } });
+        var pendingIntake = await repo.InitiateWorkflowIntakeAsync(
+            poId: null,
+            lotNumber: "LOT-CUST-DEPOSIT-01",
+            locationId: 102,
+            receivedBy: "salmiya-officer",
+            serialsJsonList: itemsJson,
+            sourceType: "CUSTOMER",
+            customerId: 10,
+            accountId: 20,
+            receiptReason: "CUSTODY_DEPOSIT",
+            transferToMainVault: true,
+            courierInfo: "Armored Courier Service & Security Escort #77",
+            destinationBranchId: 1
+        );
+
+        Assert.NotNull(pendingIntake);
+        Assert.True(pendingIntake.TransferToMainVault);
+        Assert.Equal(1, pendingIntake.DestinationBranchId);
+        Assert.Equal("Armored Courier Service & Security Escort #77", pendingIntake.CourierInfo);
+
+        // 5. Checker approves the INTAKE_SHIPMENT workflow
+        var groupChecker = new PrivilegeGroup { GroupName = "Operations Checker", Description = "Checker group", IsSystem = true };
+        setup.Context.PrivilegeGroups.Add(groupChecker);
+        await setup.Context.SaveChangesAsync();
+
+        var userChecker = new AppUser { Username = "custody-checker", DisplayName = "Custody Checker", Email = "checker@test.local", PasswordHash = "test-hash" };
+        setup.Context.AppUsers.Add(userChecker);
+        await setup.Context.SaveChangesAsync();
+        setup.Context.UserGroupMemberships.Add(new UserGroupMembership { UserId = userChecker.UserId, GroupId = groupChecker.GroupId, AssignedBy = "TEST" });
+        await setup.Context.SaveChangesAsync();
+
+        var activeInstances = (await repo.GetActiveWorkflowInstancesAsync()).ToList();
+        var intakeWf = activeInstances.First(i => i.EntityId == pendingIntake.PendingIntakeId && i.WorkflowType == "INTAKE_SHIPMENT");
+        var approveResult = await repo.ProcessWorkflowActionAsync(intakeWf.InstanceId, "custody-checker", "APPROVED", "Approved custody receipt from customer Zaid");
+        Assert.Equal("SUCCESS", approveResult);
+
+        // Verify holding and customer allocation created
+        var holding = await setup.Context.CustomerHoldings.FirstOrDefaultAsync(h => h.ItemId == 55 && h.CustomerId == 10);
+        Assert.NotNull(holding);
+        Assert.Equal("HELD_IN_CUSTODY", holding.StatusCode);
+
+        // 6. Verify automatic branch transfer created with courier info to Main Vault
+        var autoTransfer = await setup.Context.BranchTransfers.FirstOrDefaultAsync(t => t.ItemId == 55);
+        Assert.NotNull(autoTransfer);
+        Assert.Equal("RETURN_TO_VAULT", autoTransfer.TransferType);
+        Assert.Equal(2, autoTransfer.SourceBranchId);
+        Assert.Equal(1, autoTransfer.DestinationBranchId);
+        Assert.Equal("Armored Courier Service & Security Escort #77", autoTransfer.CourierInfo);
+        Assert.Equal("PENDING_APPROVAL", autoTransfer.StatusCode);
+
+        // 7. Approve the automatic courier transfer and receive at Main Central Vault
+        var transferWf = (await repo.GetActiveWorkflowInstancesAsync()).First(i => i.EntityId == autoTransfer.TransferId && i.WorkflowType == "BRANCH_TRANSFER");
+        var approveTransfer = await repo.ProcessWorkflowActionAsync(transferWf.InstanceId, "custody-checker", "APPROVED", "Approved courier transport to Main Vault");
+        Assert.Equal("SUCCESS", approveTransfer);
+
+        var receiveResult = await repo.ReceiveBranchTransferAsync(autoTransfer.TransferId, "main-vault-custodian");
+        Assert.Equal("SUCCESS", receiveResult);
+
+        // Bar is now located at Main Vault (location 1), status is HELD_IN_CUSTODY, and customer allocation updated
+        var itemFinal = await setup.Context.InventoryItems.FindAsync(55);
+        Assert.NotNull(itemFinal);
+        Assert.Equal(1, itemFinal.LocationId);
+        Assert.Equal("CUSTOMER_OWNED", itemFinal.OwnershipType);
+        Assert.Equal("HELD_IN_CUSTODY", itemFinal.StatusCode);
+
+        var allocation = await setup.Context.CustomerAllocations.FirstOrDefaultAsync(a => a.HoldingId == holding.HoldingId);
+        Assert.NotNull(allocation);
+        Assert.Equal(1, allocation.AssignedLocationId);
     }
 }
 
