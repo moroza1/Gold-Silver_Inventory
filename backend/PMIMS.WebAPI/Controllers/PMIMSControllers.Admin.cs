@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Claims;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
@@ -223,23 +224,77 @@ public partial class PMIMSControllers
         return Ok(new { message = "Branch deleted successfully." });
     }
 
+    [Authorize(Policy = "master_data.write")]
+    [HttpPost("catalog/vendors")]
+    public async Task<IActionResult> CreateVendor([FromBody] SaveVendorRequest req)
+    {
+        if (string.IsNullOrWhiteSpace(req.VendorCode) || string.IsNullOrWhiteSpace(req.VendorName))
+            return BadRequest(new { error = "VendorCode and VendorName are required." });
+
+        var vendor = await _repository.CreateVendorAsync(req.VendorCode, req.VendorName, req.CountryOfOrigin, req.IsShariaCompliant, req.ContactEmail);
+        return Ok(new {
+            vendor_id = vendor.VendorId,
+            code = vendor.VendorCode,
+            name = vendor.VendorName,
+            country = vendor.CountryOfOrigin,
+            sharia = vendor.IsShariaCompliant,
+            email = vendor.ContactEmail,
+            message = "Vendor created successfully."
+        });
+    }
+
+    [Authorize(Policy = "master_data.write")]
+    [HttpPut("catalog/vendors/{id}")]
+    public async Task<IActionResult> UpdateVendor(int id, [FromBody] SaveVendorRequest req)
+    {
+        if (string.IsNullOrWhiteSpace(req.VendorCode) || string.IsNullOrWhiteSpace(req.VendorName))
+            return BadRequest(new { error = "VendorCode and VendorName are required." });
+
+        var vendor = await _repository.UpdateVendorAsync(id, req.VendorCode, req.VendorName, req.CountryOfOrigin, req.IsShariaCompliant, req.ContactEmail);
+        if (vendor == null) return NotFound(new { error = "Vendor not found." });
+
+        return Ok(new {
+            vendor_id = vendor.VendorId,
+            code = vendor.VendorCode,
+            name = vendor.VendorName,
+            country = vendor.CountryOfOrigin,
+            sharia = vendor.IsShariaCompliant,
+            email = vendor.ContactEmail,
+            message = "Vendor updated successfully."
+        });
+    }
+
+    [Authorize(Policy = "master_data.write")]
+    [HttpDelete("catalog/vendors/{id}")]
+    public async Task<IActionResult> DeleteVendor(int id)
+    {
+        var result = await _repository.DeleteVendorAsync(id);
+        if (!result) return NotFound(new { error = "Vendor not found." });
+        return Ok(new { message = "Vendor deleted successfully." });
+    }
+
     // =========================================================================
     // STOCK REORDER THRESHOLDS
     // =========================================================================
 
     [Authorize(Policy = "master_data.read")]
     [HttpGet("inventory/reorder-thresholds")]
-    public async Task<IActionResult> GetReorderThresholds()
+    public async Task<IActionResult> GetReorderThresholds([FromQuery] string? type = null)
     {
-        var thresholds = await _repository.GetReorderThresholdsAsync();
+        var thresholds = await _repository.GetReorderThresholdsAsync(type);
         return Ok(thresholds.Select(t => new {
             threshold_id = t.ThresholdId,
+            threshold_type = t.ThresholdType,
             product_id = t.ProductId,
             product_code = t.Product?.ProductCode ?? "",
-            product_name = $"{t.Product?.MetalType?.MetalName ?? ""} {t.Product?.Denomination?.Label ?? ""}",
+            product_name = t.Product != null ? $"{t.Product?.MetalType?.MetalName ?? ""} {t.Product?.Denomination?.Label ?? ""}" : $"{t.MetalType?.MetalName ?? "All"} Products",
+            metal_type_id = t.MetalTypeId ?? t.Product?.MetalTypeId,
+            metal_name = t.MetalType?.MetalName ?? t.Product?.MetalType?.MetalName ?? "Gold",
             vendor_id = t.VendorId,
-            vendor_name = t.Vendor?.VendorName ?? "",
+            vendor_name = t.Vendor?.VendorName ?? "All Manufacturers",
             min_stock_qty = t.MinStockQty,
+            max_stock_qty = t.MaxStockQty ?? (t.ThresholdType == "HIGH_STOCK" ? t.MinStockQty : (int?)null),
+            threshold_weight_kg = t.ThresholdWeightKg,
             reorder_qty = t.ReorderQty,
             is_active = t.IsActive
         }));
@@ -249,17 +304,39 @@ public partial class PMIMSControllers
     [HttpPost("inventory/reorder-thresholds")]
     public async Task<IActionResult> SaveReorderThreshold([FromBody] SaveReorderThresholdRequest req)
     {
-        var threshold = await _repository.SaveReorderThresholdAsync(req.ThresholdId, req.ProductId, req.VendorId, req.MinStockQty, req.ReorderQty, req.IsActive);
+        string username = User.Identity?.Name ?? "system-admin";
+        var pending = await _repository.SubmitThresholdChangeRequestAsync(
+            req.ThresholdType,
+            req.ThresholdId,
+            req.ProductId,
+            req.VendorId,
+            req.MinStockQty,
+            req.MaxStockQty,
+            req.ReorderQty,
+            req.IsActive,
+            username,
+            null,
+            req.MetalTypeId,
+            req.ThresholdWeightKg
+        );
         return Ok(new {
-            threshold_id = threshold.ThresholdId,
-            product_id = threshold.ProductId,
-            product_code = threshold.Product?.ProductCode ?? "",
-            vendor_id = threshold.VendorId,
-            vendor_name = threshold.Vendor?.VendorName ?? "",
-            min_stock_qty = threshold.MinStockQty,
-            reorder_qty = threshold.ReorderQty,
-            is_active = threshold.IsActive,
-            message = "Threshold saved successfully."
+            pending_change_id = pending.PendingChangeId,
+            change_type = pending.ChangeType,
+            threshold_type = pending.ThresholdType,
+            threshold_id = pending.ThresholdId,
+            product_id = pending.ProductId,
+            product_code = pending.Product?.ProductCode ?? "",
+            metal_type_id = pending.MetalTypeId,
+            metal_name = pending.MetalType?.MetalName ?? pending.Product?.MetalType?.MetalName ?? "Gold",
+            vendor_id = pending.VendorId,
+            vendor_name = pending.Vendor?.VendorName ?? "All Manufacturers",
+            min_stock_qty = pending.MinStockQty,
+            max_stock_qty = pending.MaxStockQty,
+            threshold_weight_kg = pending.ThresholdWeightKg,
+            reorder_qty = pending.ReorderQty,
+            is_active = pending.IsActive,
+            status_code = pending.StatusCode,
+            message = $"{pending.ThresholdType} cut-off threshold configuration submitted for Maker-Checker approval."
         });
     }
 
@@ -267,16 +344,133 @@ public partial class PMIMSControllers
     [HttpDelete("inventory/reorder-thresholds/{id}")]
     public async Task<IActionResult> DeleteReorderThreshold(int id)
     {
-        var result = await _repository.DeleteReorderThresholdAsync(id);
-        if (!result) return NotFound();
-        return Ok(new { message = "Threshold deleted successfully." });
+        string username = User.Identity?.Name ?? "system-admin";
+        var pending = await _repository.SubmitThresholdDeleteRequestAsync(id, username);
+        return Ok(new {
+            pending_change_id = pending.PendingChangeId,
+            change_type = pending.ChangeType,
+            threshold_type = pending.ThresholdType,
+            threshold_id = pending.ThresholdId,
+            status_code = pending.StatusCode,
+            message = "Cut-off threshold deletion request submitted for Maker-Checker approval."
+        });
+    }
+
+    [Authorize(Policy = "master_data.read")]
+    [HttpGet("inventory/pending-threshold-changes")]
+    public async Task<IActionResult> GetPendingThresholdChanges([FromQuery] string? type = null)
+    {
+        var changes = await _repository.GetPendingThresholdChangesAsync(type);
+        return Ok(changes.Select(c => new {
+            pending_change_id = c.PendingChangeId,
+            change_type = c.ChangeType,
+            threshold_type = c.ThresholdType,
+            threshold_id = c.ThresholdId,
+            product_id = c.ProductId,
+            product_code = c.Product?.ProductCode ?? "",
+            product_name = c.Product != null ? $"{c.Product?.MetalType?.MetalName ?? ""} {c.Product?.Denomination?.Label ?? ""}" : $"{c.MetalType?.MetalName ?? "All"} Products",
+            metal_type_id = c.MetalTypeId ?? c.Product?.MetalTypeId,
+            metal_name = c.MetalType?.MetalName ?? c.Product?.MetalType?.MetalName ?? "Gold",
+            vendor_id = c.VendorId,
+            vendor_name = c.Vendor?.VendorName ?? "All Manufacturers",
+            min_stock_qty = c.MinStockQty,
+            max_stock_qty = c.MaxStockQty,
+            threshold_weight_kg = c.ThresholdWeightKg,
+            reorder_qty = c.ReorderQty,
+            is_active = c.IsActive,
+            status_code = c.StatusCode,
+            requested_by = c.RequestedBy,
+            created_at = c.CreatedAt,
+            comments = c.Comments
+        }));
+    }
+
+    // =========================================================================
+    // Damaged Gold High-Stock Alert & Manufacturer Export (Requirement 6)
+    // =========================================================================
+
+    [Authorize(Policy = "dashboard.read")]
+    [HttpGet("inventory/damaged/high-stock-alerts")]
+    public async Task<IActionResult> GetDamagedHighStockAlerts([FromQuery] int? metalTypeId = null)
+    {
+        var alerts = await _repository.GetDamagedHighStockAlertsAsync(metalTypeId);
+        return Ok(alerts);
+    }
+
+    [Authorize]
+    [HttpGet("inventory/damaged/export-candidates")]
+    public async Task<IActionResult> GetDamagedExportCandidates([FromQuery] int? metalTypeId = null, [FromQuery] int? vendorId = null)
+    {
+        var candidates = await _repository.GetDamagedExportCandidatesAsync(metalTypeId, vendorId);
+        return Ok(candidates);
+    }
+
+    [Authorize(Policy = "master_data.write")]
+    [HttpPost("inventory/damaged/export-manifest")]
+    public async Task<IActionResult> GenerateDamagedExportManifest([FromBody] GenerateDamagedExportManifestRequest req)
+    {
+        string username = User.Identity?.Name ?? "system-admin";
+        if (req.ItemIds == null || req.ItemIds.Count == 0)
+        {
+            return BadRequest(new { error = "Please select at least one damaged bar to export to the manufacturer." });
+        }
+
+        try
+        {
+            var manifest = await _repository.GenerateDamagedExportManifestAsync(req.MetalTypeId, req.VendorId, req.ItemIds, username, req.Notes);
+            return Ok(manifest);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
     }
 
     [Authorize(Policy = "dashboard.read")]
     [HttpGet("inventory/low-stock-alerts")]
     public async Task<IActionResult> GetLowStockAlerts()
     {
-        var alerts = await _repository.CheckLowStockAlertsAsync();
+        // Low-stock replenishment alerts are restricted to operational and IT groups,
+        // and hidden from Management / Executive-only viewers.
+        bool isManagementOnly = User.IsInRole("Executive Management")
+            || User.IsInRole("Management")
+            || User.IsInRole("Board")
+            || User.Claims.Any(c => c.Type == ClaimTypes.Role && c.Value.Contains("Management", StringComparison.OrdinalIgnoreCase));
+
+        bool hasOperationalGrant = User.IsInRole("IT/Admin")
+            || User.HasClaim(c => c.Type == "perm:purchase_orders" && c.Value != "HIDDEN")
+            || User.HasClaim(c => c.Type == "perm:master_data" && c.Value != "HIDDEN")
+            || User.HasClaim(c => c.Type == "perm:intake" && c.Value != "HIDDEN");
+
+        if (isManagementOnly && !User.IsInRole("IT/Admin") && !hasOperationalGrant)
+        {
+            return Ok(new List<object>());
+        }
+
+        var alerts = await _repository.CheckStockAlertsAsync();
+        return Ok(alerts);
+    }
+
+    [Authorize(Policy = "dashboard.read")]
+    [HttpGet("inventory/stock-alerts")]
+    public async Task<IActionResult> GetStockAlerts()
+    {
+        bool isManagementOnly = User.IsInRole("Executive Management")
+            || User.IsInRole("Management")
+            || User.IsInRole("Board")
+            || User.Claims.Any(c => c.Type == ClaimTypes.Role && c.Value.Contains("Management", StringComparison.OrdinalIgnoreCase));
+
+        bool hasOperationalGrant = User.IsInRole("IT/Admin")
+            || User.HasClaim(c => c.Type == "perm:purchase_orders" && c.Value != "HIDDEN")
+            || User.HasClaim(c => c.Type == "perm:master_data" && c.Value != "HIDDEN")
+            || User.HasClaim(c => c.Type == "perm:intake" && c.Value != "HIDDEN");
+
+        if (isManagementOnly && !User.IsInRole("IT/Admin") && !hasOperationalGrant)
+        {
+            return Ok(new List<object>());
+        }
+
+        var alerts = await _repository.CheckStockAlertsAsync();
         return Ok(alerts);
     }
 
@@ -523,8 +717,91 @@ public partial class PMIMSControllers
             message = "Reservation TTL updated successfully."
         });
     }
+
+    [Authorize(Policy = "master_data.read")]
+    [HttpGet("settings/turkey-qr-requirement")]
+    public async Task<IActionResult> GetTurkeyQrRequirementSetting()
+    {
+        bool required = await _repository.IsQrCodeRequiredForTurkeyTransferAsync();
+        return Ok(new {
+            setting_key = "RequireQrPrintedForTurkeyTransfer",
+            required,
+            description = "Prevent gold bar ownership transfer from Turkey to KFH unless QR code has been printed"
+        });
+    }
+
+    [Authorize(Policy = "master_data.write")]
+    [HttpPost("settings/turkey-qr-requirement")]
+    public async Task<IActionResult> SaveTurkeyQrRequirementSetting([FromBody] SaveTurkeyQrRequirementRequest req)
+    {
+        string username = User?.Identity?.Name ?? "SYSTEM";
+        var setting = await _repository.SetQrCodeRequiredForTurkeyTransferAsync(req.Required, username);
+        return Ok(new {
+            setting_key = setting.SettingKey,
+            required = req.Required,
+            updated_at = setting.UpdatedAt,
+            updated_by = setting.UpdatedBy,
+            message = req.Required
+                ? "QR Code requirement for Turkey-to-KFH transfers enabled successfully."
+                : "QR Code requirement for Turkey-to-KFH transfers disabled successfully."
+        });
+    }
+
+    [Authorize(Policy = "master_data.read")]
+    [HttpGet("settings/qrcode-reprint-privilege")]
+    public async Task<IActionResult> GetQrReprintPrivilegeSetting()
+    {
+        string level = await _repository.GetQrCodeReprintPrivilegeAsync();
+        return Ok(new {
+            setting_key = "QrCodeReprintPrivilege",
+            privilege_level = level,
+            description = "Privilege level required to reprint physical QR code labels (ADMIN_ONLY, CHECKER_AND_ADMIN, ALL_OPERATORS, DISABLED)"
+        });
+    }
+
+    [Authorize(Policy = "master_data.write")]
+    [HttpPost("settings/qrcode-reprint-privilege")]
+    public async Task<IActionResult> SaveQrReprintPrivilegeSetting([FromBody] SaveQrReprintPrivilegeRequest req)
+    {
+        string username = User?.Identity?.Name ?? "SYSTEM";
+        var setting = await _repository.SetQrCodeReprintPrivilegeAsync(req.PrivilegeLevel, username);
+        return Ok(new {
+            setting_key = setting.SettingKey,
+            privilege_level = setting.SettingValue,
+            updated_at = setting.UpdatedAt,
+            updated_by = setting.UpdatedBy,
+            message = $"QR Code reprint privilege updated to '{setting.SettingValue}' successfully."
+        });
+    }
+
+
+    // =========================================================================
+    // PRESENTATION MODE / ZERO-STATE RESET
+    // ------------------------------------------------------------------------
+    // Wipes all transactional store data, physical inventory items, lots,
+    // transactions, orders, workflows, and audit logs to start from zero for
+    // demonstrations, while keeping all configuration, master products,
+    // locations, users, and rules.
+    // =========================================================================
+    [Authorize(Policy = "user_admin.write")]
+    [HttpPost("admin/system/reset-store-data")]
+    public async Task<IActionResult> ResetStoreDataAndAuditTrail()
+    {
+        string username = User?.Identity?.Name ?? "system-admin";
+        await _repository.ResetStoreDataAndAuditTrailAsync(username);
+        return Ok(new {
+            success = true,
+            message = "All store inventory, transactions, orders, workflows, and audit trail records have been cleared. System configuration and master data preserved for clean presentation.",
+            resetBy = username,
+            timestamp = DateTime.UtcNow
+        });
+    }
 }
 
 public class SaveTtlRequest { public int TtlSeconds { get; set; } public double? TtlMinutes { get; set; } }
+public class SaveTurkeyQrRequirementRequest { public bool Required { get; set; } }
+public class SaveQrReprintPrivilegeRequest { public string PrivilegeLevel { get; set; } = "ADMIN_ONLY"; }
 public class TestErrorRequest { public string? Message { get; set; } }
 public class SqlQueryRequest { public string Query { get; set; } = null!; }
+
+

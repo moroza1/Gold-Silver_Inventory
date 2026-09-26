@@ -110,11 +110,11 @@ public class RateFeedService : IRateFeedService
             // Fallback to simulation if offline/failed
         }
 
-        // Target operating market hours check (simulate IMAL fallback outside 7:00 AM - 5:00 PM Kuwait Time)
+        // Target operating market hours check (simulate Phoenix fallback outside 7:00 AM - 5:00 PM Kuwait Time)
         var kuwaitTime = TimeZoneInfo.ConvertTime(DateTime.UtcNow, TimeZoneInfo.FindSystemTimeZoneById("Arab Standard Time"));
         bool isMarketOpen = kuwaitTime.Hour >= 7 && kuwaitTime.Hour < 17;
 
-        string fallbackSource = isMarketOpen ? "360T Live Feed (Simulated)" : "IMAL Core Rate Fallback (Simulated)";
+        string fallbackSource = isMarketOpen ? "360T Live Feed (Simulated)" : "Phoenix Core Rate Fallback (Simulated)";
 
         decimal baseBid = metalName.Equals("Silver", StringComparison.OrdinalIgnoreCase) ? 28.15m : 2284.50m;
         decimal delta = (decimal)(_rand.NextDouble() - 0.5) * (baseBid * 0.001m);
@@ -126,7 +126,7 @@ public class RateFeedService : IRateFeedService
 }
 
 // ============================================================
-// Cost Tracking & Valuation -- Core Banking (IMAL) GL Integration
+// Cost Tracking & Valuation -- Core Banking (Phoenix) GL Integration
 // ------------------------------------------------------------
 // Pushes one journal entry to Core Banking's general ledger for a PMIMS-
 // originated financial event (currently: a purchase-order receipt's landed
@@ -134,7 +134,7 @@ public class RateFeedService : IRateFeedService
 // "adapter, not vendor lock-in" shape as GenericWebhookMonitoringAdapter:
 // every attempt is first recorded locally as PENDING, then updated to
 // POSTED/FAILED, so core_banking_ledger_postings is a reliable local audit
-// trail even if Core Banking/IMAL is unreachable or not yet wired up for
+// trail even if Core Banking/Phoenix is unreachable or not yet wired up for
 // this environment. When no live endpoint is configured (CoreBanking:
 // WebhookUrl), this simulates a successful post rather than leaving the
 // entry stuck PENDING/DISABLED -- same "always produce a usable result"
@@ -215,13 +215,13 @@ public class CoreBankingGlAdapter : ICoreBankingLedgerService
         }
         else
         {
-            // No live Core Banking/IMAL GL endpoint configured for this environment -- accept
+            // No live Core Banking/Phoenix GL endpoint configured for this environment -- accept
             // the posting locally so the cost-tracking audit trail stays complete. Matches the
-            // gap-closure doc's stance: IMAL/GL exist as concepts in PMIMS, but a
+            // gap-closure doc's stance: Phoenix/GL exist as concepts in PMIMS, but a
             // vendor-specific live connection is out of scope for this codebase alone.
             posting.StatusCode = "POSTED";
             posting.CoreBankingReference = $"SIM-GL-{posting.PostingId:D8}";
-            posting.ResponseMessage = "Simulated Core Banking (IMAL) GL posting -- no live endpoint configured (see CoreBanking:WebhookUrl in appsettings.json).";
+            posting.ResponseMessage = "Simulated Core Banking (Phoenix) GL posting -- no live endpoint configured (see CoreBanking:WebhookUrl in appsettings.json).";
         }
 
         posting.PostedAt = DateTime.UtcNow;

@@ -67,6 +67,96 @@ public class BarcodeLabelService : IBarcodeLabelService
         };
     }
 
+    public async Task<(bool valid, string? error, BarcodeLabelDto? label)> GenerateCustomLabelAsync(CustomBarcodeLabelRequest req)
+    {
+        if (string.IsNullOrWhiteSpace(req.SerialNumber))
+        {
+            return (false, "E2: Serial number is mandatory.", null);
+        }
+
+        if (req.WeightGrams <= 0)
+        {
+            return (false, "E2: Weight must be greater than zero.", null);
+        }
+
+        if (req.PurityValue < 900.0m || req.PurityValue > 1000.0m)
+        {
+            return (false, "E2: Purity must be between 900.0 and 1000.0 (e.g. 999.9).", null);
+        }
+
+        // Check if bar already exists in repository (for context)
+        var existing = await _repository.GetItemBySerialNumberAsync(req.SerialNumber.Trim());
+        if (existing != null)
+        {
+            var existingLabel = MapToDto(existing);
+            return (true, null, existingLabel);
+        }
+
+        // Generate standalone label
+        var gtin14 = ComputeGtin14(1);
+        var lotNumber = req.LotNumber ?? "LOT-MANUAL";
+        var elementString = BuildGs1ElementString(gtin14, lotNumber, req.SerialNumber.Trim());
+        var humanReadable = BuildHumanReadable(gtin14, lotNumber, req.SerialNumber.Trim());
+
+        var denom = string.IsNullOrWhiteSpace(req.DenominationLabel) ? $"{req.WeightGrams}g" : req.DenominationLabel;
+        var productLabel = $"{req.MetalName} {denom} ({req.PurityValue})".Trim();
+        if (!string.IsNullOrWhiteSpace(req.RefinerBrand))
+        {
+            productLabel += $" - {req.RefinerBrand}";
+        }
+
+        var origin = ResolveCustomOrigin(req);
+        var originClean = origin?.Trim() ?? "";
+        var metalClean = string.IsNullOrWhiteSpace(req.MetalName) ? "Gold" : req.MetalName.Trim();
+        var prodType = string.IsNullOrWhiteSpace(originClean) ? metalClean : $"{metalClean} {originClean}";
+        var qrCodePayload = BuildQrCodePayload(req.SerialNumber.Trim(), denom, req.MetalName, origin);
+
+        var label = new BarcodeLabelDto
+        {
+            ItemId = 0,
+            SerialNumber = req.SerialNumber.Trim(),
+            ProductLabel = productLabel,
+            ProductType = prodType,
+            MetalName = metalClean,
+            WeightGrams = req.WeightGrams,
+            PurityValue = req.PurityValue,
+            Denomination = denom,
+            RefinerBrand = req.RefinerBrand,
+            Gtin14 = gtin14,
+            LotNumber = lotNumber,
+            OwnershipType = req.OwnershipType ?? "KFH_OWNED",
+            StatusCode = "READY",
+            LocationDescription = "Main Vault Stage",
+            IsDamaged = false,
+            Gs1ElementString = elementString,
+            Gs1HumanReadable = humanReadable,
+            BarcodeSvg = BuildGs1BarcodeSvg(elementString),
+            QrCodeSvg = BuildQrCodeSvg(qrCodePayload),
+            QrCodeContent = qrCodePayload
+        };
+
+        return (true, null, label);
+    }
+
+    public async Task<List<BarcodeLabelDto>> GenerateBulkLabelsAsync(IEnumerable<string> serialNumbers)
+    {
+        var list = new List<BarcodeLabelDto>();
+        foreach (var sn in serialNumbers.Where(s => !string.IsNullOrWhiteSpace(s)))
+        {
+            var label = await GenerateItemLabelAsync(sn.Trim());
+            if (label != null)
+            {
+                list.Add(label);
+            }
+            else
+            {
+                var (valid, _, customLabel) = await GenerateCustomLabelAsync(new CustomBarcodeLabelRequest { SerialNumber = sn.Trim() });
+                if (valid && customLabel != null) list.Add(customLabel);
+            }
+        }
+        return list;
+    }
+
     // ------------------------------------------------------------------------
     // Mapping
     // ------------------------------------------------------------------------
@@ -83,21 +173,121 @@ public class BarcodeLabelService : IBarcodeLabelService
             productLabel += $" ({item.Product.Purity.PurityValue})";
         }
 
+        if (item.IsDamaged)
+        {
+            humanReadable += " [DAMAGED - QUARANTINE]";
+        }
+
+        var weight = item.Product?.Denomination?.WeightGrams ?? 0m;
+        var metal = item.Product?.MetalType?.MetalName ?? "Gold";
+        var purity = item.Product?.Purity?.PurityValue ?? 999.9m;
+        var denomLabel = item.Product?.Denomination?.Label ?? $"{weight}g";
+        var brand = item.Lot?.Vendor?.VendorName ?? "KFH Mint";
+
+        var originType = ResolveProductOriginType(item);
+        var originClean = originType?.Trim() ?? "";
+        var metalClean = string.IsNullOrWhiteSpace(metal) ? "Gold" : metal.Trim();
+        var prodType = string.IsNullOrWhiteSpace(originClean) ? metalClean : $"{metalClean} {originClean}";
+
+        var qrCodePayload = BuildQrCodePayload(item.SerialNumber, denomLabel, metal, originType);
+
         return new BarcodeLabelDto
         {
             ItemId = item.ItemId,
             SerialNumber = item.SerialNumber,
             ProductLabel = productLabel,
+            ProductType = prodType,
+            MetalName = metal,
+            WeightGrams = weight,
+            PurityValue = purity,
+            Denomination = denomLabel,
+            RefinerBrand = brand,
             Gtin14 = gtin14,
             LotNumber = lotNumber,
             OwnershipType = item.OwnershipType,
             StatusCode = item.StatusCode,
             LocationDescription = item.Location?.Description,
+            IsDamaged = item.IsDamaged,
+            DamageApprovalStatus = item.DamageApprovalStatus,
+            DamageReason = item.DamageReason,
+            DamageDescription = item.DamageDescription,
+            DamageReportedBy = item.DamageReportedBy,
+            DamageApprovedBy = item.DamageApprovedBy,
+            DamageApprovedAt = item.DamageApprovedAt,
             Gs1ElementString = elementString,
             Gs1HumanReadable = humanReadable,
             BarcodeSvg = BuildGs1BarcodeSvg(elementString),
-            QrCodeSvg = BuildQrCodeSvg(humanReadable)
+            QrCodeSvg = BuildQrCodeSvg(qrCodePayload),
+            QrCodeContent = qrCodePayload
         };
+    }
+
+    public static string BuildQrCodePayload(string serialNumber, string denomination, string metalName, string? origin)
+    {
+        var originClean = origin?.Trim() ?? "";
+        var metalClean = string.IsNullOrWhiteSpace(metalName) ? "Gold" : metalName.Trim();
+        var productType = string.IsNullOrWhiteSpace(originClean) ? metalClean : $"{metalClean} {originClean}";
+        return $"Serial No: {serialNumber}\nDenomination: {denomination}\nProduct Type: {productType}";
+    }
+
+    public static string ResolveProductOriginType(InventoryItem item)
+    {
+        // 1. Turkey ownership always indicates Turkey origin consignment
+        if (string.Equals(item.OwnershipType, "TURKEY_OWNED", StringComparison.OrdinalIgnoreCase))
+            return "Turkey";
+
+        // 2. Serial number convention
+        var sn = item.SerialNumber?.ToUpperInvariant() ?? "";
+        if (sn.StartsWith("TR-") || sn.Contains("-TURK-") || sn.Contains("-TR-"))
+            return "Turkey";
+
+        // 3. Product code tags
+        var pCode = item.Product?.ProductCode?.ToUpperInvariant() ?? "";
+        if (pCode.Contains("TURK")) return "Turkey";
+        if (pCode.Contains("SWISS") || pCode.Contains("SWIS")) return "Swiss";
+
+        // 4. Product OriginCountry
+        var origin = item.Product?.OriginCountry?.Trim();
+        if (!string.IsNullOrWhiteSpace(origin))
+        {
+            if (origin.Equals("Switzerland", StringComparison.OrdinalIgnoreCase) || origin.Equals("CH", StringComparison.OrdinalIgnoreCase))
+                return "Swiss";
+            if (origin.Equals("Turkey", StringComparison.OrdinalIgnoreCase) || origin.Equals("TR", StringComparison.OrdinalIgnoreCase))
+                return "Turkey";
+            return origin;
+        }
+
+        // 5. Refiner brand or vendor
+        var brand = (item.Product?.BrandName ?? item.Product?.Brand?.BrandName ?? item.Lot?.Vendor?.VendorName ?? "").ToUpperInvariant();
+        if (brand.Contains("NADIR") || brand.Contains("TURK") || brand.Contains("IGR"))
+            return "Turkey";
+        if (brand.Contains("VALCAMBI") || brand.Contains("PAMP") || brand.Contains("ARGOR") || brand.Contains("SUISSE") || brand.Contains("SWISS"))
+            return "Swiss";
+
+        var vendorOrigin = item.Lot?.Vendor?.CountryOfOrigin?.Trim();
+        if (!string.IsNullOrWhiteSpace(vendorOrigin))
+        {
+            if (vendorOrigin.Equals("Switzerland", StringComparison.OrdinalIgnoreCase) || vendorOrigin.Equals("CH", StringComparison.OrdinalIgnoreCase))
+                return "Swiss";
+            if (vendorOrigin.Equals("Turkey", StringComparison.OrdinalIgnoreCase) || vendorOrigin.Equals("TR", StringComparison.OrdinalIgnoreCase))
+                return "Turkey";
+        }
+
+        return "Swiss";
+    }
+
+    public static string ResolveCustomOrigin(CustomBarcodeLabelRequest req)
+    {
+        var brand = (req.RefinerBrand ?? "").ToUpperInvariant();
+        var own = (req.OwnershipType ?? "").ToUpperInvariant();
+        var sn = (req.SerialNumber ?? "").ToUpperInvariant();
+
+        if (own.Contains("TURK") || sn.StartsWith("TR-") || brand.Contains("NADIR") || brand.Contains("TURK") || brand.Contains("IGR"))
+            return "Turkey";
+        if (brand.Contains("VALCAMBI") || brand.Contains("PAMP") || brand.Contains("ARGOR") || brand.Contains("SUISSE") || brand.Contains("SWISS"))
+            return "Swiss";
+
+        return "Swiss";
     }
 
     // ------------------------------------------------------------------------

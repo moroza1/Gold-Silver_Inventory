@@ -84,7 +84,7 @@ try
     builder.Services.AddScoped<IAuditExportService, AuditExportService>();
     builder.Services.AddScoped<IEmailSenderService, EmailSenderService>();
     builder.Services.AddScoped<IMonitoringAdapter, GenericWebhookMonitoringAdapter>();
-    // Cost Tracking & Valuation -- Core Banking (IMAL) GL Integration (pushes purchase-order
+    // Cost Tracking & Valuation -- Core Banking (Phoenix) GL Integration (pushes purchase-order
     // receipt landed-cost journal entries; see InventoryRepository.IntakeInventoryItemsAsync).
     builder.Services.AddScoped<ICoreBankingLedgerService, CoreBankingGlAdapter>();
 
@@ -311,6 +311,11 @@ try
             Console.WriteLine("🔄 Ensuring module permissions are up to date...");
             await DbSeeder.EnsureModulePermissionsAsync(context);
             Console.WriteLine("✅ Module permissions verified");
+
+            // Ensure all 6 core workflows have active Maker-Checker template definitions
+            Console.WriteLine("🔄 Ensuring workflow templates are up to date...");
+            await DbSeeder.EnsureWorkflowTemplatesAsync(context);
+            Console.WriteLine("✅ Workflow templates verified");
 
             // Create the General Ledger tables (gl_journal_*, gl_config_versions) in the
             // same database, seed the initial ACTIVE config version from the JSON file, and

@@ -68,8 +68,296 @@ public static class DbSeeder
                             );
                             CREATE INDEX IF NOT EXISTS IX_pending_turkey_purchases_status_code ON pending_turkey_purchases (status_code);
                             CREATE INDEX IF NOT EXISTS IX_pending_turkey_purchases_created_at ON pending_turkey_purchases (created_at);
+
+                            CREATE TABLE IF NOT EXISTS pending_customs_transfers (
+                                pending_transfer_id INTEGER NOT NULL CONSTRAINT PK_pending_customs_transfers PRIMARY KEY AUTOINCREMENT,
+                                lot_id INTEGER,
+                                item_id INTEGER,
+                                target_ownership TEXT NOT NULL DEFAULT 'TURKEY_OWNED',
+                                requested_by TEXT NOT NULL,
+                                clearance_notes TEXT,
+                                customs_declaration_number TEXT,
+                                customs_duty_amount TEXT,
+                                port_of_entry TEXT,
+                                status_code TEXT NOT NULL DEFAULT 'PENDING_APPROVAL',
+                                created_at TEXT NOT NULL,
+                                approved_by TEXT,
+                                approved_at TEXT
+                            );
+                            CREATE INDEX IF NOT EXISTS IX_pending_customs_transfers_status_code ON pending_customs_transfers (status_code);
+                            CREATE INDEX IF NOT EXISTS IX_pending_customs_transfers_created_at ON pending_customs_transfers (created_at);
+
+                            CREATE TABLE IF NOT EXISTS pending_vip_allocations (
+                                pending_allocation_id INTEGER NOT NULL CONSTRAINT PK_pending_vip_allocations PRIMARY KEY AUTOINCREMENT,
+                                batch_reference TEXT NOT NULL,
+                                serials_json_list TEXT NOT NULL,
+                                total_items INTEGER NOT NULL,
+                                total_weight_grams TEXT NOT NULL,
+                                vip_category TEXT,
+                                requested_by TEXT NOT NULL,
+                                notes TEXT,
+                                status_code TEXT NOT NULL DEFAULT 'PENDING_APPROVAL',
+                                created_at TEXT NOT NULL,
+                                approved_by TEXT,
+                                approved_at TEXT
+                            );
+                            CREATE INDEX IF NOT EXISTS IX_pending_vip_allocations_status_code ON pending_vip_allocations (status_code);
+                            CREATE INDEX IF NOT EXISTS IX_pending_vip_allocations_created_at ON pending_vip_allocations (created_at);
+
+                            CREATE TABLE IF NOT EXISTS pending_vip_deallocations (
+                                pending_deallocation_id INTEGER NOT NULL CONSTRAINT PK_pending_vip_deallocations PRIMARY KEY AUTOINCREMENT,
+                                batch_reference TEXT NOT NULL,
+                                serials_json_list TEXT NOT NULL,
+                                total_items INTEGER NOT NULL,
+                                total_weight_grams TEXT NOT NULL,
+                                deallocation_reason TEXT,
+                                requested_by TEXT NOT NULL,
+                                notes TEXT,
+                                status_code TEXT NOT NULL DEFAULT 'PENDING_APPROVAL',
+                                created_at TEXT NOT NULL,
+                                approved_by TEXT,
+                                approved_at TEXT
+                            );
+                            CREATE INDEX IF NOT EXISTS IX_pending_vip_deallocations_status_code ON pending_vip_deallocations (status_code);
+                            CREATE INDEX IF NOT EXISTS IX_pending_vip_deallocations_created_at ON pending_vip_deallocations (created_at);
+
+                            CREATE TABLE IF NOT EXISTS pending_vip_dispenses (
+                                pending_dispense_id INTEGER NOT NULL CONSTRAINT PK_pending_vip_dispenses PRIMARY KEY AUTOINCREMENT,
+                                dispense_reference TEXT NOT NULL,
+                                serials_json_list TEXT NOT NULL,
+                                total_items INTEGER NOT NULL,
+                                total_weight_grams TEXT NOT NULL,
+                                customer_name TEXT NOT NULL,
+                                customer_civil_id TEXT NOT NULL,
+                                customer_account_number TEXT,
+                                handover_location TEXT,
+                                requested_by TEXT NOT NULL,
+                                notes TEXT,
+                                status_code TEXT NOT NULL DEFAULT 'PENDING_APPROVAL',
+                                created_at TEXT NOT NULL,
+                                approved_by TEXT,
+                                approved_at TEXT
+                            );
+                            CREATE INDEX IF NOT EXISTS IX_pending_vip_dispenses_status_code ON pending_vip_dispenses (status_code);
+                            CREATE INDEX IF NOT EXISTS IX_pending_vip_dispenses_created_at ON pending_vip_dispenses (created_at);
+
+                            CREATE TABLE IF NOT EXISTS pending_turkey_returns (
+                                pending_return_id INTEGER NOT NULL CONSTRAINT PK_pending_turkey_returns PRIMARY KEY AUTOINCREMENT,
+                                batch_reference TEXT NOT NULL,
+                                serials_json_list TEXT NOT NULL,
+                                total_items INTEGER NOT NULL,
+                                total_weight_grams TEXT NOT NULL,
+                                source_ownership TEXT NOT NULL DEFAULT 'KFH_OWNED',
+                                return_reason TEXT,
+                                requested_by TEXT NOT NULL,
+                                notes TEXT,
+                                status_code TEXT NOT NULL DEFAULT 'PENDING_APPROVAL',
+                                created_at TEXT NOT NULL,
+                                approved_by TEXT,
+                                approved_at TEXT
+                            );
+                            CREATE INDEX IF NOT EXISTS IX_pending_turkey_returns_status_code ON pending_turkey_returns (status_code);
+                            CREATE INDEX IF NOT EXISTS IX_pending_turkey_returns_created_at ON pending_turkey_returns (created_at);
+
+                            CREATE TABLE IF NOT EXISTS pending_missing_item_reports (
+                                pending_report_id INTEGER NOT NULL CONSTRAINT PK_pending_missing_item_reports PRIMARY KEY AUTOINCREMENT,
+                                report_reference TEXT NOT NULL,
+                                ownership_type TEXT NOT NULL DEFAULT 'TURKEY_OWNED',
+                                lot_id INTEGER,
+                                lot_number TEXT,
+                                serials_json_list TEXT NOT NULL,
+                                total_items INTEGER NOT NULL,
+                                total_weight_grams TEXT NOT NULL,
+                                discrepancy_reason TEXT NOT NULL,
+                                requested_by TEXT NOT NULL,
+                                notes TEXT,
+                                status_code TEXT NOT NULL DEFAULT 'PENDING_APPROVAL',
+                                created_at TEXT NOT NULL,
+                                approved_by TEXT,
+                                approved_at TEXT
+                            );
+                            CREATE INDEX IF NOT EXISTS IX_pending_missing_item_reports_status_code ON pending_missing_item_reports (status_code);
+                            CREATE INDEX IF NOT EXISTS IX_pending_missing_item_reports_created_at ON pending_missing_item_reports (created_at);
+
+                            CREATE TABLE IF NOT EXISTS system_settings (
+                                setting_key TEXT NOT NULL CONSTRAINT PK_system_settings PRIMARY KEY,
+                                setting_value TEXT NOT NULL,
+                                description TEXT,
+                                category TEXT,
+                                updated_at TEXT NOT NULL,
+                                updated_by TEXT
+                            );
+
+                            CREATE TABLE IF NOT EXISTS pending_qr_reprints (
+                                reprint_request_id INTEGER NOT NULL CONSTRAINT PK_pending_qr_reprints PRIMARY KEY AUTOINCREMENT,
+                                request_type TEXT NOT NULL DEFAULT 'SINGLE',
+                                item_ids_json TEXT NOT NULL DEFAULT '[]',
+                                item_count INTEGER NOT NULL DEFAULT 1,
+                                reason TEXT NOT NULL,
+                                attachment_url TEXT,
+                                status TEXT NOT NULL DEFAULT 'PENDING_APPROVAL',
+                                initiated_by TEXT NOT NULL,
+                                initiated_at TEXT NOT NULL,
+                                approved_by TEXT,
+                                approved_at TEXT,
+                                rejection_reason TEXT
+                            );
+                            CREATE INDEX IF NOT EXISTS IX_pending_qr_reprints_status ON pending_qr_reprints (status);
+
+                            CREATE TABLE IF NOT EXISTS qr_print_logs (
+                                print_log_id INTEGER NOT NULL CONSTRAINT PK_qr_print_logs PRIMARY KEY AUTOINCREMENT,
+                                item_id INTEGER NOT NULL,
+                                serial_number TEXT NOT NULL,
+                                print_type TEXT NOT NULL DEFAULT 'INITIAL_SINGLE',
+                                print_reason TEXT,
+                                reprint_request_id INTEGER,
+                                printed_by TEXT NOT NULL,
+                                printed_at TEXT NOT NULL,
+                                label_payload TEXT,
+                                CONSTRAINT FK_qr_print_logs_inventory_items_item_id FOREIGN KEY (item_id) REFERENCES inventory_items (item_id) ON DELETE RESTRICT,
+                                CONSTRAINT FK_qr_print_logs_pending_qr_reprints_reprint_request_id FOREIGN KEY (reprint_request_id) REFERENCES pending_qr_reprints (reprint_request_id) ON DELETE SET NULL
+                            );
+                            CREATE INDEX IF NOT EXISTS IX_qr_print_logs_item_id ON qr_print_logs (item_id);
+                            CREATE INDEX IF NOT EXISTS IX_qr_print_logs_printed_at ON qr_print_logs (printed_at);
+
+                            CREATE TABLE IF NOT EXISTS damaged_bar_replacements (
+                                replacement_id INTEGER NOT NULL CONSTRAINT PK_damaged_bar_replacements PRIMARY KEY AUTOINCREMENT,
+                                replacement_reference TEXT NOT NULL,
+                                damaged_item_id INTEGER NOT NULL,
+                                damaged_serial_number TEXT NOT NULL,
+                                damaged_original_owner TEXT NOT NULL DEFAULT 'KFH_OWNED',
+                                customer_id INTEGER,
+                                account_id INTEGER,
+                                customer_holding_id INTEGER,
+                                replacement_item_id INTEGER NOT NULL,
+                                replacement_serial_number TEXT NOT NULL,
+                                metal_type_id INTEGER NOT NULL DEFAULT 1,
+                                denomination_id INTEGER NOT NULL DEFAULT 1,
+                                weight_grams REAL NOT NULL DEFAULT 0.0,
+                                reason TEXT NOT NULL,
+                                attachment_url TEXT,
+                                status TEXT NOT NULL DEFAULT 'PENDING_APPROVAL',
+                                initiated_by TEXT NOT NULL,
+                                initiated_at TEXT NOT NULL,
+                                approved_by TEXT,
+                                approved_at TEXT,
+                                rejection_reason TEXT
+                            );
+
+                            CREATE TABLE IF NOT EXISTS pending_damaged_exports (
+                                export_id INTEGER NOT NULL CONSTRAINT PK_pending_damaged_exports PRIMARY KEY AUTOINCREMENT,
+                                export_reference TEXT NOT NULL,
+                                item_id INTEGER NOT NULL,
+                                serial_number TEXT NOT NULL,
+                                metal_type_id INTEGER NOT NULL,
+                                weight_grams REAL NOT NULL,
+                                vendor_id INTEGER,
+                                vendor_name TEXT,
+                                reason TEXT NOT NULL,
+                                customs_declaration_number TEXT,
+                                courier_company TEXT,
+                                courier_tracking_number TEXT,
+                                handover_courier_rep TEXT,
+                                security_seal_number TEXT,
+                                handover_timestamp TEXT,
+                                status_code TEXT NOT NULL DEFAULT 'PENDING_APPROVAL',
+                                requested_by TEXT NOT NULL,
+                                checker_approved_by TEXT,
+                                senior_manager_approved_by TEXT,
+                                created_at TEXT NOT NULL,
+                                approved_at TEXT,
+                                exported_at TEXT,
+                                notes TEXT,
+                                rejection_reason TEXT
+                            );
+                            CREATE UNIQUE INDEX IF NOT EXISTS IX_pending_damaged_exports_export_reference ON pending_damaged_exports (export_reference);
                         ";
                         await createTableCmd.ExecuteNonQueryAsync();
+                    }
+
+                    // 1b. Ensure inventory_items has composite unique index on (product_id, serial_number)
+                    using (var idxCmd = connection.CreateCommand())
+                    {
+                        idxCmd.CommandText = @"
+                            DROP INDEX IF EXISTS IX_inventory_items_serial_number;
+                            CREATE UNIQUE INDEX IF NOT EXISTS IX_inventory_items_product_id_serial_number ON inventory_items (product_id, serial_number);
+                        ";
+                        try { await idxCmd.ExecuteNonQueryAsync(); } catch { }
+                    }
+
+                    // 1c. Ensure columns on inventory_items
+                    var itemCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    using (var pragmaCmd = connection.CreateCommand())
+                    {
+                        pragmaCmd.CommandText = "PRAGMA table_info(inventory_items);";
+                        using var reader = await pragmaCmd.ExecuteReaderAsync();
+                        while (await reader.ReadAsync())
+                        {
+                            var colName = reader["name"]?.ToString();
+                            if (!string.IsNullOrEmpty(colName)) itemCols.Add(colName);
+                        }
+                    }
+                    if (itemCols.Count > 0)
+                    {
+                        var itemColsToAdd = new List<(string Name, string Def)>
+                        {
+                            ("production_cost_kwd", "DECIMAL(18,4)"),
+                            ("replaced_by_item_id", "INTEGER"),
+                            ("replaces_item_id", "INTEGER"),
+                            ("replacement_date", "TEXT"),
+                            ("channel_status", "TEXT NOT NULL DEFAULT 'ONLINE'"),
+                            ("channel_category", "TEXT NOT NULL DEFAULT 'RETAIL_ONLINE'")
+                        };
+                        foreach (var (col, def) in itemColsToAdd)
+                        {
+                            if (!itemCols.Contains(col))
+                            {
+                                try
+                                {
+                                    using var alterCmd = connection.CreateCommand();
+                                    alterCmd.CommandText = $"ALTER TABLE inventory_items ADD COLUMN {col} {def};";
+                                    await alterCmd.ExecuteNonQueryAsync();
+                                    itemCols.Add(col);
+                                }
+                                catch { }
+                            }
+                        }
+                    }
+
+                    // 1d. Ensure columns on branch_transfers
+                    var transferCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    using (var pragmaTransferCmd = connection.CreateCommand())
+                    {
+                        pragmaTransferCmd.CommandText = "PRAGMA table_info(branch_transfers);";
+                        using var reader = await pragmaTransferCmd.ExecuteReaderAsync();
+                        while (await reader.ReadAsync())
+                        {
+                            var colName = reader["name"]?.ToString();
+                            if (!string.IsNullOrEmpty(colName)) transferCols.Add(colName);
+                        }
+                    }
+                    if (transferCols.Count > 0)
+                    {
+                        var transferColsToAdd = new List<(string Name, string Def)>
+                        {
+                            ("transfer_type", "TEXT NOT NULL DEFAULT 'OUTBOUND_TO_BRANCH'"),
+                            ("return_reason", "TEXT"),
+                            ("notes", "TEXT")
+                        };
+                        foreach (var (col, def) in transferColsToAdd)
+                        {
+                            if (!transferCols.Contains(col))
+                            {
+                                try
+                                {
+                                    using var alterCmd = connection.CreateCommand();
+                                    alterCmd.CommandText = $"ALTER TABLE branch_transfers ADD COLUMN {col} {def};";
+                                    await alterCmd.ExecuteNonQueryAsync();
+                                    transferCols.Add(col);
+                                }
+                                catch { }
+                            }
+                        }
                     }
 
                     // 2. Ensure columns on pending_intakes
@@ -100,7 +388,15 @@ public static class DbSeeder
                             ("discrepancy_notes", "TEXT"),
                             ("receiving_date", "TEXT"),
                             ("customer_id", "INTEGER"),
-                            ("account_id", "INTEGER")
+                            ("account_id", "INTEGER"),
+                            ("customs_declaration_number", "TEXT"),
+                            ("customs_duty_amount", "DECIMAL(18,4)"),
+                            ("port_of_entry", "TEXT"),
+                            ("customs_clearance_date", "TEXT"),
+                            ("production_costs_json", "TEXT"),
+                            ("transfer_to_main_vault", "INTEGER NOT NULL DEFAULT 0"),
+                            ("courier_info", "TEXT"),
+                            ("destination_branch_id", "INTEGER")
                         };
 
                         foreach (var (col, def) in colsToAdd)
@@ -119,6 +415,179 @@ public static class DbSeeder
                                     // Ignore if already added with different casing
                                 }
                             }
+                        }
+
+                        // Ensure shipment_production_costs table exists in SQLite
+                        try
+                        {
+                            using var prodCostTableCmd = connection.CreateCommand();
+                            prodCostTableCmd.CommandText = @"
+                                CREATE TABLE IF NOT EXISTS shipment_production_costs (
+                                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                    pending_intake_id INTEGER,
+                                    lot_id INTEGER,
+                                    shipment_reference TEXT NOT NULL,
+                                    metal_type_id INTEGER NOT NULL,
+                                    denomination_id INTEGER NOT NULL,
+                                    production_cost_kwd DECIMAL(18,4) NOT NULL,
+                                    created_at TEXT NOT NULL
+                                );
+                            ";
+                            await prodCostTableCmd.ExecuteNonQueryAsync();
+
+                            // Also ensure lot_id column exists if table was created previously without it
+                            var prodCostCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                            using (var pragmaCmd = connection.CreateCommand())
+                            {
+                                pragmaCmd.CommandText = "PRAGMA table_info(shipment_production_costs);";
+                                using var reader = await pragmaCmd.ExecuteReaderAsync();
+                                while (await reader.ReadAsync())
+                                {
+                                    var colName = reader["name"]?.ToString();
+                                    if (!string.IsNullOrEmpty(colName)) prodCostCols.Add(colName);
+                                }
+                            }
+                            if (prodCostCols.Count > 0 && !prodCostCols.Contains("lot_id"))
+                            {
+                                using var alterCmd = connection.CreateCommand();
+                                alterCmd.CommandText = "ALTER TABLE shipment_production_costs ADD COLUMN lot_id INTEGER;";
+                                await alterCmd.ExecuteNonQueryAsync();
+                            }
+                        }
+                        catch { }
+
+                        // Check and update inventory_lots for customs columns
+                        var lotCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                        using (var pragmaCmd = connection.CreateCommand())
+                        {
+                            pragmaCmd.CommandText = "PRAGMA table_info(inventory_lots);";
+                            using var reader = await pragmaCmd.ExecuteReaderAsync();
+                            while (await reader.ReadAsync())
+                            {
+                                var colName = reader["name"]?.ToString();
+                                if (!string.IsNullOrEmpty(colName)) lotCols.Add(colName);
+                            }
+                        }
+                        if (lotCols.Count > 0)
+                        {
+                            if (!lotCols.Contains("customs_declaration_number"))
+                            {
+                                try
+                                {
+                                    using var alterCmd = connection.CreateCommand();
+                                    alterCmd.CommandText = "ALTER TABLE inventory_lots ADD COLUMN customs_declaration_number TEXT;";
+                                    await alterCmd.ExecuteNonQueryAsync();
+                                }
+                                catch { }
+                            }
+                            if (!lotCols.Contains("port_of_entry"))
+                            {
+                                try
+                                {
+                                    using var alterCmd = connection.CreateCommand();
+                                    alterCmd.CommandText = "ALTER TABLE inventory_lots ADD COLUMN port_of_entry TEXT;";
+                                    await alterCmd.ExecuteNonQueryAsync();
+                                }
+                                catch { }
+                            }
+                        }
+                    }
+
+                    // Check and update reorder_thresholds
+                    var thCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    using (var pragmaCmd = connection.CreateCommand())
+                    {
+                        pragmaCmd.CommandText = "PRAGMA table_info(reorder_thresholds);";
+                        using var reader = await pragmaCmd.ExecuteReaderAsync();
+                        while (await reader.ReadAsync())
+                        {
+                            var colName = reader["name"]?.ToString();
+                            if (!string.IsNullOrEmpty(colName)) thCols.Add(colName);
+                        }
+                    }
+                    if (thCols.Count > 0)
+                    {
+                        if (!thCols.Contains("threshold_type"))
+                        {
+                            try
+                            {
+                                using var alterCmd = connection.CreateCommand();
+                                alterCmd.CommandText = "ALTER TABLE reorder_thresholds ADD COLUMN threshold_type TEXT NOT NULL DEFAULT 'LOW_STOCK';";
+                                await alterCmd.ExecuteNonQueryAsync();
+                            }
+                            catch { }
+                        }
+                        if (!thCols.Contains("max_stock_qty"))
+                        {
+                            try
+                            {
+                                using var alterCmd = connection.CreateCommand();
+                                alterCmd.CommandText = "ALTER TABLE reorder_thresholds ADD COLUMN max_stock_qty INTEGER NULL;";
+                                await alterCmd.ExecuteNonQueryAsync();
+                            }
+                            catch { }
+                        }
+                    }
+
+                    // Ensure pending_threshold_changes table exists and is up to date
+                    using (var createThresholdTableCmd = connection.CreateCommand())
+                    {
+                        createThresholdTableCmd.CommandText = @"
+                            CREATE TABLE IF NOT EXISTS pending_threshold_changes (
+                                pending_change_id INTEGER NOT NULL CONSTRAINT PK_pending_threshold_changes PRIMARY KEY AUTOINCREMENT,
+                                change_type TEXT NOT NULL DEFAULT 'CREATE',
+                                threshold_type TEXT NOT NULL DEFAULT 'LOW_STOCK',
+                                threshold_id INTEGER,
+                                product_id INTEGER NOT NULL,
+                                vendor_id INTEGER NOT NULL,
+                                min_stock_qty INTEGER NOT NULL,
+                                max_stock_qty INTEGER,
+                                reorder_qty INTEGER NOT NULL,
+                                is_active INTEGER NOT NULL DEFAULT 1,
+                                status_code TEXT NOT NULL DEFAULT 'PENDING_APPROVAL',
+                                requested_by TEXT NOT NULL,
+                                approved_by TEXT,
+                                created_at TEXT NOT NULL,
+                                comments TEXT
+                            );
+                            CREATE INDEX IF NOT EXISTS IX_pending_threshold_changes_status_code ON pending_threshold_changes (status_code);
+                            CREATE INDEX IF NOT EXISTS IX_pending_threshold_changes_threshold_type ON pending_threshold_changes (threshold_type);
+                        ";
+                        await createThresholdTableCmd.ExecuteNonQueryAsync();
+                    }
+
+                    var pthCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    using (var pragmaCmd = connection.CreateCommand())
+                    {
+                        pragmaCmd.CommandText = "PRAGMA table_info(pending_threshold_changes);";
+                        using var reader = await pragmaCmd.ExecuteReaderAsync();
+                        while (await reader.ReadAsync())
+                        {
+                            var colName = reader["name"]?.ToString();
+                            if (!string.IsNullOrEmpty(colName)) pthCols.Add(colName);
+                        }
+                    }
+                    if (pthCols.Count > 0)
+                    {
+                        if (!pthCols.Contains("threshold_type"))
+                        {
+                            try
+                            {
+                                using var alterCmd = connection.CreateCommand();
+                                alterCmd.CommandText = "ALTER TABLE pending_threshold_changes ADD COLUMN threshold_type TEXT NOT NULL DEFAULT 'LOW_STOCK';";
+                                await alterCmd.ExecuteNonQueryAsync();
+                            }
+                            catch { }
+                        }
+                        if (!pthCols.Contains("max_stock_qty"))
+                        {
+                            try
+                            {
+                                using var alterCmd = connection.CreateCommand();
+                                alterCmd.CommandText = "ALTER TABLE pending_threshold_changes ADD COLUMN max_stock_qty INTEGER NULL;";
+                                await alterCmd.ExecuteNonQueryAsync();
+                            }
+                            catch { }
                         }
                     }
                 }
@@ -143,40 +612,359 @@ public static class DbSeeder
                                 ApprovedAt DATETIME2 NULL
                             );
                             CREATE NONCLUSTERED INDEX IX_pending_turkey_purchases_StatusCode ON pending_turkey_purchases(StatusCode);
-                            CREATE NONCLUSTERED INDEX IX_pending_turkey_purchases_CreatedAt ON pending_turkey_purchases(CreatedAt);
+                        END
+
+                        IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'pending_missing_item_reports')
+                        BEGIN
+                            CREATE TABLE pending_missing_item_reports (
+                                PendingReportId INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_pending_missing_item_reports PRIMARY KEY,
+                                ReportReference NVARCHAR(MAX) NOT NULL,
+                                OwnershipType NVARCHAR(50) NOT NULL CONSTRAINT DF_pending_missing_item_reports_OwnershipType DEFAULT 'TURKEY_OWNED',
+                                LotId INT NULL,
+                                LotNumber NVARCHAR(MAX) NULL,
+                                SerialsJsonList NVARCHAR(MAX) NOT NULL,
+                                TotalItems INT NOT NULL,
+                                TotalWeightGrams DECIMAL(18,3) NOT NULL,
+                                DiscrepancyReason NVARCHAR(MAX) NOT NULL,
+                                RequestedBy NVARCHAR(MAX) NOT NULL,
+                                Notes NVARCHAR(MAX) NULL,
+                                StatusCode NVARCHAR(50) NOT NULL CONSTRAINT DF_pending_missing_item_reports_StatusCode DEFAULT 'PENDING_APPROVAL',
+                                CreatedAt DATETIME2 NOT NULL,
+                                ApprovedBy NVARCHAR(MAX) NULL,
+                                ApprovedAt DATETIME2 NULL
+                            );
+                            CREATE NONCLUSTERED INDEX IX_pending_missing_item_reports_StatusCode ON pending_missing_item_reports(StatusCode);
+                            CREATE NONCLUSTERED INDEX IX_pending_missing_item_reports_CreatedAt ON pending_missing_item_reports(CreatedAt);
+                        END
+
+                        IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'pending_customs_transfers')
+                        BEGIN
+                            CREATE TABLE pending_customs_transfers (
+                                PendingTransferId INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_pending_customs_transfers PRIMARY KEY,
+                                TransferReference NVARCHAR(MAX) NOT NULL,
+                                TargetOwnershipType NVARCHAR(50) NOT NULL CONSTRAINT DF_pending_customs_transfers_TargetOwnershipType DEFAULT 'TURKEY_OWNED',
+                                SerialsJsonList NVARCHAR(MAX) NOT NULL,
+                                TotalItems INT NOT NULL,
+                                TotalWeightGrams DECIMAL(18,3) NOT NULL,
+                                RequestedBy NVARCHAR(MAX) NOT NULL,
+                                Notes NVARCHAR(MAX) NULL,
+                                StatusCode NVARCHAR(50) NOT NULL CONSTRAINT DF_pending_customs_transfers_StatusCode DEFAULT 'PENDING_APPROVAL',
+                                CreatedAt DATETIME2 NOT NULL,
+                                ApprovedBy NVARCHAR(MAX) NULL,
+                                ApprovedAt DATETIME2 NULL
+                            );
+                            CREATE NONCLUSTERED INDEX IX_pending_customs_transfers_StatusCode ON pending_customs_transfers(StatusCode);
+                        END
+
+                        IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'pending_vip_allocations')
+                        BEGIN
+                            CREATE TABLE pending_vip_allocations (
+                                PendingAllocationId INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_pending_vip_allocations PRIMARY KEY,
+                                AllocationReference NVARCHAR(MAX) NOT NULL,
+                                VipCustomerId INT NOT NULL,
+                                VipCustomerName NVARCHAR(MAX) NOT NULL,
+                                SerialsJsonList NVARCHAR(MAX) NOT NULL,
+                                TotalItems INT NOT NULL,
+                                TotalWeightGrams DECIMAL(18,3) NOT NULL,
+                                RequestedBy NVARCHAR(MAX) NOT NULL,
+                                Notes NVARCHAR(MAX) NULL,
+                                StatusCode NVARCHAR(50) NOT NULL CONSTRAINT DF_pending_vip_allocations_StatusCode DEFAULT 'PENDING_APPROVAL',
+                                CreatedAt DATETIME2 NOT NULL,
+                                ApprovedBy NVARCHAR(MAX) NULL,
+                                ApprovedAt DATETIME2 NULL
+                            );
+                            CREATE NONCLUSTERED INDEX IX_pending_vip_allocations_StatusCode ON pending_vip_allocations(StatusCode);
+                        END
+
+                        IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'pending_vip_dispenses')
+                        BEGIN
+                            CREATE TABLE pending_vip_dispenses (
+                                PendingDispenseId INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_pending_vip_dispenses PRIMARY KEY,
+                                DispenseReference NVARCHAR(MAX) NOT NULL,
+                                VipCustomerId INT NOT NULL,
+                                VipCustomerName NVARCHAR(MAX) NOT NULL,
+                                SerialsJsonList NVARCHAR(MAX) NOT NULL,
+                                TotalItems INT NOT NULL,
+                                TotalWeightGrams DECIMAL(18,3) NOT NULL,
+                                DeliveryOption NVARCHAR(MAX) NOT NULL,
+                                DeliveryReference NVARCHAR(MAX) NULL,
+                                RequestedBy NVARCHAR(MAX) NOT NULL,
+                                Notes NVARCHAR(MAX) NULL,
+                                StatusCode NVARCHAR(50) NOT NULL CONSTRAINT DF_pending_vip_dispenses_StatusCode DEFAULT 'PENDING_APPROVAL',
+                                CreatedAt DATETIME2 NOT NULL,
+                                ApprovedBy NVARCHAR(MAX) NULL,
+                                ApprovedAt DATETIME2 NULL
+                            );
+                            CREATE NONCLUSTERED INDEX IX_pending_vip_dispenses_StatusCode ON pending_vip_dispenses(StatusCode);
+                        END
+
+                        IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'pending_turkey_returns')
+                        BEGIN
+                            CREATE TABLE pending_turkey_returns (
+                                PendingReturnId INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_pending_turkey_returns PRIMARY KEY,
+                                ReturnReference NVARCHAR(MAX) NOT NULL,
+                                ReturnReason NVARCHAR(MAX) NOT NULL,
+                                SerialsJsonList NVARCHAR(MAX) NOT NULL,
+                                TotalItems INT NOT NULL,
+                                TotalWeightGrams DECIMAL(18,3) NOT NULL,
+                                RequestedBy NVARCHAR(MAX) NOT NULL,
+                                Notes NVARCHAR(MAX) NULL,
+                                StatusCode NVARCHAR(50) NOT NULL CONSTRAINT DF_pending_turkey_returns_StatusCode DEFAULT 'PENDING_APPROVAL',
+                                CreatedAt DATETIME2 NOT NULL,
+                                ApprovedBy NVARCHAR(MAX) NULL,
+                                ApprovedAt DATETIME2 NULL
+                            );
+                            CREATE NONCLUSTERED INDEX IX_pending_turkey_returns_StatusCode ON pending_turkey_returns(StatusCode);
                         END
 
                         IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('pending_intakes') AND name = 'ownership_type')
                         BEGIN
                             ALTER TABLE pending_intakes ADD ownership_type VARCHAR(30) NOT NULL CONSTRAINT DF_pending_intakes_ownership_type DEFAULT 'KFH_OWNED';
                         END
+
+                        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('reorder_thresholds') AND name = 'threshold_type')
+                        BEGIN
+                            ALTER TABLE reorder_thresholds ADD threshold_type VARCHAR(30) NOT NULL CONSTRAINT DF_reorder_thresholds_threshold_type DEFAULT 'LOW_STOCK';
+                        END
+
+                        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('reorder_thresholds') AND name = 'max_stock_qty')
+                        BEGIN
+                            ALTER TABLE reorder_thresholds ADD max_stock_qty INT NULL;
+                        END
+
+                        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('pending_threshold_changes') AND name = 'threshold_type')
+                        BEGIN
+                            ALTER TABLE pending_threshold_changes ADD threshold_type VARCHAR(30) NOT NULL CONSTRAINT DF_pending_threshold_changes_threshold_type DEFAULT 'LOW_STOCK';
+                        END
+
+                        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('pending_threshold_changes') AND name = 'max_stock_qty')
+                        BEGIN
+                            ALTER TABLE pending_threshold_changes ADD max_stock_qty INT NULL;
+                        END
+
+                        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('pending_intakes') AND name = 'customs_declaration_number')
+                        BEGIN
+                            ALTER TABLE pending_intakes ADD customs_declaration_number NVARCHAR(100) NULL;
+                        END
+
+                        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('pending_intakes') AND name = 'customs_duty_amount')
+                        BEGIN
+                            ALTER TABLE pending_intakes ADD customs_duty_amount DECIMAL(18,4) NULL;
+                        END
+
+                        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('pending_intakes') AND name = 'port_of_entry')
+                        BEGIN
+                            ALTER TABLE pending_intakes ADD port_of_entry NVARCHAR(100) NULL;
+                        END
+
+                        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('pending_intakes') AND name = 'customs_clearance_date')
+                        BEGIN
+                            ALTER TABLE pending_intakes ADD customs_clearance_date DATETIME2 NULL;
+                        END
+
+                        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('pending_intakes') AND name = 'production_costs_json')
+                        BEGIN
+                            ALTER TABLE pending_intakes ADD production_costs_json NVARCHAR(MAX) NULL;
+                        END
+
+                        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('inventory_lots') AND name = 'customs_declaration_number')
+                        BEGIN
+                            ALTER TABLE inventory_lots ADD customs_declaration_number NVARCHAR(100) NULL;
+                        END
+
+                        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('inventory_lots') AND name = 'port_of_entry')
+                        BEGIN
+                            ALTER TABLE inventory_lots ADD port_of_entry NVARCHAR(100) NULL;
+                        END
+
+                        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('inventory_items') AND name = 'production_cost_kwd')
+                        BEGIN
+                            ALTER TABLE inventory_items ADD production_cost_kwd DECIMAL(18,4) NULL;
+                        END
+
+                        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('inventory_items') AND name = 'replaced_by_item_id')
+                        BEGIN
+                            ALTER TABLE inventory_items ADD replaced_by_item_id INT NULL;
+                        END
+
+                        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('inventory_items') AND name = 'replaces_item_id')
+                        BEGIN
+                            ALTER TABLE inventory_items ADD replaces_item_id INT NULL;
+                        END
+
+                        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('inventory_items') AND name = 'replacement_date')
+                        BEGIN
+                            ALTER TABLE inventory_items ADD replacement_date DATETIME2 NULL;
+                        END
+
+                        IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'shipment_production_costs')
+                        BEGIN
+                            CREATE TABLE shipment_production_costs (
+                                id INT IDENTITY(1,1) PRIMARY KEY,
+                                pending_intake_id INT NULL,
+                                lot_id INT NULL,
+                                shipment_reference NVARCHAR(100) NOT NULL,
+                                metal_type_id INT NOT NULL,
+                                denomination_id INT NOT NULL,
+                                production_cost_kwd DECIMAL(18,4) NOT NULL,
+                                created_at DATETIME2 NOT NULL
+                            );
+                        END
+                        ELSE
+                        BEGIN
+                            IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('shipment_production_costs') AND name = 'lot_id')
+                            BEGIN
+                                ALTER TABLE shipment_production_costs ADD lot_id INT NULL;
+                            END
+                        END
+
+                        IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'system_settings')
+                        BEGIN
+                            CREATE TABLE system_settings (
+                                setting_key NVARCHAR(100) NOT NULL CONSTRAINT PK_system_settings PRIMARY KEY,
+                                setting_value NVARCHAR(MAX) NOT NULL,
+                                description NVARCHAR(MAX) NULL,
+                                category NVARCHAR(100) NULL,
+                                updated_at DATETIME2 NOT NULL,
+                                updated_by NVARCHAR(100) NULL
+                            );
+                        END
                     ");
                 }
 
-                // 3. Ensure TURKEY_PURCHASE workflow template exists
-                var hasTurkeyWf = await context.WorkflowTemplates.AnyAsync(t => t.WorkflowType == "TURKEY_PURCHASE");
-                if (!hasTurkeyWf)
-                {
-                    var turkeyPurchaseWorkflow = new WorkflowTemplate
-                    {
-                        WorkflowType = "TURKEY_PURCHASE",
-                        Name = "Default Turkey Gold Purchase Workflow",
-                        Description = "Maker-Checker verification for purchasing consignment gold from Turkey.",
-                        IsActive = true
-                    };
-                    context.WorkflowTemplates.Add(turkeyPurchaseWorkflow);
-                    await context.SaveChangesAsync();
+                // 3. Ensure all default workflow templates and Maker-Checker steps exist
+                await EnsureWorkflowTemplatesAsync(context);
 
-                    var turkeyPurchaseStep1 = new WorkflowStep
+                // 4. Ensure default reorder thresholds exist if empty
+                if (!await context.ReorderThresholds.AnyAsync())
+                {
+                    var products = await context.MetalProducts.ToListAsync();
+                    var defaultVendor = await context.Vendors.FirstOrDefaultAsync(v => v.VendorCode == "VAL-SWISS")
+                                     ?? await context.Vendors.FirstOrDefaultAsync();
+                    if (products.Count > 0 && defaultVendor != null)
                     {
-                        TemplateId = turkeyPurchaseWorkflow.TemplateId,
-                        StepOrder = 1,
-                        StepName = "Turkey Purchase Checker Approval",
-                        RequiredRole = "Treasury Operations (Checker)",
-                        Description = "Checker verifies serials and purchase price, approving ownership transfer to KFH."
-                    };
-                    context.WorkflowSteps.Add(turkeyPurchaseStep1);
-                    await context.SaveChangesAsync();
+                        foreach (var prod in products.Take(4))
+                        {
+                            context.ReorderThresholds.Add(new ReorderThreshold
+                            {
+                                ThresholdType = "LOW_STOCK",
+                                ProductId = prod.ProductId,
+                                VendorId = defaultVendor.VendorId,
+                                MinStockQty = 5,
+                                MaxStockQty = 50,
+                                ReorderQty = 10,
+                                IsActive = true,
+                                CreatedAt = DateTime.UtcNow,
+                                UpdatedAt = DateTime.UtcNow
+                            });
+                            context.ReorderThresholds.Add(new ReorderThreshold
+                            {
+                                ThresholdType = "HIGH_STOCK",
+                                ProductId = prod.ProductId,
+                                VendorId = defaultVendor.VendorId,
+                                MinStockQty = 50,
+                                MaxStockQty = 100,
+                                ReorderQty = 0,
+                                IsActive = true,
+                                CreatedAt = DateTime.UtcNow,
+                                UpdatedAt = DateTime.UtcNow
+                            });
+                        }
+
+                        // Seed Damaged Gold & Silver High-Stock thresholds (Requirement 6)
+                        var goldMetal = await context.MetalTypes.FirstOrDefaultAsync(m => m.MetalName == "Gold");
+                        var silverMetal = await context.MetalTypes.FirstOrDefaultAsync(m => m.MetalName == "Silver");
+                        if (goldMetal != null)
+                        {
+                            context.ReorderThresholds.Add(new ReorderThreshold
+                            {
+                                ThresholdType = "DAMAGED_HIGH_STOCK",
+                                MetalTypeId = goldMetal.MetalTypeId,
+                                VendorId = defaultVendor.VendorId,
+                                ThresholdWeightKg = 5.0m, // 5.000 KG threshold for Gold
+                                MinStockQty = 0,
+                                MaxStockQty = 0,
+                                ReorderQty = 0,
+                                IsActive = true,
+                                CreatedAt = DateTime.UtcNow,
+                                UpdatedAt = DateTime.UtcNow
+                            });
+                        }
+                        if (silverMetal != null)
+                        {
+                            context.ReorderThresholds.Add(new ReorderThreshold
+                            {
+                                ThresholdType = "DAMAGED_HIGH_STOCK",
+                                MetalTypeId = silverMetal.MetalTypeId,
+                                VendorId = defaultVendor.VendorId,
+                                ThresholdWeightKg = 20.0m, // 20.000 KG threshold for Silver
+                                MinStockQty = 0,
+                                MaxStockQty = 0,
+                                ReorderQty = 0,
+                                IsActive = true,
+                                CreatedAt = DateTime.UtcNow,
+                                UpdatedAt = DateTime.UtcNow
+                            });
+                        }
+
+                        await context.SaveChangesAsync();
+                    }
+                }
+
+                // 5. Ensure default system settings exist
+                try
+                {
+                    var existingSettings = await context.SystemSettings.Select(s => s.SettingKey).ToListAsync();
+                    var defaultSettings = new List<SystemSetting>();
+
+                    if (!existingSettings.Contains("ReservationTTLSeconds"))
+                    {
+                        defaultSettings.Add(new SystemSetting
+                        {
+                            SettingKey = "ReservationTTLSeconds",
+                            SettingValue = "300",
+                            Category = "RESERVATIONS",
+                            Description = "Duration (in seconds) that physical gold bars remain locked in pessimistic reservation during checkout before auto-release",
+                            UpdatedBy = "SYSTEM",
+                            UpdatedAt = DateTime.UtcNow
+                        });
+                    }
+
+                    if (!existingSettings.Contains("RequireQrPrintedForTurkeyTransfer"))
+                    {
+                        defaultSettings.Add(new SystemSetting
+                        {
+                            SettingKey = "RequireQrPrintedForTurkeyTransfer",
+                            SettingValue = "false",
+                            Category = "TURKEY_CONSIGNMENT",
+                            Description = "Prevent gold bar ownership transfer from Turkey to KFH unless QR code has been printed",
+                            UpdatedBy = "SYSTEM",
+                            UpdatedAt = DateTime.UtcNow
+                        });
+                    }
+
+                    if (!existingSettings.Contains("QrCodeReprintPrivilege"))
+                    {
+                        defaultSettings.Add(new SystemSetting
+                        {
+                            SettingKey = "QrCodeReprintPrivilege",
+                            SettingValue = "ADMIN_ONLY",
+                            Category = "QR_CODE_LABELS",
+                            Description = "Privilege level required to reprint physical QR code labels (ADMIN_ONLY, CHECKER_AND_ADMIN, ALL_OPERATORS, DISABLED)",
+                            UpdatedBy = "SYSTEM",
+                            UpdatedAt = DateTime.UtcNow
+                        });
+                    }
+
+                    if (defaultSettings.Count > 0)
+                    {
+                        context.SystemSettings.AddRange(defaultSettings);
+                        await context.SaveChangesAsync();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"⚠️ Failed to seed default system settings: {ex.Message}");
                 }
             }
             finally
@@ -187,6 +975,270 @@ public static class DbSeeder
         catch (Exception ex)
         {
             Console.WriteLine($"⚠️ Schema update check warning: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Ensures all 6 core workflows have active workflow template definitions with Maker and Checker steps.
+    /// Step 1: Treasury Operations (Maker) verification.
+    /// Step 2: Treasury Operations (Checker) approval.
+    /// </summary>
+    public static async Task EnsureWorkflowTemplatesAsync(AppDbContext context)
+    {
+        var workflows = new[]
+        {
+            new
+            {
+                WorkflowType = "PURCHASE_ORDER",
+                Name = "Default Purchase Order Workflow",
+                Description = "Standard Maker-Checker approval for procurement purchase orders.",
+                MakerStepName = "Purchase Order Maker Creation",
+                MakerDesc = "Maker drafts purchase order, assigns supplier, quantities, and agreed prices.",
+                CheckerStepName = "Purchase Order Checker Approval",
+                CheckerDesc = "Checker reviews PO terms, budget, and authorizes supplier procurement."
+            },
+            new
+            {
+                WorkflowType = "INTAKE_SHIPMENT",
+                Name = "Default Intake Shipment Workflow",
+                Description = "Standard Maker-Checker verification for incoming shipments.",
+                MakerStepName = "Intake Shipment Maker Verification",
+                MakerDesc = "Maker inspects shipment package, logs serials, and reviews delivery documentation.",
+                CheckerStepName = "Intake Shipment Checker Approval",
+                CheckerDesc = "Checker validates weight, serial counts, and authorizes vault shelf placement."
+            },
+            new
+            {
+                WorkflowType = "BRANCH_TRANSFER",
+                Name = "Default Branch Transfer Workflow",
+                Description = "Standard Maker-Checker verification for branch transfers.",
+                MakerStepName = "Branch Transfer Maker Verification",
+                MakerDesc = "Maker confirms transfer request items, destination vault, and courier dispatch details.",
+                CheckerStepName = "Branch Transfer Checker Approval",
+                CheckerDesc = "Checker validates transfer routing and authorizes vault transfer movement."
+            },
+            new
+            {
+                WorkflowType = "TURKEY_PURCHASE",
+                Name = "Default Turkey Gold Purchase Workflow",
+                Description = "Maker-Checker verification for purchasing consignment gold from Turkey.",
+                MakerStepName = "Turkey Purchase Maker Verification",
+                MakerDesc = "Maker checks consignment serials, gold purity certification, and agreed buy rate.",
+                CheckerStepName = "Turkey Purchase Checker Approval",
+                CheckerDesc = "Checker verifies serials and agreed buy rate, approving ownership transfer to KFH."
+            },
+            new
+            {
+                WorkflowType = "DAMAGE_BAR",
+                Name = "Default Damage Bar Workflow",
+                Description = "Standard Maker-Checker verification for marking gold bars as damaged.",
+                MakerStepName = "Damage Bar Maker Verification",
+                MakerDesc = "Maker inspects damaged bar, records defect report, and attaches visual evidence.",
+                CheckerStepName = "Damage Bar Checker Approval",
+                CheckerDesc = "Checker reviews damage evidence and approves quarantine status change."
+            },
+            new
+            {
+                WorkflowType = "CUSTODY_WITHDRAWAL",
+                Name = "Default Customer Gold Custody Withdrawal Workflow",
+                Description = "Maker-Checker verification for client physical gold withdrawal and delivery handover.",
+                MakerStepName = "Custody Handover Maker Verification",
+                MakerDesc = "Maker checks withdrawal request, customer civil ID, and staging of custody bars.",
+                CheckerStepName = "Custody Checker Handover Authorization",
+                CheckerDesc = "Checker validates customer civil ID, PACI handover OTP, and authorizes vault dispatch."
+            },
+            new
+            {
+                WorkflowType = "THRESHOLD_CONFIG",
+                Name = "Default Cut-Off Threshold Configuration Workflow",
+                Description = "Maker-Checker verification for creation, amendment, activation, deactivation, or deletion of stock cut-off thresholds.",
+                MakerStepName = "Threshold Configuration Maker Verification",
+                MakerDesc = "Maker configures product denomination, vendor, min stock cut-off, reorder level, and active state.",
+                CheckerStepName = "Threshold Configuration Checker Authorization",
+                CheckerDesc = "Checker reviews threshold parameters against enterprise stock policy and authorizes threshold activation or removal."
+            },
+            new
+            {
+                WorkflowType = "HOME_DELIVERY",
+                Name = "Default Home Delivery Fulfillment Workflow",
+                Description = "Standard Maker-Checker verification for client residential gold home delivery dispatch.",
+                MakerStepName = "Home Delivery Maker Verification & Bar Scanning",
+                MakerDesc = "Maker selects GFS delivery request, scans matching gold bar serial number and product type, and initiates dispatch authorization.",
+                CheckerStepName = "Home Delivery Checker Authorization",
+                CheckerDesc = "Checker verifies customer PACI Civil ID, delivery address, scanned bar serial/product match, and authorizes armored courier dispatch."
+            },
+            new
+            {
+                WorkflowType = "CUSTOMS_TRANSFER",
+                Name = "Default Customs-Held Ownership Transfer Workflow",
+                Description = "Maker-Checker verification for releasing bonded customs gold and transferring ownership to Turkey or Kuwait portfolio.",
+                MakerStepName = "Customs Transfer Maker Submission",
+                MakerDesc = "Maker verifies Bayan customs declaration number, port entry clearance documents, and submits ownership transfer request.",
+                CheckerStepName = "Customs Transfer Checker Authorization",
+                CheckerDesc = "Checker reviews customs clearance documents, duty receipts, and authorizes ownership transfer to Turkey/Kuwait inventory."
+            },
+            new
+            {
+                WorkflowType = "VIP_ALLOCATION",
+                Name = "Default VIP Stock Allocation Workflow",
+                Description = "Maker-Checker verification for allocating KFH owned gold into VIP Exclusive Stock (isolated from online retail).",
+                MakerStepName = "VIP Stock Allocation Maker Submission",
+                MakerDesc = "Maker selects KFH owned gold bars, assigns VIP category, and submits allocation request.",
+                CheckerStepName = "VIP Stock Allocation Checker Approval",
+                CheckerDesc = "Checker verifies bar serials, denomination weights, and approves transfer of channel to OFFLINE."
+            },
+            new
+            {
+                WorkflowType = "VIP_DEALLOCATION",
+                Name = "Default VIP Return to Online Stock Workflow",
+                Description = "Maker-Checker verification for returning VIP Offline gold bars back to general KFH Online inventory.",
+                MakerStepName = "VIP Return to Online Maker Request",
+                MakerDesc = "Maker selects VIP offline bars, specifies deallocation/replenishment reason, and submits return request.",
+                CheckerStepName = "VIP Return to Online Checker Authorization",
+                CheckerDesc = "Checker verifies bar serials, channel reallocation, and authorizes transition to ONLINE stock."
+            },
+            new
+            {
+                WorkflowType = "VIP_DISPENSE",
+                Name = "Default VIP Client Gold Dispensation Workflow",
+                Description = "Maker-Checker verification for withdrawing and dispensing physical gold from VIP Exclusive Stock to VIP clients.",
+                MakerStepName = "VIP Gold Dispensation Maker Request",
+                MakerDesc = "Maker records VIP customer profile, Civil ID, account number, selects VIP bars, and submits withdrawal request.",
+                CheckerStepName = "VIP Gold Dispensation Checker Authorization",
+                CheckerDesc = "Checker validates VIP customer identity and authorizes vault release and physical dispensation."
+            },
+            new
+            {
+                WorkflowType = "TURKEY_RETURN",
+                Name = "Default Return Gold to Turkey Consignment Workflow",
+                Description = "Maker-Checker verification for returning KFH Owned or VIP Owned gold bars back to Turkey Consignment (TURKEY_OWNED).",
+                MakerStepName = "Turkey Return Maker Request",
+                MakerDesc = "Maker selects available KFH or VIP gold bars, specifies return reason, and submits return request.",
+                CheckerStepName = "Turkey Return Checker Authorization",
+                CheckerDesc = "Checker verifies bar serials, physical return checklist, and authorizes ownership reversion to TURKEY_OWNED."
+            },
+            new
+            {
+                WorkflowType = "MISSING_ITEMS",
+                Name = "Default Missing Items Workflow",
+                Description = "Maker-Checker verification for reporting and writing off missing items/serials from Turkey consignment or customs intake.",
+                MakerStepName = "Missing Items Maker Submission",
+                MakerDesc = "Maker selects missing serials, identifies source lot/consignment, specifies discrepancy justification, and submits report.",
+                CheckerStepName = "Missing Items Checker Authorization",
+                CheckerDesc = "Checker investigates missing serial discrepancy, approves inventory status transition to MISSING, and adjusts ownership balance."
+            },
+            new
+            {
+                WorkflowType = "DAMAGED_EXPORT",
+                Name = "Default Damaged Gold Export Workflow",
+                Description = "Three-level Maker-Checker-SeniorManager approval process for exporting damaged precious metals to manufacturer/refiner.",
+                MakerStepName = "Damaged Export Maker Initiation",
+                MakerDesc = "Maker selects damaged Turkey-owned bar, verifies physical defect report and MOCI assay, and initiates export request.",
+                CheckerStepName = "Damaged Export Checker Review",
+                CheckerDesc = "Checker reviews damage evidence, Turkey ownership, and validates export details."
+            }
+        };
+
+        foreach (var def in workflows)
+        {
+            var template = await context.WorkflowTemplates
+                .Include(t => t.Steps)
+                .FirstOrDefaultAsync(t => t.WorkflowType == def.WorkflowType);
+
+            if (template == null)
+            {
+                template = new WorkflowTemplate
+                {
+                    WorkflowType = def.WorkflowType,
+                    Name = def.Name,
+                    Description = def.Description,
+                    IsActive = true
+                };
+                context.WorkflowTemplates.Add(template);
+                await context.SaveChangesAsync();
+
+                var step1 = new WorkflowStep
+                {
+                    TemplateId = template.TemplateId,
+                    StepOrder = 1,
+                    StepName = def.MakerStepName,
+                    RequiredRole = "Treasury Operations (Maker)",
+                    Description = def.MakerDesc
+                };
+                var step2 = new WorkflowStep
+                {
+                    TemplateId = template.TemplateId,
+                    StepOrder = 2,
+                    StepName = def.CheckerStepName,
+                    RequiredRole = "Treasury Operations (Checker)",
+                    Description = def.CheckerDesc
+                };
+                context.WorkflowSteps.AddRange(step1, step2);
+
+                if (def.WorkflowType == "DAMAGED_EXPORT")
+                {
+                    var step3 = new WorkflowStep
+                    {
+                        TemplateId = template.TemplateId,
+                        StepOrder = 3,
+                        StepName = "Damaged Export Senior Manager Authorization",
+                        RequiredRole = "Senior Treasury Manager",
+                        Description = "Senior Treasury Manager gives final executive authorization for overseas manufacturer export and courier dispatch."
+                    };
+                    context.WorkflowSteps.Add(step3);
+                }
+
+                await context.SaveChangesAsync();
+            }
+            else
+            {
+                int minSteps = def.WorkflowType == "DAMAGED_EXPORT" ? 3 : 2;
+                if (template.Steps == null || template.Steps.Count < minSteps)
+                {
+                    bool hasPending = await context.WorkflowInstances.AnyAsync(i => i.TemplateId == template.TemplateId && i.StatusCode == "PENDING_MAKER");
+                    if (!hasPending)
+                    {
+                        if (template.Steps != null && template.Steps.Any())
+                        {
+                            context.WorkflowSteps.RemoveRange(template.Steps);
+                            await context.SaveChangesAsync();
+                        }
+
+                        var step1 = new WorkflowStep
+                        {
+                            TemplateId = template.TemplateId,
+                            StepOrder = 1,
+                            StepName = def.MakerStepName,
+                            RequiredRole = "Treasury Operations (Maker)",
+                            Description = def.MakerDesc
+                        };
+                        var step2 = new WorkflowStep
+                        {
+                            TemplateId = template.TemplateId,
+                            StepOrder = 2,
+                            StepName = def.CheckerStepName,
+                            RequiredRole = "Treasury Operations (Checker)",
+                            Description = def.CheckerDesc
+                        };
+                        context.WorkflowSteps.AddRange(step1, step2);
+
+                        if (def.WorkflowType == "DAMAGED_EXPORT")
+                        {
+                            var step3 = new WorkflowStep
+                            {
+                                TemplateId = template.TemplateId,
+                                StepOrder = 3,
+                                StepName = "Damaged Export Senior Manager Authorization",
+                                RequiredRole = "Senior Treasury Manager",
+                                Description = "Senior Treasury Manager gives final executive authorization for overseas manufacturer export and courier dispatch."
+                            };
+                            context.WorkflowSteps.Add(step3);
+                        }
+
+                        await context.SaveChangesAsync();
+                    }
+                }
+            }
         }
     }
     // Single source of truth for system-group module permissions, shared by the fresh
@@ -200,7 +1252,7 @@ public static class DbSeeder
             {"dashboard","READ_ONLY"}, {"pending_actions","READ_WRITE"}, {"spatial_map","READ_ONLY"},
             {"custody","READ_ONLY"}, {"stocktake","READ_ONLY"}, {"migration","HIDDEN"}, {"reports","READ_ONLY"},
             {"workflows","READ_ONLY"}, {"settings","HIDDEN"}, {"user_admin","HIDDEN"}, {"vault_location","HIDDEN"},
-            {"master_data","HIDDEN"}, {"workflow_design","HIDDEN"}, {"intake","FULL"}, {"rules_engine","HIDDEN"},
+            {"master_data","HIDDEN"}, {"workflow_design","READ_ONLY"}, {"intake","FULL"}, {"rules_engine","HIDDEN"},
             {"monitoring","HIDDEN"}, {"barcode_qr_labeling","FULL"}, {"purchase_orders","FULL"},
             {"dispensing","FULL"}, {"device_integration","HIDDEN"}, {"notifications","READ_ONLY"},
         },
@@ -209,7 +1261,7 @@ public static class DbSeeder
             {"dashboard","READ_ONLY"}, {"pending_actions","FULL"}, {"spatial_map","READ_ONLY"},
             {"custody","READ_ONLY"}, {"stocktake","READ_WRITE"}, {"migration","HIDDEN"}, {"reports","READ_ONLY"},
             {"workflows","READ_ONLY"}, {"settings","HIDDEN"}, {"user_admin","HIDDEN"}, {"vault_location","HIDDEN"},
-            {"master_data","HIDDEN"}, {"workflow_design","HIDDEN"}, {"intake","READ_ONLY"}, {"rules_engine","HIDDEN"},
+            {"master_data","HIDDEN"}, {"workflow_design","READ_ONLY"}, {"intake","READ_ONLY"}, {"rules_engine","HIDDEN"},
             {"monitoring","HIDDEN"}, {"barcode_qr_labeling","READ_ONLY"}, {"purchase_orders","READ_ONLY"},
             {"dispensing","READ_ONLY"}, {"device_integration","HIDDEN"}, {"notifications","READ_ONLY"},
         },
@@ -218,9 +1270,18 @@ public static class DbSeeder
             {"dashboard","READ_ONLY"}, {"pending_actions","FULL"}, {"spatial_map","READ_ONLY"},
             {"custody","READ_ONLY"}, {"stocktake","FULL"}, {"migration","HIDDEN"}, {"reports","FULL"},
             {"workflows","READ_ONLY"}, {"settings","HIDDEN"}, {"user_admin","HIDDEN"}, {"vault_location","HIDDEN"},
-            {"master_data","HIDDEN"}, {"workflow_design","HIDDEN"}, {"intake","READ_ONLY"}, {"rules_engine","HIDDEN"},
+            {"master_data","HIDDEN"}, {"workflow_design","READ_ONLY"}, {"intake","READ_ONLY"}, {"rules_engine","HIDDEN"},
             {"monitoring","HIDDEN"}, {"barcode_qr_labeling","READ_ONLY"}, {"purchase_orders","READ_ONLY"},
             {"dispensing","READ_ONLY"}, {"device_integration","HIDDEN"}, {"notifications","READ_ONLY"},
+        },
+        ["Senior Treasury Manager"] = new()
+        {
+            {"dashboard","FULL"}, {"pending_actions","FULL"}, {"spatial_map","READ_ONLY"},
+            {"custody","FULL"}, {"stocktake","READ_ONLY"}, {"migration","HIDDEN"}, {"reports","FULL"},
+            {"workflows","FULL"}, {"settings","READ_ONLY"}, {"user_admin","READ_ONLY"}, {"vault_location","READ_ONLY"},
+            {"master_data","READ_ONLY"}, {"workflow_design","READ_ONLY"}, {"intake","READ_ONLY"}, {"rules_engine","READ_ONLY"},
+            {"monitoring","FULL"}, {"barcode_qr_labeling","READ_ONLY"}, {"purchase_orders","FULL"},
+            {"dispensing","FULL"}, {"device_integration","READ_ONLY"}, {"notifications","FULL"},
         },
         ["IT Administrators"] = new()
         {
@@ -489,116 +1550,8 @@ public static class DbSeeder
 
         // 17. (No simulated reconciliation break — starting from zero stock.)
 
-        // 18. Default Active Workflow Templates Seeding
-        // 1. TURKEY_PURCHASE (Consignment Gold Purchase from Turkey)
-        var turkeyPurchaseWorkflow = new WorkflowTemplate
-        {
-            WorkflowType = "TURKEY_PURCHASE",
-            Name = "Default Turkey Gold Purchase Workflow",
-            Description = "Maker-Checker verification for purchasing consignment gold from Turkey.",
-            IsActive = true
-        };
-        context.WorkflowTemplates.Add(turkeyPurchaseWorkflow);
-        await context.SaveChangesAsync();
-
-        var turkeyPurchaseStep1 = new WorkflowStep
-        {
-            TemplateId = turkeyPurchaseWorkflow.TemplateId,
-            StepOrder = 1,
-            StepName = "Turkey Purchase Checker Approval",
-            RequiredRole = "Treasury Operations (Checker)",
-            Description = "Checker verifies serials and agreed buy rate, approving ownership transfer to KFH."
-        };
-        context.WorkflowSteps.Add(turkeyPurchaseStep1);
-        await context.SaveChangesAsync();
-
-        // 2. DAMAGE_BAR (Damaged Gold Bar Quarantine)
-        var damageWorkflow = new WorkflowTemplate
-        {
-            WorkflowType = "DAMAGE_BAR",
-            Name = "Default Damage Bar Workflow",
-            Description = "Standard Maker-Checker verification for marking gold bars as damaged.",
-            IsActive = true
-        };
-        context.WorkflowTemplates.Add(damageWorkflow);
-        await context.SaveChangesAsync();
-
-        var damageStep1 = new WorkflowStep
-        {
-            TemplateId = damageWorkflow.TemplateId,
-            StepOrder = 1,
-            StepName = "Damage Bar Checker Approval",
-            RequiredRole = "Treasury Operations (Checker)",
-            Description = "Checker reviews damage evidence and approves status change."
-        };
-        context.WorkflowSteps.Add(damageStep1);
-        await context.SaveChangesAsync();
-
-        // 3. INTAKE_SHIPMENT (Incoming Shipment Receipt & Weighing)
-        var intakeWorkflow = new WorkflowTemplate
-        {
-            WorkflowType = "INTAKE_SHIPMENT",
-            Name = "Default Intake Shipment Workflow",
-            Description = "Standard Maker-Checker verification for incoming shipments.",
-            IsActive = true
-        };
-        context.WorkflowTemplates.Add(intakeWorkflow);
-        await context.SaveChangesAsync();
-
-        var intakeStep1 = new WorkflowStep
-        {
-            TemplateId = intakeWorkflow.TemplateId,
-            StepOrder = 1,
-            StepName = "Intake Checker Verification",
-            RequiredRole = "Treasury Operations (Checker)",
-            Description = "Checker verifies weight, serials and approves shelf placement."
-        };
-        context.WorkflowSteps.Add(intakeStep1);
-        await context.SaveChangesAsync();
-
-        // 4. BRANCH_TRANSFER (Inter-Branch & Vault Transfer)
-        var transferWorkflow = new WorkflowTemplate
-        {
-            WorkflowType = "BRANCH_TRANSFER",
-            Name = "Default Branch Transfer Workflow",
-            Description = "Standard Maker-Checker verification for branch transfers.",
-            IsActive = true
-        };
-        context.WorkflowTemplates.Add(transferWorkflow);
-        await context.SaveChangesAsync();
-
-        var transferStep1 = new WorkflowStep
-        {
-            TemplateId = transferWorkflow.TemplateId,
-            StepOrder = 1,
-            StepName = "Branch Transfer Checker Approval",
-            RequiredRole = "Treasury Operations (Checker)",
-            Description = "Checker reviews and approves the branch transfer."
-        };
-        context.WorkflowSteps.Add(transferStep1);
-        await context.SaveChangesAsync();
-
-        // 5. CUSTODY_WITHDRAWAL (Client Custody Withdrawal & Handover)
-        var custodyWithdrawalWorkflow = new WorkflowTemplate
-        {
-            WorkflowType = "CUSTODY_WITHDRAWAL",
-            Name = "Default Customer Gold Custody Withdrawal Workflow",
-            Description = "Maker-Checker verification for client physical gold withdrawal and delivery handover.",
-            IsActive = true
-        };
-        context.WorkflowTemplates.Add(custodyWithdrawalWorkflow);
-        await context.SaveChangesAsync();
-
-        var custodyWithdrawalStep1 = new WorkflowStep
-        {
-            TemplateId = custodyWithdrawalWorkflow.TemplateId,
-            StepOrder = 1,
-            StepName = "Custody Checker Handover Authorization",
-            RequiredRole = "Treasury Operations (Checker)",
-            Description = "Checker validates customer civil ID, PACI handover OTP, and authorizes vault dispatch."
-        };
-        context.WorkflowSteps.Add(custodyWithdrawalStep1);
-        await context.SaveChangesAsync();
+        // 18. Default Active Workflow Templates Seeding (Maker and Checker Steps)
+        await EnsureWorkflowTemplatesAsync(context);
 
 
         // 19. Default Privilege Groups with Permission Matrices
@@ -612,9 +1565,10 @@ public static class DbSeeder
 
         var grpMaker = new PrivilegeGroup { GroupName = "Treasury Operations (Maker)", Description = "Initiates purchase orders, transfers, and branch operations.", IsSystem = true };
         var grpChecker = new PrivilegeGroup { GroupName = "Treasury Operations (Checker)", Description = "Reviews and approves purchase orders and intake verifications.", IsSystem = true };
+        var grpSenior = new PrivilegeGroup { GroupName = "Senior Treasury Manager", Description = "Executive authorization for high-value gold movements and overseas exports.", IsSystem = true };
         var grpRecon = new PrivilegeGroup { GroupName = "Reconciliation Officers", Description = "Runs audit sessions, stocktakes, and ledger reconciliation checks.", IsSystem = true };
         var grpAdmin = new PrivilegeGroup { GroupName = "IT Administrators", Description = "Full system access including user administration and configuration.", IsSystem = true };
-        context.PrivilegeGroups.AddRange(grpMaker, grpChecker, grpRecon, grpAdmin);
+        context.PrivilegeGroups.AddRange(grpMaker, grpChecker, grpSenior, grpRecon, grpAdmin);
         await context.SaveChangesAsync();
 
         // Apply the shared permission matrix (single source of truth -- see
@@ -624,6 +1578,7 @@ public static class DbSeeder
         {
             [grpMaker.GroupName] = grpMaker,
             [grpChecker.GroupName] = grpChecker,
+            [grpSenior.GroupName] = grpSenior,
             [grpRecon.GroupName] = grpRecon,
             [grpAdmin.GroupName] = grpAdmin,
         };
@@ -639,15 +1594,17 @@ public static class DbSeeder
 
         var userMaker = new AppUser { Username = "treasury-maker", DisplayName = "KFH Treasury Maker User", Email = "maker@kfh.com.kw", PasswordHash = demoHash, CreatedBy = "SYSTEM" };
         var userChecker = new AppUser { Username = "treasury-checker", DisplayName = "KFH Treasury Checker User", Email = "checker@kfh.com.kw", PasswordHash = demoHash, CreatedBy = "SYSTEM" };
+        var userSenior = new AppUser { Username = "treasury-manager", DisplayName = "KFH Senior Treasury Manager", Email = "manager@kfh.com.kw", PasswordHash = demoHash, CreatedBy = "SYSTEM" };
         var userRecon = new AppUser { Username = "reconciliation-reconciler", DisplayName = "KFH Reconciliation Officer", Email = "reconciler@kfh.com.kw", PasswordHash = demoHash, CreatedBy = "SYSTEM" };
         var userAdmin = new AppUser { Username = "system-admin", DisplayName = "KFH IT Administrator", Email = "admin@kfh.com.kw", PasswordHash = demoHash, CreatedBy = "SYSTEM" };
-        context.AppUsers.AddRange(userMaker, userChecker, userRecon, userAdmin);
+        context.AppUsers.AddRange(userMaker, userChecker, userSenior, userRecon, userAdmin);
         await context.SaveChangesAsync();
 
         // 21. User-Group Memberships
         context.UserGroupMemberships.AddRange(
             new UserGroupMembership { UserId = userMaker.UserId, GroupId = grpMaker.GroupId, AssignedBy = "SYSTEM" },
             new UserGroupMembership { UserId = userChecker.UserId, GroupId = grpChecker.GroupId, AssignedBy = "SYSTEM" },
+            new UserGroupMembership { UserId = userSenior.UserId, GroupId = grpSenior.GroupId, AssignedBy = "SYSTEM" },
             new UserGroupMembership { UserId = userRecon.UserId, GroupId = grpRecon.GroupId, AssignedBy = "SYSTEM" },
             new UserGroupMembership { UserId = userAdmin.UserId, GroupId = grpAdmin.GroupId, AssignedBy = "SYSTEM" }
         );
@@ -789,6 +1746,24 @@ public static class DbSeeder
                 SettingValue = "300", 
                 Category = "RESERVATIONS", 
                 Description = "Duration (in seconds) that physical gold bars remain locked in pessimistic reservation during checkout before auto-release",
+                UpdatedBy = "SYSTEM",
+                UpdatedAt = DateTime.UtcNow
+            },
+            new SystemSetting
+            {
+                SettingKey = "RequireQrPrintedForTurkeyTransfer",
+                SettingValue = "false",
+                Category = "TURKEY_CONSIGNMENT",
+                Description = "Prevent gold bar ownership transfer from Turkey to KFH unless QR code has been printed",
+                UpdatedBy = "SYSTEM",
+                UpdatedAt = DateTime.UtcNow
+            },
+            new SystemSetting
+            {
+                SettingKey = "QrCodeReprintPrivilege",
+                SettingValue = "ADMIN_ONLY",
+                Category = "QR_CODE_LABELS",
+                Description = "Privilege level required to reprint physical QR code labels (ADMIN_ONLY, CHECKER_AND_ADMIN, ALL_OPERATORS, DISABLED)",
                 UpdatedBy = "SYSTEM",
                 UpdatedAt = DateTime.UtcNow
             }

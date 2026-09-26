@@ -532,14 +532,16 @@ public class FimService : IFimService
 
     private async Task WriteAuditLogAsync(string username, string moduleName, string description)
     {
-        _dbContext.AuditLogs.Add(new AuditLog
+        var log = new AuditLog
         {
             Username = username,
             IpAddress = "SYSTEM",
             ModuleName = moduleName,
             ActionDescription = description,
             Timestamp = DateTime.UtcNow
-        });
+        };
+        log.RowHash = InventoryRepository.ComputeAuditRowHash(log);
+        _dbContext.AuditLogs.Add(log);
         await _dbContext.SaveChangesAsync();
     }
 

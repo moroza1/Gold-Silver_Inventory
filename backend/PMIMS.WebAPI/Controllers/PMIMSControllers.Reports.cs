@@ -395,6 +395,21 @@ public partial class PMIMSControllers
             });
         }
 
+        // Damaged bar quarantines and pending damage reports
+        var damagedBars = (await _repository.GetItemsAsync()).Where(i => i.IsDamaged || i.DamageApprovalStatus == "PENDING_APPROVAL");
+        foreach (var d in damagedBars)
+        {
+            rows.Add(new[]
+            {
+                d.IsDamaged ? "DAMAGED_BAR_QUARANTINE" : "DAMAGED_BAR_PENDING_APPROVAL",
+                d.SerialNumber,
+                $"Reason: {d.DamageReason ?? "DEFECT"} | Desc: {d.DamageDescription ?? "N/A"} | Reported By: {d.DamageReportedBy ?? "SYSTEM"}",
+                d.IsDamaged ? "HIGH" : "MEDIUM",
+                d.DamageApprovedAt?.ToString("u") ?? d.InspectionDate?.ToString("u") ?? "",
+                d.DamageApprovalStatus ?? (d.IsDamaged ? "APPROVED" : "PENDING")
+            });
+        }
+
         return (headers, rows);
     }
 

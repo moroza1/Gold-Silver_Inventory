@@ -31,7 +31,7 @@ public class ReconciliationService : IReconciliationService
         // 1. Fetch active database items
         var items = (await _repository.GetItemsAsync()).ToList();
 
-        // 2. Query expected balances from Core Banking / IMAL (Simulated core database lookup)
+        // 2. Query expected balances from Core Banking / Phoenix (Simulated core database lookup)
         // We simulate that Core Banking expects items matching our DB, but with a discrepancy for verification
         var discrepancies = new List<(InventoryItem item, int pmimsVal, int coreVal)>();
 
@@ -54,7 +54,7 @@ public class ReconciliationService : IReconciliationService
         {
             if (item.SerialNumber == "TR-10293-02")
             {
-                discrepancies.Add((item, 1, 0)); // Present in PMIMS, missing in Core IMAL GL
+                discrepancies.Add((item, 1, 0)); // Present in PMIMS, missing in Core Phoenix GL
                 totalDiscrepancies++;
             }
         }

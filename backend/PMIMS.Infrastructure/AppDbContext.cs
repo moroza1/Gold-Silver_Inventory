@@ -120,7 +120,19 @@ public class AppDbContext : DbContext
     public DbSet<BranchTransfer> BranchTransfers { get; set; } = null!;
     public DbSet<PendingIntake> PendingIntakes { get; set; } = null!;
     public DbSet<PendingTurkeyPurchase> PendingTurkeyPurchases { get; set; } = null!;
+    public DbSet<PendingThresholdChange> PendingThresholdChanges { get; set; } = null!;
+    public DbSet<PendingCustomsTransfer> PendingCustomsTransfers { get; set; } = null!;
+    public DbSet<PendingVipAllocation> PendingVipAllocations { get; set; } = null!;
+    public DbSet<PendingVipDeallocation> PendingVipDeallocations { get; set; } = null!;
+    public DbSet<PendingVipDispense> PendingVipDispenses { get; set; } = null!;
+    public DbSet<PendingTurkeyReturn> PendingTurkeyReturns { get; set; } = null!;
+    public DbSet<PendingMissingItemReport> PendingMissingItemReports { get; set; } = null!;
+    public DbSet<ShipmentProductionCost> ShipmentProductionCosts { get; set; } = null!;
     public DbSet<SystemSetting> SystemSettings { get; set; } = null!;
+    public DbSet<QrPrintLog> QrPrintLogs { get; set; } = null!;
+    public DbSet<PendingQrReprint> PendingQrReprints { get; set; } = null!;
+    public DbSet<DamagedBarReplacement> DamagedBarReplacements { get; set; } = null!;
+    public DbSet<PendingDamagedExport> PendingDamagedExports { get; set; } = null!;
 
     // FIM Integration Module
     public DbSet<FimUserAttribute> FimUserAttributes { get; set; } = null!;
@@ -144,7 +156,7 @@ public class AppDbContext : DbContext
     public DbSet<ChainOfCustodyEvent> ChainOfCustodyEvents { get; set; } = null!;
     public DbSet<IfrsValuationDisclosure> IfrsValuationDisclosures { get; set; } = null!;
 
-    // Cost Tracking & Valuation -- Core Banking (IMAL) GL Integration
+    // Cost Tracking & Valuation -- Core Banking (Phoenix) GL Integration
     public DbSet<CoreBankingLedgerPosting> CoreBankingLedgerPostings { get; set; } = null!;
 
     // Reporting Requirements Gap Analysis -- Cost Analysis & Variance (Item 8)
@@ -177,6 +189,13 @@ public class AppDbContext : DbContext
         {
             entity.HasKey(e => e.ReasonCode);
             entity.ToTable("reason_codes");
+        });
+
+        // PendingCustomsTransfer Configuration
+        modelBuilder.Entity<PendingCustomsTransfer>(entity =>
+        {
+            entity.HasKey(e => e.PendingTransferId);
+            entity.ToTable("pending_customs_transfers");
         });
 
         // MetalType Configuration
@@ -330,7 +349,7 @@ public class AppDbContext : DbContext
         {
             entity.HasKey(e => e.ItemId);
             entity.ToTable("inventory_items");
-            entity.HasIndex(e => e.SerialNumber).IsUnique();
+            entity.HasIndex(e => e.SerialNumber);
             entity.HasOne(e => e.Product).WithMany().HasForeignKey(e => e.ProductId);
             entity.HasOne(e => e.Lot).WithMany().HasForeignKey(e => e.LotId);
             entity.HasOne(e => e.Location).WithMany().HasForeignKey(e => e.LocationId);
@@ -387,6 +406,51 @@ public class AppDbContext : DbContext
         {
             entity.HasKey(e => e.PendingPurchaseId);
             entity.ToTable("pending_turkey_purchases");
+            entity.HasIndex(e => e.StatusCode);
+            entity.HasIndex(e => e.CreatedAt);
+        });
+
+        // PendingVipAllocation Configuration
+        modelBuilder.Entity<PendingVipAllocation>(entity =>
+        {
+            entity.HasKey(e => e.PendingAllocationId);
+            entity.ToTable("pending_vip_allocations");
+            entity.HasIndex(e => e.StatusCode);
+            entity.HasIndex(e => e.CreatedAt);
+        });
+
+        // PendingVipDeallocation Configuration
+        modelBuilder.Entity<PendingVipDeallocation>(entity =>
+        {
+            entity.HasKey(e => e.PendingDeallocationId);
+            entity.ToTable("pending_vip_deallocations");
+            entity.HasIndex(e => e.StatusCode);
+            entity.HasIndex(e => e.CreatedAt);
+        });
+
+        // PendingVipDispense Configuration
+        modelBuilder.Entity<PendingVipDispense>(entity =>
+        {
+            entity.HasKey(e => e.PendingDispenseId);
+            entity.ToTable("pending_vip_dispenses");
+            entity.HasIndex(e => e.StatusCode);
+            entity.HasIndex(e => e.CreatedAt);
+        });
+
+        // PendingTurkeyReturn Configuration
+        modelBuilder.Entity<PendingTurkeyReturn>(entity =>
+        {
+            entity.HasKey(e => e.PendingReturnId);
+            entity.ToTable("pending_turkey_returns");
+            entity.HasIndex(e => e.StatusCode);
+            entity.HasIndex(e => e.CreatedAt);
+        });
+
+        // PendingMissingItemReport Configuration
+        modelBuilder.Entity<PendingMissingItemReport>(entity =>
+        {
+            entity.HasKey(e => e.PendingReportId);
+            entity.ToTable("pending_missing_item_reports");
             entity.HasIndex(e => e.StatusCode);
             entity.HasIndex(e => e.CreatedAt);
         });
@@ -631,45 +695,15 @@ public class AppDbContext : DbContext
                   .OnDelete(DeleteBehavior.Cascade);
         });
 
-        // Loop over all entities and convert property/column names to snake_case
-        foreach (var entity in modelBuilder.Model.GetEntityTypes())
-        {
-            foreach (var property in entity.GetProperties())
-            {
-                var columnName = ConvertToSnakeCase(property.Name);
-                property.SetColumnName(columnName);
-
-                // Configure RowVersion for SQLite if running on SQLite
-                if (property.Name == "RowVersion" && Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite")
-                {
-                    property.SetDefaultValueSql("randomblob(8)");
-                    property.ValueGenerated = Microsoft.EntityFrameworkCore.Metadata.ValueGenerated.OnAddOrUpdate;
-                }
-            }
-
-            foreach (var key in entity.GetKeys())
-            {
-                key.SetName(ConvertToSnakeCase(key.GetName()));
-            }
-
-            foreach (var key in entity.GetForeignKeys())
-            {
-                key.SetConstraintName(ConvertToSnakeCase(key.GetConstraintName()));
-            }
-
-            foreach (var index in entity.GetIndexes())
-            {
-                index.SetDatabaseName(ConvertToSnakeCase(index.GetDatabaseName()));
-            }
-        }
-
         // ReorderThreshold Configuration
         modelBuilder.Entity<ReorderThreshold>(entity =>
         {
             entity.HasKey(e => e.ThresholdId);
             entity.ToTable("reorder_thresholds");
-            entity.HasOne(e => e.Product).WithMany().HasForeignKey(e => e.ProductId);
-            entity.HasOne(e => e.Vendor).WithMany().HasForeignKey(e => e.VendorId);
+            entity.Property(e => e.ThresholdWeightKg).HasColumnType("decimal(18,4)");
+            entity.HasOne(e => e.Product).WithMany().HasForeignKey(e => e.ProductId).IsRequired(false);
+            entity.HasOne(e => e.Vendor).WithMany().HasForeignKey(e => e.VendorId).IsRequired(false);
+            entity.HasOne(e => e.MetalType).WithMany().HasForeignKey(e => e.MetalTypeId).IsRequired(false);
         });
 
         // BranchTransfer Configuration
@@ -677,6 +711,9 @@ public class AppDbContext : DbContext
         {
             entity.HasKey(e => e.TransferId);
             entity.ToTable("branch_transfers");
+            entity.Property(e => e.TransferType).HasMaxLength(50);
+            entity.Property(e => e.ReturnReason).HasMaxLength(500);
+            entity.Property(e => e.Notes).HasMaxLength(1000);
             entity.HasOne(e => e.Item).WithMany().HasForeignKey(e => e.ItemId);
             entity.HasOne(e => e.SourceBranch).WithMany().HasForeignKey(e => e.SourceBranchId);
             entity.HasOne(e => e.DestinationBranch).WithMany().HasForeignKey(e => e.DestinationBranchId);
@@ -687,11 +724,37 @@ public class AppDbContext : DbContext
         {
             entity.HasKey(e => e.PendingIntakeId);
             entity.ToTable("pending_intakes");
+            entity.Property(e => e.CourierInfo).HasMaxLength(200);
             // Optional now -- a CUSTOMER-sourced receipt (buyback/custody deposit/return) has
             // no Purchase Order at all. SUPPLIER receipts still always set PoId.
             entity.HasOne(e => e.PurchaseOrder).WithMany().HasForeignKey(e => e.PoId).IsRequired(false);
             entity.HasOne(e => e.Location).WithMany().HasForeignKey(e => e.LocationId);
             entity.HasOne(e => e.Customer).WithMany().HasForeignKey(e => e.CustomerId).IsRequired(false);
+            entity.HasOne(e => e.DestinationBranch).WithMany().HasForeignKey(e => e.DestinationBranchId).IsRequired(false);
+        });
+
+        // PendingThresholdChange Configuration
+        modelBuilder.Entity<PendingThresholdChange>(entity =>
+        {
+            entity.HasKey(e => e.PendingChangeId);
+            entity.ToTable("pending_threshold_changes");
+            entity.Property(e => e.ThresholdWeightKg).HasColumnType("decimal(18,4)");
+            entity.HasOne(e => e.Product).WithMany().HasForeignKey(e => e.ProductId).IsRequired(false);
+            entity.HasOne(e => e.Vendor).WithMany().HasForeignKey(e => e.VendorId).IsRequired(false);
+            entity.HasOne(e => e.MetalType).WithMany().HasForeignKey(e => e.MetalTypeId).IsRequired(false);
+            entity.HasOne(e => e.Threshold).WithMany().HasForeignKey(e => e.ThresholdId).IsRequired(false);
+        });
+
+        // ShipmentProductionCost Configuration
+        modelBuilder.Entity<ShipmentProductionCost>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.ToTable("shipment_production_costs");
+            entity.Property(e => e.ProductionCostKwd).HasColumnType("decimal(18,4)");
+            entity.HasOne(e => e.PendingIntake).WithMany().HasForeignKey(e => e.PendingIntakeId).IsRequired(false);
+            entity.HasOne(e => e.Lot).WithMany().HasForeignKey(e => e.LotId).IsRequired(false);
+            entity.HasOne(e => e.MetalType).WithMany().HasForeignKey(e => e.MetalTypeId);
+            entity.HasOne(e => e.Denomination).WithMany().HasForeignKey(e => e.DenominationId);
         });
 
         // ============================================================
@@ -787,7 +850,7 @@ public class AppDbContext : DbContext
         });
 
         // ============================================================
-        // Cost Tracking & Valuation -- Core Banking (IMAL) GL Integration
+        // Cost Tracking & Valuation -- Core Banking (Phoenix) GL Integration
         // ============================================================
         modelBuilder.Entity<CoreBankingLedgerPosting>(entity =>
         {
@@ -895,6 +958,77 @@ public class AppDbContext : DbContext
             entity.HasKey(e => e.SettingKey);
             entity.ToTable("system_settings");
         });
+
+        // QrPrintLog Configuration
+        modelBuilder.Entity<QrPrintLog>(entity =>
+        {
+            entity.HasKey(e => e.PrintLogId);
+            entity.ToTable("qr_print_logs");
+            entity.HasOne(e => e.Item).WithMany().HasForeignKey(e => e.ItemId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ReprintRequest).WithMany().HasForeignKey(e => e.ReprintRequestId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        // PendingQrReprint Configuration
+        modelBuilder.Entity<PendingQrReprint>(entity =>
+        {
+            entity.HasKey(e => e.ReprintRequestId);
+            entity.ToTable("pending_qr_reprints");
+        });
+
+        // DamagedBarReplacement Configuration
+        modelBuilder.Entity<DamagedBarReplacement>(entity =>
+        {
+            entity.HasKey(e => e.ReplacementId);
+            entity.ToTable("damaged_bar_replacements");
+            entity.HasOne(e => e.DamagedItem).WithMany().HasForeignKey(e => e.DamagedItemId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ReplacementItem).WithMany().HasForeignKey(e => e.ReplacementItemId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Customer).WithMany().HasForeignKey(e => e.CustomerId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Account).WithMany().HasForeignKey(e => e.AccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.CustomerHolding).WithMany().HasForeignKey(e => e.CustomerHoldingId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // PendingDamagedExport Configuration
+        modelBuilder.Entity<PendingDamagedExport>(entity =>
+        {
+            entity.HasKey(e => e.ExportId);
+            entity.ToTable("pending_damaged_exports");
+            entity.HasIndex(e => e.ExportReference).IsUnique();
+            entity.HasOne(e => e.Item).WithMany().HasForeignKey(e => e.ItemId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.MetalType).WithMany().HasForeignKey(e => e.MetalTypeId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Vendor).WithMany().HasForeignKey(e => e.VendorId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // Loop over all entities and convert property/column names to snake_case
+        foreach (var entity in modelBuilder.Model.GetEntityTypes())
+        {
+            foreach (var property in entity.GetProperties())
+            {
+                var columnName = ConvertToSnakeCase(property.Name);
+                property.SetColumnName(columnName);
+
+                // Configure RowVersion for SQLite if running on SQLite
+                if (property.Name == "RowVersion" && Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite")
+                {
+                    property.SetDefaultValueSql("randomblob(8)");
+                    property.ValueGenerated = Microsoft.EntityFrameworkCore.Metadata.ValueGenerated.OnAddOrUpdate;
+                }
+            }
+
+            foreach (var key in entity.GetKeys())
+            {
+                key.SetName(ConvertToSnakeCase(key.GetName()));
+            }
+
+            foreach (var key in entity.GetForeignKeys())
+            {
+                key.SetConstraintName(ConvertToSnakeCase(key.GetConstraintName()));
+            }
+
+            foreach (var index in entity.GetIndexes())
+            {
+                index.SetDatabaseName(ConvertToSnakeCase(index.GetDatabaseName()));
+            }
+        }
     }
 
     private static string ConvertToSnakeCase(string? input)
