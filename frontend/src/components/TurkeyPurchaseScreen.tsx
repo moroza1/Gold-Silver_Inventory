@@ -588,13 +588,15 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           serial_numbers: selectedKfhSerials,
+          serialNumbers: selectedKfhSerials,
           vip_category: vipCategory,
+          vipCategory: vipCategory,
           notes: vipAllocationNotes
         })
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.message || 'Failed to submit VIP allocation');
+        throw new Error(err.error || err.message || err.title || (res.status === 401 ? 'Unauthorized: Please log in again.' : res.status === 403 ? 'Forbidden: custody.write permission required.' : `Failed to submit VIP allocation (HTTP ${res.status})`));
       }
       const data = await res.json();
       alert(currentLang === 'en'
@@ -672,16 +674,21 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           serial_numbers: selectedVipSerials,
+          serialNumbers: selectedVipSerials,
           customer_name: vipCustomerName.trim(),
+          customerName: vipCustomerName.trim(),
           customer_civil_id: vipCustomerCivilId.trim(),
+          customerCivilId: vipCustomerCivilId.trim(),
           customer_account_number: vipCustomerAccount.trim(),
+          customerAccount: vipCustomerAccount.trim(),
           special_instructions: vipSpecialInstructions,
+          specialInstructions: vipSpecialInstructions,
           notes: vipDispenseNotes
         })
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.message || 'Failed to submit VIP dispensation request');
+        throw new Error(err.error || err.message || err.title || (res.status === 401 ? 'Unauthorized: Please log in again.' : res.status === 403 ? 'Forbidden: custody.write permission required.' : `Failed to submit VIP dispensation request (HTTP ${res.status})`));
       }
       const data = await res.json();
       alert(currentLang === 'en'
@@ -726,13 +733,15 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           serial_numbers: serialsToReturn,
+          serialNumbers: serialsToReturn,
           return_reason: returnReason,
+          returnReason: returnReason,
           notes: returnNotes
         })
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.message || 'Failed to initiate Turkey return workflow');
+        throw new Error(err.error || err.message || err.title || (res.status === 401 ? 'Unauthorized: Please log in again.' : res.status === 403 ? 'Forbidden: custody.write permission required.' : `Failed to initiate Turkey return workflow (HTTP ${res.status})`));
       }
       const data = await res.json();
       alert(currentLang === 'en'
@@ -1505,72 +1514,90 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
                 </div>
               </div>
 
-              {/* Denomination Choice Pills / Cards */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px', marginBottom: '16px' }}>
-                {turkeyInventory?.summary?.by_product?.map(p => {
-                  const isSelected = selectedDenomCode === p.product_code;
-                  const prodItems = availableItems.filter(i => i.product_code === p.product_code);
-                  const selectedSet = new Set(selectedSerials);
-                  const selectedInThis = prodItems.filter(i => selectedSet.has(i.serial_number)).length;
-                  const denomPurchasingCost = rateNum > 0 ? (p.weight_grams * rateNum) : 0;
-
-                  return (
-                    <div
-                      key={p.product_code}
-                      onClick={() => {
-                        setSelectedDenomCode(p.product_code);
+              {/* Denomination Choice Dropdown List */}
+              <div style={{ marginBottom: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '14px', alignItems: 'end', flexWrap: 'wrap' }}>
+                  <div className="form-group" style={{ margin: 0, flex: 1, minWidth: '280px' }}>
+                    <label style={{ fontSize: '12px', fontWeight: 600, marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-primary)' }}>
+                      <i className="fa-solid fa-coins" style={{ color: 'var(--accent-gold)' }}></i>
+                      {currentLang === 'en' ? 'Select Denomination & Metal Type' : 'اختر فئة ونوع السبيكة'}
+                    </label>
+                    <select
+                      className="form-control"
+                      value={selectedDenomCode}
+                      onChange={e => {
+                        setSelectedDenomCode(e.target.value);
                         setDenomSerialSearch('');
                       }}
                       style={{
-                        padding: '12px 14px',
-                        borderRadius: '8px',
-                        cursor: 'pointer',
-                        transition: 'all 0.2s',
-                        border: isSelected ? '2px solid var(--kfh-green)' : '1px solid var(--surface-border)',
-                        background: isSelected ? 'rgba(0, 155, 78, 0.12)' : 'rgba(255,255,255,0.02)',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '6px'
+                        fontSize: '13px',
+                        padding: '10px 14px',
+                        fontWeight: '600',
+                        backgroundColor: 'var(--bg-secondary)',
+                        borderColor: 'var(--kfh-green)',
+                        color: 'var(--text-primary)',
+                        width: '100%',
+                        borderRadius: '6px'
                       }}
                     >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ fontSize: '13px', fontWeight: 'bold', color: isSelected ? 'var(--kfh-green)' : 'var(--text-primary)' }}>
-                          {p.denomination}
-                        </span>
-                        <span style={{ fontSize: '11px', padding: '2px 7px', borderRadius: '10px', background: isSelected ? 'var(--kfh-green)' : 'rgba(255,255,255,0.08)', color: isSelected ? '#fff' : 'var(--text-muted)', fontWeight: 600 }}>
-                          {p.count} {currentLang === 'en' ? 'in stock' : 'متاح'}
-                        </span>
-                      </div>
+                      {turkeyInventory?.summary?.by_product?.map(p => {
+                        const prodItems = availableItems.filter(i => i.product_code === p.product_code);
+                        const selectedSet = new Set(selectedSerials);
+                        const selectedInThis = prodItems.filter(i => selectedSet.has(i.serial_number)).length;
+                        return (
+                          <option key={p.product_code} value={p.product_code} style={{ backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)' }}>
+                            {p.denomination} — {p.metal_name} ({p.weight_grams}g) — [{p.count} {currentLang === 'en' ? 'in stock' : 'متاح'}{selectedInThis > 0 ? ` • ${selectedInThis} ${currentLang === 'en' ? 'selected' : 'محدد'}` : ''}]
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
 
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-muted)' }}>
-                        <span>{p.metal_name} ({p.weight_grams}g)</span>
+                  {currentDenomObj && (() => {
+                    const prodItems = availableItems.filter(i => i.product_code === currentDenomObj.product_code);
+                    const selectedSet = new Set(selectedSerials);
+                    const selectedInThis = prodItems.filter(i => selectedSet.has(i.serial_number)).length;
+                    const denomPurchasingCost = rateNum > 0 ? (currentDenomObj.weight_grams * rateNum) : 0;
+
+                    return (
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '14px',
+                        padding: '8px 16px',
+                        background: 'rgba(0, 155, 78, 0.08)',
+                        border: '1px solid rgba(0, 155, 78, 0.25)',
+                        borderRadius: '6px',
+                        minHeight: '44px'
+                      }}>
+                        <div>
+                          <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Available Stock' : 'المخزون المتاح'}</div>
+                          <div style={{ fontSize: '13px', fontWeight: 'bold', color: 'var(--kfh-green)' }}>
+                            {currentDenomObj.count} {currentLang === 'en' ? 'bars' : 'سبيكة'} <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 'normal' }}>({(currentDenomObj.count * currentDenomObj.weight_grams).toLocaleString()} g)</span>
+                          </div>
+                        </div>
+
                         {selectedInThis > 0 && (
-                          <span style={{ color: 'var(--kfh-green)', fontWeight: 'bold' }}>
-                            ✓ {selectedInThis} {currentLang === 'en' ? 'selected' : 'محدد'}
-                          </span>
+                          <div style={{ borderLeft: '1px solid rgba(0, 155, 78, 0.25)', paddingLeft: '12px' }}>
+                            <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Selected for Purchase' : 'المحدد للشراء'}</div>
+                            <div style={{ fontSize: '13px', fontWeight: 'bold', color: 'var(--accent-gold)' }}>
+                              ✓ {selectedInThis} {currentLang === 'en' ? 'bars' : 'سبيكة'}
+                            </div>
+                          </div>
+                        )}
+
+                        {denomPurchasingCost > 0 && (
+                          <div style={{ borderLeft: '1px solid rgba(0, 155, 78, 0.25)', paddingLeft: '12px' }}>
+                            <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Purchasing Cost / Bar' : 'تكلفة الشراء للسبيكة'}</div>
+                            <div style={{ fontSize: '13px', fontWeight: 'bold', color: 'var(--kfh-green)' }}>
+                              {denomPurchasingCost.toFixed(3)} KWD
+                            </div>
+                          </div>
                         )}
                       </div>
-
-                      {/* Purchasing Cost by Denomination preview on card */}
-                      {denomPurchasingCost > 0 && (
-                        <div style={{
-                          marginTop: '2px',
-                          paddingTop: '6px',
-                          borderTop: '1px dashed rgba(255,255,255,0.08)',
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                          fontSize: '11px'
-                        }}>
-                          <span style={{ color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Purchasing Cost:' : 'تكلفة الشراء للفئة:'}</span>
-                          <strong style={{ color: 'var(--kfh-green)' }}>
-                            {denomPurchasingCost.toFixed(3)} KWD <span style={{ fontSize: '9px', fontWeight: 'normal', color: 'var(--text-muted)' }}>/ bar</span>
-                          </strong>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+                    );
+                  })()}
+                </div>
               </div>
 
               {/* STEP 2: FACILITATE AVAILABLE SERIALS FOR THE CHOSEN DENOMINATION */}
@@ -2139,53 +2166,80 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
               )}
             </div>
 
-            {/* Denomination Choice Pills for KFH Stock */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px', marginBottom: '16px' }}>
-              {kfhAvailableInventory?.summary?.by_product?.map(p => {
-                const isSelected = selectedKfhDenomCode === p.product_code;
-                const prodItems = kfhAvailableItems.filter(i => i.product_code === p.product_code);
-                const selectedSet = new Set(selectedKfhSerials);
-                const selectedInThis = prodItems.filter(i => selectedSet.has(i.serial_number)).length;
-
-                return (
-                  <div
-                    key={p.product_code}
-                    onClick={() => {
-                      setSelectedKfhDenomCode(p.product_code);
+            {/* Denomination Choice Dropdown List for KFH Stock */}
+            <div style={{ marginBottom: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '14px', alignItems: 'end', flexWrap: 'wrap' }}>
+                <div className="form-group" style={{ margin: 0, flex: 1, minWidth: '280px' }}>
+                  <label style={{ fontSize: '12px', fontWeight: 600, marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-primary)' }}>
+                    <i className="fa-solid fa-coins" style={{ color: '#6366f1' }}></i>
+                    {currentLang === 'en' ? 'Select Denomination & Metal Type' : 'اختر فئة ونوع السبيكة'}
+                  </label>
+                  <select
+                    className="form-control"
+                    value={selectedKfhDenomCode}
+                    onChange={e => {
+                      setSelectedKfhDenomCode(e.target.value);
                       setKfhSerialSearch('');
                     }}
                     style={{
-                      padding: '12px 14px',
-                      borderRadius: '8px',
-                      cursor: 'pointer',
-                      transition: 'all 0.2s',
-                      border: isSelected ? '2px solid #6366f1' : '1px solid var(--surface-border)',
-                      background: isSelected ? 'rgba(99, 102, 241, 0.12)' : 'rgba(255,255,255,0.02)',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '6px'
+                      fontSize: '13px',
+                      padding: '10px 14px',
+                      fontWeight: '600',
+                      backgroundColor: 'var(--bg-secondary)',
+                      borderColor: '#6366f1',
+                      color: 'var(--text-primary)',
+                      width: '100%',
+                      borderRadius: '6px'
                     }}
                   >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontSize: '13px', fontWeight: 'bold', color: isSelected ? '#6366f1' : 'var(--text-primary)' }}>
-                        {p.denomination}
-                      </span>
-                      <span style={{ fontSize: '11px', padding: '2px 7px', borderRadius: '10px', background: isSelected ? '#6366f1' : 'rgba(255,255,255,0.08)', color: isSelected ? '#fff' : 'var(--text-muted)', fontWeight: 600 }}>
-                        {p.count} {currentLang === 'en' ? 'KFH stock' : 'متاح بيتك'}
-                      </span>
-                    </div>
+                    {kfhAvailableInventory?.summary?.by_product?.map(p => {
+                      const prodItems = kfhAvailableItems.filter(i => i.product_code === p.product_code);
+                      const selectedSet = new Set(selectedKfhSerials);
+                      const selectedInThis = prodItems.filter(i => selectedSet.has(i.serial_number)).length;
+                      return (
+                        <option key={p.product_code} value={p.product_code} style={{ backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)' }}>
+                          {p.denomination} — {p.metal_name} ({p.weight_grams}g) — [{p.count} {currentLang === 'en' ? 'KFH stock' : 'متاح بيتك'}{selectedInThis > 0 ? ` • ${selectedInThis} ${currentLang === 'en' ? 'selected' : 'محدد'}` : ''}]
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
 
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-muted)' }}>
-                      <span>{p.metal_name} ({p.weight_grams}g)</span>
+                {currentKfhDenomObj && (() => {
+                  const prodItems = kfhAvailableItems.filter(i => i.product_code === currentKfhDenomObj.product_code);
+                  const selectedSet = new Set(selectedKfhSerials);
+                  const selectedInThis = prodItems.filter(i => selectedSet.has(i.serial_number)).length;
+
+                  return (
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '14px',
+                      padding: '8px 16px',
+                      background: 'rgba(99, 102, 241, 0.08)',
+                      border: '1px solid rgba(99, 102, 241, 0.25)',
+                      borderRadius: '6px',
+                      minHeight: '44px'
+                    }}>
+                      <div>
+                        <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'KFH Stock' : 'مخزون بيتك'}</div>
+                        <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#6366f1' }}>
+                          {currentKfhDenomObj.count} {currentLang === 'en' ? 'bars' : 'سبيكة'} <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 'normal' }}>({(currentKfhDenomObj.count * currentKfhDenomObj.weight_grams).toLocaleString()} g)</span>
+                        </div>
+                      </div>
+
                       {selectedInThis > 0 && (
-                        <span style={{ color: '#6366f1', fontWeight: 'bold' }}>
-                          ✓ {selectedInThis} {currentLang === 'en' ? 'selected' : 'محدد'}
-                        </span>
+                        <div style={{ borderLeft: '1px solid rgba(99, 102, 241, 0.25)', paddingLeft: '12px' }}>
+                          <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Selected for VIP' : 'المحدد للـ VIP'}</div>
+                          <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#818cf8' }}>
+                            ✓ {selectedInThis} {currentLang === 'en' ? 'bars' : 'سبيكة'}
+                          </div>
+                        </div>
                       )}
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })()}
+              </div>
             </div>
 
             {/* KFH Serials Facilitator & Quick Picker */}

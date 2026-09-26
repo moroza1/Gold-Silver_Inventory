@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -307,7 +308,7 @@ public partial class PMIMSControllers
     }
 
     [HttpPost("inventory/vip/allocate")]
-    [Authorize(Policy = "custody.write")]
+    [Authorize(Policy = "purchase_orders.write")]
     public async Task<IActionResult> InitiateVipAllocation([FromBody] VipAllocationRequest req)
     {
         try
@@ -342,7 +343,7 @@ public partial class PMIMSControllers
     }
 
     [HttpPost("inventory/vip/dispense")]
-    [Authorize(Policy = "custody.write")]
+    [Authorize(Policy = "dispensing.write")]
     public async Task<IActionResult> InitiateVipDispense([FromBody] VipDispenseRequest req)
     {
         try
@@ -673,51 +674,97 @@ public partial class PMIMSControllers
 
 public class InitiateDamagedBarReplacementRequest
 {
+    [JsonPropertyName("damaged_item_id")]
     public int DamagedItemId { get; set; }
+
+    [JsonPropertyName("replacement_item_id")]
     public int ReplacementItemId { get; set; }
+
+    [JsonPropertyName("reason")]
     public string Reason { get; set; } = null!;
+
+    [JsonPropertyName("attachment_url")]
     public string? AttachmentUrl { get; set; }
 }
 
 public class RejectDamageReplacementRequest
 {
+    [JsonPropertyName("reason")]
     public string Reason { get; set; } = null!;
 }
 
 public class MissingItemsReportRequest
 {
+    [JsonPropertyName("serial_numbers")]
     public List<string> SerialNumbers { get; set; } = new();
+
+    [JsonPropertyName("lot_id")]
     public int? LotId { get; set; }
+
+    [JsonPropertyName("discrepancy_reason")]
     public string? DiscrepancyReason { get; set; }
+
+    [JsonPropertyName("requested_by")]
     public string? RequestedBy { get; set; }
+
+    [JsonPropertyName("notes")]
     public string? Notes { get; set; }
+
+    [JsonPropertyName("ownership_type")]
     public string OwnershipType { get; set; } = "TURKEY_OWNED";
 }
 
 public class VipAllocationRequest
 {
+    [JsonPropertyName("serial_numbers")]
     public List<string> SerialNumbers { get; set; } = new();
+
+    [JsonPropertyName("vip_category")]
     public string? VipCategory { get; set; }
+
+    [JsonPropertyName("requested_by")]
     public string? RequestedBy { get; set; }
+
+    [JsonPropertyName("notes")]
     public string? Notes { get; set; }
 }
 
 public class VipDispenseRequest
 {
+    [JsonPropertyName("serial_numbers")]
     public List<string> SerialNumbers { get; set; } = new();
+
+    [JsonPropertyName("customer_name")]
     public string CustomerName { get; set; } = null!;
+
+    [JsonPropertyName("customer_civil_id")]
     public string CustomerCivilId { get; set; } = null!;
+
+    [JsonPropertyName("customer_account_number")]
     public string? CustomerAccount { get; set; }
+
+    [JsonPropertyName("special_instructions")]
     public string? SpecialInstructions { get; set; }
+
+    [JsonPropertyName("requested_by")]
     public string? RequestedBy { get; set; }
+
+    [JsonPropertyName("notes")]
     public string? Notes { get; set; }
 }
 
 public class TurkeyReturnRequest
 {
+    [JsonPropertyName("serial_numbers")]
     public List<string> SerialNumbers { get; set; } = new();
+
+    [JsonPropertyName("return_reason")]
     public string? ReturnReason { get; set; }
+
+    [JsonPropertyName("requested_by")]
     public string? RequestedBy { get; set; }
+
+    [JsonPropertyName("notes")]
     public string? Notes { get; set; }
 }
 

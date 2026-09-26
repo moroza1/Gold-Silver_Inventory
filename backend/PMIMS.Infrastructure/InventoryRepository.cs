@@ -3660,8 +3660,10 @@ public class InventoryRepository : IInventoryRepository
         if (sourceType == "SUPPLIER")
         {
             // 2. Check duplicate against existing inventory (excluding EXPORTED bars -- Requirement 8 serial reuse)
+            var upperSerials = distinctSerials.Select(s => s.ToUpperInvariant()).ToList();
             var activeExisting = await _dbContext.InventoryItems
-                .Where(i => distinctSerials.Contains(i.SerialNumber) && i.StatusCode != "EXPORTED")
+                .Where(i => i.StatusCode != "EXPORTED")
+                .Where(i => upperSerials.Contains(i.SerialNumber.ToUpper()))
                 .Select(i => i.SerialNumber)
                 .ToListAsync();
 
@@ -3680,7 +3682,7 @@ public class InventoryRepository : IInventoryRepository
 
             // 3. Check duplicate against in-flight pending intakes
             var inFlightPending = await _dbContext.PendingIntakes
-                .Where(pi => pi.StatusCode == "PENDING_APPROVAL")
+                .Where(pi => pi.StatusCode == "PENDING_APPROVAL" || pi.StatusCode == "PENDING" || pi.StatusCode == "PENDING_MAKER" || pi.StatusCode == "PENDING_CHECKER")
                 .Select(pi => pi.SerialsJsonList)
                 .ToListAsync();
 

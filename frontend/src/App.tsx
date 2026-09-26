@@ -5278,10 +5278,46 @@ const [migrationApproved, setMigrationApproved] = useState(false);
       return;
     }
 
+    // Pre-flight duplicate check against scanned serials, inventory, and pending intakes
+    const serialsList = scannedSerials.map(s => s.serial.trim().toUpperCase());
+    const batchDups = serialsList.filter((item, index) => serialsList.indexOf(item) !== index);
+    if (batchDups.length > 0) {
+      alert(currentLang === 'en'
+        ? `Duplicate serial detected in scanned items: "${batchDups[0]}". Every bar serial number must be globally unique.`
+        : `تم اكتشاف رقم تسلسلي مكرر في العناصر الممسوحة: "${batchDups[0]}". يجب أن يكون الرقم التسلسلي فريداً.`);
+      return;
+    }
+
+    try {
+      const valRes = await fetch(`${API_BASE}/vault/intake/validate-serials`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({
+          serialNumbers: scannedSerials.map(s => s.serial.trim()),
+          sourceType: 'SUPPLIER'
+        })
+      });
+      if (valRes.ok) {
+        const valData = await valRes.json();
+        if (!valData.isValid) {
+          alert(currentLang === 'en'
+            ? `Maker Serial Validation Failed:\n${valData.errors.join('\n')}`
+            : `فشل التحقق من الأرقام التسلسلية:\n${valData.errors.join('\n')}`);
+          return;
+        }
+      } else {
+        alert(await describeApiError(valRes, currentLang, 'Pre-flight serial validation failed', 'فشل التحقق من الأرقام التسلسلية'));
+        return;
+      }
+    } catch (err: any) {
+      alert(currentLang === 'en' ? `Validation error: ${err?.message || 'Server error'}` : `خطأ أثناء التحقق: ${err?.message || 'خطأ في الخادم'}`);
+      return;
+    }
+
     try {
       const res = await fetch(`${API_BASE}/vault/intake`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({
           poId: intakePOId,
           lotNumber: intakeLotNum,
@@ -5312,7 +5348,9 @@ const [migrationApproved, setMigrationApproved] = useState(false);
 
   const fetchPendingIntakes = async () => {
     try {
-      const res = await fetch(`${API_BASE}/vault/intake/pending`);
+      const res = await fetch(`${API_BASE}/vault/intake/pending`, {
+        headers: getAuthHeaders()
+      });
       if (res.ok) {
         const data = await res.json();
         setPendingIntakesList(data);
@@ -5458,6 +5496,8 @@ const [migrationApproved, setMigrationApproved] = useState(false);
       alert(currentLang === 'en' ? 'Every bar must have a Serial Number.' : 'يجب أن تحتوي كل سبيكة على رقم تسلسلي.');
       return;
     }
+
+    // 1. Client-side duplicate check within shipment batch
     const serialsList = intakeBars.map(b => b.serial.trim().toUpperCase());
     const duplicates = serialsList.filter((item, index) => serialsList.indexOf(item) !== index);
     if (duplicates.length > 0) {
@@ -5468,13 +5508,46 @@ const [migrationApproved, setMigrationApproved] = useState(false);
       return;
     }
 
+    // 2. Client-side duplicate check against active inventory
+    for (const bar of intakeBars) {
+      const sUpper = bar.serial.trim().toUpperCase();
+      const existingInInv = inventoryList.find((i: any) => i.serial_number?.toUpperCase() === sUpper && i.status !== 'EXPORTED');
+      if (existingInInv) {
+        alert(currentLang === 'en'
+          ? `Serial number "${bar.serial.trim()}" already exists in inventory (Status: ${existingInInv.status}, Location: ${existingInInv.location_name || 'Vault'}). Submission blocked.`
+          : `الرقم التسلسلي "${bar.serial.trim()}" مسجل بالفعل في المخزون (الحالة: ${existingInInv.status}). تم إيقاف الإرسال لمنع التكرار.`);
+        return;
+      }
+    }
+
+    // 3. Client-side duplicate check against in-flight pending intakes
+    for (const bar of intakeBars) {
+      const sUpper = bar.serial.trim().toUpperCase();
+      const existingInPending = (pendingIntakesList || []).find((pi: any) => {
+        if (!pi.serials_json) return false;
+        try {
+          const parsed = typeof pi.serials_json === 'string' ? JSON.parse(pi.serials_json) : pi.serials_json;
+          if (Array.isArray(parsed)) {
+            return parsed.some((item: any) => (item.serial || item.serial_number)?.toUpperCase() === sUpper);
+          }
+        } catch { }
+        return false;
+      });
+      if (existingInPending) {
+        alert(currentLang === 'en'
+          ? `Serial number "${bar.serial.trim()}" is already pending approval in another intake request (Pending ID: #${existingInPending.pending_id || existingInPending.id || ''}). Submission blocked.`
+          : `الرقم التسلسلي "${bar.serial.trim()}" قيد الاعتماد بالفعل في طلب استلام شحنة آخر. تم إيقاف الإرسال.`);
+        return;
+      }
+    }
+
     // ============================================================
-    // Pre-flight Maker-phase serial validation: check duplicates on server
+    // 4. Pre-flight Maker-phase serial validation: check duplicates on server with auth
     // ============================================================
     try {
       const valRes = await fetch(`${API_BASE}/vault/intake/validate-serials`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({
           serialNumbers: intakeBars.map(b => b.serial.trim()),
           sourceType: 'SUPPLIER'
@@ -5488,8 +5561,14 @@ const [migrationApproved, setMigrationApproved] = useState(false);
             : `فشل التحقق من الأرقام التسلسلية (مرحلة المنشئ):\n${valData.errors.join('\n')}`);
           return;
         }
+      } else {
+        alert(await describeApiError(valRes, currentLang, 'Maker Serial Validation Failed', 'فشل التحقق من الأرقام التسلسلية'));
+        return;
       }
-    } catch (_) {}
+    } catch (err: any) {
+      alert(currentLang === 'en' ? `Validation error: ${err?.message || 'Server error'}` : `خطأ أثناء التحقق: ${err?.message || 'خطأ في الخادم'}`);
+      return;
+    }
 
     // ============================================================
     // Mandatory Production Cost in KWD per (Metal Type, Denomination)
@@ -5556,7 +5635,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
 
       const res = await fetch(`${API_BASE}/vault/intake`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify(payload)
       });
 
@@ -5616,7 +5695,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     try {
       const res = await fetch(`${API_BASE}/vault/intake/customer`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({
           customerId: parseInt(receiptCustomerId, 10),
           accountId: receiptReason === 'CUSTODY_DEPOSIT' ? parseInt(receiptAccountId, 10) : null,
@@ -8639,7 +8718,28 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       </thead>
                       <tbody>
                         {intakeBars.map((bar, idx) => {
-                          const isDuplicate = bar.serial.trim() && intakeBars.filter(b => b.serial.trim().toUpperCase() === bar.serial.trim().toUpperCase()).length > 1;
+                          const sUpper = bar.serial.trim().toUpperCase();
+                          const isDuplicateInBatch = sUpper !== '' && intakeBars.filter(b => b.serial.trim().toUpperCase() === sUpper).length > 1;
+                          const isDuplicateInInventory = sUpper !== '' && inventoryList.some((i: any) => i.serial_number?.toUpperCase() === sUpper && i.status !== 'EXPORTED');
+                          const isDuplicateInPending = sUpper !== '' && (pendingIntakesList || []).some((pi: any) => {
+                            if (!pi.serials_json) return false;
+                            try {
+                              const parsed = typeof pi.serials_json === 'string' ? JSON.parse(pi.serials_json) : pi.serials_json;
+                              if (Array.isArray(parsed)) {
+                                return parsed.some((item: any) => (item.serial || item.serial_number)?.toUpperCase() === sUpper);
+                              }
+                            } catch { }
+                            return false;
+                          });
+                          const isDuplicate = isDuplicateInBatch || isDuplicateInInventory || isDuplicateInPending;
+                          const dupReason = isDuplicateInBatch
+                            ? (currentLang === 'en' ? 'Duplicate Serial in shipment batch!' : 'رقم تسلسلي مكرر في كشف الشحنة!')
+                            : isDuplicateInInventory
+                            ? (currentLang === 'en' ? 'Serial already exists in Inventory records!' : 'الرقم التسلسلي مسجل بالفعل في سجلات المخزون!')
+                            : isDuplicateInPending
+                            ? (currentLang === 'en' ? 'Serial is pending approval in another intake!' : 'الرقم التسلسلي قيد الاعتماد في شحنة أخرى!')
+                            : '';
+
                           return (
                             <tr key={bar.id} style={isDuplicate ? { backgroundColor: 'rgba(239, 68, 68, 0.08)' } : undefined}>
                               <td><span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{idx + 1}</span></td>
@@ -8670,7 +8770,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                                       marginTop: '2px'
                                     }}>
                                       <i className="fa-solid fa-triangle-exclamation"></i>
-                                      {currentLang === 'en' ? 'Duplicate Serial Number!' : 'رقم تسلسلي مكرر!'}
+                                      {dupReason}
                                     </span>
                                   )}
                                 </div>
@@ -8758,10 +8858,28 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     return sum + cost;
                   }, 0);
 
+                  const hasDuplicateSerials = intakeBars.some(bar => {
+                    const sUpper = bar.serial.trim().toUpperCase();
+                    if (!sUpper) return false;
+                    const inBatch = intakeBars.filter(b => b.serial.trim().toUpperCase() === sUpper).length > 1;
+                    const inInv = inventoryList.some((i: any) => i.serial_number?.toUpperCase() === sUpper && i.status !== 'EXPORTED');
+                    const inPending = (pendingIntakesList || []).some((pi: any) => {
+                      if (!pi.serials_json) return false;
+                      try {
+                        const parsed = typeof pi.serials_json === 'string' ? JSON.parse(pi.serials_json) : pi.serials_json;
+                        if (Array.isArray(parsed)) {
+                          return parsed.some((item: any) => (item.serial || item.serial_number)?.toUpperCase() === sUpper);
+                        }
+                      } catch { }
+                      return false;
+                    });
+                    return inBatch || inInv || inPending;
+                  });
+
                   return (
                     <div style={{
-                      backgroundColor: 'rgba(0, 155, 78, 0.05)',
-                      border: '1px solid rgba(0, 155, 78, 0.25)',
+                      backgroundColor: hasDuplicateSerials ? 'rgba(239, 68, 68, 0.05)' : 'rgba(0, 155, 78, 0.05)',
+                      border: hasDuplicateSerials ? '1px solid rgba(239, 68, 68, 0.3)' : '1px solid rgba(0, 155, 78, 0.25)',
                       borderRadius: '8px',
                       padding: '16px',
                       display: 'flex',
@@ -8789,13 +8907,38 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                             {totalPurchasingCost.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })} <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>KWD</span>
                           </div>
                         </div>
+
+                        {hasDuplicateSerials && (
+                          <div style={{
+                            padding: '6px 12px',
+                            background: 'rgba(239, 68, 68, 0.12)',
+                            border: '1px solid rgba(239, 68, 68, 0.3)',
+                            borderRadius: '6px',
+                            color: 'var(--accent-red)',
+                            fontSize: '12px',
+                            fontWeight: 600,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px'
+                          }}>
+                            <i className="fa-solid fa-triangle-exclamation"></i>
+                            {currentLang === 'en' ? 'Duplicate serial numbers detected! Resolve duplicates before submitting.' : 'تم اكتشاف أرقام تسلسلية مكررة! يرجى معالجة التكرار قبل الإرسال.'}
+                          </div>
+                        )}
                       </div>
 
                       {canModify('intake') && (
                         <button
                           className="btn btn-primary"
-                          style={{ padding: '10px 20px', fontSize: '13px', fontWeight: 'bold' }}
+                          style={{
+                            padding: '10px 20px',
+                            fontSize: '13px',
+                            fontWeight: 'bold',
+                            opacity: hasDuplicateSerials ? 0.6 : 1,
+                            cursor: hasDuplicateSerials ? 'not-allowed' : 'pointer'
+                          }}
                           onClick={handleSubmitUC03Intake}
+                          disabled={hasDuplicateSerials}
                         >
                           <i className="fa-solid fa-paper-plane"></i> {currentLang === 'en' ? 'Submit for Vault Checker Approval' : 'إرسال لاعتماد مراجع الخزينة (Maker-Checker)'}
                         </button>
@@ -18703,7 +18846,17 @@ const [migrationApproved, setMigrationApproved] = useState(false);
           products={products}
           brands={brandsList}
           currentLang={currentLang}
-          existingSerials={intakeBars.map(b => b.serial.trim())}
+          existingSerials={[
+            ...intakeBars.map(b => b.serial.trim()),
+            ...inventoryList.filter((i: any) => i.status !== 'EXPORTED').map((i: any) => (i.serial_number || '').trim()),
+            ...(pendingIntakesList || []).flatMap((pi: any) => {
+              if (!pi.serials_json) return [];
+              try {
+                const parsed = typeof pi.serials_json === 'string' ? JSON.parse(pi.serials_json) : pi.serials_json;
+                return Array.isArray(parsed) ? parsed.map((item: any) => (item.serial || item.serial_number || '').trim()) : [];
+              } catch { return []; }
+            })
+          ]}
           denominationPurchasingCosts={denominationPurchasingCosts}
           onUpdatePurchasingCost={(productId: number, cost: number) => {
             setDenominationPurchasingCosts(prev => ({ ...prev, [productId]: cost }));
