@@ -104,6 +104,7 @@ interface TurkeyPurchaseScreenProps {
   canModify: boolean;
   userRole: string;
   displayName: string;
+  initialSubTab?: 'STOCK_PURCHASE' | 'VIP_STOCK' | 'PENDING_BATCHES';
 }
 
 export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
@@ -115,9 +116,16 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
   currentLang,
   canModify,
   userRole: _userRole,
-  displayName: _displayName
+  displayName: _displayName,
+  initialSubTab
 }) => {
-  const [activeSubTab, setActiveSubTab] = useState<'STOCK_PURCHASE' | 'VIP_STOCK' | 'PENDING_BATCHES'>('STOCK_PURCHASE');
+  const [activeSubTab, setActiveSubTab] = useState<'STOCK_PURCHASE' | 'VIP_STOCK' | 'PENDING_BATCHES'>(initialSubTab || 'STOCK_PURCHASE');
+
+  useEffect(() => {
+    if (initialSubTab) {
+      setActiveSubTab(initialSubTab);
+    }
+  }, [initialSubTab]);
   
   // VIP & KFH Inventory State
   const [vipInventory, setVipInventory] = useState<{

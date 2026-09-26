@@ -218,6 +218,8 @@ const Translations: Record<string, Record<string, string>> = {
     title_active_deals: "Active Purchasing Orders",
     menu_turkey_purchase: "Purchase from Turkey",
     title_turkey_purchase: "Purchase Gold from Turkey (Consignment Conversion)",
+    menu_vip_management: "VIP & Offline Stock",
+    title_vip_management: "VIP Exclusive & Offline Stock Management",
     menu_missing_serials: "Report Missing Serials",
     title_missing_serials: "Report Missing Serials (Maker-Checker)",
     menu_customer_receipt: "Receive from Customer",
@@ -537,6 +539,8 @@ const Translations: Record<string, Record<string, string>> = {
     title_active_deals: "طلبات الشراء النشطة",
     menu_turkey_purchase: "شراء الذهب من تركيا",
     title_turkey_purchase: "شراء الذهب من تركيا (تحويل أمانات إلى ملكية البنك)",
+    menu_vip_management: "مخزون VIP وأوفلاين",
+    title_vip_management: "إدارة مخزون كبار العملاء (VIP) وقنوات الأوفلاين",
     menu_missing_serials: "تسجيل أرقام تسلسلية مفقودة",
     title_missing_serials: "تسجيل أرقام تسلسلية مفقودة (صانع / معتمد)",
     menu_customer_receipt: "استلام من عميل",
@@ -6639,6 +6643,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     { type: 'section', key: 'section-operations', label: t('menu_operations') },
     { type: 'item', key: 'screen-intake', label: currentLang === 'en' ? 'Receive Shipment' : 'استلام الشحنات', icon: 'fa-solid fa-dolly', permission: 'intake', onClick: () => { setActiveTab('screen-intake'); fetchSuppliers(); fetchPendingIntakes(); fetchLocations(); fetchProducts(); } },
     { type: 'item', key: 'screen-turkey-purchase', label: t('menu_turkey_purchase'), icon: 'fa-solid fa-handshake', permission: 'intake', onClick: () => { setActiveTab('screen-turkey-purchase'); fetchTurkeyInventory(); fetchPendingTurkeyPurchases(); } },
+    { type: 'item', key: 'screen-vip-offline', label: t('menu_vip_management'), icon: 'fa-solid fa-crown', permission: 'custody', onClick: () => { setActiveTab('screen-vip-offline'); fetchTurkeyInventory(); fetchPendingTurkeyPurchases(); } },
     { type: 'item', key: 'screen-spatial', label: t('menu_spatial'), icon: 'fa-solid fa-warehouse', permission: 'spatial_map', onClick: () => setActiveTab('screen-spatial') },
     { type: 'item', key: 'screen-transfers', label: t('menu_transfers'), icon: 'fa-solid fa-truck-arrow-right', permission: 'intake', onClick: () => { setActiveTab('screen-transfers'); fetchTransfers(); } },
     { type: 'item', key: 'screen-custody', label: t('menu_custody'), icon: 'fa-solid fa-vault', permission: 'custody', onClick: () => setActiveTab('screen-custody') },
@@ -9248,6 +9253,26 @@ const [migrationApproved, setMigrationApproved] = useState(false);
             canModify={canModify('purchase_orders')}
             userRole={userRole}
             displayName={displayName}
+            initialSubTab="STOCK_PURCHASE"
+          />
+        </section>
+
+        {/* SCREEN VIEWPORT: VIP & OFFLINE STOCK MANAGEMENT */}
+        <section className={`screen-viewport ${activeTab === 'screen-vip-offline' ? 'active' : ''}`}>
+          <TurkeyPurchaseScreen
+            turkeyInventory={turkeyInventory}
+            pendingPurchases={pendingTurkeyPurchases}
+            onRefresh={() => {
+              fetchTurkeyInventory();
+              fetchPendingTurkeyPurchases();
+            }}
+            onSubmitPurchase={handleTurkeyPurchase}
+            goldRate={goldRate}
+            currentLang={currentLang}
+            canModify={canModify('custody')}
+            userRole={userRole}
+            displayName={displayName}
+            initialSubTab="VIP_STOCK"
           />
         </section>
 
