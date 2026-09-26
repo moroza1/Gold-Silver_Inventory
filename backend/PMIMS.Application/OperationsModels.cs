@@ -102,6 +102,7 @@ public class BarcodeLabelDto
     public int ItemId { get; set; }
     public string SerialNumber { get; set; } = null!;
     public string ProductLabel { get; set; } = null!;
+    public string ProductType { get; set; } = string.Empty;
     public string MetalName { get; set; } = "Gold";
     public decimal WeightGrams { get; set; }
     public decimal PurityValue { get; set; } = 999.9m;

@@ -106,6 +106,9 @@ public class BarcodeLabelService : IBarcodeLabelService
         }
 
         var origin = ResolveCustomOrigin(req);
+        var originClean = origin?.Trim() ?? "";
+        var metalClean = string.IsNullOrWhiteSpace(req.MetalName) ? "Gold" : req.MetalName.Trim();
+        var prodType = string.IsNullOrWhiteSpace(originClean) ? metalClean : $"{metalClean} {originClean}";
         var qrCodePayload = BuildQrCodePayload(req.SerialNumber.Trim(), denom, req.MetalName, origin);
 
         var label = new BarcodeLabelDto
@@ -113,6 +116,12 @@ public class BarcodeLabelService : IBarcodeLabelService
             ItemId = 0,
             SerialNumber = req.SerialNumber.Trim(),
             ProductLabel = productLabel,
+            ProductType = prodType,
+            MetalName = metalClean,
+            WeightGrams = req.WeightGrams,
+            PurityValue = req.PurityValue,
+            Denomination = denom,
+            RefinerBrand = req.RefinerBrand,
             Gtin14 = gtin14,
             LotNumber = lotNumber,
             OwnershipType = req.OwnershipType ?? "KFH_OWNED",
@@ -176,6 +185,10 @@ public class BarcodeLabelService : IBarcodeLabelService
         var brand = item.Lot?.Vendor?.VendorName ?? "KFH Mint";
 
         var originType = ResolveProductOriginType(item);
+        var originClean = originType?.Trim() ?? "";
+        var metalClean = string.IsNullOrWhiteSpace(metal) ? "Gold" : metal.Trim();
+        var prodType = string.IsNullOrWhiteSpace(originClean) ? metalClean : $"{metalClean} {originClean}";
+
         var qrCodePayload = BuildQrCodePayload(item.SerialNumber, denomLabel, metal, originType);
 
         return new BarcodeLabelDto
@@ -183,6 +196,7 @@ public class BarcodeLabelService : IBarcodeLabelService
             ItemId = item.ItemId,
             SerialNumber = item.SerialNumber,
             ProductLabel = productLabel,
+            ProductType = prodType,
             MetalName = metal,
             WeightGrams = weight,
             PurityValue = purity,
@@ -208,7 +222,7 @@ public class BarcodeLabelService : IBarcodeLabelService
         };
     }
 
-    public static string BuildQrCodePayload(string serialNumber, string denomination, string metalName, string origin)
+    public static string BuildQrCodePayload(string serialNumber, string denomination, string metalName, string? origin)
     {
         var originClean = origin?.Trim() ?? "";
         var metalClean = string.IsNullOrWhiteSpace(metalName) ? "Gold" : metalName.Trim();

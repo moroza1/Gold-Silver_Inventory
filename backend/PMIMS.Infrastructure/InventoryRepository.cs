@@ -6913,6 +6913,29 @@ public class InventoryRepository : IInventoryRepository
             .ToListAsync();
     }
 
+    public async Task<IEnumerable<InventoryItem>> GetAllMissingItemsAsync(string? ownershipType = null)
+    {
+        var query = _dbContext.InventoryItems
+            .Include(i => i.Product)
+                .ThenInclude(p => p!.Denomination)
+            .Include(i => i.Product)
+                .ThenInclude(p => p!.MetalType)
+            .Include(i => i.Product)
+                .ThenInclude(p => p!.Brand)
+            .Include(i => i.Location)
+                .ThenInclude(l => l!.Vault)
+            .Include(i => i.Lot)
+                .ThenInclude(l => l!.Vendor)
+            .Where(i => i.StatusCode == "MISSING");
+
+        if (!string.IsNullOrWhiteSpace(ownershipType))
+        {
+            query = query.Where(i => i.OwnershipType == ownershipType);
+        }
+
+        return await query.OrderBy(i => i.SerialNumber).ToListAsync();
+    }
+
     public async Task<PendingMissingItemReport> InitiateMissingItemsWorkflowAsync(List<string> serialNumbers, string requestedBy, string? discrepancyReason, string? notes, int? lotId = null, string ownershipType = "TURKEY_OWNED")
     {
         if (serialNumbers == null || serialNumbers.Count == 0)

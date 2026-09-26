@@ -218,6 +218,8 @@ const Translations: Record<string, Record<string, string>> = {
     title_active_deals: "Active Purchasing Orders",
     menu_turkey_purchase: "Purchase from Turkey",
     title_turkey_purchase: "Purchase Gold from Turkey (Consignment Conversion)",
+    menu_missing_serials: "Report Missing Serials",
+    title_missing_serials: "Report Missing Serials (Maker-Checker)",
     menu_customer_receipt: "Receive from Customer",
     title_customer_receipt: "Receive Precious Metals from a Customer",
     active_deals_empty: "No purchase orders yet.",
@@ -535,6 +537,8 @@ const Translations: Record<string, Record<string, string>> = {
     title_active_deals: "طلبات الشراء النشطة",
     menu_turkey_purchase: "شراء الذهب من تركيا",
     title_turkey_purchase: "شراء الذهب من تركيا (تحويل أمانات إلى ملكية البنك)",
+    menu_missing_serials: "تسجيل أرقام تسلسلية مفقودة",
+    title_missing_serials: "تسجيل أرقام تسلسلية مفقودة (صانع / معتمد)",
     menu_customer_receipt: "استلام من عميل",
     title_customer_receipt: "استلام معادن ثمينة من عميل",
     active_deals_empty: "لا توجد طلبات شراء بعد.",
@@ -1716,6 +1720,18 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   const [damageDesc, setDamageDesc] = useState('');
   const [damageDocId, setDamageDocId] = useState(`DOC-MOCI-${Date.now().toString().slice(-4)}`);
 
+  // Missing Serials Screen states
+  const [missingSerialsTab, setMissingSerialsTab] = useState<'report' | 'pending' | 'history'>('report');
+  const [missingScope, setMissingScope] = useState<'ALL' | 'TURKEY_OWNED' | 'KFH_OWNED'>('ALL');
+  const [missingLotFilter, setMissingLotFilter] = useState('');
+  const [missingSearch, setMissingSearch] = useState('');
+  const [missingSelectedSerials, setMissingSelectedSerials] = useState<string[]>([]);
+  const [missingReason, setMissingReason] = useState('Physical bar missing upon customs receipt unpacking verification');
+  const [missingNotes, setMissingNotes] = useState('');
+  const [missingIsSubmitting, setMissingIsSubmitting] = useState(false);
+  const [missingPendingReports, setMissingPendingReports] = useState<any[]>([]);
+  const [missingHistoryItems, setMissingHistoryItems] = useState<any[]>([]);
+
   // Threshold form inputs
   const [thresholdAlertType, setThresholdAlertType] = useState('LOW_STOCK');
   const [thresholdProductId, setThresholdProductId] = useState('');
@@ -2616,6 +2632,80 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     }
   };
 
+  const fetchMissingSerialsScreenData = async () => {
+    try {
+      fetchInventory();
+      fetchTurkeyInventory();
+      fetchWorkflows();
+      const [pendingRes, historyRes] = await Promise.all([
+        fetch(`${API_BASE}/inventory/turkey/pending-missing-reports`, { headers: getAuthHeaders() }),
+        fetch(`${API_BASE}/inventory/missing-items`, { headers: getAuthHeaders() })
+      ]);
+      if (pendingRes.ok) setMissingPendingReports(await pendingRes.json());
+      if (historyRes.ok) setMissingHistoryItems(await historyRes.json());
+    } catch (e) {
+      console.warn("Error fetching missing serials data", e);
+    }
+  };
+
+  const handleReportMissingSerialsSubmit = async () => {
+    if (missingSelectedSerials.length === 0) {
+      alert(currentLang === 'en' ? 'Please select at least one serial number to report as missing.' : 'يرجى تحديد رقم تسلسلي واحد على الأقل للإبلاغ عنه كمفقود.');
+      return;
+    }
+    setMissingIsSubmitting(true);
+    try {
+      const res = await fetch(`${API_BASE}/inventory/turkey/missing-items/report`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({
+          serialNumbers: missingSelectedSerials,
+          discrepancyReason: missingReason,
+          notes: missingNotes,
+          requestedBy: username || displayName || 'Treasury Maker',
+          ownershipType: missingScope === 'ALL' ? 'TURKEY_OWNED' : missingScope
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        alert(currentLang === 'en'
+          ? `✅ Missing Items Discrepancy Workflow Initiated!\nReference: ${data.report_reference}\n${data.total_items} bar(s) submitted for Checker authorization.\nOnce approved by the Checker, serials will transition to MISSING status and be deducted from balance.`
+          : `✅ تم إنشاء مسار تدقيق مفقودات الشحنة بنجاح!\nالمرجع: ${data.report_reference}\nتم إرسال ${data.total_items} سبيكة لاعتماد المعتمد.\nفور الاعتماد، ستتحول السبائك إلى مفقودة وتُخصم تلقائياً.`);
+        setMissingSelectedSerials([]);
+        setMissingNotes('');
+        setMissingSerialsTab('pending');
+        fetchMissingSerialsScreenData();
+      } else {
+        alert(await describeApiError(res, currentLang, 'Failed to submit missing items report.', 'فشل إرسال تقرير المفقودات.'));
+      }
+    } catch (e) {
+      alert(currentLang === 'en' ? 'Error submitting missing report' : 'خطأ في إرسال تقرير المفقودات');
+    } finally {
+      setMissingIsSubmitting(false);
+    }
+  };
+
+  const handleApproveMissingReportDirect = async (pendingReportId: number) => {
+    const inst = workflowInstances.find((w: any) => w.workflow_type === 'MISSING_ITEMS' && w.entity_id === pendingReportId && w.status_code === 'PENDING_MAKER');
+    if (inst) {
+      await handleInstanceAction(inst.instance_id, 'APPROVED');
+      fetchMissingSerialsScreenData();
+    } else {
+      alert(currentLang === 'en' ? 'Report routed for Checker approval in Workflow Instances.' : 'تم توجيه التقرير لاعتماد المعتمد في شاشة مسارات العمل.');
+      fetchMissingSerialsScreenData();
+    }
+  };
+
+  const handleRejectMissingReportDirect = async (pendingReportId: number) => {
+    const reason = prompt(currentLang === 'en' ? 'Enter rejection reason:' : 'أدخل سبب الرفض:');
+    if (!reason) return;
+    const inst = workflowInstances.find((w: any) => w.workflow_type === 'MISSING_ITEMS' && w.entity_id === pendingReportId && w.status_code === 'PENDING_MAKER');
+    if (inst) {
+      await handleInstanceAction(inst.instance_id, 'REJECTED', reason);
+      fetchMissingSerialsScreenData();
+    }
+  };
+
   const fetchEnterpriseStockAlerts = async () => {
     try {
       const res = await fetch(`${API_BASE}/inventory/stock-alerts/enterprise`);
@@ -3392,13 +3482,16 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   const handlePrintBarcodeLabel = async (itemId?: number, labelObj?: any) => {
     const label = labelObj || barcodeCurrentLabel || barcodeReprintResult;
     if (label) {
-      const printWindow = window.open('', '_blank', 'width=400,height=400');
+      const serial = label.serialNumber || label.serial_number || label.serial || '';
+      const productType = label.productType || label.product_type || label.productLabel || label.metalName || label.metal_name || 'Gold';
+      const denomination = label.denomination || (label.weightGrams ? `${label.weightGrams}g` : label.weight_grams ? `${label.weight_grams}g` : '');
+      const printWindow = window.open('', '_blank', 'width=400,height=450');
       if (printWindow) {
         printWindow.document.write(`<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
-  <title>QR Code</title>
+  <title>QR Label - ${serial}</title>
   <style>
     @page {
       size: auto;
@@ -3413,31 +3506,71 @@ const [migrationApproved, setMigrationApproved] = useState(false);
       width: 100%;
       height: 100%;
       background: #ffffff;
+      color: #111827;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
       display: flex;
       justify-content: center;
       align-items: center;
     }
-    .qr-only-container {
+    .qr-label-card {
       display: flex;
-      justify-content: center;
+      flex-direction: column;
       align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 8px;
       width: 100%;
-      height: 100%;
-      padding: 6px;
+      max-width: 260px;
     }
-    .qr-only-container svg {
-      width: 220px !important;
-      height: 220px !important;
-      max-width: 90vw !important;
-      max-height: 90vh !important;
+    .qr-svg-wrapper {
+      width: 180px;
+      height: 180px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      margin: 0 auto 8px auto;
+    }
+    .qr-svg-wrapper svg {
+      width: 100% !important;
+      height: 100% !important;
+      max-width: 180px !important;
+      max-height: 180px !important;
       display: block;
       margin: 0 auto;
+    }
+    .qr-label-details {
+      width: 100%;
+      text-align: center;
+      font-size: 13px;
+      line-height: 1.4;
+      color: #111827;
+    }
+    .qr-label-field {
+      margin: 2px 0;
+    }
+    .qr-label-serial {
+      font-family: monospace;
+      font-weight: 800;
+      font-size: 14px;
+      letter-spacing: 0.5px;
+    }
+    .qr-label-meta {
+      font-size: 12px;
+      font-weight: 600;
+      color: #374151;
     }
   </style>
 </head>
 <body>
-  <div class="qr-only-container">
-    ${label.qrCodeSvg || ''}
+  <div class="qr-label-card">
+    <div class="qr-svg-wrapper">
+      ${label.qrCodeSvg || ''}
+    </div>
+    <div class="qr-label-details">
+      <div class="qr-label-field qr-label-serial">Serial: ${serial}</div>
+      <div class="qr-label-field qr-label-meta">Product: ${productType}</div>
+      <div class="qr-label-field qr-label-meta">Denomination: ${denomination}</div>
+    </div>
   </div>
   <script>
     window.onload = function() {
@@ -3464,6 +3597,121 @@ const [migrationApproved, setMigrationApproved] = useState(false);
       } catch (e) {
         console.warn("Print log error", e);
       }
+    }
+  };
+
+  const handlePrintMultipleLabels = (labels: any[]) => {
+    if (!labels || labels.length === 0) return;
+    const printWindow = window.open('', '_blank', 'width=800,height=600');
+    if (printWindow) {
+      const labelsHtml = labels.map(label => {
+        const serial = label.serialNumber || label.serial_number || label.serial || '';
+        const productType = label.productType || label.product_type || label.productLabel || label.metalName || label.metal_name || 'Gold';
+        const denomination = label.denomination || (label.weightGrams ? `${label.weightGrams}g` : label.weight_grams ? `${label.weight_grams}g` : '');
+        return `
+          <div class="qr-label-card">
+            <div class="qr-svg-wrapper">
+              ${label.qrCodeSvg || ''}
+            </div>
+            <div class="qr-label-details">
+              <div class="qr-label-field qr-label-serial">Serial: ${serial}</div>
+              <div class="qr-label-field qr-label-meta">Product: ${productType}</div>
+              <div class="qr-label-field qr-label-meta">Denomination: ${denomination}</div>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      printWindow.document.write(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>QR Labels Sheet</title>
+  <style>
+    @page {
+      size: auto;
+      margin: 6mm;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    html, body {
+      background: #ffffff;
+      color: #111827;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+    .labels-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 16px;
+      padding: 10px;
+    }
+    .qr-label-card {
+      border: 1px dashed #d1d5db;
+      border-radius: 8px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      break-inside: avoid;
+      page-break-inside: avoid;
+      background: #ffffff;
+    }
+    .qr-svg-wrapper {
+      width: 140px;
+      height: 140px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      margin: 0 auto 6px auto;
+    }
+    .qr-svg-wrapper svg {
+      width: 100% !important;
+      height: 100% !important;
+      max-width: 140px !important;
+      max-height: 140px !important;
+      display: block;
+      margin: 0 auto;
+    }
+    .qr-label-details {
+      width: 100%;
+      text-align: center;
+      font-size: 11px;
+      line-height: 1.35;
+      color: #111827;
+    }
+    .qr-label-field {
+      margin: 1px 0;
+    }
+    .qr-label-serial {
+      font-family: monospace;
+      font-weight: 800;
+      font-size: 12px;
+    }
+    .qr-label-meta {
+      font-size: 11px;
+      font-weight: 600;
+      color: #374151;
+    }
+  </style>
+</head>
+<body>
+  <div class="labels-grid">
+    ${labelsHtml}
+  </div>
+  <script>
+    window.onload = function() {
+      window.focus();
+      window.print();
+    };
+  </script>
+</body>
+</html>`);
+      printWindow.document.close();
     }
   };
 
@@ -3545,6 +3793,9 @@ const [migrationApproved, setMigrationApproved] = useState(false);
       if (res.ok) {
         const data = await res.json();
         setBarcodeCurrentLabel(data.label);
+        if (data.label) {
+          handlePrintBarcodeLabel(itemId, data.label);
+        }
         alert(currentLang === 'en' ? '✓ Initial QR code printed and logged successfully!' : '✓ تمت طباعة وتسجيل رمز QR بنجاح!');
         fetchUnprintedBars();
         fetchQrHistory();
@@ -3569,6 +3820,10 @@ const [migrationApproved, setMigrationApproved] = useState(false);
         body: JSON.stringify({ itemIds: selectedUnprintedIds, reason: 'Manual batch print' })
       });
       if (res.ok) {
+        const data = await res.json();
+        if (data.labels && data.labels.length > 0) {
+          handlePrintMultipleLabels(data.labels);
+        }
         alert(currentLang === 'en' ? `✓ Batch QR printing completed for ${selectedUnprintedIds.length} bars!` : `✓ تمت الطباعة المجمعة لرموز QR لعدد ${selectedUnprintedIds.length} سبيكة!`);
         setSelectedUnprintedIds([]);
         fetchUnprintedBars();
@@ -6380,6 +6635,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     { type: 'item', key: 'screen-gfs-delivery', label: currentLang === 'en' ? 'GFS Branch Delivery' : 'طلبات فروع GFS', icon: 'fa-solid fa-truck-fast', permission: 'intake', onClick: () => { setActiveTab('screen-gfs-delivery'); fetchGfsDeliveryRequests(); fetchGfsSyncLogs(); } },
     { type: 'item', key: 'screen-home-delivery', label: currentLang === 'en' ? 'Home Delivery' : 'توصيل المنازل', icon: 'fa-solid fa-house-chimney-user', permission: 'intake', onClick: () => { setActiveTab('screen-home-delivery'); fetchHomeDeliveries(); } },
     { type: 'item', key: 'screen-damaged-bars', label: currentLang === 'en' ? 'Damaged Bar Approvals' : 'اعتماد السبائك التالفة', icon: 'fa-solid fa-triangle-exclamation', permission: 'custody', onClick: () => { setActiveTab('screen-damaged-bars'); fetchDamagedBars(); fetchDamagedHighStockAlerts(); fetchDamagedReplacements(); fetchDamagedExports(); } },
+    { type: 'item', key: 'screen-missing-serials', label: t('menu_missing_serials'), icon: 'fa-solid fa-file-circle-exclamation', permission: 'intake', onClick: () => { setActiveTab('screen-missing-serials'); fetchMissingSerialsScreenData(); } },
     { type: 'item', key: 'screen-barcode-labeling', label: currentLang === 'en' ? 'Barcode & QR Labeling' : 'طباعة وتتبع الباركود و QR', icon: 'fa-solid fa-barcode', permission: 'barcode_qr_labeling', onClick: () => { setActiveTab('screen-barcode-labeling'); fetchInventory(); fetchLocations(); fetchQrReprintPrivilege(); } },
     { type: 'item', key: 'screen-bar-traceability', label: t('menu_bar_traceability'), icon: 'fa-solid fa-passport', permission: 'dashboard', onClick: () => { setActiveTab('screen-bar-traceability'); fetchInventory(); fetchProducts(); } },
 
@@ -6644,6 +6900,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
               activeTab === 'screen-exec' ? 'title_exec' :
               activeTab === 'screen-my-activity' ? 'title_my_activity' :
               activeTab === 'screen-customer-receipt' ? 'title_customer_receipt' :
+              activeTab === 'screen-missing-serials' ? 'title_missing_serials' :
               activeTab.replace('screen-', 'menu_').replace(/-/g, '_')
             )}</h1>
           </div>
@@ -10460,6 +10717,564 @@ const [migrationApproved, setMigrationApproved] = useState(false);
           </div>
         )}
 
+        {/* SCREEN VIEWPORT: REPORT MISSING SERIALS & DISCREPANCY REGISTER */}
+        <section className={`screen-viewport ${activeTab === 'screen-missing-serials' ? 'active' : ''}`}>
+          {/* 1. Header Card */}
+          <div className="glass-card" style={{ marginBottom: '20px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '15px' }}>
+              <div>
+                <h3 style={{ display: 'flex', alignItems: 'center', gap: '10px', margin: '0 0 6px 0' }}>
+                  <i className="fa-solid fa-file-circle-exclamation" style={{ color: '#EF4444' }}></i>
+                  {currentLang === 'en' ? 'Report Missing Serials & Discrepancy Ledger' : 'تسجيل السبائك المفقودة وسجل الفروقات المعتمد'}
+                </h3>
+                <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: 0 }}>
+                  {currentLang === 'en'
+                    ? '4-eyes Maker-Checker discrepancy registration for missing bars across Customs, Consignment, and Main Vault inventory with automated balance adjustments.'
+                    : 'تسجيل وإثبات السبائك المفقودة بنظام الرقابة الثنائية Maker-Checker عبر الجمارك وشحنات الأمانات والخزينة الرئيسية مع الخصم المحاسبي الآلي.'}
+                </p>
+              </div>
+
+              {/* Tabs Control */}
+              <div style={{ display: 'flex', gap: '8px', background: 'rgba(255,255,255,0.05)', padding: '4px', borderRadius: '8px', border: '1px solid var(--surface-border)', flexWrap: 'wrap' }}>
+                <button
+                  className={`btn ${missingSerialsTab === 'report' ? 'btn-primary' : 'btn-outline'}`}
+                  style={{ fontSize: '12px', padding: '6px 14px', background: missingSerialsTab === 'report' ? '#EF4444' : undefined, borderColor: missingSerialsTab === 'report' ? '#EF4444' : undefined }}
+                  onClick={() => setMissingSerialsTab('report')}
+                >
+                  <i className="fa-solid fa-plus-circle"></i> {currentLang === 'en' ? '1. Report Missing (Maker)' : '1. تسجيل مفقودات جديد'}
+                </button>
+                <button
+                  className={`btn ${missingSerialsTab === 'pending' ? 'btn-primary' : 'btn-outline'}`}
+                  style={{ fontSize: '12px', padding: '6px 14px' }}
+                  onClick={() => { setMissingSerialsTab('pending'); fetchMissingSerialsScreenData(); }}
+                >
+                  <i className="fa-solid fa-clipboard-check"></i> {currentLang === 'en' ? `2. Pending Approvals (${missingPendingReports.length})` : `2. بانتظار الاعتماد (${missingPendingReports.length})`}
+                </button>
+                <button
+                  className={`btn ${missingSerialsTab === 'history' ? 'btn-primary' : 'btn-outline'}`}
+                  style={{ fontSize: '12px', padding: '6px 14px' }}
+                  onClick={() => { setMissingSerialsTab('history'); fetchMissingSerialsScreenData(); }}
+                >
+                  <i className="fa-solid fa-clock-rotate-left"></i> {currentLang === 'en' ? `3. Missing Register (${missingHistoryItems.length})` : `3. سجل المفقودات (${missingHistoryItems.length})`}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* 2. Top Summary KPI Cards */}
+          {(() => {
+            const totalMissingCount = missingHistoryItems.length;
+            const totalMissingWeight = missingHistoryItems.reduce((sum, i) => sum + (i.weight_grams || 0), 0);
+            const pendingCount = missingPendingReports.length;
+            const pendingWeight = missingPendingReports.reduce((sum, r) => sum + (r.total_weight_grams || 0), 0);
+
+            return (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '20px' }}>
+                <div className="glass-card" style={{ padding: '16px', borderLeft: '4px solid #EF4444' }}>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>
+                    {currentLang === 'en' ? 'Active Missing Bars' : 'إجمالي السبائك المفقودة'}
+                  </div>
+                  <div style={{ fontSize: '24px', fontWeight: 800, color: '#EF4444', marginTop: '4px' }}>
+                    {totalMissingCount} <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'bars' : 'سبيكة'}</span>
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                    {Math.round((totalMissingWeight / 1000) * 1000) / 1000} kg ({totalMissingWeight.toLocaleString()}g)
+                  </div>
+                </div>
+
+                <div className="glass-card" style={{ padding: '16px', borderLeft: '4px solid #F59E0B' }}>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>
+                    {currentLang === 'en' ? 'Pending Checker Reports' : 'تقارير بانتظار اعتماد المعتمد'}
+                  </div>
+                  <div style={{ fontSize: '24px', fontWeight: 800, color: '#F59E0B', marginTop: '4px' }}>
+                    {pendingCount} <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'reports' : 'تقرير'}</span>
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                    {Math.round((pendingWeight / 1000) * 1000) / 1000} kg {currentLang === 'en' ? 'under review' : 'قيد المراجعة'}
+                  </div>
+                </div>
+
+                <div className="glass-card" style={{ padding: '16px', borderLeft: '4px solid #3B82F6' }}>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>
+                    {currentLang === 'en' ? 'Turkey Consignment Missing' : 'مفقودات أمانات تركيا'}
+                  </div>
+                  <div style={{ fontSize: '24px', fontWeight: 800, color: '#3B82F6', marginTop: '4px' }}>
+                    {missingHistoryItems.filter(i => i.ownership_type === 'TURKEY_OWNED').length} <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'bars' : 'سبيكة'}</span>
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                    {currentLang === 'en' ? 'Customs & lot verification' : 'مطابقة جمركية واستلام لوتات'}
+                  </div>
+                </div>
+
+                <div className="glass-card" style={{ padding: '16px', borderLeft: '4px solid var(--kfh-green)' }}>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>
+                    {currentLang === 'en' ? 'Compliance & GL Control' : 'الرقابة الشرعية والقيود'}
+                  </div>
+                  <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--kfh-green)', marginTop: '8px' }}>
+                    <i className="fa-solid fa-shield-halved"></i> 4-Eyes Maker-Checker
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                    {currentLang === 'en' ? 'Auto-deduction on approval' : 'خصم تلقائي فور اعتماد المراجع'}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* 3. TAB 1: MAKER DISCREPANCY SUBMISSION */}
+          {missingSerialsTab === 'report' && (() => {
+            const allCandidates: any[] = [];
+            const seen = new Set<string>();
+            [...inventoryList, ...(turkeyInventory?.items || [])].forEach((item: any) => {
+              const sn = item.serial_number || item.SerialNumber;
+              if (sn && !seen.has(sn) && item.status_code !== 'MISSING' && item.StatusCode !== 'MISSING') {
+                seen.add(sn);
+                allCandidates.push({
+                  item_id: item.item_id || item.ItemId,
+                  serial_number: sn,
+                  denomination: item.denomination || item.Denomination || `${item.weight_grams || item.WeightGrams || 0}g`,
+                  weight_grams: item.weight_grams || item.WeightGrams || 0,
+                  lot_number: item.lot_number || item.lotNumber || item.LotNumber || 'N/A',
+                  location_code: item.location || item.location_code || item.LocationCode || 'Main Vault',
+                  ownership_type: item.ownership_type || item.OwnershipType || 'TURKEY_OWNED',
+                  metal_name: item.metal || item.metal_name || 'Gold'
+                });
+              }
+            });
+
+            let filteredCandidates = allCandidates;
+            if (missingScope !== 'ALL') {
+              filteredCandidates = filteredCandidates.filter(i => i.ownership_type === missingScope);
+            }
+            if (missingLotFilter.trim()) {
+              const q = missingLotFilter.trim().toLowerCase();
+              filteredCandidates = filteredCandidates.filter(i => (i.lot_number || '').toLowerCase().includes(q));
+            }
+            if (missingSearch.trim()) {
+              const q = missingSearch.trim().toLowerCase();
+              filteredCandidates = filteredCandidates.filter(i => (i.serial_number || '').toLowerCase().includes(q));
+            }
+
+            const selectedCandidateObjs = allCandidates.filter(i => missingSelectedSerials.includes(i.serial_number));
+            const selectedWeightGrams = selectedCandidateObjs.reduce((sum, i) => sum + (i.weight_grams || 0), 0);
+
+            return (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: '20px', alignItems: 'start' }}>
+                {/* Left Column: Selection Table */}
+                <div className="glass-card">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
+                    <h4 style={{ margin: 0, fontSize: '15px', color: 'var(--accent-gold)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <i className="fa-solid fa-list-check"></i>
+                      {currentLang === 'en' ? 'Step 1: Select Missing Bars from Vault / Consignment' : 'الخطوة 1: تحديد السبائك المفقودة من الخزينة أو الأمانات'}
+                    </h4>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button
+                        className={`btn btn-sm ${missingScope === 'ALL' ? 'btn-primary' : 'btn-outline'}`}
+                        style={{ fontSize: '11px', padding: '3px 10px' }}
+                        onClick={() => setMissingScope('ALL')}
+                      >
+                        {currentLang === 'en' ? 'All' : 'الكل'}
+                      </button>
+                      <button
+                        className={`btn btn-sm ${missingScope === 'TURKEY_OWNED' ? 'btn-primary' : 'btn-outline'}`}
+                        style={{ fontSize: '11px', padding: '3px 10px' }}
+                        onClick={() => setMissingScope('TURKEY_OWNED')}
+                      >
+                        {currentLang === 'en' ? 'Turkey Consignment' : 'أمانات تركيا'}
+                      </button>
+                      <button
+                        className={`btn btn-sm ${missingScope === 'KFH_OWNED' ? 'btn-primary' : 'btn-outline'}`}
+                        style={{ fontSize: '11px', padding: '3px 10px' }}
+                        onClick={() => setMissingScope('KFH_OWNED')}
+                      >
+                        {currentLang === 'en' ? 'KFH Owned' : 'ملك بيتك'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Filters */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '14px' }}>
+                    <div>
+                      <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+                        {currentLang === 'en' ? 'Filter by Lot / Batch Reference:' : 'تصفية برقم اللوت / الدفعة:'}
+                      </label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="e.g. LOT-2026..."
+                        value={missingLotFilter}
+                        onChange={e => setMissingLotFilter(e.target.value)}
+                        style={{ fontSize: '12px', padding: '6px 10px' }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+                        {currentLang === 'en' ? 'Search Serial Number:' : 'بحث بالرقم التسلسلي:'}
+                      </label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="e.g. TR-BAR-001..."
+                        value={missingSearch}
+                        onChange={e => setMissingSearch(e.target.value)}
+                        style={{ fontSize: '12px', padding: '6px 10px' }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Candidates Table */}
+                  <div className="table-responsive" style={{ maxHeight: '380px', overflowY: 'auto' }}>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th style={{ width: '40px' }}>
+                            <input
+                              type="checkbox"
+                              checked={filteredCandidates.length > 0 && missingSelectedSerials.length === filteredCandidates.length}
+                              onChange={e => {
+                                if (e.target.checked) {
+                                  setMissingSelectedSerials(filteredCandidates.map(i => i.serial_number));
+                                } else {
+                                  setMissingSelectedSerials([]);
+                                }
+                              }}
+                            />
+                          </th>
+                          <th>{currentLang === 'en' ? 'Serial Number' : 'الرقم التسلسلي'}</th>
+                          <th>{currentLang === 'en' ? 'Denomination' : 'الفئة'}</th>
+                          <th>{currentLang === 'en' ? 'Weight' : 'الوزن'}</th>
+                          <th>{currentLang === 'en' ? 'Lot Number' : 'رقم اللوت'}</th>
+                          <th>{currentLang === 'en' ? 'Ownership' : 'الملكية'}</th>
+                          <th>{currentLang === 'en' ? 'Vault Location' : 'موقع الخزينة'}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredCandidates.map(item => {
+                          const isSelected = missingSelectedSerials.includes(item.serial_number);
+                          return (
+                            <tr key={item.serial_number} style={{ background: isSelected ? 'rgba(239, 68, 68, 0.08)' : undefined }}>
+                              <td>
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  onChange={() => {
+                                    if (isSelected) {
+                                      setMissingSelectedSerials(missingSelectedSerials.filter(s => s !== item.serial_number));
+                                    } else {
+                                      setMissingSelectedSerials([...missingSelectedSerials, item.serial_number]);
+                                    }
+                                  }}
+                                />
+                              </td>
+                              <td><strong style={{ fontFamily: 'monospace' }}>{item.serial_number}</strong></td>
+                              <td>{item.denomination}</td>
+                              <td>{item.weight_grams}g</td>
+                              <td><span className="badge badge-outline" style={{ fontSize: '10px' }}>{item.lot_number}</span></td>
+                              <td>
+                                <span className={`badge ${item.ownership_type === 'TURKEY_OWNED' ? 'badge-warning' : 'badge-ready'}`} style={{ fontSize: '10px' }}>
+                                  {item.ownership_type}
+                                </span>
+                              </td>
+                              <td style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{item.location_code}</td>
+                            </tr>
+                          );
+                        })}
+                        {filteredCandidates.length === 0 && (
+                          <tr>
+                            <td colSpan={7} style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)' }}>
+                              <i className="fa-solid fa-box-open" style={{ fontSize: '24px', marginBottom: '6px', display: 'block' }}></i>
+                              {currentLang === 'en' ? 'No eligible candidate bars found.' : 'لا توجد سبائك مطابقة.'}
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Right Column: Justification & Submission Card */}
+                <div className="glass-card" style={{ borderTop: '4px solid #EF4444' }}>
+                  <h4 style={{ margin: '0 0 12px 0', fontSize: '15px', color: '#EF4444', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <i className="fa-solid fa-clipboard-question"></i>
+                    {currentLang === 'en' ? 'Step 2: Discrepancy Reason & Submit' : 'الخطوة 2: سبب الفقد وتقديم التقرير'}
+                  </h4>
+
+                  {/* Selected Summary Box */}
+                  <div style={{ background: 'rgba(239, 68, 68, 0.06)', border: '1px solid rgba(239, 68, 68, 0.2)', borderRadius: '8px', padding: '12px', marginBottom: '16px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '12px' }}>
+                      <span style={{ fontWeight: 600 }}>{currentLang === 'en' ? 'Selected Missing Bars:' : 'السبائك المحددة:'}</span>
+                      <strong style={{ color: '#EF4444' }}>{missingSelectedSerials.length} {currentLang === 'en' ? 'bars' : 'سبيكة'}</strong>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
+                      <span style={{ fontWeight: 600 }}>{currentLang === 'en' ? 'Total Weight:' : 'الوزن الإجمالي:'}</span>
+                      <strong style={{ color: 'var(--accent-gold)' }}>{selectedWeightGrams}g ({Math.round((selectedWeightGrams / 1000) * 1000) / 1000} kg)</strong>
+                    </div>
+
+                    {missingSelectedSerials.length > 0 && (
+                      <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px dashed rgba(239, 68, 68, 0.2)', maxHeight: '60px', overflowY: 'auto', display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                        {missingSelectedSerials.map(sn => (
+                          <span key={sn} style={{ fontFamily: 'monospace', fontSize: '10px', background: '#EF4444', color: '#fff', padding: '1px 6px', borderRadius: '4px' }}>
+                            {sn}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Form fields */}
+                  <div className="form-group" style={{ marginBottom: '12px' }}>
+                    <label style={{ fontSize: '12px', fontWeight: 600, marginBottom: '4px', display: 'block' }}>
+                      {currentLang === 'en' ? 'Discrepancy Justification Reason:' : 'سبب الفقد / الفروقات:'}
+                    </label>
+                    <select
+                      className="form-control"
+                      style={{ fontSize: '12px', color: '#000' }}
+                      value={missingReason}
+                      onChange={e => setMissingReason(e.target.value)}
+                    >
+                      <option value="Physical bar missing upon customs receipt unpacking verification">
+                        {currentLang === 'en' ? 'Customs Unpacking Discrepancy' : 'فروقات فتح وتفتيش الشحنات الجمركية'}
+                      </option>
+                      <option value="Count discrepancy during vault coordinate stocktake">
+                        {currentLang === 'en' ? 'Vault Stocktake Discrepancy' : 'فروقات جرد إحداثيات الخزينة'}
+                      </option>
+                      <option value="Packaging sleeve empty / security seal broken">
+                        {currentLang === 'en' ? 'Empty Sleeve / Seal Broken' : 'غلاف سبيكة فارغ / تلف الختم الأمني'}
+                      </option>
+                      <option value="Physical loss during logistics branch courier transit">
+                        {currentLang === 'en' ? 'Logistics / Courier Transit Loss' : 'فقد أثناء النقل والتحويل اللوجستي'}
+                      </option>
+                      <option value="Audit discrepancy identified by Compliance Team">
+                        {currentLang === 'en' ? 'Internal Audit / Compliance Discrepancy' : 'فروقات تدقيق التفتيش والرقابة'}
+                      </option>
+                    </select>
+                  </div>
+
+                  <div className="form-group" style={{ marginBottom: '16px' }}>
+                    <label style={{ fontSize: '12px', fontWeight: 600, marginBottom: '4px', display: 'block' }}>
+                      {currentLang === 'en' ? 'Explanatory Notes / Incident Details:' : 'ملاحظات تفصيلية وسياق الواقعة:'}
+                    </label>
+                    <textarea
+                      className="form-control"
+                      rows={3}
+                      placeholder={currentLang === 'en' ? 'Provide context, bay number, airway bill or witness details...' : 'أدخل تفاصيل البوليسة أو مكان الفحص أو أسماء الشهود...'}
+                      value={missingNotes}
+                      onChange={e => setMissingNotes(e.target.value)}
+                      style={{ fontSize: '12px' }}
+                    />
+                  </div>
+
+                  <button
+                    className="btn btn-primary"
+                    style={{ width: '100%', padding: '10px', fontSize: '13px', fontWeight: 700, background: '#EF4444', borderColor: '#EF4444', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+                    disabled={missingSelectedSerials.length === 0 || missingIsSubmitting}
+                    onClick={handleReportMissingSerialsSubmit}
+                  >
+                    <i className={`fa-solid ${missingIsSubmitting ? 'fa-spinner fa-spin' : 'fa-paper-plane'}`}></i>
+                    <span>{currentLang === 'en' ? `Submit Report (${missingSelectedSerials.length} Bars)` : `إرسال التقرير (${missingSelectedSerials.length} سبيكة)`}</span>
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* 4. TAB 2: PENDING MAKER-CHECKER APPROVALS */}
+          {missingSerialsTab === 'pending' && (
+            <div className="glass-card">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
+                <div>
+                  <h4 style={{ margin: 0, fontSize: '16px', color: 'var(--accent-gold)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <i className="fa-solid fa-clipboard-check"></i>
+                    {currentLang === 'en' ? 'Pending Missing Items Reports (Maker-Checker 4-Eyes Queue)' : 'طابور تقارير السبائك المفقودة بانتظار الاعتماد (رقابة ثنائية)'}
+                  </h4>
+                  <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: '4px 0 0 0' }}>
+                    {currentLang === 'en'
+                      ? 'Reports submitted by Makers awaiting Checker authorization. Upon approval, items are set to MISSING and deducted from inventory balance.'
+                      : 'تقارير تم تقديمها من الصانع وبانتظار اعتماد المراجع. فور الاعتماد تتحول السبائك لمفقودة وتُخصم محاسبياً.'}
+                  </p>
+                </div>
+
+                <button className="btn btn-outline btn-sm" onClick={fetchMissingSerialsScreenData}>
+                  <i className="fa-solid fa-rotate"></i> {currentLang === 'en' ? 'Refresh' : 'تحديث'}
+                </button>
+              </div>
+
+              {missingPendingReports.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-muted)' }}>
+                  <i className="fa-solid fa-circle-check" style={{ fontSize: '32px', color: 'var(--kfh-green)', marginBottom: '10px', display: 'block' }}></i>
+                  <p style={{ margin: 0, fontSize: '14px', fontWeight: 600 }}>
+                    {currentLang === 'en' ? 'No pending missing item reports in queue.' : 'لا توجد تقارير مفقودات معلقة بانتظار الاعتماد.'}
+                  </p>
+                </div>
+              ) : (
+                <div style={{ display: 'grid', gap: '14px' }}>
+                  {missingPendingReports.map((rep: any) => {
+                    let serialsList: string[] = [];
+                    try {
+                      serialsList = JSON.parse(rep.serials_json || '[]');
+                    } catch (_) {}
+
+                    const isCheckerOrAdmin = userRole?.includes('Checker') || userRole?.includes('Admin') || displayName === 'system-admin';
+
+                    return (
+                      <div
+                        key={rep.pending_report_id}
+                        style={{
+                          background: 'rgba(255,255,255,0.03)',
+                          border: '1px solid var(--surface-border)',
+                          borderLeft: '4px solid #F59E0B',
+                          borderRadius: '8px',
+                          padding: '16px'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '10px', marginBottom: '10px' }}>
+                          <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                              <strong style={{ fontSize: '14px', fontFamily: 'monospace', color: 'var(--accent-gold)' }}>
+                                {rep.report_reference}
+                              </strong>
+                              <span className="badge badge-warning" style={{ fontSize: '10px' }}>{rep.status_code}</span>
+                              <span className="badge badge-outline" style={{ fontSize: '10px' }}>{rep.ownership_type}</span>
+                            </div>
+                            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                              <i className="fa-solid fa-user" style={{ marginRight: '4px' }}></i> {rep.requested_by} •{' '}
+                              <i className="fa-solid fa-clock" style={{ marginRight: '4px' }}></i> {rep.created_at ? new Date(rep.created_at).toLocaleString() : ''}
+                            </div>
+                          </div>
+
+                          <div style={{ textAlign: 'right' }}>
+                            <div style={{ fontSize: '15px', fontWeight: 800, color: '#EF4444' }}>
+                              {rep.total_items} {currentLang === 'en' ? 'bars' : 'سبيكة'} ({rep.total_weight_grams}g)
+                            </div>
+                            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                              {Math.round((rep.total_weight_grams / 1000) * 1000) / 1000} kg
+                            </div>
+                          </div>
+                        </div>
+
+                        <div style={{ background: 'rgba(0,0,0,0.2)', padding: '10px', borderRadius: '6px', fontSize: '12px', marginBottom: '10px' }}>
+                          <div><strong>Reason:</strong> {rep.discrepancy_reason}</div>
+                          {rep.notes && <div style={{ marginTop: '4px', color: 'var(--text-muted)' }}><strong>Notes:</strong> {rep.notes}</div>}
+                          {rep.lot_number && <div style={{ marginTop: '4px' }}><strong>Source Lot:</strong> {rep.lot_number}</div>}
+                        </div>
+
+                        {serialsList.length > 0 && (
+                          <div style={{ marginBottom: '12px' }}>
+                            <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+                              {currentLang === 'en' ? 'Affected Serial Numbers:' : 'الأرقام التسلسلية المتأثرة:'}
+                            </span>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                              {serialsList.map((s: string) => (
+                                <span key={s} style={{ fontFamily: 'monospace', fontSize: '11px', background: 'rgba(239,68,68,0.15)', color: '#EF4444', border: '1px solid rgba(239,68,68,0.3)', padding: '2px 8px', borderRadius: '4px' }}>
+                                  {s}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {isCheckerOrAdmin && (
+                          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', borderTop: '1px solid var(--surface-border)', paddingTop: '10px' }}>
+                            <button
+                              className="btn btn-outline btn-sm"
+                              onClick={() => handleRejectMissingReportDirect(rep.pending_report_id)}
+                              style={{ color: '#EF4444', borderColor: '#EF4444' }}
+                            >
+                              <i className="fa-solid fa-xmark"></i> {currentLang === 'en' ? 'Reject Report' : 'رفض التقرير'}
+                            </button>
+                            <button
+                              className="btn btn-primary btn-sm"
+                              onClick={() => handleApproveMissingReportDirect(rep.pending_report_id)}
+                              style={{ background: 'var(--kfh-green)', borderColor: 'var(--kfh-green)', fontWeight: 'bold' }}
+                            >
+                              <i className="fa-solid fa-check"></i> {currentLang === 'en' ? 'Approve & Deduct Balance' : 'اعتماد التقرير والخصم'}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 5. TAB 3: MISSING SERIALS HISTORICAL REGISTER */}
+          {missingSerialsTab === 'history' && (
+            <div className="glass-card">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
+                <div>
+                  <h4 style={{ margin: 0, fontSize: '16px', color: 'var(--accent-gold)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <i className="fa-solid fa-clock-rotate-left"></i>
+                    {currentLang === 'en' ? 'Approved Missing Serials Register & Audit Log' : 'سجل السبائك المفقودة المعتمدة ومسار التدقيق'}
+                  </h4>
+                  <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: '4px 0 0 0' }}>
+                    {currentLang === 'en'
+                      ? 'Comprehensive registry of all serialized bars transitioned to MISSING status with full chain-of-custody audit trail.'
+                      : 'السجل الشامل لجميع السبائك المتحولة إلى حالة مفقودة مع سجل الحيازة والتتبع الكامل.'}
+                  </p>
+                </div>
+
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button className="btn btn-outline btn-sm" onClick={() => window.print()}>
+                    <i className="fa-solid fa-print"></i> {currentLang === 'en' ? 'Print Register' : 'طباعة السجل'}
+                  </button>
+                  <button className="btn btn-outline btn-sm" onClick={fetchMissingSerialsScreenData}>
+                    <i className="fa-solid fa-rotate"></i> {currentLang === 'en' ? 'Refresh' : 'تحديث'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="table-responsive">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>{currentLang === 'en' ? 'Serial Number' : 'الرقم التسلسلي'}</th>
+                      <th>{currentLang === 'en' ? 'Product / Metal' : 'الصنف / المعدن'}</th>
+                      <th>{currentLang === 'en' ? 'Denomination' : 'الفئة'}</th>
+                      <th>{currentLang === 'en' ? 'Weight' : 'الوزن'}</th>
+                      <th>{currentLang === 'en' ? 'Lot Number' : 'رقم اللوت'}</th>
+                      <th>{currentLang === 'en' ? 'Ownership' : 'الملكية'}</th>
+                      <th>{currentLang === 'en' ? 'Location' : 'الموقع'}</th>
+                      <th>{currentLang === 'en' ? 'Status' : 'الحالة'}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {missingHistoryItems.map((item: any) => (
+                      <tr key={item.item_id || item.serial_number}>
+                        <td><strong style={{ fontFamily: 'monospace', color: '#EF4444' }}>{item.serial_number}</strong></td>
+                        <td>{item.metal_name || 'Gold'}</td>
+                        <td>{item.denomination}</td>
+                        <td>{item.weight_grams}g</td>
+                        <td><span className="badge badge-outline" style={{ fontSize: '10px' }}>{item.lot_number || 'N/A'}</span></td>
+                        <td>
+                          <span className={`badge ${item.ownership_type === 'TURKEY_OWNED' ? 'badge-warning' : 'badge-ready'}`} style={{ fontSize: '10px' }}>
+                            {item.ownership_type}
+                          </span>
+                        </td>
+                        <td style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{item.location_code || 'Unassigned'}</td>
+                        <td>
+                          <span className="badge" style={{ background: '#EF4444', color: '#fff', fontSize: '10px', fontWeight: 700 }}>
+                            MISSING
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                    {missingHistoryItems.length === 0 && (
+                      <tr>
+                        <td colSpan={8} style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)' }}>
+                          <i className="fa-solid fa-circle-check" style={{ fontSize: '28px', color: 'var(--kfh-green)', marginBottom: '8px', display: 'block' }}></i>
+                          {currentLang === 'en' ? 'No missing serials recorded in inventory.' : 'لا توجد سبائك مسجلة كمفقودة في المخزون.'}
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </section>
+
         {/* SCREEN VIEWPORT: BARCODE & QR CODE TRACKING (UC01 - GS1-128 & ISO/IEC 18004) */}
         <section className={`screen-viewport ${activeTab === 'screen-barcode-labeling' ? 'active' : ''}`}>
           <div className="glass-card" style={{ marginBottom: '20px' }}>
@@ -11415,7 +12230,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                           </div>
                         </div>
 
-                        {/* Machine-Readable Barcode & QR Code Security Assay Tag */}
+                        {/* QR Code Bar Sticker Tag */}
                         <div
                           id="printable-barcode-sticker"
                           className="barcode-sticker-tag"
@@ -11423,38 +12238,29 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                             background: '#ffffff',
                             color: '#111827',
                             borderRadius: '8px',
-                            padding: '12px',
-                            border: '1px solid #d4af37',
+                            padding: '14px',
+                            border: '1.5px solid #d4af37',
                             position: 'relative',
-                            zIndex: 2
+                            zIndex: 2,
+                            maxWidth: '260px',
+                            margin: '0 auto',
+                            textAlign: 'center',
+                            boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
                           }}
                         >
-                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 75px', gap: '8px', alignItems: 'center' }}>
-                            <div>
-                              <div style={{ fontSize: '10px', fontWeight: 800, color: '#009B4E' }}>
-                                📍 {barcodeCurrentLabel.locationDescription || selectedBar?.location || 'Vault Stage'}
-                              </div>
-                              <div style={{ fontSize: '9px', color: '#4B5563', marginTop: '2px' }}>
-                                <strong>GTIN-14:</strong> {barcodeCurrentLabel.gtin14}
-                              </div>
-                              <div style={{ fontSize: '9px', color: '#4B5563' }}>
-                                <strong>Batch / Lot:</strong> {barcodeCurrentLabel.lotNumber || 'N/A'}
-                              </div>
+                          <div
+                            style={{ width: '130px', height: '130px', margin: '0 auto 10px auto', background: '#fff', padding: '2px', display: 'flex', justifyContent: 'center', alignItems: 'center' }}
+                            dangerouslySetInnerHTML={{ __html: barcodeCurrentLabel.qrCodeSvg }}
+                          />
+                          <div style={{ textAlign: 'center', fontSize: '11px', color: '#111827', lineHeight: '1.4' }}>
+                            <div style={{ fontFamily: 'monospace', fontWeight: 800, fontSize: '12px', marginBottom: '2px' }}>
+                              Serial: {barcodeCurrentLabel.serialNumber}
                             </div>
-                            <div
-                              style={{ width: '70px', height: '70px', margin: '0 auto', background: '#fff', padding: '2px' }}
-                              dangerouslySetInnerHTML={{ __html: barcodeCurrentLabel.qrCodeSvg }}
-                            />
-                          </div>
-
-                          {/* Barcode SVG */}
-                          <div style={{ textAlign: 'center', borderTop: '1px dashed #d1d5db', paddingTop: '6px', marginTop: '6px' }}>
-                            <div
-                              style={{ maxWidth: '100%', height: '38px', margin: '0 auto', display: 'flex', justifyContent: 'center' }}
-                              dangerouslySetInnerHTML={{ __html: barcodeCurrentLabel.barcodeSvg }}
-                            />
-                            <div style={{ fontFamily: 'monospace', fontSize: '9px', fontWeight: 'bold', color: '#111827', letterSpacing: '0.5px' }}>
-                              {barcodeCurrentLabel.gs1HumanReadable}
+                            <div style={{ fontWeight: 600, color: '#374151' }}>
+                              Product: {barcodeCurrentLabel.productType || barcodeCurrentLabel.productLabel || barcodeCurrentLabel.metalName || 'Gold'}
+                            </div>
+                            <div style={{ fontWeight: 600, color: '#374151' }}>
+                              Denomination: {barcodeCurrentLabel.denomination || (barcodeCurrentLabel.weightGrams ? `${barcodeCurrentLabel.weightGrams}g` : '')}
                             </div>
                           </div>
                         </div>
@@ -11612,31 +12418,33 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     <i className="fa-solid fa-circle-check" style={{ color: '#10B981' }}></i>
                     {currentLang === 'en' ? 'Reprint Approved & Custody Event Logged' : 'تم اعتماد إعادة الطباعة وتوثيق سجل الحيازة'}
                   </div>
-                  <div style={{ maxWidth: '380px', margin: '0 auto', background: '#ffffff', color: '#111827', borderRadius: '8px', border: '1.5px solid #d4af37', padding: '12px' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 75px', gap: '8px', alignItems: 'center' }}>
-                      <div>
-                        <div style={{ fontSize: '10px', fontWeight: 800, color: '#009B4E' }}>
-                          📍 {barcodeReprintResult.locationDescription || 'Vault Stage'}
-                        </div>
-                        <div style={{ fontSize: '9px', color: '#4B5563', marginTop: '2px' }}>
-                          <strong>GTIN-14:</strong> {barcodeReprintResult.gtin14}
-                        </div>
-                        <div style={{ fontSize: '9px', color: '#4B5563' }}>
-                          <strong>Batch / Lot:</strong> {barcodeReprintResult.lotNumber || 'N/A'}
-                        </div>
+                  <div
+                    className="barcode-sticker-tag"
+                    style={{
+                      maxWidth: '260px',
+                      margin: '0 auto',
+                      background: '#ffffff',
+                      color: '#111827',
+                      borderRadius: '8px',
+                      border: '1.5px solid #d4af37',
+                      padding: '14px',
+                      textAlign: 'center',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                    }}
+                  >
+                    <div
+                      style={{ width: '130px', height: '130px', margin: '0 auto 10px auto', background: '#fff', padding: '2px', display: 'flex', justifyContent: 'center', alignItems: 'center' }}
+                      dangerouslySetInnerHTML={{ __html: barcodeReprintResult.qrCodeSvg }}
+                    />
+                    <div style={{ textAlign: 'center', fontSize: '11px', color: '#111827', lineHeight: '1.4' }}>
+                      <div style={{ fontFamily: 'monospace', fontWeight: 800, fontSize: '12px', marginBottom: '2px' }}>
+                        Serial: {barcodeReprintResult.serialNumber}
                       </div>
-                      <div
-                        style={{ width: '70px', height: '70px', margin: '0 auto', background: '#fff', padding: '2px' }}
-                        dangerouslySetInnerHTML={{ __html: barcodeReprintResult.qrCodeSvg }}
-                      />
-                    </div>
-                    <div style={{ textAlign: 'center', borderTop: '1px dashed #d1d5db', paddingTop: '6px', marginTop: '6px' }}>
-                      <div
-                        style={{ maxWidth: '100%', height: '38px', margin: '0 auto', display: 'flex', justifyContent: 'center' }}
-                        dangerouslySetInnerHTML={{ __html: barcodeReprintResult.barcodeSvg }}
-                      />
-                      <div style={{ fontFamily: 'monospace', fontSize: '9px', fontWeight: 'bold', color: '#111827', letterSpacing: '0.5px' }}>
-                        {barcodeReprintResult.gs1HumanReadable}
+                      <div style={{ fontWeight: 600, color: '#374151' }}>
+                        Product: {barcodeReprintResult.productType || barcodeReprintResult.productLabel || barcodeReprintResult.metalName || 'Gold'}
+                      </div>
+                      <div style={{ fontWeight: 600, color: '#374151' }}>
+                        Denomination: {barcodeReprintResult.denomination || (barcodeReprintResult.weightGrams ? `${barcodeReprintResult.weightGrams}g` : '')}
                       </div>
                     </div>
                   </div>
@@ -11697,7 +12505,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     </p>
                   </div>
                   {barcodeBulkLabels.length > 0 && (
-                    <button className="btn btn-primary" onClick={() => window.print()}>
+                    <button className="btn btn-primary" onClick={() => handlePrintMultipleLabels(barcodeBulkLabels)}>
                       <i className="fa-solid fa-print"></i> {currentLang === 'en' ? `Print All Labels (${barcodeBulkLabels.length})` : `طباعة كامل الكشف (${barcodeBulkLabels.length})`}
                     </button>
                   )}
@@ -11857,12 +12665,12 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                         <i className="fa-solid fa-tags" style={{ marginRight: '6px' }}></i>
                         {currentLang === 'en' ? `Generated Barcode Stickers (${barcodeBulkLabels.length})` : `ملصقات الباركود المولدة (${barcodeBulkLabels.length})`}
                       </span>
-                      <button className="btn btn-primary btn-sm" onClick={() => window.print()}>
+                      <button className="btn btn-primary btn-sm" onClick={() => handlePrintMultipleLabels(barcodeBulkLabels)}>
                         <i className="fa-solid fa-print"></i> {currentLang === 'en' ? 'Print Stickers Sheet' : 'طباعة كشف الملصقات'}
                       </button>
                     </div>
 
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px' }}>
                       {barcodeBulkLabels.map((lbl: any, idx: number) => (
                         <div
                           key={idx}
@@ -11872,37 +12680,26 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                             color: '#111827',
                             borderRadius: '8px',
                             border: '1.5px solid #d4af37',
-                            padding: '12px',
+                            padding: '14px',
+                            maxWidth: '260px',
+                            margin: '0 auto',
+                            textAlign: 'center',
                             boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
                           }}
                         >
-                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 75px', gap: '8px', alignItems: 'center' }}>
-                            <div>
-                              <div style={{ fontSize: '10px', fontWeight: 800, color: '#009B4E' }}>
-                                📍 {lbl.locationDescription || 'Vault Stage'}
-                              </div>
-                              <div style={{ fontSize: '9px', color: '#4B5563', marginTop: '2px' }}>
-                                <strong>GTIN-14:</strong> {lbl.gtin14}
-                              </div>
-                              <div style={{ fontSize: '9px', color: '#4B5563' }}>
-                                <strong>Batch / Lot:</strong> {lbl.lotNumber || 'N/A'}
-                              </div>
-                              <div style={{ fontSize: '9px', fontWeight: 700, color: '#111827', marginTop: '2px' }}>
-                                {lbl.productLabel}
-                              </div>
+                          <div
+                            style={{ width: '130px', height: '130px', margin: '0 auto 10px auto', background: '#fff', padding: '2px', display: 'flex', justifyContent: 'center', alignItems: 'center' }}
+                            dangerouslySetInnerHTML={{ __html: lbl.qrCodeSvg }}
+                          />
+                          <div style={{ textAlign: 'center', fontSize: '11px', color: '#111827', lineHeight: '1.4' }}>
+                            <div style={{ fontFamily: 'monospace', fontWeight: 800, fontSize: '12px', marginBottom: '2px' }}>
+                              Serial: {lbl.serialNumber || lbl.serial_number}
                             </div>
-                            <div
-                              style={{ width: '70px', height: '70px', margin: '0 auto', background: '#fff', padding: '2px' }}
-                              dangerouslySetInnerHTML={{ __html: lbl.qrCodeSvg }}
-                            />
-                          </div>
-                          <div style={{ textAlign: 'center', borderTop: '1px dashed #d1d5db', paddingTop: '6px', marginTop: '6px' }}>
-                            <div
-                              style={{ maxWidth: '100%', height: '36px', margin: '0 auto', display: 'flex', justifyContent: 'center' }}
-                              dangerouslySetInnerHTML={{ __html: lbl.barcodeSvg }}
-                            />
-                            <div style={{ fontFamily: 'monospace', fontSize: '9px', fontWeight: 'bold', color: '#111827', letterSpacing: '0.5px' }}>
-                              {lbl.gs1HumanReadable}
+                            <div style={{ fontWeight: 600, color: '#374151' }}>
+                              Product: {lbl.productType || lbl.productLabel || lbl.metalName || 'Gold'}
+                            </div>
+                            <div style={{ fontWeight: 600, color: '#374151' }}>
+                              Denomination: {lbl.denomination || (lbl.weightGrams ? `${lbl.weightGrams}g` : '')}
                             </div>
                           </div>
                         </div>

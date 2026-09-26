@@ -191,6 +191,7 @@ public interface IInventoryRepository
     Task<string> ApproveMissingItemsAsync(int pendingReportId, string approvedBy);
     Task<IEnumerable<PendingMissingItemReport>> GetPendingMissingItemReportsAsync();
     Task<IEnumerable<InventoryItem>> GetTurkeyMissingItemsAsync();
+    Task<IEnumerable<InventoryItem>> GetAllMissingItemsAsync(string? ownershipType = null);
 
     // =========================================================================
     // Dynamic Business Validation Rules Engine (RFP item 5) -- pure data access;

@@ -504,6 +504,34 @@ public partial class PMIMSControllers
         }
     }
 
+    [HttpGet("inventory/missing-items")]
+    [Authorize(Policy = "purchase_orders.read")]
+    public async Task<IActionResult> GetAllMissingItems([FromQuery] string? ownershipType = null)
+    {
+        try
+        {
+            var items = (await _repository.GetAllMissingItemsAsync(ownershipType)).ToList();
+            return Ok(items.Select(i => new
+            {
+                item_id = i.ItemId,
+                serial_number = i.SerialNumber,
+                product_id = i.ProductId,
+                product_code = i.Product?.ProductCode,
+                metal_name = i.Product?.MetalType?.MetalName ?? "Gold",
+                denomination = i.Product?.Denomination?.Label ?? "1kg Bar",
+                weight_grams = i.Product?.Denomination?.WeightGrams ?? 0,
+                lot_number = i.Lot?.LotNumber,
+                location_code = i.Location != null ? $"{i.Location.ZoneRoom} / {i.Location.ShelfRow} / {i.Location.SlotBin}" : "Unassigned",
+                status_code = i.StatusCode,
+                ownership_type = i.OwnershipType
+            }));
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
     [HttpPost("inventory/turkey/missing-items/report")]
     [Authorize(Policy = "purchase_orders.write")]
     public async Task<IActionResult> InitiateMissingItemsReport([FromBody] MissingItemsReportRequest req)

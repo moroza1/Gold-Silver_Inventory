@@ -207,9 +207,16 @@ public partial class PMIMSControllers
             }
 
             var logs = await _repository.RecordBatchQrPrintAsync(req.ItemIds, "INITIAL_BATCH", printedBy, req.Reason);
+            var labels = new List<BarcodeLabelDto>();
+            foreach (var id in req.ItemIds)
+            {
+                var l = await _barcodeLabelService.GenerateItemLabelByIdAsync(id);
+                if (l != null) labels.Add(l);
+            }
             return Ok(new
             {
                 total_printed = req.ItemIds.Count,
+                labels,
                 message = $"Batch QR labels successfully generated for {req.ItemIds.Count} bars."
             });
         }

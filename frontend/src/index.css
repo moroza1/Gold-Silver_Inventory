@@ -867,9 +867,10 @@ html[dir="rtl"] .modal-header {
     color: #111827 !important;
     border: 1.5px solid #d4af37 !important;
     border-radius: 8px !important;
-    padding: 10px 12px !important;
-    max-width: 380px !important;
+    padding: 12px !important;
+    max-width: 260px !important;
     margin: 0 auto !important;
+    text-align: center !important;
     break-inside: avoid;
     page-break-inside: avoid;
   }
