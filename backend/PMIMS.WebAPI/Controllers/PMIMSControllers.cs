@@ -2132,7 +2132,9 @@ public partial class PMIMSControllers : ControllerBase
                                                 metal_name = metalName,
                                                 weight_grams = item.Product?.Denomination?.WeightGrams ?? 0m,
                                                 weight_kg = Math.Round(GetItemWeightKg(item), 4),
-                                                purity = item.Product?.Purity?.PurityValue ?? 0.9999m,
+                                                purity = item.Product?.Purity?.PurityValue != null
+                                                    ? (item.Product.Purity.PurityValue <= 1.0m ? item.Product.Purity.PurityValue * 1000m : (item.Product.Purity.PurityValue <= 100.0m ? item.Product.Purity.PurityValue * 10m : item.Product.Purity.PurityValue))
+                                                    : 999.9m,
                                                 brand_name = item.Product?.BrandName ?? item.Product?.Brand?.BrandName ?? "",
                                                 status = item.StatusCode,
                                                 ownership_type = (item.OwnershipType == "VIP_OWNED" || (item.OwnershipType == "KFH_OWNED" && item.ChannelStatus == "OFFLINE")) ? "KFH_OWNED" : item.OwnershipType,

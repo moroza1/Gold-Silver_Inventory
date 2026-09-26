@@ -940,6 +940,7 @@ export default function App() {
   const [drilldownLocation, setDrilldownLocation] = useState<string | null>(null);
   const [drilldownDenom, setDrilldownDenom] = useState<string | null>(null);
   const [drilldownSearch, setDrilldownSearch] = useState<string>('');
+  const [hierarchyKfhChannelFilter, setHierarchyKfhChannelFilter] = useState<'ALL' | 'ONLINE' | 'OFFLINE'>('ALL');
 
   // Compliance Dashboard (Reporting Requirements Gap Analysis, Item 6) -- summarizes the
   // same exceptions feed the Reports screen's Exceptions Report exports, plus audit-log
@@ -6530,8 +6531,63 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   }, [execKpiBreakdown]);
 
   const selectedOwnerData = useMemo(() => {
-    return inventoryHierarchy?.hierarchy?.find((o: any) => o.owner_code === drilldownOwner);
-  }, [inventoryHierarchy, drilldownOwner]);
+    const rawOwner = inventoryHierarchy?.hierarchy?.find((o: any) => o.owner_code === drilldownOwner);
+    if (!rawOwner) return null;
+    if (drilldownOwner !== 'KFH_OWNED' || hierarchyKfhChannelFilter === 'ALL') {
+      return rawOwner;
+    }
+
+    const isMatch = (item: any) => {
+      if (hierarchyKfhChannelFilter === 'ONLINE') {
+        return item.channel_status === 'ONLINE' || !item.channel_status;
+      }
+      return item.channel_status === 'OFFLINE' || item.channel_category === 'VIP_EXCLUSIVE' || item.ownership_type === 'VIP_OWNED';
+    };
+
+    const filteredMetals = (rawOwner.metals || []).map((metal: any) => {
+      const filteredLocations = (metal.locations || []).map((loc: any) => {
+        const filteredDenoms = (loc.denominations || []).map((denom: any) => {
+          const denomItems = (denom.items || []).filter(isMatch);
+          const denomWeightKg = denomItems.reduce((s: number, i: any) => s + (i.weight_kg || (i.weight_grams ? i.weight_grams / 1000 : 0)), 0);
+          return {
+            ...denom,
+            bar_count: denomItems.length,
+            total_weight_kg: Math.round(denomWeightKg * 1000) / 1000,
+            items: denomItems
+          };
+        }).filter((d: any) => d.bar_count > 0);
+
+        const locItems = filteredDenoms.flatMap((d: any) => d.items || []);
+        const locWeightKg = locItems.reduce((s: number, i: any) => s + (i.weight_kg || (i.weight_grams ? i.weight_grams / 1000 : 0)), 0);
+        return {
+          ...loc,
+          bar_count: locItems.length,
+          total_weight_kg: Math.round(locWeightKg * 1000) / 1000,
+          denominations: filteredDenoms
+        };
+      }).filter((l: any) => l.bar_count > 0);
+
+      const metalItems = filteredLocations.flatMap((l: any) => l.denominations?.flatMap((d: any) => d.items || []) || []);
+      const metalWeightKg = metalItems.reduce((s: number, i: any) => s + (i.weight_kg || (i.weight_grams ? i.weight_grams / 1000 : 0)), 0);
+
+      return {
+        ...metal,
+        bar_count: metalItems.length,
+        total_weight_kg: Math.round(metalWeightKg * 1000) / 1000,
+        locations: filteredLocations
+      };
+    }).filter((m: any) => m.bar_count > 0);
+
+    const ownerItems = filteredMetals.flatMap((m: any) => m.locations?.flatMap((l: any) => l.denominations?.flatMap((d: any) => d.items || []) || []) || []);
+    const ownerWeightKg = ownerItems.reduce((s: number, i: any) => s + (i.weight_kg || (i.weight_grams ? i.weight_grams / 1000 : 0)), 0);
+
+    return {
+      ...rawOwner,
+      bar_count: ownerItems.length,
+      total_weight_kg: Math.round(ownerWeightKg * 1000) / 1000,
+      metals: filteredMetals
+    };
+  }, [inventoryHierarchy, drilldownOwner, hierarchyKfhChannelFilter]);
 
   const selectedMetalData = useMemo(() => {
     return selectedOwnerData?.metals?.find((m: any) => m.metal_name === drilldownMetal);
@@ -6545,6 +6601,22 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     return selectedLocationData?.denominations?.find((d: any) => d.denomination_label === drilldownDenom);
   }, [selectedLocationData, drilldownDenom]);
 
+  const formatPurityDisplay = (val: any): string => {
+    if (val === null || val === undefined || val === '') return '999.9';
+    const str = String(val).trim().replace('%', '');
+    const n = parseFloat(str);
+    if (isNaN(n)) return str;
+    if (n <= 1.0) {
+      const mill = n * 1000;
+      return mill % 1 === 0 ? mill.toFixed(0) : mill.toFixed(1);
+    }
+    if (n <= 100.0) {
+      const mill = n * 10;
+      return mill % 1 === 0 ? mill.toFixed(0) : mill.toFixed(1);
+    }
+    return n % 1 === 0 ? n.toFixed(0) : n.toFixed(1);
+  };
+
   const drilldownBars = useMemo(() => {
     if (!selectedLocationData) return [];
     let list: any[] = [];
@@ -6552,6 +6624,13 @@ const [migrationApproved, setMigrationApproved] = useState(false);
       list = selectedDenomData.items || [];
     } else {
       list = selectedLocationData.denominations?.flatMap((d: any) => d.items || []) || [];
+    }
+    if (drilldownOwner === 'KFH_OWNED' && hierarchyKfhChannelFilter !== 'ALL') {
+      if (hierarchyKfhChannelFilter === 'ONLINE') {
+        list = list.filter((i: any) => i.channel_status === 'ONLINE' || !i.channel_status);
+      } else if (hierarchyKfhChannelFilter === 'OFFLINE') {
+        list = list.filter((i: any) => i.channel_status === 'OFFLINE' || i.channel_category === 'VIP_EXCLUSIVE' || i.ownership_type === 'VIP_OWNED');
+      }
     }
     if (drilldownSearch.trim()) {
       const q = drilldownSearch.toLowerCase().trim();
@@ -6563,7 +6642,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
       );
     }
     return list;
-  }, [selectedLocationData, selectedDenomData, drilldownSearch]);
+  }, [selectedLocationData, selectedDenomData, drilldownSearch, drilldownOwner, hierarchyKfhChannelFilter]);
 
   if (activeApp === 'GFS') {
     return <GfsApp onBackToPmims={() => setActiveApp('PMIMS')} initialLang={currentLang} />;
@@ -7431,13 +7510,56 @@ const [migrationApproved, setMigrationApproved] = useState(false);
 
                           {/* KFH Stock Channels Breakdown: Online vs Offline (VIP/GFS) */}
                           {isKfh && (
-                            <div style={{ marginTop: '10px', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                              <span style={{ fontSize: '10px', padding: '3px 8px', borderRadius: '4px', background: 'rgba(0,155,78,0.15)', color: 'var(--kfh-green)', border: '1px solid rgba(0,155,78,0.3)', fontWeight: 600 }} title="Online E-Commerce & Retail Available">
+                            <div style={{ marginTop: '10px', display: 'flex', gap: '6px', flexWrap: 'wrap' }} onClick={e => e.stopPropagation()}>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setDrilldownOwner('KFH_OWNED');
+                                  setHierarchyKfhChannelFilter('ONLINE');
+                                  setDrilldownMetal(null);
+                                  setDrilldownLocation(null);
+                                  setDrilldownDenom(null);
+                                }}
+                                style={{
+                                  fontSize: '10px',
+                                  padding: '4px 8px',
+                                  borderRadius: '4px',
+                                  background: 'rgba(0,155,78,0.15)',
+                                  color: 'var(--kfh-green)',
+                                  border: '1px solid rgba(0,155,78,0.4)',
+                                  fontWeight: 700,
+                                  cursor: 'pointer'
+                                }}
+                                title="Explore Online E-Commerce & Retail Channel Details"
+                              >
                                 🌐 {currentLang === 'en' ? 'Online Channel:' : 'أونلاين:'} <strong>{(execBoard?.total_precious?.kfh_online_weight_kg ?? execBoard?.kfh_online_weight_kg ?? 0).toFixed(1)}kg</strong> ({execBoard?.total_precious?.kfh_online_qty ?? execBoard?.kfh_online_qty ?? 0})
-                              </span>
-                              <span style={{ fontSize: '10px', padding: '3px 8px', borderRadius: '4px', background: 'rgba(99,102,241,0.15)', color: '#6366f1', border: '1px solid rgba(99,102,241,0.3)', fontWeight: 600 }} title="Offline Vault VIP Reserve / GFS Only">
-                                👑 {currentLang === 'en' ? 'Offline (VIP / GFS):' : 'أوفلاين (VIP/GFS):'} <strong>{(execBoard?.total_precious?.kfh_offline_weight_kg ?? execBoard?.kfh_offline_weight_kg ?? 0).toFixed(1)}kg</strong> ({execBoard?.total_precious?.kfh_offline_qty ?? execBoard?.kfh_offline_qty ?? 0})
-                              </span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setDrilldownOwner('KFH_OWNED');
+                                  setHierarchyKfhChannelFilter('OFFLINE');
+                                  setDrilldownMetal(null);
+                                  setDrilldownLocation(null);
+                                  setDrilldownDenom(null);
+                                }}
+                                style={{
+                                  fontSize: '10px',
+                                  padding: '4px 8px',
+                                  borderRadius: '4px',
+                                  background: 'rgba(99,102,241,0.15)',
+                                  color: '#6366f1',
+                                  border: '1px solid rgba(99,102,241,0.4)',
+                                  fontWeight: 700,
+                                  cursor: 'pointer'
+                                }}
+                                title="Explore Offline VIP / GFS Channel Details"
+                              >
+                                👑 {currentLang === 'en' ? 'Offline (VIP/GFS):' : 'أوفلاين (VIP/GFS):'} <strong>{(execBoard?.total_precious?.kfh_offline_weight_kg ?? execBoard?.kfh_offline_weight_kg ?? 0).toFixed(1)}kg</strong> ({execBoard?.total_precious?.kfh_offline_qty ?? execBoard?.kfh_offline_qty ?? 0})
+                              </button>
                             </div>
                           )}
 
@@ -7481,7 +7603,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     </button>
                   </div>
 
-                  {selectedOwnerData.owner_code === 'KFH_OWNED' && (
+                  {drilldownOwner === 'KFH_OWNED' && (
                     <div style={{
                       background: 'rgba(0, 155, 78, 0.08)',
                       border: '1px solid rgba(0, 155, 78, 0.25)',
@@ -7495,18 +7617,63 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       gap: '10px'
                     }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <i className="fa-solid fa-building-columns" style={{ color: 'var(--kfh-green)', fontSize: '15px' }}></i>
-                        <span style={{ fontSize: '12px', color: 'var(--text-primary)', fontWeight: 600 }}>
-                          {currentLang === 'en' ? 'KFH Inventory Channel Breakdown (Online Retail vs Offline VIP/GFS):' : 'تفصيل قنوات مخزون بيتك (التجزئة أونلاين ضد كبار العملاء أوفلاين):'}
+                        <i className="fa-solid fa-code-branch" style={{ color: 'var(--kfh-green)', fontSize: '15px' }}></i>
+                        <span style={{ fontSize: '12px', color: 'var(--text-primary)', fontWeight: 700 }}>
+                          {currentLang === 'en' ? 'KFH Inventory Channel Filter:' : 'تصفية قنوات مخزون بيتك:'}
                         </span>
                       </div>
                       <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                        <span style={{ fontSize: '11px', padding: '4px 10px', borderRadius: '4px', background: 'rgba(0,155,78,0.18)', color: 'var(--kfh-green)', border: '1px solid rgba(0,155,78,0.3)', fontWeight: 700 }}>
-                          🌐 {currentLang === 'en' ? 'Online Channel:' : 'أونلاين:'} {(execBoard?.total_precious?.kfh_online_weight_kg ?? 0).toFixed(1)} KG ({execBoard?.total_precious?.kfh_online_qty ?? 0} bars)
-                        </span>
-                        <span style={{ fontSize: '11px', padding: '4px 10px', borderRadius: '4px', background: 'rgba(99,102,241,0.18)', color: '#6366f1', border: '1px solid rgba(99,102,241,0.3)', fontWeight: 700 }}>
-                          👑 {currentLang === 'en' ? 'Offline Channel (VIP / GFS):' : 'أوفلاين (VIP/GFS):'} {(execBoard?.total_precious?.kfh_offline_weight_kg ?? 0).toFixed(1)} KG ({execBoard?.total_precious?.kfh_offline_qty ?? 0} bars)
-                        </span>
+                        <button
+                          type="button"
+                          className="btn"
+                          onClick={() => setHierarchyKfhChannelFilter('ALL')}
+                          style={{
+                            padding: '5px 12px',
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            background: hierarchyKfhChannelFilter === 'ALL' ? 'var(--kfh-green)' : 'rgba(255,255,255,0.05)',
+                            color: hierarchyKfhChannelFilter === 'ALL' ? '#fff' : 'var(--text-primary)',
+                            border: `1px solid ${hierarchyKfhChannelFilter === 'ALL' ? 'var(--kfh-green)' : 'var(--surface-border)'}`,
+                            borderRadius: '6px',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          🏢 {currentLang === 'en' ? 'All Channels' : 'كافة القنوات'} ({(execBoard?.total_precious?.kfh_weight_kg ?? execBoard?.kfh_weight_kg ?? 0).toFixed(1)}kg)
+                        </button>
+                        <button
+                          type="button"
+                          className="btn"
+                          onClick={() => setHierarchyKfhChannelFilter('ONLINE')}
+                          style={{
+                            padding: '5px 12px',
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            background: hierarchyKfhChannelFilter === 'ONLINE' ? 'var(--kfh-green)' : 'rgba(255,255,255,0.05)',
+                            color: hierarchyKfhChannelFilter === 'ONLINE' ? '#fff' : 'var(--kfh-green)',
+                            border: `1px solid ${hierarchyKfhChannelFilter === 'ONLINE' ? 'var(--kfh-green)' : 'rgba(0,155,78,0.3)'}`,
+                            borderRadius: '6px',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          🌐 {currentLang === 'en' ? 'Online Channel (E-Commerce)' : 'أونلاين (المتجر الإلكتروني)'} ({(execBoard?.total_precious?.kfh_online_weight_kg ?? 0).toFixed(1)}kg)
+                        </button>
+                        <button
+                          type="button"
+                          className="btn"
+                          onClick={() => setHierarchyKfhChannelFilter('OFFLINE')}
+                          style={{
+                            padding: '5px 12px',
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            background: hierarchyKfhChannelFilter === 'OFFLINE' ? '#6366f1' : 'rgba(255,255,255,0.05)',
+                            color: hierarchyKfhChannelFilter === 'OFFLINE' ? '#fff' : '#6366f1',
+                            border: `1px solid ${hierarchyKfhChannelFilter === 'OFFLINE' ? '#6366f1' : 'rgba(99,102,241,0.3)'}`,
+                            borderRadius: '6px',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          👑 {currentLang === 'en' ? 'Offline Channel (VIP / GFS Only)' : 'أوفلاين (VIP و GFS فقط)'} ({(execBoard?.total_precious?.kfh_offline_weight_kg ?? 0).toFixed(1)}kg)
+                        </button>
                       </div>
                     </div>
                   )}
@@ -7579,6 +7746,81 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       <i className="fa-solid fa-arrow-left"></i> {currentLang === 'en' ? 'Back to Metals' : 'الرجوع للمعادن'}
                     </button>
                   </div>
+
+                  {drilldownOwner === 'KFH_OWNED' && (
+                    <div style={{
+                      background: 'rgba(0, 155, 78, 0.08)',
+                      border: '1px solid rgba(0, 155, 78, 0.25)',
+                      borderRadius: '8px',
+                      padding: '10px 16px',
+                      marginBottom: '16px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      flexWrap: 'wrap',
+                      gap: '10px'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <i className="fa-solid fa-code-branch" style={{ color: 'var(--kfh-green)', fontSize: '15px' }}></i>
+                        <span style={{ fontSize: '12px', color: 'var(--text-primary)', fontWeight: 700 }}>
+                          {currentLang === 'en' ? 'KFH Inventory Channel Filter:' : 'تصفية قنوات مخزون بيتك:'}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                        <button
+                          type="button"
+                          className="btn"
+                          onClick={() => setHierarchyKfhChannelFilter('ALL')}
+                          style={{
+                            padding: '5px 12px',
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            background: hierarchyKfhChannelFilter === 'ALL' ? 'var(--kfh-green)' : 'rgba(255,255,255,0.05)',
+                            color: hierarchyKfhChannelFilter === 'ALL' ? '#fff' : 'var(--text-primary)',
+                            border: `1px solid ${hierarchyKfhChannelFilter === 'ALL' ? 'var(--kfh-green)' : 'var(--surface-border)'}`,
+                            borderRadius: '6px',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          🏢 {currentLang === 'en' ? 'All Channels' : 'كافة القنوات'} ({(execBoard?.total_precious?.kfh_weight_kg ?? execBoard?.kfh_weight_kg ?? 0).toFixed(1)}kg)
+                        </button>
+                        <button
+                          type="button"
+                          className="btn"
+                          onClick={() => setHierarchyKfhChannelFilter('ONLINE')}
+                          style={{
+                            padding: '5px 12px',
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            background: hierarchyKfhChannelFilter === 'ONLINE' ? 'var(--kfh-green)' : 'rgba(255,255,255,0.05)',
+                            color: hierarchyKfhChannelFilter === 'ONLINE' ? '#fff' : 'var(--kfh-green)',
+                            border: `1px solid ${hierarchyKfhChannelFilter === 'ONLINE' ? 'var(--kfh-green)' : 'rgba(0,155,78,0.3)'}`,
+                            borderRadius: '6px',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          🌐 {currentLang === 'en' ? 'Online Channel (E-Commerce)' : 'أونلاين (المتجر الإلكتروني)'} ({(execBoard?.total_precious?.kfh_online_weight_kg ?? 0).toFixed(1)}kg)
+                        </button>
+                        <button
+                          type="button"
+                          className="btn"
+                          onClick={() => setHierarchyKfhChannelFilter('OFFLINE')}
+                          style={{
+                            padding: '5px 12px',
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            background: hierarchyKfhChannelFilter === 'OFFLINE' ? '#6366f1' : 'rgba(255,255,255,0.05)',
+                            color: hierarchyKfhChannelFilter === 'OFFLINE' ? '#fff' : '#6366f1',
+                            border: `1px solid ${hierarchyKfhChannelFilter === 'OFFLINE' ? '#6366f1' : 'rgba(99,102,241,0.3)'}`,
+                            borderRadius: '6px',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          👑 {currentLang === 'en' ? 'Offline Channel (VIP / GFS Only)' : 'أوفلاين (VIP و GFS فقط)'} ({(execBoard?.total_precious?.kfh_offline_weight_kg ?? 0).toFixed(1)}kg)
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
                     {(selectedMetalData.locations ?? []).map((loc: any) => {
