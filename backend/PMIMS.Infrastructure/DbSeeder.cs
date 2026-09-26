@@ -104,6 +104,23 @@ public static class DbSeeder
                             CREATE INDEX IF NOT EXISTS IX_pending_vip_allocations_status_code ON pending_vip_allocations (status_code);
                             CREATE INDEX IF NOT EXISTS IX_pending_vip_allocations_created_at ON pending_vip_allocations (created_at);
 
+                            CREATE TABLE IF NOT EXISTS pending_vip_deallocations (
+                                pending_deallocation_id INTEGER NOT NULL CONSTRAINT PK_pending_vip_deallocations PRIMARY KEY AUTOINCREMENT,
+                                batch_reference TEXT NOT NULL,
+                                serials_json_list TEXT NOT NULL,
+                                total_items INTEGER NOT NULL,
+                                total_weight_grams TEXT NOT NULL,
+                                deallocation_reason TEXT,
+                                requested_by TEXT NOT NULL,
+                                notes TEXT,
+                                status_code TEXT NOT NULL DEFAULT 'PENDING_APPROVAL',
+                                created_at TEXT NOT NULL,
+                                approved_by TEXT,
+                                approved_at TEXT
+                            );
+                            CREATE INDEX IF NOT EXISTS IX_pending_vip_deallocations_status_code ON pending_vip_deallocations (status_code);
+                            CREATE INDEX IF NOT EXISTS IX_pending_vip_deallocations_created_at ON pending_vip_deallocations (created_at);
+
                             CREATE TABLE IF NOT EXISTS pending_vip_dispenses (
                                 pending_dispense_id INTEGER NOT NULL CONSTRAINT PK_pending_vip_dispenses PRIMARY KEY AUTOINCREMENT,
                                 dispense_reference TEXT NOT NULL,
@@ -287,7 +304,9 @@ public static class DbSeeder
                             ("production_cost_kwd", "DECIMAL(18,4)"),
                             ("replaced_by_item_id", "INTEGER"),
                             ("replaces_item_id", "INTEGER"),
-                            ("replacement_date", "TEXT")
+                            ("replacement_date", "TEXT"),
+                            ("channel_status", "TEXT NOT NULL DEFAULT 'ONLINE'"),
+                            ("channel_category", "TEXT NOT NULL DEFAULT 'RETAIL_ONLINE'")
                         };
                         foreach (var (col, def) in itemColsToAdd)
                         {
