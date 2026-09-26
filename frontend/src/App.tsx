@@ -896,6 +896,7 @@ export default function App() {
   const [loadingExecBoard, setLoadingExecBoard] = useState(false);
   const [selectedExecKpi, setSelectedExecKpi] = useState<'TOTAL_PRECIOUS' | 'PROPRIETARY_GOLD' | 'READY_SALE' | 'VIP_STOCK' | 'RESERVED' | 'CUSTODY' | 'DAMAGED'>('TOTAL_PRECIOUS');
   const [execPreciousFilter, setExecPreciousFilter] = useState<'ALL' | 'SWISS' | 'TURKEY' | 'SILVER'>('ALL');
+  const [execKfhChannelFilter, setExecKfhChannelFilter] = useState<'ALL' | 'ONLINE' | 'OFFLINE'>('ALL');
 
   // Hierarchical Drill-down Dashboard state (Owner -> Metal -> Location/In-Transit -> Denomination) in KG
   const [execDashboardMode, setExecDashboardMode] = useState<'drilldown' | 'classic'>('drilldown');
@@ -6414,11 +6415,16 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     } else if (selectedExecKpi === 'PROPRIETARY_GOLD') {
       return execBoard.items.filter((i: any) => i.metal === 'Gold' && (i.ownership === 'TURKEY_OWNED' || i.ownership === 'PROPRIETARY'));
     } else if (selectedExecKpi === 'READY_SALE') {
-      return execBoard.items.filter((i: any) =>
-        (i.ownership === 'KFH_OWNED' || i.ownership === 'PROPRIETARY') &&
-        (i.channel_status === 'ONLINE' || !i.channel_status) &&
-        i.status === 'READY'
-      );
+      return execBoard.items.filter((i: any) => {
+        const isKfh = i.ownership === 'KFH_OWNED' || i.ownership === 'PROPRIETARY' || i.ownership === 'VIP_OWNED';
+        if (!isKfh) return false;
+        if (execKfhChannelFilter === 'ONLINE') {
+          return (i.channel_status === 'ONLINE' || !i.channel_status) && i.status === 'READY';
+        } else if (execKfhChannelFilter === 'OFFLINE') {
+          return i.channel_status === 'OFFLINE' || i.channel_category === 'VIP_EXCLUSIVE' || i.ownership === 'VIP_OWNED';
+        }
+        return true;
+      });
     } else if (selectedExecKpi === 'VIP_STOCK') {
       return execBoard.items.filter((i: any) =>
         (i.ownership === 'KFH_OWNED' || i.ownership === 'VIP_OWNED') &&
@@ -6430,7 +6436,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
       return execBoard.items.filter((i: any) => i.ownership === 'CUSTOMER_OWNED' || i.status === 'HELD_IN_CUSTODY');
     }
     return [];
-  }, [execBoard?.items, selectedExecKpi]);
+  }, [execBoard?.items, selectedExecKpi, execKfhChannelFilter]);
 
   // Executive Board: precious type statistics (Swiss, Turkey, Silver) for the active card
   const execPreciousStats = useMemo(() => {
@@ -7475,6 +7481,36 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     </button>
                   </div>
 
+                  {selectedOwnerData.owner_code === 'KFH_OWNED' && (
+                    <div style={{
+                      background: 'rgba(0, 155, 78, 0.08)',
+                      border: '1px solid rgba(0, 155, 78, 0.25)',
+                      borderRadius: '8px',
+                      padding: '10px 16px',
+                      marginBottom: '16px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      flexWrap: 'wrap',
+                      gap: '10px'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <i className="fa-solid fa-building-columns" style={{ color: 'var(--kfh-green)', fontSize: '15px' }}></i>
+                        <span style={{ fontSize: '12px', color: 'var(--text-primary)', fontWeight: 600 }}>
+                          {currentLang === 'en' ? 'KFH Inventory Channel Breakdown (Online Retail vs Offline VIP/GFS):' : 'تفصيل قنوات مخزون بيتك (التجزئة أونلاين ضد كبار العملاء أوفلاين):'}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: '11px', padding: '4px 10px', borderRadius: '4px', background: 'rgba(0,155,78,0.18)', color: 'var(--kfh-green)', border: '1px solid rgba(0,155,78,0.3)', fontWeight: 700 }}>
+                          🌐 {currentLang === 'en' ? 'Online Channel:' : 'أونلاين:'} {(execBoard?.total_precious?.kfh_online_weight_kg ?? 0).toFixed(1)} KG ({execBoard?.total_precious?.kfh_online_qty ?? 0} bars)
+                        </span>
+                        <span style={{ fontSize: '11px', padding: '4px 10px', borderRadius: '4px', background: 'rgba(99,102,241,0.18)', color: '#6366f1', border: '1px solid rgba(99,102,241,0.3)', fontWeight: 700 }}>
+                          👑 {currentLang === 'en' ? 'Offline Channel (VIP / GFS):' : 'أوفلاين (VIP/GFS):'} {(execBoard?.total_precious?.kfh_offline_weight_kg ?? 0).toFixed(1)} KG ({execBoard?.total_precious?.kfh_offline_qty ?? 0} bars)
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '16px' }}>
                     {(selectedOwnerData.metals ?? []).map((metal: any) => {
                       const isGold = metal.metal_name.toLowerCase().includes('gold');
@@ -7865,7 +7901,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
               </span>
             </div>
 
-            {/* 3. KFH OWNED (ONLINE CHANNEL) */}
+            {/* 3. KFH OWNED TOTAL STOCK (ONLINE + OFFLINE) */}
             <div
               className="glass-card kpi-card"
               onClick={() => { setSelectedExecKpi('READY_SALE'); setExecPreciousFilter('ALL'); }}
@@ -7880,8 +7916,8 @@ const [migrationApproved, setMigrationApproved] = useState(false);
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span className="kpi-title" style={{ color: 'var(--kfh-green)' }}>
-                  <i className="fa-solid fa-globe" style={{ marginRight: '6px' }}></i>
-                  {currentLang === 'en' ? 'KFH Gold (Online Channel)' : 'مخزون بيتك (أونلاين)'}
+                  <i className="fa-solid fa-building-columns" style={{ marginRight: '6px' }}></i>
+                  {currentLang === 'en' ? 'KFH Owned Gold (Total)' : 'مخزون بيتك (الإجمالي)'}
                 </span>
                 {selectedExecKpi === 'READY_SALE' && (
                   <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: 'var(--kfh-green)', color: '#fff', fontWeight: 'bold' }}>
@@ -7889,39 +7925,17 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                   </span>
                 )}
               </div>
-              <span className="kpi-value" style={{ color: 'var(--kfh-green)' }}>{(execBoard?.total_precious?.kfh_online_weight_kg ?? execBoard?.available_weight_kg ?? 0).toFixed(3)} KG</span>
-              <span className="kpi-sub" style={{ color: 'var(--accent-green)' }}>
-                {(((execBoard?.total_precious?.kfh_online_weight_kg ?? execBoard?.available_weight_kg ?? 0)) * 1000).toLocaleString()} g • {execBoard?.total_precious?.kfh_online_qty ?? execBoard?.ready_qty ?? 0} {currentLang === 'en' ? 'Bars (Internet Retail)' : 'سبيكة (متاح أونلاين)'}
-              </span>
-            </div>
-
-            {/* 4. KFH OWNED (OFFLINE / VIP / GFS CHANNEL) */}
-            <div
-              className="glass-card kpi-card"
-              onClick={() => { setSelectedExecKpi('VIP_STOCK'); setExecPreciousFilter('ALL'); }}
-              style={{
-                cursor: 'pointer',
-                transition: 'all 0.2s ease',
-                border: selectedExecKpi === 'VIP_STOCK' ? '2px solid #6366f1' : '1px solid var(--surface-border)',
-                background: selectedExecKpi === 'VIP_STOCK' ? 'rgba(99, 102, 241, 0.08)' : undefined,
-                boxShadow: selectedExecKpi === 'VIP_STOCK' ? '0 0 16px rgba(99, 102, 241, 0.25)' : undefined,
-                transform: selectedExecKpi === 'VIP_STOCK' ? 'translateY(-2px)' : undefined
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span className="kpi-title" style={{ color: '#6366f1' }}>
-                  <i className="fa-solid fa-crown" style={{ marginRight: '6px' }}></i>
-                  {currentLang === 'en' ? 'KFH Gold (Offline / VIP / GFS)' : 'مخزون بيتك (أوفلاين / VIP)'}
+              <span className="kpi-value" style={{ color: 'var(--kfh-green)' }}>{(execBoard?.total_precious?.kfh_weight_kg ?? execBoard?.kfh_weight_kg ?? 0).toFixed(3)} KG</span>
+              <div style={{ marginTop: '6px', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: 'rgba(0,155,78,0.15)', color: 'var(--kfh-green)', border: '1px solid rgba(0,155,78,0.3)', fontWeight: 600 }}>
+                  🌐 {currentLang === 'en' ? 'Online:' : 'أونلاين:'} <strong>{(execBoard?.total_precious?.kfh_online_weight_kg ?? 0).toFixed(1)}kg</strong> ({execBoard?.total_precious?.kfh_online_qty ?? 0})
                 </span>
-                {selectedExecKpi === 'VIP_STOCK' && (
-                  <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: '#6366f1', color: '#fff', fontWeight: 'bold' }}>
-                    <i className="fa-solid fa-chart-pie"></i> {currentLang === 'en' ? 'Active' : 'نشط'}
-                  </span>
-                )}
+                <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: 'rgba(99,102,241,0.15)', color: '#6366f1', border: '1px solid rgba(99,102,241,0.3)', fontWeight: 600 }}>
+                  👑 {currentLang === 'en' ? 'Offline (VIP):' : 'أوفلاين:'} <strong>{(execBoard?.total_precious?.kfh_offline_weight_kg ?? 0).toFixed(1)}kg</strong> ({execBoard?.total_precious?.kfh_offline_qty ?? 0})
+                </span>
               </div>
-              <span className="kpi-value" style={{ color: '#6366f1' }}>{(execBoard?.total_precious?.kfh_offline_weight_kg ?? execBoard?.vip_weight_kg ?? 0).toFixed(3)} KG</span>
-              <span className="kpi-sub" style={{ color: '#818cf8' }}>
-                {(((execBoard?.total_precious?.kfh_offline_weight_kg ?? execBoard?.vip_weight_kg ?? 0)) * 1000).toLocaleString()} g • {execBoard?.total_precious?.kfh_offline_qty ?? execBoard?.vip_qty ?? 0} {currentLang === 'en' ? 'Bars (GFS / Branch Only)' : 'سبيكة (صرف GFS فقط)'}
+              <span className="kpi-sub" style={{ color: 'var(--text-muted)', marginTop: '4px' }}>
+                <i className="fa-solid fa-hand-pointer"></i> {currentLang === 'en' ? 'Click to view & filter online/offline channels' : 'انقر لعرض وتصفية قنوات الأونلاين والأوفلاين'}
               </span>
             </div>
 
@@ -8176,7 +8190,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     : selectedExecKpi === 'PROPRIETARY_GOLD'
                     ? (currentLang === 'en' ? 'Turkey Offline — Quantity Breakdown by Bar Type' : 'مخزون تركيا (أوفلاين) — تفصيل الكميات المتاحة حسب نوع السبيكة')
                     : selectedExecKpi === 'READY_SALE'
-                    ? (currentLang === 'en' ? 'Ready for Sale (KFH Owned) — Quantity Breakdown by Bar Type' : 'جاهز للبيع (ملك بيتك) — تفصيل الكميات المتاحة حسب نوع السبيكة')
+                    ? (currentLang === 'en' ? 'KFH Owned Stock (Total) — Quantity Breakdown by Bar Type' : 'مخزون ملك بيتك (الإجمالي) — تفصيل الكميات حسب نوع السبيكة')
                     : selectedExecKpi === 'RESERVED'
                     ? (currentLang === 'en' ? 'Reserved Stock — Quantity Breakdown by Bar Type' : 'الطلبات المحجوزة — تفصيل الكميات حسب نوع السبيكة')
                     : (currentLang === 'en' ? 'Customer Custody — Quantity Breakdown by Bar Type' : 'أمانات العملاء — تفصيل الكميات حسب نوع السبيكة')}
@@ -8198,6 +8212,90 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                 </span>
               </div>
             </div>
+
+            {/* KFH Channels Selector (Online vs Offline/VIP) when KFH Owned Stock is selected */}
+            {selectedExecKpi === 'READY_SALE' && (
+              <div style={{
+                background: 'rgba(0, 155, 78, 0.06)',
+                border: '1px solid rgba(0, 155, 78, 0.25)',
+                borderRadius: '8px',
+                padding: '12px 16px',
+                marginBottom: '16px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '10px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <i className="fa-solid fa-code-branch" style={{ color: 'var(--kfh-green)', fontSize: '15px' }}></i>
+                  <div>
+                    <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--kfh-green)' }}>
+                      {currentLang === 'en' ? 'KFH Channel Filter:' : 'تصفية قنوات مخزون بيتك:'}
+                    </span>
+                    <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: '8px' }}>
+                      {currentLang === 'en' ? 'Switch between All KFH, Online (E-Commerce), and Offline (VIP / GFS Only)' : 'التبديل بين إجمالي بيتك، الأونلاين (المتجر الإلكتروني)، والأوفلاين (VIP و GFS)'}
+                    </span>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => setExecKfhChannelFilter('ALL')}
+                    style={{
+                      padding: '6px 14px',
+                      fontSize: '11px',
+                      fontWeight: 'bold',
+                      background: execKfhChannelFilter === 'ALL' ? 'var(--kfh-green)' : 'rgba(255,255,255,0.05)',
+                      color: execKfhChannelFilter === 'ALL' ? '#fff' : 'var(--text-primary)',
+                      border: `1px solid ${execKfhChannelFilter === 'ALL' ? 'var(--kfh-green)' : 'var(--surface-border)'}`,
+                      borderRadius: '6px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    🏢 {currentLang === 'en' ? 'All KFH Stock' : 'إجمالي مخزون بيتك'} ({(execBoard?.total_precious?.kfh_weight_kg ?? execBoard?.kfh_weight_kg ?? 0).toFixed(1)}kg)
+                  </button>
+
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => setExecKfhChannelFilter('ONLINE')}
+                    style={{
+                      padding: '6px 14px',
+                      fontSize: '11px',
+                      fontWeight: 'bold',
+                      background: execKfhChannelFilter === 'ONLINE' ? 'var(--kfh-green)' : 'rgba(255,255,255,0.05)',
+                      color: execKfhChannelFilter === 'ONLINE' ? '#fff' : 'var(--kfh-green)',
+                      border: `1px solid ${execKfhChannelFilter === 'ONLINE' ? 'var(--kfh-green)' : 'rgba(0,155,78,0.3)'}`,
+                      borderRadius: '6px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    🌐 {currentLang === 'en' ? 'Online Channel (E-Commerce)' : 'القناة الإلكترونية (أونلاين)'} ({(execBoard?.total_precious?.kfh_online_weight_kg ?? 0).toFixed(1)}kg)
+                  </button>
+
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => setExecKfhChannelFilter('OFFLINE')}
+                    style={{
+                      padding: '6px 14px',
+                      fontSize: '11px',
+                      fontWeight: 'bold',
+                      background: execKfhChannelFilter === 'OFFLINE' ? '#6366f1' : 'rgba(255,255,255,0.05)',
+                      color: execKfhChannelFilter === 'OFFLINE' ? '#fff' : '#6366f1',
+                      border: `1px solid ${execKfhChannelFilter === 'OFFLINE' ? '#6366f1' : 'rgba(99,102,241,0.3)'}`,
+                      borderRadius: '6px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    👑 {currentLang === 'en' ? 'Offline Channel (VIP / GFS Only)' : 'القناة المغلقة (VIP / GFS)'} ({(execBoard?.total_precious?.kfh_offline_weight_kg ?? 0).toFixed(1)}kg)
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* PRECIOUS TYPE BREAKDOWN SUMMARY (SWISS / TURKEY / SILVER) FOR ACTIVE CARD */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '12px', marginBottom: '20px' }}>
