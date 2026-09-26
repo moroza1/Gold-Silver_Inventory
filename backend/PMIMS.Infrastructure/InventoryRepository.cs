@@ -1023,8 +1023,9 @@ public class InventoryRepository : IInventoryRepository
             if (existing != null) return existing.ReservationToken;
 
             // Find and pessimistically lock (emulated by executing first row write check)
+            // OFFLINE / VIP items cannot be reserved or purchased via internet channel!
             var item = await _dbContext.InventoryItems
-                .FirstOrDefaultAsync(i => i.ProductId == productId && i.StatusCode == "READY" && i.OwnershipType == "KFH_OWNED");
+                .FirstOrDefaultAsync(i => i.ProductId == productId && i.StatusCode == "READY" && i.OwnershipType == "KFH_OWNED" && (i.ChannelStatus == "ONLINE" || i.ChannelStatus == null));
 
             if (item == null) return null;
 
@@ -2131,6 +2132,11 @@ public class InventoryRepository : IInventoryRepository
                 var alloc = await _dbContext.PendingVipAllocations.FindAsync(instance.EntityId);
                 if (alloc != null) alloc.StatusCode = "REJECTED";
             }
+            else if (instance.WorkflowType == "VIP_DEALLOCATION")
+            {
+                var dealloc = await _dbContext.PendingVipDeallocations.FindAsync(instance.EntityId);
+                if (dealloc != null) dealloc.StatusCode = "REJECTED";
+            }
             else if (instance.WorkflowType == "VIP_DISPENSE")
             {
                 var disp = await _dbContext.PendingVipDispenses.FindAsync(instance.EntityId);
@@ -2221,6 +2227,11 @@ public class InventoryRepository : IInventoryRepository
             {
                 var alloc = await _dbContext.PendingVipAllocations.FindAsync(instance.EntityId);
                 if (alloc != null) alloc.StatusCode = "PENDING_APPROVAL";
+            }
+            else if (instance.WorkflowType == "VIP_DEALLOCATION")
+            {
+                var dealloc = await _dbContext.PendingVipDeallocations.FindAsync(instance.EntityId);
+                if (dealloc != null) dealloc.StatusCode = "PENDING_APPROVAL";
             }
             else if (instance.WorkflowType == "VIP_DISPENSE")
             {
@@ -2539,6 +2550,14 @@ public class InventoryRepository : IInventoryRepository
                     if (result != "SUCCESS")
                     {
                         throw new InvalidOperationException($"VIP allocation approval execution failed: {result}");
+                    }
+                }
+                else if (instance.WorkflowType == "VIP_DEALLOCATION")
+                {
+                    string result = await ApproveVipDeallocationAsync(instance.EntityId, username);
+                    if (result != "SUCCESS")
+                    {
+                        throw new InvalidOperationException($"VIP deallocation approval execution failed: {result}");
                     }
                 }
                 else if (instance.WorkflowType == "VIP_DISPENSE")
@@ -6432,7 +6451,7 @@ public class InventoryRepository : IInventoryRepository
             .Include(i => i.Location)
                 .ThenInclude(l => l.Vault)
             .Include(i => i.Lot)
-            .Where(i => i.OwnershipType == "VIP_OWNED")
+            .Where(i => (i.OwnershipType == "KFH_OWNED" && i.ChannelStatus == "OFFLINE") || i.OwnershipType == "VIP_OWNED")
             .OrderByDescending(i => i.ItemId)
             .ToListAsync();
     }
@@ -6451,7 +6470,7 @@ public class InventoryRepository : IInventoryRepository
             .Include(i => i.Location)
                 .ThenInclude(l => l.Vault)
             .Include(i => i.Lot)
-            .Where(i => i.OwnershipType == "KFH_OWNED" && i.StatusCode == "READY")
+            .Where(i => i.OwnershipType == "KFH_OWNED" && (i.ChannelStatus == "ONLINE" || i.ChannelStatus == null) && i.StatusCode == "READY")
             .OrderByDescending(i => i.ItemId)
             .ToListAsync();
     }
@@ -6459,6 +6478,13 @@ public class InventoryRepository : IInventoryRepository
     public async Task<IEnumerable<PendingVipAllocation>> GetPendingVipAllocationsAsync()
     {
         return await _dbContext.PendingVipAllocations
+            .OrderByDescending(p => p.CreatedAt)
+            .ToListAsync();
+    }
+
+    public async Task<IEnumerable<PendingVipDeallocation>> GetPendingVipDeallocationsAsync()
+    {
+        return await _dbContext.PendingVipDeallocations
             .OrderByDescending(p => p.CreatedAt)
             .ToListAsync();
     }
@@ -6500,6 +6526,12 @@ public class InventoryRepository : IInventoryRepository
         if (invalidOwner.Any())
         {
             throw new InvalidOperationException($"Items must be KFH-owned before allocating to VIP reserve: {string.Join(", ", invalidOwner.Select(i => i.SerialNumber))}");
+        }
+
+        var invalidChannel = items.Where(i => i.ChannelStatus == "OFFLINE").ToList();
+        if (invalidChannel.Any())
+        {
+            throw new InvalidOperationException($"Items are already allocated to OFFLINE (VIP) channel: {string.Join(", ", invalidChannel.Select(i => i.SerialNumber))}");
         }
 
         var invalidStatus = items.Where(i => i.StatusCode != "READY").ToList();
@@ -6559,8 +6591,9 @@ public class InventoryRepository : IInventoryRepository
 
         foreach (var item in items)
         {
-            string oldOwnership = item.OwnershipType;
-            item.OwnershipType = "VIP_OWNED";
+            item.OwnershipType = "KFH_OWNED";
+            item.ChannelStatus = "OFFLINE";
+            item.ChannelCategory = allocation.VipCategory ?? "VIP_EXCLUSIVE";
             item.StatusCode = "READY";
 
             if (item.LocationId.HasValue)
@@ -6575,8 +6608,8 @@ public class InventoryRepository : IInventoryRepository
                 TransactionType = "ADJUSTMENT",
                 SourceLocationId = item.LocationId,
                 DestinationLocationId = item.LocationId,
-                SourceOwnership = oldOwnership,
-                DestinationOwnership = "VIP_OWNED",
+                SourceOwnership = "KFH_OWNED",
+                DestinationOwnership = "KFH_OWNED",
                 InitiatedBy = allocation.RequestedBy,
                 ApprovedBy = approvedBy,
                 TransactionTimestamp = DateTime.UtcNow
@@ -6584,7 +6617,7 @@ public class InventoryRepository : IInventoryRepository
             _dbContext.InventoryTransactions.Add(tx);
 
             await RecordChainOfCustodyEventAsync(item.ItemId, "VIP_ALLOCATION", approvedBy, item.LocationId, tx.TransactionNumber,
-                $"Allocated to VIP Exclusive Stock ({allocation.VipCategory ?? "VIP Reserve"}). Batch: {allocation.BatchReference}. Non-Online Inventory.");
+                $"Allocated to VIP Exclusive Stock ({allocation.VipCategory ?? "VIP Reserve"}). Batch: {allocation.BatchReference}. Channel: OFFLINE (GFS Only).");
         }
 
         await _dbContext.SaveChangesAsync();
@@ -6592,13 +6625,165 @@ public class InventoryRepository : IInventoryRepository
         foreach (var (locId, prodId) in affectedProductsByLocation)
         {
             await RecalculateInventoryBalanceAsync(locId, prodId, "KFH_OWNED");
-            await RecalculateInventoryBalanceAsync(locId, prodId, "VIP_OWNED");
         }
 
         await SaveAuditLogAsync(approvedBy, "VAULT", "VIP_ALLOCATION",
-            $"Approved VIP Stock Allocation #{allocation.PendingAllocationId} ({allocation.TotalItems} bars, {allocation.TotalWeightGrams:N2}g) to VIP Exclusive reserve.",
+            $"Approved VIP Stock Allocation #{allocation.PendingAllocationId} ({allocation.TotalItems} bars, {allocation.TotalWeightGrams:N2}g) to KFH Offline (VIP Exclusive) reserve.",
             entityType: "PENDING_VIP_ALLOCATION", entityId: allocation.PendingAllocationId.ToString());
 
+        return "SUCCESS";
+    }
+
+    public async Task<PendingVipDeallocation> InitiateVipDeallocationWorkflowAsync(List<string> serialNumbers, string requestedBy, string? deallocationReason, string? notes)
+    {
+        if (serialNumbers == null || serialNumbers.Count == 0)
+        {
+            throw new InvalidOperationException("At least one serial number must be specified to return from VIP to general KFH online stock.");
+        }
+
+        var cleanSerials = serialNumbers.Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s.Trim()).Distinct().ToList();
+        if (cleanSerials.Count == 0)
+        {
+            throw new InvalidOperationException("No valid serial numbers provided.");
+        }
+
+        var items = await _dbContext.InventoryItems
+            .Include(i => i.Product)
+                .ThenInclude(p => p.Denomination)
+            .Where(i => cleanSerials.Contains(i.SerialNumber))
+            .ToListAsync();
+
+        if (items.Count != cleanSerials.Count)
+        {
+            var foundSerials = items.Select(i => i.SerialNumber).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var missing = cleanSerials.Where(s => !foundSerials.Contains(s)).ToList();
+            throw new InvalidOperationException($"The following serial numbers were not found: {string.Join(", ", missing)}");
+        }
+
+        var invalidOwner = items.Where(i => i.OwnershipType != "KFH_OWNED" && i.OwnershipType != "VIP_OWNED").ToList();
+        if (invalidOwner.Any())
+        {
+            throw new InvalidOperationException($"Items must be in VIP / KFH stock: {string.Join(", ", invalidOwner.Select(i => i.SerialNumber))}");
+        }
+
+        var invalidChannel = items.Where(i => i.ChannelStatus == "ONLINE" && i.OwnershipType != "VIP_OWNED").ToList();
+        if (invalidChannel.Any())
+        {
+            throw new InvalidOperationException($"Items are already in ONLINE channel: {string.Join(", ", invalidChannel.Select(i => i.SerialNumber))}");
+        }
+
+        var invalidStatus = items.Where(i => i.StatusCode != "READY").ToList();
+        if (invalidStatus.Any())
+        {
+            throw new InvalidOperationException($"Items must be in READY status: {string.Join(", ", invalidStatus.Select(i => i.SerialNumber))}");
+        }
+
+        decimal totalWeightGrams = items.Sum(i => i.Product?.Denomination?.WeightGrams ?? 0);
+        string batchRef = $"VIP-RET-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..6].ToUpperInvariant()}";
+
+        var pending = new PendingVipDeallocation
+        {
+            BatchReference = batchRef,
+            SerialsJsonList = JsonSerializer.Serialize(cleanSerials),
+            TotalItems = items.Count,
+            TotalWeightGrams = totalWeightGrams,
+            DeallocationReason = string.IsNullOrWhiteSpace(deallocationReason) ? "Return to General Online Inventory" : deallocationReason,
+            RequestedBy = requestedBy,
+            Notes = notes,
+            StatusCode = "PENDING_APPROVAL",
+            CreatedAt = DateTime.UtcNow
+        };
+
+        _dbContext.PendingVipDeallocations.Add(pending);
+        await _dbContext.SaveChangesAsync();
+
+        var template = await _dbContext.WorkflowTemplates.Include(t => t.Steps)
+            .FirstOrDefaultAsync(t => t.WorkflowType == "VIP_DEALLOCATION" && t.IsActive);
+        if (template == null || template.Steps.Count == 0)
+        {
+            throw new InvalidOperationException("Cannot initiate VIP return to online stock: No active VIP_DEALLOCATION workflow template configured.");
+        }
+
+        await StartWorkflowInstanceAsync("VIP_DEALLOCATION", pending.PendingDeallocationId, requestedBy);
+        return pending;
+    }
+
+    public async Task<string> ApproveVipDeallocationAsync(int pendingDeallocationId, string approvedBy)
+    {
+        var deallocation = await _dbContext.PendingVipDeallocations.FindAsync(pendingDeallocationId);
+        if (deallocation == null) throw new InvalidOperationException("Pending VIP deallocation request not found.");
+        if (deallocation.StatusCode == "APPROVED") return "SUCCESS";
+
+        var serials = JsonSerializer.Deserialize<List<string>>(deallocation.SerialsJsonList) ?? new List<string>();
+        var items = await _dbContext.InventoryItems
+            .Include(i => i.Product)
+                .ThenInclude(p => p.Denomination)
+            .Where(i => serials.Contains(i.SerialNumber))
+            .ToListAsync();
+
+        deallocation.StatusCode = "APPROVED";
+        deallocation.ApprovedBy = approvedBy;
+        deallocation.ApprovedAt = DateTime.UtcNow;
+
+        var affectedProductsByLocation = new HashSet<(int locationId, int productId)>();
+
+        foreach (var item in items)
+        {
+            item.OwnershipType = "KFH_OWNED";
+            item.ChannelStatus = "ONLINE";
+            item.ChannelCategory = "RETAIL_ONLINE";
+            item.StatusCode = "READY";
+
+            if (item.LocationId.HasValue)
+            {
+                affectedProductsByLocation.Add((item.LocationId.Value, item.ProductId));
+            }
+
+            var tx = new InventoryTransaction
+            {
+                TransactionNumber = $"TX-VIP-RET-{item.ItemId}-{DateTime.UtcNow:yyyyMMddHHmmssfff}",
+                ItemId = item.ItemId,
+                TransactionType = "ADJUSTMENT",
+                SourceLocationId = item.LocationId,
+                DestinationLocationId = item.LocationId,
+                SourceOwnership = "KFH_OWNED",
+                DestinationOwnership = "KFH_OWNED",
+                InitiatedBy = deallocation.RequestedBy,
+                ApprovedBy = approvedBy,
+                TransactionTimestamp = DateTime.UtcNow
+            };
+            _dbContext.InventoryTransactions.Add(tx);
+
+            await RecordChainOfCustodyEventAsync(item.ItemId, "VIP_RETURN_ONLINE", approvedBy, item.LocationId, tx.TransactionNumber,
+                $"Returned from VIP Offline Reserve to General KFH Online Stock. Reason: {deallocation.DeallocationReason ?? "Replenishment"}. Batch: {deallocation.BatchReference}. Channel: ONLINE.");
+        }
+
+        await _dbContext.SaveChangesAsync();
+
+        foreach (var (locId, prodId) in affectedProductsByLocation)
+        {
+            await RecalculateInventoryBalanceAsync(locId, prodId, "KFH_OWNED");
+        }
+
+        await SaveAuditLogAsync(approvedBy, "VAULT", "VIP_DEALLOCATION",
+            $"Approved VIP Return to KFH Online Stock #{deallocation.PendingDeallocationId} ({deallocation.TotalItems} bars, {deallocation.TotalWeightGrams:N2}g).",
+            entityType: "PENDING_VIP_DEALLOCATION", entityId: deallocation.PendingDeallocationId.ToString());
+
+        return "SUCCESS";
+    }
+
+    public async Task<string> RejectVipDeallocationAsync(int pendingDeallocationId, string rejectedBy, string? reason)
+    {
+        var deallocation = await _dbContext.PendingVipDeallocations.FindAsync(pendingDeallocationId);
+        if (deallocation == null) throw new InvalidOperationException("Pending VIP deallocation request not found.");
+        deallocation.StatusCode = "REJECTED";
+        deallocation.ApprovedBy = rejectedBy;
+        deallocation.ApprovedAt = DateTime.UtcNow;
+        if (!string.IsNullOrWhiteSpace(reason))
+        {
+            deallocation.Notes = string.IsNullOrWhiteSpace(deallocation.Notes) ? $"Rejection reason: {reason}" : $"{deallocation.Notes} | Rejection reason: {reason}";
+        }
+        await _dbContext.SaveChangesAsync();
         return "SUCCESS";
     }
 
@@ -6631,10 +6816,16 @@ public class InventoryRepository : IInventoryRepository
             throw new InvalidOperationException($"The following VIP serial numbers were not found: {string.Join(", ", missing)}");
         }
 
-        var invalidOwner = items.Where(i => i.OwnershipType != "VIP_OWNED").ToList();
+        var invalidOwner = items.Where(i => i.OwnershipType != "KFH_OWNED" && i.OwnershipType != "VIP_OWNED").ToList();
         if (invalidOwner.Any())
         {
-            throw new InvalidOperationException($"Items must be in VIP Exclusive Stock (VIP_OWNED): {string.Join(", ", invalidOwner.Select(i => i.SerialNumber))}");
+            throw new InvalidOperationException($"Items must be in KFH stock: {string.Join(", ", invalidOwner.Select(i => i.SerialNumber))}");
+        }
+
+        var invalidChannel = items.Where(i => i.ChannelStatus != "OFFLINE" && i.OwnershipType != "VIP_OWNED").ToList();
+        if (invalidChannel.Any())
+        {
+            throw new InvalidOperationException($"Items must be in OFFLINE (VIP) channel before VIP dispensation: {string.Join(", ", invalidChannel.Select(i => i.SerialNumber))}");
         }
 
         var invalidStatus = items.Where(i => i.StatusCode != "READY").ToList();
@@ -6702,7 +6893,6 @@ public class InventoryRepository : IInventoryRepository
 
         foreach (var item in items)
         {
-            string oldOwnership = item.OwnershipType;
             item.OwnershipType = "CUSTOMER_OWNED";
             item.StatusCode = "DELIVERED";
 
@@ -6718,7 +6908,7 @@ public class InventoryRepository : IInventoryRepository
                 TransactionType = "DISPATCH",
                 SourceLocationId = item.LocationId,
                 DestinationLocationId = item.LocationId,
-                SourceOwnership = oldOwnership,
+                SourceOwnership = "KFH_OWNED",
                 DestinationOwnership = "CUSTOMER_OWNED",
                 InitiatedBy = dispense.RequestedBy,
                 ApprovedBy = approvedBy,
@@ -6734,7 +6924,7 @@ public class InventoryRepository : IInventoryRepository
 
         foreach (var (locId, prodId) in affectedProductsByLocation)
         {
-            await RecalculateInventoryBalanceAsync(locId, prodId, "VIP_OWNED");
+            await RecalculateInventoryBalanceAsync(locId, prodId, "KFH_OWNED");
             await RecalculateInventoryBalanceAsync(locId, prodId, "CUSTOMER_OWNED");
         }
 

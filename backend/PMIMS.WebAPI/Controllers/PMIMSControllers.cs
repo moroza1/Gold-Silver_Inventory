@@ -1827,13 +1827,20 @@ public partial class PMIMSControllers : ControllerBase
         decimal turkeyWeightKg = WeightKg(turkeyItems);
         int turkeyQty = turkeyItems.Count;
 
-        var kfhItems = scopedItems.Where(i => i.OwnershipType == "KFH_OWNED").ToList();
+        var kfhItems = scopedItems.Where(i => i.OwnershipType == "KFH_OWNED" || i.OwnershipType == "VIP_OWNED").ToList();
         decimal kfhWeightKg = WeightKg(kfhItems);
         int kfhQty = kfhItems.Count;
 
-        var vipItems = scopedItems.Where(i => i.OwnershipType == "VIP_OWNED").ToList();
-        decimal vipWeightKg = WeightKg(vipItems);
-        int vipQty = vipItems.Count;
+        var kfhOnlineItems = kfhItems.Where(i => (i.ChannelStatus == "ONLINE" || i.ChannelStatus == null) && i.OwnershipType != "VIP_OWNED").ToList();
+        decimal kfhOnlineWeightKg = WeightKg(kfhOnlineItems);
+        int kfhOnlineQty = kfhOnlineItems.Count;
+
+        var kfhOfflineItems = kfhItems.Where(i => i.ChannelStatus == "OFFLINE" || i.OwnershipType == "VIP_OWNED").ToList();
+        decimal kfhOfflineWeightKg = WeightKg(kfhOfflineItems);
+        int kfhOfflineQty = kfhOfflineItems.Count;
+
+        decimal vipWeightKg = kfhOfflineWeightKg;
+        int vipQty = kfhOfflineQty;
 
         var transitItems = scopedItems.Where(i => i.StatusCode == "IN_TRANSFER").ToList();
         decimal transitWeightKg = WeightKg(transitItems);
@@ -1918,6 +1925,10 @@ public partial class PMIMSControllers : ControllerBase
                 turkey_qty = turkeyQty,
                 kfh_weight_kg = kfhWeightKg,
                 kfh_qty = kfhQty,
+                kfh_online_weight_kg = kfhOnlineWeightKg,
+                kfh_online_qty = kfhOnlineQty,
+                kfh_offline_weight_kg = kfhOfflineWeightKg,
+                kfh_offline_qty = kfhOfflineQty,
                 vip_weight_kg = vipWeightKg,
                 vip_qty = vipQty,
                 transit_weight_kg = transitWeightKg,
@@ -1981,7 +1992,9 @@ public partial class PMIMSControllers : ControllerBase
                 location = i.Location?.Description ?? "Unknown",
                 location_id = i.LocationId,
                 status = i.StatusCode,
-                ownership = i.OwnershipType,
+                ownership = (i.OwnershipType == "VIP_OWNED" || (i.OwnershipType == "KFH_OWNED" && i.ChannelStatus == "OFFLINE")) ? "KFH_OWNED" : i.OwnershipType,
+                channel_status = (i.ChannelStatus == "OFFLINE" || i.OwnershipType == "VIP_OWNED") ? "OFFLINE" : "ONLINE",
+                channel_category = i.ChannelCategory ?? ((i.ChannelStatus == "OFFLINE" || i.OwnershipType == "VIP_OWNED") ? "VIP_EXCLUSIVE" : "RETAIL_ONLINE"),
                 acquisition_date = i.Lot?.AcquisitionDate,
                 is_damaged = i.IsDamaged,
                 damage_status = i.DamageApprovalStatus ?? (i.IsDamaged ? "APPROVED" : "NONE"),
@@ -2026,7 +2039,6 @@ public partial class PMIMSControllers : ControllerBase
         {
             "TURKEY_OWNED" or "PROPRIETARY" => "TURKEY_OWNED",
             "CUSTOMER_OWNED" or "HELD_IN_CUSTODY" => "CUSTOMER_OWNED",
-            "VIP_OWNED" => "VIP_OWNED",
             _ => "KFH_OWNED"
         };
 
@@ -2034,7 +2046,6 @@ public partial class PMIMSControllers : ControllerBase
         {
             "TURKEY_OWNED" => "Turkey Consignment (KT Gold)",
             "CUSTOMER_OWNED" => "Customer Custody (Safekeeping)",
-            "VIP_OWNED" => "VIP Exclusive Reserve",
             _ => "KFH Proprietary Stock"
         };
 
@@ -2124,7 +2135,9 @@ public partial class PMIMSControllers : ControllerBase
                                                 purity = item.Product?.Purity?.PurityValue ?? 0.9999m,
                                                 brand_name = item.Product?.BrandName ?? item.Product?.Brand?.BrandName ?? "",
                                                 status = item.StatusCode,
-                                                ownership_type = item.OwnershipType,
+                                                ownership_type = (item.OwnershipType == "VIP_OWNED" || (item.OwnershipType == "KFH_OWNED" && item.ChannelStatus == "OFFLINE")) ? "KFH_OWNED" : item.OwnershipType,
+                                                channel_status = (item.ChannelStatus == "OFFLINE" || item.OwnershipType == "VIP_OWNED") ? "OFFLINE" : "ONLINE",
+                                                channel_category = item.ChannelCategory ?? ((item.ChannelStatus == "OFFLINE" || item.OwnershipType == "VIP_OWNED") ? "VIP_EXCLUSIVE" : "RETAIL_ONLINE"),
                                                 is_in_transit = locInfo.IsTransit,
                                                 courier_info = locInfo.Courier,
                                                 location_label = locInfo.Label,

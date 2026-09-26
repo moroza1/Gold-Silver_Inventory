@@ -123,6 +123,7 @@ public class AppDbContext : DbContext
     public DbSet<PendingThresholdChange> PendingThresholdChanges { get; set; } = null!;
     public DbSet<PendingCustomsTransfer> PendingCustomsTransfers { get; set; } = null!;
     public DbSet<PendingVipAllocation> PendingVipAllocations { get; set; } = null!;
+    public DbSet<PendingVipDeallocation> PendingVipDeallocations { get; set; } = null!;
     public DbSet<PendingVipDispense> PendingVipDispenses { get; set; } = null!;
     public DbSet<PendingTurkeyReturn> PendingTurkeyReturns { get; set; } = null!;
     public DbSet<PendingMissingItemReport> PendingMissingItemReports { get; set; } = null!;
@@ -414,6 +415,15 @@ public class AppDbContext : DbContext
         {
             entity.HasKey(e => e.PendingAllocationId);
             entity.ToTable("pending_vip_allocations");
+            entity.HasIndex(e => e.StatusCode);
+            entity.HasIndex(e => e.CreatedAt);
+        });
+
+        // PendingVipDeallocation Configuration
+        modelBuilder.Entity<PendingVipDeallocation>(entity =>
+        {
+            entity.HasKey(e => e.PendingDeallocationId);
+            entity.ToTable("pending_vip_deallocations");
             entity.HasIndex(e => e.StatusCode);
             entity.HasIndex(e => e.CreatedAt);
         });

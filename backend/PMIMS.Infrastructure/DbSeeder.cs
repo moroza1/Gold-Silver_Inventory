@@ -1027,7 +1027,17 @@ public static class DbSeeder
                 MakerStepName = "VIP Stock Allocation Maker Submission",
                 MakerDesc = "Maker selects KFH owned gold bars, assigns VIP category, and submits allocation request.",
                 CheckerStepName = "VIP Stock Allocation Checker Approval",
-                CheckerDesc = "Checker verifies bar serials, denomination weights, and approves transfer of ownership to VIP_OWNED."
+                CheckerDesc = "Checker verifies bar serials, denomination weights, and approves transfer of channel to OFFLINE."
+            },
+            new
+            {
+                WorkflowType = "VIP_DEALLOCATION",
+                Name = "Default VIP Return to Online Stock Workflow",
+                Description = "Maker-Checker verification for returning VIP Offline gold bars back to general KFH Online inventory.",
+                MakerStepName = "VIP Return to Online Maker Request",
+                MakerDesc = "Maker selects VIP offline bars, specifies deallocation/replenishment reason, and submits return request.",
+                CheckerStepName = "VIP Return to Online Checker Authorization",
+                CheckerDesc = "Checker verifies bar serials, channel reallocation, and authorizes transition to ONLINE stock."
             },
             new
             {

@@ -234,6 +234,8 @@ public class InventoryItem
     public int? LocationId { get; set; }
     public string OwnershipType { get; set; } = "KFH_OWNED";
     public string StatusCode { get; set; } = "READY";
+    public string ChannelStatus { get; set; } = "ONLINE"; // "ONLINE" (default: available for internet/e-commerce & GFS), "OFFLINE" (VIP/Branch walk-in: GFS/counter only, blocked from internet)
+    public string? ChannelCategory { get; set; } // "VIP_EXCLUSIVE", "RETAIL_ONLINE", "BRANCH_OFFLINE"
     public byte[] RowVersion { get; set; } = null!; // Concurrency lock
 
     // ============================================================
@@ -1147,6 +1149,22 @@ public class PendingVipAllocation
     public int TotalItems { get; set; }
     public decimal TotalWeightGrams { get; set; }
     public string? VipCategory { get; set; } // "Private Banking", "Royal / Executive VIP", "High Net Worth"
+    public string RequestedBy { get; set; } = null!;
+    public string? Notes { get; set; }
+    public string StatusCode { get; set; } = "PENDING_APPROVAL"; // PENDING_APPROVAL, APPROVED, REJECTED
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public string? ApprovedBy { get; set; }
+    public DateTime? ApprovedAt { get; set; }
+}
+
+public class PendingVipDeallocation
+{
+    public int PendingDeallocationId { get; set; }
+    public string BatchReference { get; set; } = null!;
+    public string SerialsJsonList { get; set; } = null!;
+    public int TotalItems { get; set; }
+    public decimal TotalWeightGrams { get; set; }
+    public string? DeallocationReason { get; set; } // "Return to General Online Inventory", "Excess VIP Stock", "Retail Replenishment"
     public string RequestedBy { get; set; } = null!;
     public string? Notes { get; set; }
     public string StatusCode { get; set; } = "PENDING_APPROVAL"; // PENDING_APPROVAL, APPROVED, REJECTED

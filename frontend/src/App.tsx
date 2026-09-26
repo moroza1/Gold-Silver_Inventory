@@ -874,6 +874,10 @@ export default function App() {
     turkey_qty?: number;
     kfh_weight_kg?: number;
     kfh_qty?: number;
+    kfh_online_weight_kg?: number;
+    kfh_online_qty?: number;
+    kfh_offline_weight_kg?: number;
+    kfh_offline_qty?: number;
     vip_weight_kg?: number;
     vip_qty?: number;
     total_gold_weight_kg: number;
@@ -6406,9 +6410,16 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     } else if (selectedExecKpi === 'PROPRIETARY_GOLD') {
       return execBoard.items.filter((i: any) => i.metal === 'Gold' && (i.ownership === 'TURKEY_OWNED' || i.ownership === 'PROPRIETARY'));
     } else if (selectedExecKpi === 'READY_SALE') {
-      return execBoard.items.filter((i: any) => i.status === 'READY' && i.ownership === 'KFH_OWNED');
+      return execBoard.items.filter((i: any) =>
+        (i.ownership === 'KFH_OWNED' || i.ownership === 'PROPRIETARY') &&
+        (i.channel_status === 'ONLINE' || !i.channel_status) &&
+        i.status === 'READY'
+      );
     } else if (selectedExecKpi === 'VIP_STOCK') {
-      return execBoard.items.filter((i: any) => i.ownership === 'VIP_OWNED');
+      return execBoard.items.filter((i: any) =>
+        (i.ownership === 'KFH_OWNED' || i.ownership === 'VIP_OWNED') &&
+        (i.channel_status === 'OFFLINE' || i.channel_category === 'VIP_EXCLUSIVE' || i.ownership === 'VIP_OWNED')
+      );
     } else if (selectedExecKpi === 'RESERVED') {
       return execBoard.items.filter((i: any) => i.status === 'RESERVED');
     } else if (selectedExecKpi === 'CUSTODY') {
@@ -7365,14 +7376,13 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                   </div>
 
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
-                    {(inventoryHierarchy?.hierarchy ?? []).map((owner: any) => {
+                    {(inventoryHierarchy?.hierarchy ?? []).filter((owner: any) => owner.owner_code !== 'VIP_OWNED').map((owner: any) => {
                       const isKfh = owner.owner_code === 'KFH_OWNED';
                       const isTurkey = owner.owner_code === 'TURKEY_OWNED';
                       const isCustomer = owner.owner_code === 'CUSTOMER_OWNED';
-                      const isVip = owner.owner_code === 'VIP_OWNED';
 
-                      const themeColor = isKfh ? 'var(--kfh-green)' : isTurkey ? '#D4AF37' : isVip ? '#6366f1' : '#3b82f6';
-                      const icon = isKfh ? 'fa-building-columns' : isTurkey ? 'fa-coins' : isVip ? 'fa-crown' : 'fa-user-shield';
+                      const themeColor = isKfh ? 'var(--kfh-green)' : isTurkey ? '#D4AF37' : '#3b82f6';
+                      const icon = isKfh ? 'fa-building-columns' : isTurkey ? 'fa-coins' : 'fa-user-shield';
 
                       return (
                         <div
@@ -7407,6 +7417,18 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                               <i className="fa-solid fa-scale-balanced"></i> {(owner.total_weight_kg * 1000).toLocaleString()} g • {owner.bar_count} {currentLang === 'en' ? 'Bars' : 'سبيكة'}
                             </div>
                           </div>
+
+                          {/* KFH Stock Channels Breakdown: Online vs Offline (VIP/GFS) */}
+                          {isKfh && (
+                            <div style={{ marginTop: '10px', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: '10px', padding: '3px 8px', borderRadius: '4px', background: 'rgba(0,155,78,0.15)', color: 'var(--kfh-green)', border: '1px solid rgba(0,155,78,0.3)', fontWeight: 600 }} title="Online E-Commerce & Retail Available">
+                                🌐 {currentLang === 'en' ? 'Online Channel:' : 'أونلاين:'} <strong>{(execBoard?.total_precious?.kfh_online_weight_kg ?? execBoard?.kfh_online_weight_kg ?? 0).toFixed(1)}kg</strong> ({execBoard?.total_precious?.kfh_online_qty ?? execBoard?.kfh_online_qty ?? 0})
+                              </span>
+                              <span style={{ fontSize: '10px', padding: '3px 8px', borderRadius: '4px', background: 'rgba(99,102,241,0.15)', color: '#6366f1', border: '1px solid rgba(99,102,241,0.3)', fontWeight: 600 }} title="Offline Vault VIP Reserve / GFS Only">
+                                👑 {currentLang === 'en' ? 'Offline (VIP / GFS):' : 'أوفلاين (VIP/GFS):'} <strong>{(execBoard?.total_precious?.kfh_offline_weight_kg ?? execBoard?.kfh_offline_weight_kg ?? 0).toFixed(1)}kg</strong> ({execBoard?.total_precious?.kfh_offline_qty ?? execBoard?.kfh_offline_qty ?? 0})
+                              </span>
+                            </div>
+                          )}
 
                           {/* In-Transit Custody Notice */}
                           {owner.in_transit_weight_kg > 0 && (
@@ -7838,7 +7860,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
               </span>
             </div>
 
-            {/* 3. READY FOR SALE (KFH OWNED) */}
+            {/* 3. KFH OWNED (ONLINE CHANNEL) */}
             <div
               className="glass-card kpi-card"
               onClick={() => { setSelectedExecKpi('READY_SALE'); setExecPreciousFilter('ALL'); }}
@@ -7852,20 +7874,23 @@ const [migrationApproved, setMigrationApproved] = useState(false);
               }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span className="kpi-title">{t('kpi_ready')}</span>
+                <span className="kpi-title" style={{ color: 'var(--kfh-green)' }}>
+                  <i className="fa-solid fa-globe" style={{ marginRight: '6px' }}></i>
+                  {currentLang === 'en' ? 'KFH Gold (Online Channel)' : 'مخزون بيتك (أونلاين)'}
+                </span>
                 {selectedExecKpi === 'READY_SALE' && (
                   <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: 'var(--kfh-green)', color: '#fff', fontWeight: 'bold' }}>
                     <i className="fa-solid fa-chart-pie"></i> {currentLang === 'en' ? 'Active' : 'نشط'}
                   </span>
                 )}
               </div>
-              <span className="kpi-value">{(execBoard?.available_weight_kg ?? 0).toFixed(3)} KG</span>
-              <span className="kpi-sub">
-                {((execBoard?.available_weight_kg ?? 0) * 1000).toLocaleString()} g • <i className="fa-solid fa-hand-pointer"></i> {currentLang === 'en' ? 'Click to view bar quantities' : 'انقر لعرض كميات السبائك'}
+              <span className="kpi-value" style={{ color: 'var(--kfh-green)' }}>{(execBoard?.total_precious?.kfh_online_weight_kg ?? execBoard?.available_weight_kg ?? 0).toFixed(3)} KG</span>
+              <span className="kpi-sub" style={{ color: 'var(--accent-green)' }}>
+                {(((execBoard?.total_precious?.kfh_online_weight_kg ?? execBoard?.available_weight_kg ?? 0)) * 1000).toLocaleString()} g • {execBoard?.total_precious?.kfh_online_qty ?? execBoard?.ready_qty ?? 0} {currentLang === 'en' ? 'Bars (Internet Retail)' : 'سبيكة (متاح أونلاين)'}
               </span>
             </div>
 
-            {/* 4. VIP EXCLUSIVE RESERVE STOCK */}
+            {/* 4. KFH OWNED (OFFLINE / VIP / GFS CHANNEL) */}
             <div
               className="glass-card kpi-card"
               onClick={() => { setSelectedExecKpi('VIP_STOCK'); setExecPreciousFilter('ALL'); }}
@@ -7881,7 +7906,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span className="kpi-title" style={{ color: '#6366f1' }}>
                   <i className="fa-solid fa-crown" style={{ marginRight: '6px' }}></i>
-                  {currentLang === 'en' ? 'VIP Exclusive Stock' : 'مخزون كبار العملاء (VIP)'}
+                  {currentLang === 'en' ? 'KFH Gold (Offline / VIP / GFS)' : 'مخزون بيتك (أوفلاين / VIP)'}
                 </span>
                 {selectedExecKpi === 'VIP_STOCK' && (
                   <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: '#6366f1', color: '#fff', fontWeight: 'bold' }}>
@@ -7889,9 +7914,9 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                   </span>
                 )}
               </div>
-              <span className="kpi-value" style={{ color: '#6366f1' }}>{(execBoard?.vip_weight_kg ?? 0).toFixed(3)} KG</span>
+              <span className="kpi-value" style={{ color: '#6366f1' }}>{(execBoard?.total_precious?.kfh_offline_weight_kg ?? execBoard?.vip_weight_kg ?? 0).toFixed(3)} KG</span>
               <span className="kpi-sub" style={{ color: '#818cf8' }}>
-                {((execBoard?.vip_weight_kg ?? 0) * 1000).toLocaleString()} g • {execBoard?.vip_qty ?? 0} {currentLang === 'en' ? 'Bars (Vault VIP Reserve)' : 'سبيكة (غير متاحة أونلاين)'}
+                {(((execBoard?.total_precious?.kfh_offline_weight_kg ?? execBoard?.vip_weight_kg ?? 0)) * 1000).toLocaleString()} g • {execBoard?.total_precious?.kfh_offline_qty ?? execBoard?.vip_qty ?? 0} {currentLang === 'en' ? 'Bars (GFS / Branch Only)' : 'سبيكة (صرف GFS فقط)'}
               </span>
             </div>
 

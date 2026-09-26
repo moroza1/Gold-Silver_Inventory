@@ -177,6 +177,10 @@ public interface IInventoryRepository
     Task<PendingVipAllocation> InitiateVipAllocationWorkflowAsync(List<string> serialNumbers, string requestedBy, string? notes, string? vipCategory = null);
     Task<string> ApproveVipAllocationAsync(int pendingAllocationId, string approvedBy);
     Task<IEnumerable<PendingVipAllocation>> GetPendingVipAllocationsAsync();
+    Task<PendingVipDeallocation> InitiateVipDeallocationWorkflowAsync(List<string> serialNumbers, string requestedBy, string? deallocationReason, string? notes);
+    Task<string> ApproveVipDeallocationAsync(int pendingDeallocationId, string approvedBy);
+    Task<string> RejectVipDeallocationAsync(int pendingDeallocationId, string rejectedBy, string? reason);
+    Task<IEnumerable<PendingVipDeallocation>> GetPendingVipDeallocationsAsync();
     Task<PendingVipDispense> InitiateVipDispenseWorkflowAsync(List<string> serialNumbers, string customerName, string customerCivilId, string? customerAccount, string? specialInstructions, string requestedBy, string? notes);
     Task<string> ApproveVipDispenseAsync(int pendingDispenseId, string approvedBy);
     Task<IEnumerable<PendingVipDispense>> GetPendingVipDispensesAsync();

@@ -202,6 +202,8 @@ public partial class PMIMSControllers
                 vault_name = i.Location?.Vault?.VaultName ?? "Main Vault",
                 location_code = i.Location != null ? $"{i.Location.ZoneRoom} / {i.Location.ShelfRow} / {i.Location.SlotBin}" : "Unassigned",
                 ownership_type = i.OwnershipType,
+                channel_status = i.ChannelStatus ?? "OFFLINE",
+                channel_category = i.ChannelCategory ?? "VIP_EXCLUSIVE",
                 status_code = i.StatusCode,
                 lot_number = i.Lot?.LotNumber,
                 has_qr_printed = printedItemIds.Contains(i.ItemId)
@@ -261,6 +263,8 @@ public partial class PMIMSControllers
                 vault_name = i.Location?.Vault?.VaultName ?? "Main Vault",
                 location_code = i.Location != null ? $"{i.Location.ZoneRoom} / {i.Location.ShelfRow} / {i.Location.SlotBin}" : "Unassigned",
                 ownership_type = i.OwnershipType,
+                channel_status = i.ChannelStatus ?? "ONLINE",
+                channel_category = i.ChannelCategory ?? "RETAIL_ONLINE",
                 status_code = i.StatusCode,
                 has_qr_printed = printedItemIds.Contains(i.ItemId)
             }).ToList();
@@ -300,6 +304,89 @@ public partial class PMIMSControllers
         {
             var list = await _repository.GetPendingVipDispensesAsync();
             return Ok(list);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
+    [HttpGet("inventory/vip/pending-deallocations")]
+    [Authorize(Policy = "pending_actions.read")]
+    public async Task<IActionResult> GetPendingVipDeallocations()
+    {
+        try
+        {
+            var list = await _repository.GetPendingVipDeallocationsAsync();
+            return Ok(list);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
+    [HttpPost("inventory/vip/deallocate")]
+    [HttpPost("inventory/vip/return-to-kfh")]
+    [Authorize(Policy = "purchase_orders.write")]
+    public async Task<IActionResult> InitiateVipDeallocation([FromBody] VipDeallocationRequest req)
+    {
+        try
+        {
+            if (req.SerialNumbers == null || req.SerialNumbers.Count == 0)
+            {
+                return BadRequest(new { error = "Please select at least one gold bar serial to return from VIP to general KFH online stock." });
+            }
+
+            string requestedBy = !string.IsNullOrWhiteSpace(req.RequestedBy) ? req.RequestedBy : (User.Identity?.Name ?? "Treasury Maker");
+
+            var pending = await _repository.InitiateVipDeallocationWorkflowAsync(
+                req.SerialNumbers,
+                requestedBy,
+                req.DeallocationReason,
+                req.Notes);
+
+            return Ok(new
+            {
+                pending_deallocation_id = pending.PendingDeallocationId,
+                batch_reference = pending.BatchReference,
+                total_items = pending.TotalItems,
+                total_weight_grams = pending.TotalWeightGrams,
+                deallocation_reason = pending.DeallocationReason,
+                message = "VIP return to general KFH online stock initiated and routed to Maker-Checker workflow for Checker approval."
+            });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
+    [HttpPost("inventory/vip/pending-deallocations/{id}/approve")]
+    [Authorize(Policy = "pending_actions.write")]
+    public async Task<IActionResult> ApproveVipDeallocationDirect(int id)
+    {
+        try
+        {
+            string approvedBy = User.Identity?.Name ?? "Treasury Checker";
+            var result = await _repository.ApproveVipDeallocationAsync(id, approvedBy);
+            return Ok(new { success = true, message = "VIP deallocation request approved. Items transitioned to ONLINE stock." });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
+    [HttpPost("inventory/vip/pending-deallocations/{id}/reject")]
+    [Authorize(Policy = "pending_actions.write")]
+    public async Task<IActionResult> RejectVipDeallocationDirect(int id, [FromBody] RejectActionRequest? req)
+    {
+        try
+        {
+            string rejectedBy = User.Identity?.Name ?? "Treasury Checker";
+            var result = await _repository.RejectVipDeallocationAsync(id, rejectedBy, req?.Reason);
+            return Ok(new { success = true, message = "VIP deallocation request rejected." });
         }
         catch (Exception ex)
         {
@@ -755,6 +842,27 @@ public class VipAllocationRequest
 
     [JsonPropertyName("notes")]
     public string? Notes { get; set; }
+}
+
+public class VipDeallocationRequest
+{
+    [JsonPropertyName("serial_numbers")]
+    public List<string> SerialNumbers { get; set; } = new();
+
+    [JsonPropertyName("deallocation_reason")]
+    public string? DeallocationReason { get; set; }
+
+    [JsonPropertyName("requested_by")]
+    public string? RequestedBy { get; set; }
+
+    [JsonPropertyName("notes")]
+    public string? Notes { get; set; }
+}
+
+public class RejectActionRequest
+{
+    [JsonPropertyName("reason")]
+    public string? Reason { get; set; }
 }
 
 public class VipDispenseRequest

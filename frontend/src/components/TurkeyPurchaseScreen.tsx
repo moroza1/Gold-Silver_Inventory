@@ -130,9 +130,16 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
   } | null>(null);
   const [pendingVipAllocations, setPendingVipAllocations] = useState<any[]>([]);
   const [pendingVipDispenses, setPendingVipDispenses] = useState<any[]>([]);
+  const [pendingVipDeallocations, setPendingVipDeallocations] = useState<any[]>([]);
   const [pendingTurkeyReturns, setPendingTurkeyReturns] = useState<any[]>([]);
   const [pendingMissingReports, setPendingMissingReports] = useState<any[]>([]);
-  const [pendingBatchFilter, setPendingBatchFilter] = useState<'ALL' | 'TURKEY' | 'VIP_ALLOCATION' | 'VIP_DISPENSE' | 'TURKEY_RETURN' | 'MISSING_ITEMS'>('ALL');
+  const [pendingBatchFilter, setPendingBatchFilter] = useState<'ALL' | 'TURKEY' | 'VIP_ALLOCATION' | 'VIP_DEALLOCATION' | 'VIP_DISPENSE' | 'TURKEY_RETURN' | 'MISSING_ITEMS'>('ALL');
+
+  // Return VIP Stock to KFH Online Stock State
+  const [showVipDeallocModal, setShowVipDeallocModal] = useState<boolean>(false);
+  const [vipDeallocReason, setVipDeallocReason] = useState<string>('Surplus VIP reserve returned to general online retail stock');
+  const [vipDeallocNotes, setVipDeallocNotes] = useState<string>('');
+  const [isSubmittingVipDealloc, setIsSubmittingVipDealloc] = useState<boolean>(false);
 
   // Missing Items State
   const [showMissingModal, setShowMissingModal] = useState<boolean>(false);
@@ -146,11 +153,12 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
   // Fetch VIP, KFH, and Return Data
   const fetchVipData = async () => {
     try {
-      const [vipRes, kfhRes, allocRes, dispRes, retRes, missRes] = await Promise.all([
+      const [vipRes, kfhRes, allocRes, dispRes, deallocRes, retRes, missRes] = await Promise.all([
         fetch(`${API_BASE}/inventory/vip`),
         fetch(`${API_BASE}/inventory/kfh-available`),
         fetch(`${API_BASE}/inventory/vip/pending-allocations`),
         fetch(`${API_BASE}/inventory/vip/pending-dispenses`),
+        fetch(`${API_BASE}/inventory/vip/pending-deallocations`),
         fetch(`${API_BASE}/inventory/turkey/pending-returns`),
         fetch(`${API_BASE}/inventory/turkey/pending-missing-reports`)
       ]);
@@ -158,6 +166,7 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
       if (kfhRes.ok) setKfhAvailableInventory(await kfhRes.json());
       if (allocRes.ok) setPendingVipAllocations(await allocRes.json());
       if (dispRes.ok) setPendingVipDispenses(await dispRes.json());
+      if (deallocRes.ok) setPendingVipDeallocations(await deallocRes.json());
       if (retRes.ok) setPendingTurkeyReturns(await retRes.json());
       if (missRes.ok) setPendingMissingReports(await missRes.json());
     } catch (err) {
@@ -600,8 +609,8 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
       }
       const data = await res.json();
       alert(currentLang === 'en'
-        ? `✅ VIP Allocation Workflow Initiated!\nBatch Reference: ${data.batch_reference || 'VIP-ALLOC'}\n${selectedKfhSerials.length} bar(s) submitted for Checker authorization.\nOnce approved, ownership transitions to VIP_OWNED (isolated from online retail).`
-        : `✅ تم إنشاء طلب تخصيص مخزون VIP بنجاح!\nالمرجع: ${data.batch_reference || 'VIP-ALLOC'}\nتم إرسال ${selectedKfhSerials.length} سبيكة لاعتماد المراجع.\nبمجرد الاعتماد ستنتقل الملكية إلى مخزون كبار العملاء (VIP_OWNED).`);
+        ? `✅ VIP Allocation Workflow Initiated!\nBatch Reference: ${data.batch_reference || 'VIP-ALLOC'}\n${selectedKfhSerials.length} bar(s) submitted for Checker authorization.\nOnce approved, stock transitions to KFH Owned (Channel: OFFLINE / VIP Exclusive - GFS Only).`
+        : `✅ تم إنشاء طلب تخصيص مخزون VIP بنجاح!\nالمرجع: ${data.batch_reference || 'VIP-ALLOC'}\nتم إرسال ${selectedKfhSerials.length} سبيكة لاعتماد المراجع.\nبمجرد الاعتماد ستتحول القناة إلى أوفلاين (OFFLINE) تحت ملكية بيتك.`);
       setSelectedKfhSerials([]);
       setVipAllocationNotes('');
       await fetchVipData();
@@ -612,6 +621,46 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
       alert(currentLang === 'en' ? `Error: ${err.message}` : `خطأ: ${err.message}`);
     } finally {
       setIsSubmittingVipAlloc(false);
+    }
+  };
+
+  const handleReturnVipToOnline = async () => {
+    if (selectedVipSerials.length === 0) {
+      alert(currentLang === 'en' ? 'Please select at least one VIP bar to return to KFH Online stock.' : 'يرجى تحديد سبيكة واحدة على الأقل لإرجاعها لمخزون بيتك أونلاين.');
+      return;
+    }
+    setIsSubmittingVipDealloc(true);
+    try {
+      const res = await fetch(`${API_BASE}/inventory/vip/deallocate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          serial_numbers: selectedVipSerials,
+          serialNumbers: selectedVipSerials,
+          deallocation_reason: vipDeallocReason,
+          deallocationReason: vipDeallocReason,
+          notes: vipDeallocNotes
+        })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || err.message || err.title || (res.status === 401 ? 'Unauthorized: Please log in again.' : res.status === 403 ? 'Forbidden: custody.write permission required.' : `Failed to submit VIP return to online (HTTP ${res.status})`));
+      }
+      const data = await res.json();
+      alert(currentLang === 'en'
+        ? `✅ VIP Return to Online Stock Initiated!\nBatch Reference: ${data.batch_reference || 'VIP-DEALLOC'}\n${selectedVipSerials.length} bar(s) submitted for 4-Eyes Checker Authorization.\nOnce approved, items will transition to KFH ONLINE stock.`
+        : `✅ تم إنشاء طلب إعادة مخزون VIP إلى أونلاين بنجاح!\nالمرجع: ${data.batch_reference || 'VIP-DEALLOC'}\nتم إرسال ${selectedVipSerials.length} سبيكة لاعتماد المراجع.\nبمجرد الاعتماد ستعود القناة إلى ONLINE تحت ملكية بيتك.`);
+      setSelectedVipSerials([]);
+      setShowVipDeallocModal(false);
+      setVipDeallocNotes('');
+      await fetchVipData();
+      onRefresh();
+      setActiveSubTab('PENDING_BATCHES');
+      setPendingBatchFilter('VIP_DEALLOCATION');
+    } catch (err: any) {
+      alert(currentLang === 'en' ? `Error: ${err.message}` : `خطأ: ${err.message}`);
+    } finally {
+      setIsSubmittingVipDealloc(false);
     }
   };
 
@@ -2514,7 +2563,7 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
 
           </div>
 
-          {/* SECTION B: ACTIVE VIP EXCLUSIVE VAULT STOCK & DISPENSE WORKFLOW */}
+          {/* SECTION B: ACTIVE VIP EXCLUSIVE VAULT STOCK & WORKFLOWS */}
           <div className="glass-card" style={{ padding: '22px' }}>
             
             {/* Header */}
@@ -2522,12 +2571,12 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
               <div>
                 <h4 style={{ margin: 0, fontSize: '16px', color: '#6366f1', display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <i className="fa-solid fa-vault"></i>
-                  {currentLang === 'en' ? 'Active VIP Exclusive Vault Stock (VIP_OWNED)' : 'مخزون كبار العملاء الفعلي بالخزنة (VIP_OWNED)'}
+                  {currentLang === 'en' ? 'Active VIP Exclusive Vault Stock (KFH Owned - OFFLINE Channel)' : 'مخزون كبار العملاء الفعلي بالخزنة (بيتك - أوفلاين)'}
                 </h4>
                 <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
                   {currentLang === 'en'
-                    ? 'Isolated stock reserved for VIP private clients. When a VIP client requests gold bars, initiate a dispensation workflow below.'
-                    : 'مخزون معزول ومحجوز لكبار العملاء. عند رغبة العميل في استلام سبائك، يتم بدء طلب صرف معتمد عبر سير العمل.'}
+                    ? 'Isolated stock reserved for VIP private clients & GFS operations. Dispense to clients or return to general KFH online stock below.'
+                    : 'مخزون معزول ومخصص لكبار العملاء وعمليات GFS. يمكن صرف السبائك للعميل أو إرجاعها للمخزون العام المتاح أونلاين عبر سير العمل.'}
                 </span>
               </div>
 
@@ -2554,6 +2603,26 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
                 <button
                   type="button"
                   className="btn"
+                  onClick={() => setShowVipDeallocModal(true)}
+                  disabled={selectedVipSerials.length === 0}
+                  style={{
+                    background: selectedVipSerials.length > 0 ? 'var(--kfh-green)' : 'var(--bg-secondary)',
+                    borderColor: selectedVipSerials.length > 0 ? 'var(--kfh-green)' : 'var(--surface-border)',
+                    color: selectedVipSerials.length > 0 ? '#fff' : 'var(--text-muted)',
+                    fontWeight: 'bold',
+                    padding: '8px 16px'
+                  }}
+                  title={currentLang === 'en' ? 'Return selected VIP offline bars back to general KFH online stock' : 'إرجاع سبائك VIP الأوفلاين المحددة إلى مخزون بيتك أونلاين'}
+                >
+                  <i className="fa-solid fa-rotate-left"></i>{' '}
+                  {currentLang === 'en'
+                    ? `Return Selected (${selectedVipSerials.length}) to Online Stock`
+                    : `إرجاع المحدد (${selectedVipSerials.length}) إلى أونلاين`}
+                </button>
+
+                <button
+                  type="button"
+                  className="btn"
                   onClick={() => {
                     setReturnSourceOrigin('VIP');
                     setShowReturnModal(true);
@@ -2568,10 +2637,10 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
                   }}
                   title={currentLang === 'en' ? 'Return selected VIP bars back to Turkey consignment (offline owner)' : 'إرجاع سبائك VIP المحددة إلى مخزون أمانة تركيا'}
                 >
-                  <i className="fa-solid fa-rotate-left"></i>{' '}
+                  <i className="fa-solid fa-truck-ramp-box"></i>{' '}
                   {currentLang === 'en'
-                    ? `Return Selected VIP (${selectedVipSerials.length}) to Turkey`
-                    : `إرجاع سبائك VIP المحددة (${selectedVipSerials.length}) لتركيا`}
+                    ? `Return (${selectedVipSerials.length}) to Turkey`
+                    : `إرجاع لتركيا (${selectedVipSerials.length})`}
                 </button>
               </div>
             </div>
@@ -2589,10 +2658,10 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
             }}>
               <i className="fa-solid fa-eye-slash" style={{ color: '#6366f1', fontSize: '18px' }}></i>
               <div style={{ fontSize: '12px', color: 'var(--text-primary)' }}>
-                <strong>{currentLang === 'en' ? 'Online Isolation Active:' : 'حظر العرض الأونلاين مفعل:'}</strong>{' '}
+                <strong>{currentLang === 'en' ? 'Offline Stock Isolation Active:' : 'حظر البيع عبر الإنترنت مفعل:'}</strong>{' '}
                 {currentLang === 'en'
-                  ? 'All bars listed below carry VIP_OWNED ownership. They are hidden from the online retail catalogue and cannot be bought by online retail customers.'
-                  : 'كافة السبائك أدناه مسجلة بملكية كبار العملاء (VIP_OWNED). وهي محجوبة تلقائياً عن متجر البيع الإلكتروني للأفراد.'}
+                  ? 'All bars listed below carry OFFLINE channel status under KFH ownership. They cannot be bought through internet/e-commerce retail channels; only via GFS Counter, VIP Handover, or by Maker-Checker workflow return to online stock.'
+                  : 'كافة السبائك أدناه مسجلة بقناة أوفلاين (OFFLINE) تحت ملكية بيتك. لا يمكن شراؤها عبر المتجر الإلكتروني أو الإنترنت، وإنما تُصرف حصراً عبر GFS أو بتسليم VIP أو بإعادتها للمخزون الأونلاين عبر سير العمل.'}
               </div>
             </div>
 
@@ -2724,7 +2793,7 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
             </h4>
 
             {/* Filter Chips */}
-            <div style={{ display: 'flex', gap: '6px' }}>
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
               <button
                 type="button"
                 className={`btn ${pendingBatchFilter === 'ALL' ? 'btn-primary' : 'btn-secondary'}`}
@@ -2748,6 +2817,14 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
                 style={{ fontSize: '11px', padding: '4px 10px' }}
               >
                 👑 {currentLang === 'en' ? 'VIP Allocations' : 'تخصيص VIP'} ({pendingVipAllocations.length})
+              </button>
+              <button
+                type="button"
+                className={`btn ${pendingBatchFilter === 'VIP_DEALLOCATION' ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setPendingBatchFilter('VIP_DEALLOCATION')}
+                style={{ fontSize: '11px', padding: '4px 10px', ...(pendingBatchFilter === 'VIP_DEALLOCATION' ? { background: 'var(--kfh-green)', borderColor: 'var(--kfh-green)' } : {}) }}
+              >
+                ↩️ 🌐 {currentLang === 'en' ? 'VIP to Online' : 'إرجاع لأونلاين'} ({pendingVipDeallocations.length})
               </button>
               <button
                 type="button"
@@ -2867,6 +2944,47 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
                         <div style={{ maxWidth: '200px', overflowX: 'auto', whiteSpace: 'nowrap', display: 'flex', gap: '4px' }}>
                           {serialsList.map((s, idx) => (
                             <span key={idx} style={{ fontSize: '10px', padding: '2px 5px', background: 'rgba(99, 102, 241, 0.1)', color: '#6366f1', borderRadius: '3px' }}>
+                              {s}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+
+                {/* 2.5. VIP to Online Deallocations */}
+                {(pendingBatchFilter === 'ALL' || pendingBatchFilter === 'VIP_DEALLOCATION') && pendingVipDeallocations.map(d => {
+                  let serialsList: string[] = [];
+                  try { serialsList = JSON.parse(d.serials_json || '[]'); } catch (_) {}
+
+                  return (
+                    <tr key={`DEALLOC-${d.pending_deallocation_id}`}>
+                      <td><strong style={{ color: 'var(--kfh-green)' }}>{d.batch_reference}</strong></td>
+                      <td>
+                        <span className="badge" style={{ background: 'rgba(0, 155, 78, 0.15)', color: 'var(--kfh-green)', fontSize: '11px' }}>
+                          ↩️ VIP → 🌐 Online
+                        </span>
+                      </td>
+                      <td>{d.total_items} {currentLang === 'en' ? 'bars' : 'سبيكة'}</td>
+                      <td>{d.total_weight_grams} g ({(d.total_weight_grams / 1000).toFixed(3)} KG)</td>
+                      <td>
+                        <strong style={{ fontSize: '12px', color: 'var(--kfh-green)' }}>{d.deallocation_reason || 'Return to Online Retail'}</strong>
+                        {d.notes && <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{d.notes}</div>}
+                      </td>
+                      <td>{d.requested_by}</td>
+                      <td>
+                        <span className={`badge ${d.status_code === 'APPROVED' ? 'badge-ready' : d.status_code === 'REJECTED' ? 'badge-sold' : 'badge-reserved'}`}>
+                          {d.status_code === 'APPROVED' ? (currentLang === 'en' ? 'Approved & Returned' : 'معتمد وأُعيد لأونلاين') :
+                           d.status_code === 'REJECTED' ? (currentLang === 'en' ? 'Rejected' : 'مرفوض') :
+                           (currentLang === 'en' ? 'Pending Checker' : 'بانتظار المراجع')}
+                        </span>
+                      </td>
+                      <td>{new Date(d.created_at).toLocaleString()}</td>
+                      <td>
+                        <div style={{ maxWidth: '200px', overflowX: 'auto', whiteSpace: 'nowrap', display: 'flex', gap: '4px' }}>
+                          {serialsList.map((s, idx) => (
+                            <span key={idx} style={{ fontSize: '10px', padding: '2px 5px', background: 'rgba(0, 155, 78, 0.1)', color: 'var(--kfh-green)', borderRadius: '3px' }}>
                               {s}
                             </span>
                           ))}
@@ -3013,7 +3131,7 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
                   );
                 })}
 
-                {pendingPurchases.length === 0 && pendingVipAllocations.length === 0 && pendingVipDispenses.length === 0 && pendingTurkeyReturns.length === 0 && pendingMissingReports.length === 0 && (
+                {pendingPurchases.length === 0 && pendingVipAllocations.length === 0 && pendingVipDeallocations.length === 0 && pendingVipDispenses.length === 0 && pendingTurkeyReturns.length === 0 && pendingMissingReports.length === 0 && (
                   <tr>
                     <td colSpan={9} style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)' }}>
                       {currentLang === 'en' ? 'No operations or requests recorded yet.' : 'لا توجد طلبات أو عمليات مسجلة بعد.'}
@@ -3883,6 +4001,124 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
                 )}
               </div>
             )}
+
+          </div>
+        </div>
+      )}
+
+      {/* 6.7. RETURN VIP (OFFLINE) STOCK TO KFH ONLINE STOCK MODAL */}
+      {showVipDeallocModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100vw',
+          height: '100vh',
+          backgroundColor: 'rgba(0, 0, 0, 0.7)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999,
+          padding: '20px'
+        }}>
+          <div className="glass-card" style={{ width: '100%', maxWidth: '650px', maxHeight: '90vh', overflowY: 'auto', padding: '24px', borderLeft: '4px solid var(--kfh-green)' }}>
+            
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--surface-border)', paddingBottom: '12px', marginBottom: '16px' }}>
+              <h3 style={{ margin: 0, color: 'var(--kfh-green)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <i className="fa-solid fa-rotate-left"></i>
+                {currentLang === 'en' ? 'Return VIP Stock to KFH Online Stock' : 'إرجاع مخزون كبار العملاء إلى مخزون بيتك أونلاين'}
+              </h3>
+              <button
+                onClick={() => setShowVipDeallocModal(false)}
+                style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: 'var(--text-muted)' }}
+              >
+                &times;
+              </button>
+            </div>
+
+            <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '0 0 16px 0' }}>
+              {currentLang === 'en'
+                ? 'Initiate a Maker-Checker 4-eyes authorization workflow to return selected bullion from VIP Offline stock back to general KFH Online stock (Channel: ONLINE). Once approved by the Checker, items become immediately visible and eligible for retail & e-commerce purchase.'
+                : 'بدء سير عمل لاعتماد إعادة السبائك المحددة من مخزون كبار العملاء (أوفلاين) إلى مخزون بيتك العام (أونلاين). بمجرد اعتماد المراجع، ستعود القناة إلى ONLINE وتصبح متاحة فوراً للبيع والتداول عبر الإنترنت.'}
+            </p>
+
+            {/* Selected Bars Summary */}
+            <div style={{ background: 'rgba(0, 155, 78, 0.08)', borderRadius: '8px', padding: '12px', border: '1px solid rgba(0, 155, 78, 0.25)', marginBottom: '16px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', fontWeight: 'bold', color: 'var(--kfh-green)', marginBottom: '6px' }}>
+                <span>{currentLang === 'en' ? 'Selected VIP Bars to Return to Online:' : 'السبائك المحددة لإعادتها إلى أونلاين:'} {selectedVipItemsData.count} {currentLang === 'en' ? 'bars' : 'سبيكة'}</span>
+                <span>{selectedVipItemsData.totalWeightKg} KG ({selectedVipItemsData.totalWeightGrams.toLocaleString()} g)</span>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', maxHeight: '110px', overflowY: 'auto' }}>
+                {selectedVipItemsData.items.map((item, idx) => (
+                  <span key={idx} style={{ fontSize: '10px', padding: '2px 6px', background: 'rgba(255,255,255,0.1)', borderRadius: '3px', fontFamily: 'monospace' }}>
+                    {item.serial_number} ({item.weight_grams}g - {item.denomination || '1kg'})
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {/* Form Details */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '16px' }}>
+              
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label style={{ fontSize: '12px', fontWeight: 600 }}>
+                  {currentLang === 'en' ? 'Reason for Returning to Online Channel *' : 'سبب الإرجاع إلى القناة الإلكترونية *'}
+                </label>
+                <select
+                  className="form-control"
+                  value={vipDeallocReason}
+                  onChange={e => setVipDeallocReason(e.target.value)}
+                  style={{ fontSize: '12px' }}
+                >
+                  <option value="Surplus VIP reserve returned to general online retail stock">Surplus VIP reserve returned to general online retail stock</option>
+                  <option value="E-Commerce replenishment from VIP vault allocation">E-Commerce replenishment from VIP vault allocation</option>
+                  <option value="Branch retail replenishment">Branch retail replenishment</option>
+                  <option value="Client unallocated cancellation / return">Client unallocated cancellation / return</option>
+                  <option value="Treasury inventory re-balancing">Treasury inventory re-balancing</option>
+                </select>
+              </div>
+
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label style={{ fontSize: '12px', fontWeight: 600 }}>
+                  {currentLang === 'en' ? 'Additional Notes / Instructions' : 'ملاحظات إضافية'}
+                </label>
+                <textarea
+                  rows={2}
+                  className="form-control"
+                  placeholder={currentLang === 'en' ? 'e.g. Returned to online channel to fulfill pending e-commerce orders...' : 'مثال: تمت إعادة السبائك لتلبية طلبات التداول الإلكتروني...'}
+                  value={vipDeallocNotes}
+                  onChange={e => setVipDeallocNotes(e.target.value)}
+                  style={{ fontSize: '12px' }}
+                />
+              </div>
+
+            </div>
+
+            {/* Actions */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setShowVipDeallocModal(false)}
+                disabled={isSubmittingVipDealloc}
+              >
+                {currentLang === 'en' ? 'Cancel' : 'إلغاء'}
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={handleReturnVipToOnline}
+                disabled={selectedVipItemsData.count === 0 || isSubmittingVipDealloc}
+                style={{ background: 'var(--kfh-green)', color: '#fff', fontWeight: 'bold' }}
+              >
+                {isSubmittingVipDealloc ? (
+                  <><i className="fa-solid fa-spinner fa-spin"></i> {currentLang === 'en' ? 'Submitting...' : 'جاري الإرسال...'}</>
+                ) : (
+                  <><i className="fa-solid fa-rotate-left"></i> {currentLang === 'en' ? 'Submit Return for Checker Approval' : 'إرسال طلب الإرجاع لاعتماد المراجع'}</>
+                )}
+              </button>
+            </div>
 
           </div>
         </div>

@@ -2757,7 +2757,8 @@ public class PMIMSTests
 
         var barAfterAlloc = await setup.Context.InventoryItems.FindAsync(kfhBar.ItemId);
         Assert.NotNull(barAfterAlloc);
-        Assert.Equal("VIP_OWNED", barAfterAlloc.OwnershipType);
+        Assert.Equal("KFH_OWNED", barAfterAlloc.OwnershipType);
+        Assert.Equal("OFFLINE", barAfterAlloc.ChannelStatus);
         Assert.Equal("READY", barAfterAlloc.StatusCode);
 
         // 4. Verify VIP inventory contains this item, and KFH online available excludes it
@@ -2767,7 +2768,36 @@ public class PMIMSTests
         var kfhAvailable = (await repo.GetKfhAvailableInventoryAsync()).ToList();
         Assert.DoesNotContain(kfhAvailable, i => i.SerialNumber == "KFH-VIP-TEST-001");
 
-        // 5. Maker initiates VIP dispensation to VIP client
+        // 5. Test Return from VIP (Offline) to KFH Online via Workflow
+        var vipDeallocWf = new WorkflowTemplate { WorkflowType = "VIP_DEALLOCATION", Name = "VIP Deallocation", Description = "VIP Deallocation Workflow", IsActive = true };
+        setup.Context.WorkflowTemplates.Add(vipDeallocWf);
+        await setup.Context.SaveChangesAsync();
+
+        var dstep1 = new WorkflowStep { TemplateId = vipDeallocWf.TemplateId, StepOrder = 1, StepName = "Maker Request", RequiredRole = "Operations Maker", Description = "Maker submit" };
+        var dstep2 = new WorkflowStep { TemplateId = vipDeallocWf.TemplateId, StepOrder = 2, StepName = "Checker Approval", RequiredRole = "Operations Checker", Description = "Checker approve" };
+        setup.Context.WorkflowSteps.AddRange(dstep1, dstep2);
+        await setup.Context.SaveChangesAsync();
+
+        var dealloc = await repo.InitiateVipDeallocationWorkflowAsync(
+            new List<string> { "KFH-VIP-TEST-001" },
+            "treasury-maker",
+            "Retail Replenishment",
+            "Rebalancing to online e-commerce catalogue");
+        Assert.NotNull(dealloc);
+        Assert.Equal("PENDING_APPROVAL", dealloc.StatusCode);
+
+        var approveDeallocResult = await repo.ApproveVipDeallocationAsync(dealloc.PendingDeallocationId, "treasury-checker");
+        Assert.Equal("SUCCESS", approveDeallocResult);
+
+        var barAfterDealloc = await setup.Context.InventoryItems.FindAsync(kfhBar.ItemId);
+        Assert.NotNull(barAfterDealloc);
+        Assert.Equal("KFH_OWNED", barAfterDealloc.OwnershipType);
+        Assert.Equal("ONLINE", barAfterDealloc.ChannelStatus);
+
+        // Re-allocate to VIP for dispensation test
+        await repo.ApproveVipAllocationAsync((await repo.InitiateVipAllocationWorkflowAsync(new List<string> { "KFH-VIP-TEST-001" }, "treasury-maker", "Re-allocating for VIP client")).PendingAllocationId, "treasury-checker");
+
+        // 6. Maker initiates VIP dispensation to VIP client
         var dispense = await repo.InitiateVipDispenseWorkflowAsync(
             new List<string> { "KFH-VIP-TEST-001" },
             "Sheikha Al-Sabah",
@@ -2779,9 +2809,8 @@ public class PMIMSTests
 
         Assert.NotNull(dispense);
         Assert.Equal("PENDING_APPROVAL", dispense.StatusCode);
-        Assert.Equal("RESERVED", barAfterAlloc.StatusCode);
 
-        // 6. Checker approves VIP dispensation
+        // 7. Checker approves VIP dispensation
         var approveDispResult = await repo.ApproveVipDispenseAsync(dispense.PendingDispenseId, "treasury-checker");
         Assert.Equal("SUCCESS", approveDispResult);
 
