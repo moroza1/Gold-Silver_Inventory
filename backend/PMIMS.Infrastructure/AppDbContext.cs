@@ -354,6 +354,8 @@ public class AppDbContext : DbContext
             entity.HasOne(e => e.Lot).WithMany().HasForeignKey(e => e.LotId);
             entity.HasOne(e => e.Location).WithMany().HasForeignKey(e => e.LocationId);
             entity.Property(e => e.RowVersion).IsRowVersion();
+            entity.Property(e => e.ChannelStatus).HasDefaultValue("ONLINE");
+            entity.Property(e => e.ChannelCategory).HasDefaultValue("RETAIL_ONLINE");
         });
 
         // InventoryBalance Configuration

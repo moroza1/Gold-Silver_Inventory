@@ -333,7 +333,7 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
     });
   }, [selectedItemsData.items, searchSelectedQuery]);
 
-  // Purchasing Cost Breakdown per Denomination and Shipment Lot (Turkey)
+  // Production Cost Breakdown per Denomination and Shipment Lot (Turkey)
   const selectedBreakdownByDenomination = useMemo(() => {
     const map = new Map<string, {
       product_code: string;
@@ -422,7 +422,7 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
     }
 
     const itemCost = rateNum > 0 ? (matchedItem.weight_grams * rateNum) : 0;
-    const costLabel = itemCost > 0 ? ` (Purchasing Cost: ${itemCost.toFixed(3)} KWD)` : '';
+    const costLabel = itemCost > 0 ? ` (Production Cost: ${itemCost.toFixed(3)} KWD)` : '';
 
     setScanFeedback({
       type: 'success',
@@ -1645,7 +1645,7 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
 
                         {denomPurchasingCost > 0 && (
                           <div style={{ borderLeft: '1px solid rgba(0, 155, 78, 0.25)', paddingLeft: '12px' }}>
-                            <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Purchasing Cost / Bar' : 'تكلفة الشراء للسبيكة'}</div>
+                            <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Production Cost / Bar' : 'تكلفة الإنتاج للسبيكة'}</div>
                             <div style={{ fontSize: '13px', fontWeight: 'bold', color: 'var(--kfh-green)' }}>
                               {denomPurchasingCost.toFixed(3)} KWD
                             </div>
@@ -1976,7 +1976,7 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
                           <th>{currentLang === 'en' ? 'Weight (g)' : 'الوزن (جم)'}</th>
                           <th>{currentLang === 'en' ? 'Refiner' : 'المصفاة'}</th>
                           <th>{currentLang === 'en' ? 'Shipment / Lot' : 'الشحنة / التشغيلة'}</th>
-                          <th>{currentLang === 'en' ? 'Purchasing Cost' : 'تكلفة الشراء'}</th>
+                          <th>{currentLang === 'en' ? 'Production Cost' : 'تكلفة الإنتاج'}</th>
                           <th>{currentLang === 'en' ? 'QR Status' : 'حالة QR'}</th>
                           <th style={{ width: '60px' }}>{currentLang === 'en' ? 'Remove' : 'إزالة'}</th>
                         </tr>
@@ -2094,8 +2094,8 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
               </div>
               <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px', display: 'block' }}>
                 {currentLang === 'en' 
-                  ? 'Cost per gram registered with shipment lot and used to calculate purchasing cost by denomination.'
-                  : 'تكلفة الجرام ستُسجل مع الشحنة وتُستخدم لاحتساب تكلفة الشراء لكل فئة.'}
+                  ? 'Cost per gram registered with shipment lot and used to calculate production cost by denomination.'
+                  : 'تكلفة الجرام ستُسجل مع الشحنة وتُستخدم لاحتساب تكلفة الإنتاج لكل فئة.'}
               </span>
             </div>
 
@@ -2108,7 +2108,7 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
               marginBottom: '16px'
             }}>
               <div style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                {currentLang === 'en' ? 'Total Agreed Purchasing Cost' : 'إجمالي تكلفة الشراء المتفق عليها'}
+                {currentLang === 'en' ? 'Total Agreed Production Cost' : 'إجمالي تكلفة الإنتاج المتفق عليها'}
               </div>
               <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--kfh-green)', marginTop: '4px' }}>
                 {totalAgreedCostKwd.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })} <span style={{ fontSize: '14px' }}>KWD</span>
@@ -2177,8 +2177,8 @@ export const TurkeyPurchaseScreen: React.FC<TurkeyPurchaseScreenProps> = ({
             <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '12px', textAlign: 'center', lineHeight: '1.4' }}>
               <i className="fa-solid fa-shield-halved" style={{ color: 'var(--kfh-green)' }}></i>{' '}
               {currentLang === 'en' 
-                ? 'Upon Checker approval, gold ownership will transition to KFH_OWNED and purchasing costs per denomination will register in inventory ledger.' 
-                : 'بمجرد اعتماد المراجع، ستتحول ملكية الذهب إلى بيتك (KFH_OWNED) وتُسجل تكلفة الشراء حسب الفئة في سجلات المخزون.'}
+                ? 'Upon Checker approval, gold ownership will transition to KFH_OWNED and production costs per denomination will register in inventory ledger.' 
+                : 'بمجرد اعتماد المراجع، ستتحول ملكية الذهب إلى بيتك (KFH_OWNED) وتُسجل تكلفة الإنتاج حسب الفئة في سجلات المخزون.'}
             </div>
 
           </div>

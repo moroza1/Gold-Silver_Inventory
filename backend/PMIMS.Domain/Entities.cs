@@ -235,7 +235,7 @@ public class InventoryItem
     public string OwnershipType { get; set; } = "KFH_OWNED";
     public string StatusCode { get; set; } = "READY";
     public string ChannelStatus { get; set; } = "ONLINE"; // "ONLINE" (default: available for internet/e-commerce & GFS), "OFFLINE" (VIP/Branch walk-in: GFS/counter only, blocked from internet)
-    public string? ChannelCategory { get; set; } // "VIP_EXCLUSIVE", "RETAIL_ONLINE", "BRANCH_OFFLINE"
+    public string ChannelCategory { get; set; } = "RETAIL_ONLINE"; // "VIP_EXCLUSIVE", "RETAIL_ONLINE", "BRANCH_OFFLINE"
     public byte[] RowVersion { get; set; } = null!; // Concurrency lock
 
     // ============================================================

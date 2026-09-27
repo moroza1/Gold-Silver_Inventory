@@ -3617,7 +3617,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     }
   };
 
-  const handlePrintMultipleLabels = (labels: any[]) => {
+  const handlePrintMultipleLabels = async (labels: any[]) => {
     if (!labels || labels.length === 0) return;
     const printWindow = window.open('', '_blank', 'width=800,height=600');
     if (printWindow) {
@@ -3729,6 +3729,35 @@ const [migrationApproved, setMigrationApproved] = useState(false);
 </body>
 </html>`);
       printWindow.document.close();
+    }
+
+    // Automatically log batch QR printing in the database for all printed bars
+    const itemIds = labels
+      .map(l => l.itemId || l.item_id || (l.item ? l.item.itemId : 0))
+      .filter((id): id is number => typeof id === 'number' && id > 0);
+    const serialNumbers = labels
+      .map(l => (l.serialNumber || l.serial_number || l.serial || '').trim())
+      .filter((s: string) => s.length > 0);
+
+    if (itemIds.length > 0 || serialNumbers.length > 0) {
+      try {
+        await fetch(`${API_BASE}/barcode/print-batch`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+          body: JSON.stringify({
+            itemIds: itemIds.length > 0 ? itemIds : undefined,
+            serialNumbers: itemIds.length === 0 ? serialNumbers : undefined,
+            reason: 'Physical batch sticker labels printed.',
+            printedBy: username || 'treasury-maker'
+          })
+        });
+        if (typeof fetchUnprintedBars === 'function') fetchUnprintedBars();
+        if (typeof fetchQrHistory === 'function') fetchQrHistory();
+        if (typeof fetchInventory === 'function') fetchInventory();
+        if (typeof fetchTurkeyConsignmentInventory === 'function') fetchTurkeyConsignmentInventory();
+      } catch (e) {
+        console.warn('Batch print log error:', e);
+      }
     }
   };
 
@@ -9193,7 +9222,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                           />
                         </div>
                         <div className="form-group" style={{ marginBottom: 0 }}>
-                          <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Purchasing Cost (KWD)' : 'تكلفة الشراء (د.ك)'}</label>
+                          <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Production Cost (KWD)' : 'تكلفة الإنتاج (د.ك)'}</label>
                           <input 
                             type="number" 
                             step="0.001"
@@ -9224,7 +9253,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                         </div>
                       </div>
 
-                      {/* PURCHASING COST PER DENOMINATION BREAKDOWN */}
+                      {/* PRODUCTION COST PER DENOMINATION BREAKDOWN */}
                       {(() => {
                         const uniquePids = Array.from(new Set(intakeBars.map(b => b.product_id)));
                         if (uniquePids.length === 0) return null;
@@ -9314,7 +9343,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                             fontSize: '12px'
                           }}>
                             <i className="fa-solid fa-coins" style={{ color: '#F59E0B' }}></i>
-                            <span style={{ color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Total Purchasing Cost:' : 'إجمالي تكلفة الشراء:'}</span>
+                            <span style={{ color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Total Production Cost:' : 'إجمالي تكلفة الإنتاج:'}</span>
                             <strong style={{ color: '#F59E0B', fontWeight: 700 }}>
                               {totalCost.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })} KWD
                             </strong>
@@ -9329,7 +9358,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     </div>
                   </div>
 
-                  {/* PURCHASING COST BY DENOMINATION BREAKDOWN CHIPS */}
+                  {/* PRODUCTION COST BY DENOMINATION BREAKDOWN CHIPS */}
                   {(() => {
                     const uniquePids = Array.from(new Set(intakeBars.map(b => b.product_id)));
                     if (uniquePids.length === 0) return null;
@@ -9347,7 +9376,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       }}>
                         <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '5px' }}>
                           <i className="fa-solid fa-coins" style={{ color: 'var(--accent-gold)' }}></i>
-                          {currentLang === 'en' ? 'Purchasing Cost by Denomination:' : 'تكلفة الشراء حسب الفئة:'}
+                          {currentLang === 'en' ? 'Production Cost by Denomination:' : 'تكلفة الإنتاج حسب الفئة:'}
                         </span>
                         {uniquePids.map(pid => {
                           const prod = products.find((p: any) => p.product_id === pid);
@@ -9382,7 +9411,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                           <th style={{ width: '40px' }}>#</th>
                           <th style={{ minWidth: '220px' }}>{currentLang === 'en' ? 'Serial Number' : 'الرقم التسلسلي'}</th>
                           <th style={{ minWidth: '260px' }}>{currentLang === 'en' ? 'Product / Denomination' : 'نوع المنتج / الفئة'}</th>
-                          <th style={{ width: '140px' }}>{currentLang === 'en' ? 'Purchasing Cost' : 'تكلفة الشراء'}</th>
+                          <th style={{ width: '140px' }}>{currentLang === 'en' ? 'Production Cost' : 'تكلفة الإنتاج'}</th>
                           <th style={{ minWidth: '200px' }}>{currentLang === 'en' ? 'Refiner / Brand' : 'المصفاة / الماركة'}</th>
                           <th style={{ width: '50px' }}></th>
                         </tr>
@@ -9573,7 +9602,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                         </div>
 
                         <div>
-                          <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Total Purchasing Cost' : 'إجمالي تكلفة الشراء'}</div>
+                          <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Total Production Cost' : 'إجمالي تكلفة الإنتاج'}</div>
                           <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#F59E0B' }}>
                             {totalPurchasingCost.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })} <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>KWD</span>
                           </div>
@@ -18562,7 +18591,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                             <div><strong>{currentLang === 'en' ? 'Bar Serial Number:' : 'الرقم التسلسلي للسبيكة:'}</strong> <span style={{ fontFamily: 'monospace', color: 'var(--accent-gold)' }}>{selectedWfInstance.details.serial_number}</span></div>
                           )}
                           <div><strong>{currentLang === 'en' ? 'Customs Bayan No:' : 'رقم البيان الجمركي:'}</strong> {selectedWfInstance.details.customs_declaration_number || 'N/A'}</div>
-                          <div><strong>{currentLang === 'en' ? 'Purchasing Cost (KWD):' : 'تكلفة الشراء (د.ك):'}</strong> {selectedWfInstance.details.customs_duty_amount ? `${selectedWfInstance.details.customs_duty_amount.toFixed(3)} KWD` : '—'}</div>
+                          <div><strong>{currentLang === 'en' ? 'Production Cost (KWD):' : 'تكلفة الإنتاج (د.ك):'}</strong> {selectedWfInstance.details.customs_duty_amount ? `${selectedWfInstance.details.customs_duty_amount.toFixed(3)} KWD` : '—'}</div>
                           <div><strong>{currentLang === 'en' ? 'Port of Entry:' : 'منفذ الدخول:'}</strong> {selectedWfInstance.details.port_of_entry || '—'}</div>
                           <div><strong>{currentLang === 'en' ? 'Requested By (Maker):' : 'مقدم الطلب (المنشئ):'}</strong> {selectedWfInstance.details.requested_by || selectedWfInstance.details.created_by}</div>
                           <div><strong>{currentLang === 'en' ? 'Status Code:' : 'حالة الاعتماد:'}</strong> <span className="badge badge-reserved">{selectedWfInstance.details.status_code}</span></div>
@@ -18843,7 +18872,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       <span><strong>{currentLang === 'en' ? 'Bars:' : 'السبائك:'}</strong> {tBars}</span>
                       <span><strong>{currentLang === 'en' ? 'Weight:' : 'الوزن:'}</strong> {tWeight} kg</span>
                       <span><strong>{currentLang === 'en' ? 'Supplier:' : 'المورد:'}</strong> {vName}</span>
-                      {duty ? <span><strong>{currentLang === 'en' ? 'Purchasing Cost:' : 'تكلفة الشراء:'}</strong> {duty} KWD</span> : null}
+                      {duty ? <span><strong>{currentLang === 'en' ? 'Production Cost:' : 'تكلفة الإنتاج:'}</strong> {duty} KWD</span> : null}
                       <span><strong>{currentLang === 'en' ? 'Status:' : 'الحالة:'}</strong> {sCode}</span>
                     </div>
                   );
@@ -18879,7 +18908,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     />
                   </div>
                   <div className="form-group" style={{ marginBottom: 0 }}>
-                    <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Purchasing Cost (KWD)' : 'تكلفة الشراء (د.ك)'}</label>
+                    <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Production Cost (KWD)' : 'تكلفة الإنتاج (د.ك)'}</label>
                     <input
                       type="number"
                       step="0.001"

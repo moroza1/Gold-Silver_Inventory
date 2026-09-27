@@ -544,6 +544,11 @@ public class InventoryRepository : IInventoryRepository
                     itemProdCost = pcVal;
                 }
 
+                string channelStatus = element.TryGetProperty("channel_status", out var csProp) ? (csProp.GetString() ?? "ONLINE") : "ONLINE";
+                string channelCat = element.TryGetProperty("channel_category", out var ccProp)
+                    ? (ccProp.GetString() ?? (channelStatus == "OFFLINE" || finalOwnershipType == "VIP_OWNED" ? "VIP_EXCLUSIVE" : "RETAIL_ONLINE"))
+                    : (channelStatus == "OFFLINE" || finalOwnershipType == "VIP_OWNED" ? "VIP_EXCLUSIVE" : "RETAIL_ONLINE");
+
                 var item = new InventoryItem
                 {
                     SerialNumber = serial,
@@ -562,7 +567,9 @@ public class InventoryRepository : IInventoryRepository
                     AssayCertificateNumber = assayCert,
                     FinenessPpt = fineness,
                     HallmarkNumber = hallmark,
-                    GoodDeliveryStatus = !string.IsNullOrWhiteSpace(gdStatusRaw) ? gdStatusRaw! : (hasLbmaData ? "GDL_LISTED" : "NOT_ASSESSED")
+                    GoodDeliveryStatus = !string.IsNullOrWhiteSpace(gdStatusRaw) ? gdStatusRaw! : (hasLbmaData ? "GDL_LISTED" : "NOT_ASSESSED"),
+                    ChannelStatus = channelStatus,
+                    ChannelCategory = channelCat
                 };
                 _dbContext.InventoryItems.Add(item);
                 newItems.Add(item);
@@ -946,14 +953,21 @@ public class InventoryRepository : IInventoryRepository
         var ids = itemIds.Distinct().ToList();
         if (ids.Count == 0) return new HashSet<int>();
 
-        var printed = await _dbContext.ChainOfCustodyEvents
+        var printedFromCustody = await _dbContext.ChainOfCustodyEvents
             .AsNoTracking()
             .Where(e => ids.Contains(e.ItemId) && (e.EventType == "LABEL_PRINTED" || e.EventType == "LABEL_REPRINTED"))
             .Select(e => e.ItemId)
             .Distinct()
             .ToListAsync();
 
-        return printed.ToHashSet();
+        var printedFromLogs = await _dbContext.QrPrintLogs
+            .AsNoTracking()
+            .Where(l => ids.Contains(l.ItemId))
+            .Select(l => l.ItemId)
+            .Distinct()
+            .ToListAsync();
+
+        return printedFromCustody.Concat(printedFromLogs).ToHashSet();
     }
 
     public async Task<string> GetQrCodeReprintPrivilegeAsync()
@@ -1494,7 +1508,9 @@ public class InventoryRepository : IInventoryRepository
                     LotId = lot.LotId,
                     LocationId = location.LocationId,
                     OwnershipType = s.OwnershipType,
-                    StatusCode = "READY"
+                    StatusCode = "READY",
+                    ChannelStatus = "ONLINE",
+                    ChannelCategory = "RETAIL_ONLINE"
                 };
                 _dbContext.InventoryItems.Add(item);
             }
@@ -4771,6 +4787,13 @@ public class InventoryRepository : IInventoryRepository
     public async Task<InventoryItem?> GetItemBySerialNumberAsync(string serialNumber) =>
         await ItemsWithLabelDetails().FirstOrDefaultAsync(i => i.SerialNumber == serialNumber);
 
+    public async Task<IEnumerable<InventoryItem>> GetItemsBySerialNumbersAsync(IEnumerable<string> serialNumbers)
+    {
+        var list = serialNumbers.Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s.Trim()).Distinct().ToList();
+        if (list.Count == 0) return new List<InventoryItem>();
+        return await ItemsWithLabelDetails().Where(i => list.Contains(i.SerialNumber)).ToListAsync();
+    }
+
     public async Task<InventoryItem?> GetItemByIdWithDetailsAsync(int itemId) =>
         await ItemsWithLabelDetails().FirstOrDefaultAsync(i => i.ItemId == itemId);
 
@@ -7350,57 +7373,147 @@ public class InventoryRepository : IInventoryRepository
 
     public async Task<bool> ResetStoreDataAndAuditTrailAsync(string initiatedBy)
     {
-        // 1. Remove all transactional, movement, workflow, and customer records
-        _dbContext.ChainOfCustodyEvents.RemoveRange(_dbContext.ChainOfCustodyEvents);
-        _dbContext.InventoryTransactions.RemoveRange(_dbContext.InventoryTransactions);
-        _dbContext.MovementTransactions.RemoveRange(_dbContext.MovementTransactions);
-        _dbContext.SalesOrders.RemoveRange(_dbContext.SalesOrders);
-        _dbContext.RedemptionRequests.RemoveRange(_dbContext.RedemptionRequests);
-        _dbContext.WithdrawalRequests.RemoveRange(_dbContext.WithdrawalRequests);
-        _dbContext.ReservationRequests.RemoveRange(_dbContext.ReservationRequests);
-        _dbContext.CustomerAllocations.RemoveRange(_dbContext.CustomerAllocations);
-        _dbContext.CustomerHoldings.RemoveRange(_dbContext.CustomerHoldings);
-        _dbContext.StocktakeScans.RemoveRange(_dbContext.StocktakeScans);
-        _dbContext.StocktakeFreezes.RemoveRange(_dbContext.StocktakeFreezes);
-        _dbContext.StocktakeSessions.RemoveRange(_dbContext.StocktakeSessions);
-        _dbContext.MismatchCases.RemoveRange(_dbContext.MismatchCases);
-        _dbContext.ReconciliationItems.RemoveRange(_dbContext.ReconciliationItems);
-        _dbContext.ReconciliationRuns.RemoveRange(_dbContext.ReconciliationRuns);
-        _dbContext.ValuationSnapshots.RemoveRange(_dbContext.ValuationSnapshots);
-        _dbContext.ApprovalActions.RemoveRange(_dbContext.ApprovalActions);
-        _dbContext.WorkflowInstances.RemoveRange(_dbContext.WorkflowInstances);
-        _dbContext.ExtractedDocumentFields.RemoveRange(_dbContext.ExtractedDocumentFields);
-        _dbContext.DocumentUploads.RemoveRange(_dbContext.DocumentUploads);
-        _dbContext.MigrationStagingItems.RemoveRange(_dbContext.MigrationStagingItems);
-        _dbContext.BranchTransfers.RemoveRange(_dbContext.BranchTransfers);
-        _dbContext.PendingIntakes.RemoveRange(_dbContext.PendingIntakes);
-        _dbContext.PendingTurkeyPurchases.RemoveRange(_dbContext.PendingTurkeyPurchases);
-        _dbContext.PendingThresholdChanges.RemoveRange(_dbContext.PendingThresholdChanges);
-        _dbContext.PendingVipAllocations.RemoveRange(_dbContext.PendingVipAllocations);
-        _dbContext.PendingVipDispenses.RemoveRange(_dbContext.PendingVipDispenses);
-        _dbContext.PendingTurkeyReturns.RemoveRange(_dbContext.PendingTurkeyReturns);
-        _dbContext.FimSyncLogs.RemoveRange(_dbContext.FimSyncLogs);
-        _dbContext.BusinessRuleEvaluations.RemoveRange(_dbContext.BusinessRuleEvaluations);
-        _dbContext.NotificationDeliveries.RemoveRange(_dbContext.NotificationDeliveries);
-        _dbContext.MonitoringEvents.RemoveRange(_dbContext.MonitoringEvents);
-        _dbContext.IfrsValuationDisclosures.RemoveRange(_dbContext.IfrsValuationDisclosures);
-        _dbContext.CoreBankingLedgerPostings.RemoveRange(_dbContext.CoreBankingLedgerPostings);
-        _dbContext.KFHOnlineTransactionLogs.RemoveRange(_dbContext.KFHOnlineTransactionLogs);
-        _dbContext.GfsDeliveryRequests.RemoveRange(_dbContext.GfsDeliveryRequests);
-        _dbContext.HomeDeliveryRequests.RemoveRange(_dbContext.HomeDeliveryRequests);
-        _dbContext.GfsSyncLogs.RemoveRange(_dbContext.GfsSyncLogs);
-        _dbContext.POItems.RemoveRange(_dbContext.POItems);
-        _dbContext.PurchaseOrders.RemoveRange(_dbContext.PurchaseOrders);
+        bool isSqlite = _dbContext.Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite";
 
-        // 2. Remove physical inventory items, balances, and lots
-        _dbContext.InventoryItems.RemoveRange(_dbContext.InventoryItems);
-        _dbContext.InventoryBalances.RemoveRange(_dbContext.InventoryBalances);
-        _dbContext.InventoryLots.RemoveRange(_dbContext.InventoryLots);
+        if (isSqlite)
+        {
+            var conn = _dbContext.Database.GetDbConnection();
+            bool wasOpen = conn.State == System.Data.ConnectionState.Open;
+            if (!wasOpen) await conn.OpenAsync();
 
-        // 3. Clear audit logs
-        _dbContext.AuditLogs.RemoveRange(_dbContext.AuditLogs);
+            try
+            {
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = @"
+                    PRAGMA foreign_keys = OFF;
+                    DELETE FROM damaged_bar_replacements;
+                    DELETE FROM pending_damaged_exports;
+                    DELETE FROM qr_print_logs;
+                    DELETE FROM pending_qr_reprints;
+                    DELETE FROM pending_customs_transfers;
+                    DELETE FROM pending_missing_item_reports;
+                    DELETE FROM pending_vip_deallocations;
+                    DELETE FROM pending_vip_dispenses;
+                    DELETE FROM pending_vip_allocations;
+                    DELETE FROM pending_turkey_returns;
+                    DELETE FROM pending_turkey_purchases;
+                    DELETE FROM shipment_production_costs;
+                    DELETE FROM chain_of_custody_events;
+                    DELETE FROM movement_transactions;
+                    DELETE FROM inventory_transactions;
+                    DELETE FROM sales_orders;
+                    DELETE FROM withdrawal_requests;
+                    DELETE FROM redemption_requests;
+                    DELETE FROM reservation_requests;
+                    DELETE FROM customer_allocations;
+                    DELETE FROM customer_holdings;
+                    DELETE FROM stocktake_scans;
+                    DELETE FROM stocktake_freezes;
+                    DELETE FROM stocktake_sessions;
+                    DELETE FROM mismatch_cases;
+                    DELETE FROM reconciliation_items;
+                    DELETE FROM reconciliation_runs;
+                    DELETE FROM valuation_snapshots;
+                    DELETE FROM approval_actions;
+                    DELETE FROM workflow_instances;
+                    DELETE FROM extracted_document_fields;
+                    DELETE FROM document_uploads;
+                    DELETE FROM migration_staging_items;
+                    DELETE FROM branch_transfers;
+                    DELETE FROM pending_intakes;
+                    DELETE FROM pending_threshold_changes;
+                    DELETE FROM fim_sync_logs;
+                    DELETE FROM business_rule_evaluations;
+                    DELETE FROM notification_deliveries;
+                    DELETE FROM monitoring_events;
+                    DELETE FROM ifrs_valuation_disclosures;
+                    DELETE FROM core_banking_ledger_postings;
+                    DELETE FROM kfhonline_transaction_logs;
+                    DELETE FROM gfs_delivery_requests;
+                    DELETE FROM home_delivery_requests;
+                    DELETE FROM gfs_sync_logs;
+                    DELETE FROM po_items;
+                    DELETE FROM inventory_items;
+                    DELETE FROM inventory_balances;
+                    DELETE FROM inventory_lots;
+                    DELETE FROM purchase_orders;
+                    DELETE FROM gl_journal_lines;
+                    DELETE FROM gl_journal_entries;
+                    DELETE FROM audit_logs;
+                    PRAGMA foreign_keys = ON;
+                ";
+                await cmd.ExecuteNonQueryAsync();
+            }
+            finally
+            {
+                if (!wasOpen) await conn.CloseAsync();
+            }
 
-        await _dbContext.SaveChangesAsync();
+            _dbContext.ChangeTracker.Clear();
+        }
+        else
+        {
+            // SQL Server path
+            // 1. Remove all child, transactional, movement, workflow, and customer records
+            _dbContext.DamagedBarReplacements.RemoveRange(_dbContext.DamagedBarReplacements);
+            _dbContext.PendingDamagedExports.RemoveRange(_dbContext.PendingDamagedExports);
+            _dbContext.QrPrintLogs.RemoveRange(_dbContext.QrPrintLogs);
+            _dbContext.PendingQrReprints.RemoveRange(_dbContext.PendingQrReprints);
+            _dbContext.PendingCustomsTransfers.RemoveRange(_dbContext.PendingCustomsTransfers);
+            _dbContext.PendingMissingItemReports.RemoveRange(_dbContext.PendingMissingItemReports);
+            _dbContext.PendingVipDeallocations.RemoveRange(_dbContext.PendingVipDeallocations);
+            _dbContext.PendingVipDispenses.RemoveRange(_dbContext.PendingVipDispenses);
+            _dbContext.PendingVipAllocations.RemoveRange(_dbContext.PendingVipAllocations);
+            _dbContext.PendingTurkeyReturns.RemoveRange(_dbContext.PendingTurkeyReturns);
+            _dbContext.PendingTurkeyPurchases.RemoveRange(_dbContext.PendingTurkeyPurchases);
+            _dbContext.ShipmentProductionCosts.RemoveRange(_dbContext.ShipmentProductionCosts);
+            _dbContext.ChainOfCustodyEvents.RemoveRange(_dbContext.ChainOfCustodyEvents);
+            _dbContext.MovementTransactions.RemoveRange(_dbContext.MovementTransactions);
+            _dbContext.InventoryTransactions.RemoveRange(_dbContext.InventoryTransactions);
+            _dbContext.SalesOrders.RemoveRange(_dbContext.SalesOrders);
+            _dbContext.WithdrawalRequests.RemoveRange(_dbContext.WithdrawalRequests);
+            _dbContext.RedemptionRequests.RemoveRange(_dbContext.RedemptionRequests);
+            _dbContext.ReservationRequests.RemoveRange(_dbContext.ReservationRequests);
+            _dbContext.CustomerAllocations.RemoveRange(_dbContext.CustomerAllocations);
+            _dbContext.CustomerHoldings.RemoveRange(_dbContext.CustomerHoldings);
+            _dbContext.StocktakeScans.RemoveRange(_dbContext.StocktakeScans);
+            _dbContext.StocktakeFreezes.RemoveRange(_dbContext.StocktakeFreezes);
+            _dbContext.StocktakeSessions.RemoveRange(_dbContext.StocktakeSessions);
+            _dbContext.MismatchCases.RemoveRange(_dbContext.MismatchCases);
+            _dbContext.ReconciliationItems.RemoveRange(_dbContext.ReconciliationItems);
+            _dbContext.ReconciliationRuns.RemoveRange(_dbContext.ReconciliationRuns);
+            _dbContext.ValuationSnapshots.RemoveRange(_dbContext.ValuationSnapshots);
+            _dbContext.ApprovalActions.RemoveRange(_dbContext.ApprovalActions);
+            _dbContext.WorkflowInstances.RemoveRange(_dbContext.WorkflowInstances);
+            _dbContext.ExtractedDocumentFields.RemoveRange(_dbContext.ExtractedDocumentFields);
+            _dbContext.DocumentUploads.RemoveRange(_dbContext.DocumentUploads);
+            _dbContext.MigrationStagingItems.RemoveRange(_dbContext.MigrationStagingItems);
+            _dbContext.BranchTransfers.RemoveRange(_dbContext.BranchTransfers);
+            _dbContext.PendingIntakes.RemoveRange(_dbContext.PendingIntakes);
+            _dbContext.PendingThresholdChanges.RemoveRange(_dbContext.PendingThresholdChanges);
+            _dbContext.FimSyncLogs.RemoveRange(_dbContext.FimSyncLogs);
+            _dbContext.BusinessRuleEvaluations.RemoveRange(_dbContext.BusinessRuleEvaluations);
+            _dbContext.NotificationDeliveries.RemoveRange(_dbContext.NotificationDeliveries);
+            _dbContext.MonitoringEvents.RemoveRange(_dbContext.MonitoringEvents);
+            _dbContext.IfrsValuationDisclosures.RemoveRange(_dbContext.IfrsValuationDisclosures);
+            _dbContext.CoreBankingLedgerPostings.RemoveRange(_dbContext.CoreBankingLedgerPostings);
+            _dbContext.KFHOnlineTransactionLogs.RemoveRange(_dbContext.KFHOnlineTransactionLogs);
+            _dbContext.GfsDeliveryRequests.RemoveRange(_dbContext.GfsDeliveryRequests);
+            _dbContext.HomeDeliveryRequests.RemoveRange(_dbContext.HomeDeliveryRequests);
+            _dbContext.GfsSyncLogs.RemoveRange(_dbContext.GfsSyncLogs);
+            _dbContext.POItems.RemoveRange(_dbContext.POItems);
+            _dbContext.PurchaseOrders.RemoveRange(_dbContext.PurchaseOrders);
+
+            // 2. Remove physical inventory items, balances, and lots
+            _dbContext.InventoryItems.RemoveRange(_dbContext.InventoryItems);
+            _dbContext.InventoryBalances.RemoveRange(_dbContext.InventoryBalances);
+            _dbContext.InventoryLots.RemoveRange(_dbContext.InventoryLots);
+
+            // 3. Clear audit logs
+            _dbContext.AuditLogs.RemoveRange(_dbContext.AuditLogs);
+
+            await _dbContext.SaveChangesAsync();
+        }
 
         // 4. Record a clean genesis audit log entry for the reset action
         await SaveAuditLogAsync(

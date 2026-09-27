@@ -52,8 +52,8 @@ public partial class PMIMSControllers
         var printedBy = req?.PrintedBy ?? User.Identity?.Name ?? "unknown";
         try
         {
-            var evt = await _repository.RecordChainOfCustodyEventAsync(itemId, "LABEL_PRINTED", printedBy, notes: req?.Notes ?? "GS1-128/QR label printed.");
-            return Ok(new { custody_event_id = evt.CustodyEventId, recorded_at = evt.RecordedAt });
+            var log = await _repository.RecordQrPrintAsync(itemId, "INITIAL_SINGLE", printedBy, reason: req?.Notes ?? "Physical bar sticker label printed.");
+            return Ok(new { log_id = log.PrintLogId, recorded_at = log.PrintedAt });
         }
         catch (System.Exception ex)
         {
@@ -198,26 +198,34 @@ public partial class PMIMSControllers
     [HttpPost("barcode/print-batch")]
     public async Task<IActionResult> PrintBatchBarsQr([FromBody] BatchQrPrintRequest req)
     {
-        var printedBy = User.Identity?.Name ?? "system-user";
+        var printedBy = req.PrintedBy ?? User.Identity?.Name ?? "system-user";
         try
         {
-            if (req.ItemIds == null || req.ItemIds.Count == 0)
+            var itemIds = req.ItemIds ?? new List<int>();
+            if (itemIds.Count == 0 && req.SerialNumbers != null && req.SerialNumbers.Count > 0)
+            {
+                var cleanSerials = req.SerialNumbers.Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s.Trim()).ToList();
+                var items = await _repository.GetItemsBySerialNumbersAsync(cleanSerials);
+                itemIds = items.Select(i => i.ItemId).ToList();
+            }
+
+            if (itemIds.Count == 0)
             {
                 return BadRequest(new { error = "No bars selected for batch printing." });
             }
 
-            var logs = await _repository.RecordBatchQrPrintAsync(req.ItemIds, "INITIAL_BATCH", printedBy, req.Reason);
+            var logs = await _repository.RecordBatchQrPrintAsync(itemIds, "INITIAL_BATCH", printedBy, req.Reason ?? "Physical batch sticker labels printed.");
             var labels = new List<BarcodeLabelDto>();
-            foreach (var id in req.ItemIds)
+            foreach (var id in itemIds)
             {
                 var l = await _barcodeLabelService.GenerateItemLabelByIdAsync(id);
                 if (l != null) labels.Add(l);
             }
             return Ok(new
             {
-                total_printed = req.ItemIds.Count,
+                total_printed = itemIds.Count,
                 labels,
-                message = $"Batch QR labels successfully generated for {req.ItemIds.Count} bars."
+                message = $"Batch QR labels successfully generated and logged for {itemIds.Count} bars."
             });
         }
         catch (System.Exception ex)
@@ -329,8 +337,10 @@ public class SingleQrPrintRequest
 
 public class BatchQrPrintRequest
 {
-    public List<int> ItemIds { get; set; } = new();
+    public List<int>? ItemIds { get; set; } = new();
+    public List<string>? SerialNumbers { get; set; } = new();
     public string? Reason { get; set; }
+    public string? PrintedBy { get; set; }
 }
 
 public class InitiateQrReprintRequest

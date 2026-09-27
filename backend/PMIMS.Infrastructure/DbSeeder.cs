@@ -322,6 +322,16 @@ public static class DbSeeder
                                 catch { }
                             }
                         }
+                        try
+                        {
+                            using var backfillCmd = connection.CreateCommand();
+                            backfillCmd.CommandText = @"
+                                UPDATE inventory_items SET channel_category = 'RETAIL_ONLINE' WHERE channel_category IS NULL;
+                                UPDATE inventory_items SET channel_status = 'ONLINE' WHERE channel_status IS NULL;
+                            ";
+                            await backfillCmd.ExecuteNonQueryAsync();
+                        }
+                        catch { }
                     }
 
                     // 1d. Ensure columns on branch_transfers
@@ -527,6 +537,26 @@ public static class DbSeeder
                             }
                             catch { }
                         }
+                        if (!thCols.Contains("metal_type_id"))
+                        {
+                            try
+                            {
+                                using var alterCmd = connection.CreateCommand();
+                                alterCmd.CommandText = "ALTER TABLE reorder_thresholds ADD COLUMN metal_type_id INTEGER NULL;";
+                                await alterCmd.ExecuteNonQueryAsync();
+                            }
+                            catch { }
+                        }
+                        if (!thCols.Contains("threshold_weight_kg"))
+                        {
+                            try
+                            {
+                                using var alterCmd = connection.CreateCommand();
+                                alterCmd.CommandText = "ALTER TABLE reorder_thresholds ADD COLUMN threshold_weight_kg DECIMAL(18,4) NULL;";
+                                await alterCmd.ExecuteNonQueryAsync();
+                            }
+                            catch { }
+                        }
                     }
 
                     // Ensure pending_threshold_changes table exists and is up to date
@@ -538,10 +568,12 @@ public static class DbSeeder
                                 change_type TEXT NOT NULL DEFAULT 'CREATE',
                                 threshold_type TEXT NOT NULL DEFAULT 'LOW_STOCK',
                                 threshold_id INTEGER,
-                                product_id INTEGER NOT NULL,
-                                vendor_id INTEGER NOT NULL,
+                                product_id INTEGER,
+                                vendor_id INTEGER,
+                                metal_type_id INTEGER,
                                 min_stock_qty INTEGER NOT NULL,
                                 max_stock_qty INTEGER,
+                                threshold_weight_kg DECIMAL(18,4),
                                 reorder_qty INTEGER NOT NULL,
                                 is_active INTEGER NOT NULL DEFAULT 1,
                                 status_code TEXT NOT NULL DEFAULT 'PENDING_APPROVAL',
@@ -585,6 +617,26 @@ public static class DbSeeder
                             {
                                 using var alterCmd = connection.CreateCommand();
                                 alterCmd.CommandText = "ALTER TABLE pending_threshold_changes ADD COLUMN max_stock_qty INTEGER NULL;";
+                                await alterCmd.ExecuteNonQueryAsync();
+                            }
+                            catch { }
+                        }
+                        if (!pthCols.Contains("metal_type_id"))
+                        {
+                            try
+                            {
+                                using var alterCmd = connection.CreateCommand();
+                                alterCmd.CommandText = "ALTER TABLE pending_threshold_changes ADD COLUMN metal_type_id INTEGER NULL;";
+                                await alterCmd.ExecuteNonQueryAsync();
+                            }
+                            catch { }
+                        }
+                        if (!pthCols.Contains("threshold_weight_kg"))
+                        {
+                            try
+                            {
+                                using var alterCmd = connection.CreateCommand();
+                                alterCmd.CommandText = "ALTER TABLE pending_threshold_changes ADD COLUMN threshold_weight_kg DECIMAL(18,4) NULL;";
                                 await alterCmd.ExecuteNonQueryAsync();
                             }
                             catch { }

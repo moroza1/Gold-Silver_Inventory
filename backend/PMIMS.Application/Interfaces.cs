@@ -262,6 +262,7 @@ public interface IInventoryRepository
     // Product/Lot/Location include chain BarcodeLabelService needs to build a label.
     // =========================================================================
     Task<InventoryItem?> GetItemBySerialNumberAsync(string serialNumber);
+    Task<IEnumerable<InventoryItem>> GetItemsBySerialNumbersAsync(IEnumerable<string> serialNumbers);
     Task<InventoryItem?> GetItemByIdWithDetailsAsync(int itemId);
     Task<InventoryLot?> GetLotByNumberAsync(string lotNumber);
     Task<IEnumerable<InventoryItem>> GetItemsByLotIdAsync(int lotId);

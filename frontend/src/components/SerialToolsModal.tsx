@@ -102,8 +102,8 @@ export const SerialToolsModal: React.FC<SerialToolsModalProps> = ({
 
     if (!isValidCost) {
       alert(currentLang === 'en'
-        ? 'Please enter a valid Purchasing Cost / Value (must be greater than 0) before submitting.'
-        : 'يرجى إدخال تكلفة شراء / قيمة صالحة (يجب أن تكون أكبر من 0) قبل الإضافة.');
+        ? 'Please enter a valid Production Cost / Value (must be greater than 0) before submitting.'
+        : 'يرجى إدخال تكلفة إنتاج / قيمة صالحة (يجب أن تكون أكبر من 0) قبل الإضافة.');
       return;
     }
 
@@ -185,8 +185,8 @@ export const SerialToolsModal: React.FC<SerialToolsModalProps> = ({
           
           <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: 0 }}>
             {currentLang === 'en'
-              ? 'Enter serial numbers, select denomination, refiner brand, and set the purchasing cost for this denomination.'
-              : 'أدخل الأرقام التسلسلية، واختر الفئة والمصفاة، وحدد تكلفة الشراء المخصصة لهذه الفئة.'}
+              ? 'Enter serial numbers, select denomination, refiner brand, and set the production cost for this denomination.'
+              : 'أدخل الأرقام التسلسلية، واختر الفئة والمصفاة، وحدد تكلفة الإنتاج المخصصة لهذه الفئة.'}
           </p>
 
           {/* Form Fields */}
@@ -294,11 +294,11 @@ export const SerialToolsModal: React.FC<SerialToolsModalProps> = ({
                 </select>
               </div>
 
-              {/* Purchasing Cost / Value per Denomination */}
+              {/* Production Cost / Value per Denomination */}
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label style={{ fontSize: '12px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <i className="fa-solid fa-coins" style={{ color: 'var(--accent-gold)' }}></i>
-                  {currentLang === 'en' ? 'Purchasing Cost / Value (KWD)' : 'تكلفة الشراء للفئة (د.ك)'}
+                  {currentLang === 'en' ? 'Production Cost / Value (KWD)' : 'تكلفة الإنتاج للفئة (د.ك)'}
                   <span style={{ color: '#EF4444', fontWeight: 'bold' }}>*</span>
                 </label>
                 <div style={{ position: 'relative' }}>
@@ -321,11 +321,11 @@ export const SerialToolsModal: React.FC<SerialToolsModalProps> = ({
                 {!isValidCost ? (
                   <span style={{ fontSize: '11px', color: '#EF4444', marginTop: '3px', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 600 }}>
                     <i className="fa-solid fa-circle-exclamation"></i>
-                    {currentLang === 'en' ? 'Purchasing cost > 0 is mandatory to add bars.' : 'تكلفة الشراء أكبر من 0 إلزامية لإضافة السبائك.'}
+                    {currentLang === 'en' ? 'Production cost > 0 is mandatory to add bars.' : 'تكلفة الإنتاج أكبر من 0 إلزامية لإضافة السبائك.'}
                   </span>
                 ) : (
                   <span style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px', display: 'block' }}>
-                    {currentLang === 'en' ? 'Cost per bar for this denomination in this shipment' : 'تكلفة السبيكة الواحدة لهذه الفئة في هذه الشحنة'}
+                    {currentLang === 'en' ? 'Production cost per bar for this denomination in this shipment' : 'تكلفة الإنتاج للسبيكة الواحدة لهذه الفئة في هذه الشحنة'}
                   </span>
                 )}
               </div>
