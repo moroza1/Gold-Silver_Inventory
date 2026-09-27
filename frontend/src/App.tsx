@@ -3751,10 +3751,6 @@ const [migrationApproved, setMigrationApproved] = useState(false);
             printedBy: username || 'treasury-maker'
           })
         });
-        if (typeof fetchUnprintedBars === 'function') fetchUnprintedBars();
-        if (typeof fetchQrHistory === 'function') fetchQrHistory();
-        if (typeof fetchInventory === 'function') fetchInventory();
-        if (typeof fetchTurkeyConsignmentInventory === 'function') fetchTurkeyConsignmentInventory();
       } catch (e) {
         console.warn('Batch print log error:', e);
       }
