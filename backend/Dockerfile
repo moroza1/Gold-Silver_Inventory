@@ -6,8 +6,6 @@ WORKDIR /src
 COPY ["PMIMS.Domain/PMIMS.Domain.csproj", "PMIMS.Domain/"]
 COPY ["PMIMS.Application/PMIMS.Application.csproj", "PMIMS.Application/"]
 COPY ["PMIMS.Infrastructure/PMIMS.Infrastructure.csproj", "PMIMS.Infrastructure/"]
-COPY ["Ledger.Gl/Ledger.Gl.csproj", "Ledger.Gl/"]
-COPY ["Ledger.Gl.EfCore/Ledger.Gl.EfCore.csproj", "Ledger.Gl.EfCore/"]
 COPY ["PMIMS.WebAPI/PMIMS.WebAPI.csproj", "PMIMS.WebAPI/"]
 
 # Restore dependencies
