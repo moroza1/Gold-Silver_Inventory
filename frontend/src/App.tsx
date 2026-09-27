@@ -347,10 +347,10 @@ const Translations: Record<string, Record<string, string>> = {
     th_group: "Group",
     th_item_count: "Item Count",
     th_total_cost: "Total Landed Cost",
-    th_avg_unit_cost: "Avg Unit Cost/g",
+    th_avg_unit_cost: "Production Cost/g",
     th_period: "Period",
     th_budgeted_cost: "Budgeted Cost/g",
-    th_actual_cost: "Actual Avg Cost/g",
+    th_actual_cost: "Actual Production Cost/g",
     th_variance: "Variance/g",
     th_variance_pct: "Variance %",
     th_location: "Location",
@@ -365,7 +365,7 @@ const Translations: Record<string, Record<string, string>> = {
     th_gl_reference: "Core Banking Reference",
     th_gl_initiated_by: "Initiated By",
     th_gl_created_at: "Created At",
-    th_cost_basis: "Average Cost",
+    th_cost_basis: "Production Cost",
     th_market_val: "Market Value (USD)",
     th_unrealized_pnl: "Unrealized P&L",
     th_occupancy: "Occupancy Rate",
@@ -668,10 +668,10 @@ const Translations: Record<string, Record<string, string>> = {
     th_group: "المجموعة",
     th_item_count: "عدد الأصناف",
     th_total_cost: "إجمالي التكلفة الدفترية",
-    th_avg_unit_cost: "متوسط تكلفة الوحدة/جم",
+    th_avg_unit_cost: "تكلفة الإنتاج/جم",
     th_period: "الفترة",
     th_budgeted_cost: "التكلفة المعتمدة/جم",
-    th_actual_cost: "متوسط التكلفة الفعلية/جم",
+    th_actual_cost: "تكلفة الإنتاج الفعلية/جم",
     th_variance: "الفرق/جم",
     th_variance_pct: "نسبة الفرق %",
     th_location: "الموقع",
@@ -686,7 +686,7 @@ const Translations: Record<string, Record<string, string>> = {
     th_gl_reference: "مرجع النظام المصرفي",
     th_gl_initiated_by: "بواسطة",
     th_gl_created_at: "تاريخ الإنشاء",
-    th_cost_basis: "متوسط التكلفة",
+    th_cost_basis: "تكلفة الإنتاج",
     th_market_val: "القيمة السوقية (USD)",
     th_unrealized_pnl: "الأرباح/الخسائر غير المحققة",
     th_occupancy: "نسبة الإشغال",
@@ -866,6 +866,7 @@ export default function App() {
   const [execStartDate, setExecStartDate] = useState(() => getCurrentMonthRange().start);
   const [execEndDate, setExecEndDate] = useState(() => getCurrentMonthRange().end);
   const [execBoard, setExecBoard] = useState<{
+    total_precious?: any;
     total_precious_weight_kg?: number;
     total_precious_qty?: number;
     damage_weight_kg?: number;
@@ -1566,6 +1567,28 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   const [transferReturnReasonPreset, setTransferReturnReasonPreset] = useState('');
   const [transferReturnReasonCustom, setTransferReturnReasonCustom] = useState('');
   const [transferNotes, setTransferNotes] = useState('');
+
+  // Branch & Vault Transfer Receipt & Verification states
+  const [transfersSubTab, setTransfersSubTab] = useState<'main-to-branch' | 'branch-to-main' | 'initiate' | 'audit-ledger'>('main-to-branch');
+  const [transfersSearchQuery, setTransfersSearchQuery] = useState('');
+  const [transfersStatusFilter, setTransfersStatusFilter] = useState<'ALL' | 'IN_TRANSIT' | 'PENDING_APPROVAL' | 'PENDING_RECEIPT' | 'RECEIVED' | 'RETURNED'>('ALL');
+  const [selectedTransferForReceipt, setSelectedTransferForReceipt] = useState<any | null>(null);
+  const [courierQrInput, setCourierQrInput] = useState('');
+  const [isVerifyingQr, setIsVerifyingQr] = useState(false);
+  const [qrVerificationResult, setQrVerificationResult] = useState<{ isValid: boolean; customerName?: string; accountNumber?: string; error?: string } | null>(null);
+  const [receiptNotes, setReceiptNotes] = useState('');
+  const [receiptTargetLocationId, setReceiptTargetLocationId] = useState<number | null>(null);
+  const [isSubmittingReceipt, setIsSubmittingReceipt] = useState(false);
+
+  // Return to Main Vault Modal states
+  const [showTransferReturnModal, setShowTransferReturnModal] = useState(false);
+  const [selectedTransferForReturn, setSelectedTransferForReturn] = useState<any | null>(null);
+  const [transferReturnReason, setTransferReturnReason] = useState('QR Code mismatch / Discrepancy');
+  const [transferReturnReasonCustomText, setTransferReturnReasonCustomText] = useState('');
+  const [transferReturnNotes, setTransferReturnNotes] = useState('');
+  const [transferReturnCourier, setTransferReturnCourier] = useState('');
+  const [isSubmittingReturn, setIsSubmittingReturn] = useState(false);
+
 
   // GFS & Stock Threshold states
   const [gfsDeliveryRequests, setGfsDeliveryRequests] = useState<any[]>([]);
@@ -2703,7 +2726,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   };
 
   const handleApproveMissingReportDirect = async (pendingReportId: number) => {
-    const inst = workflowInstances.find((w: any) => w.workflow_type === 'MISSING_ITEMS' && w.entity_id === pendingReportId && w.status_code === 'PENDING_MAKER');
+    const inst = activeWorkflowInstances.find((w: any) => w.workflow_type === 'MISSING_ITEMS' && w.entity_id === pendingReportId && w.status_code === 'PENDING_MAKER');
     if (inst) {
       await handleInstanceAction(inst.instance_id, 'APPROVED');
       fetchMissingSerialsScreenData();
@@ -2716,7 +2739,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   const handleRejectMissingReportDirect = async (pendingReportId: number) => {
     const reason = prompt(currentLang === 'en' ? 'Enter rejection reason:' : 'أدخل سبب الرفض:');
     if (!reason) return;
-    const inst = workflowInstances.find((w: any) => w.workflow_type === 'MISSING_ITEMS' && w.entity_id === pendingReportId && w.status_code === 'PENDING_MAKER');
+    const inst = activeWorkflowInstances.find((w: any) => w.workflow_type === 'MISSING_ITEMS' && w.entity_id === pendingReportId && w.status_code === 'PENDING_MAKER');
     if (inst) {
       await handleInstanceAction(inst.instance_id, 'REJECTED', reason);
       fetchMissingSerialsScreenData();
@@ -4600,6 +4623,120 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     }
   };
 
+  const handleVerifyTransferQr = async (transferId: number, qrCode: string) => {
+    if (!qrCode.trim()) {
+      alert(currentLang === 'en' ? 'Please enter or scan the bar QR code.' : 'يرجى إدخال أو مسح رمز الاستجابة السريعة (QR).');
+      return;
+    }
+    setIsVerifyingQr(true);
+    setQrVerificationResult(null);
+    try {
+      const res = await fetch(`${API_BASE}/transfers/${transferId}/verify-qr`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scannedQr: qrCode.trim() })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setQrVerificationResult(data);
+      } else {
+        setQrVerificationResult({
+          isValid: false,
+          error: data.error || (currentLang === 'en' ? 'QR Code verification failed.' : 'فشل التحقق من رمز الاستجابة السريعة.')
+        });
+      }
+    } catch (e: any) {
+      setQrVerificationResult({
+        isValid: false,
+        error: e?.message || (currentLang === 'en' ? 'Network error during verification.' : 'خطأ في الاتصال أثناء التحقق.')
+      });
+    } finally {
+      setIsVerifyingQr(false);
+    }
+  };
+
+  const handleInitiateTransferReceipt = async (transferId: number) => {
+    if (!courierQrInput.trim()) {
+      alert(currentLang === 'en' ? 'Please scan the bar QR code first.' : 'يرجى مسح رمز الاستجابة السريعة أولاً.');
+      return;
+    }
+    setIsSubmittingReceipt(true);
+    try {
+      const res = await fetch(`${API_BASE}/transfers/${transferId}/initiate-receipt`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scannedQr: courierQrInput.trim(),
+          initiatedBy: displayName || username || 'SYSTEM',
+          notes: receiptNotes.trim() || 'Physical parcel receipt verified with courier manifest.',
+          targetLocationId: receiptTargetLocationId
+        })
+      });
+      if (res.ok) {
+        alert(currentLang === 'en'
+          ? 'Transfer receipt workflow initiated successfully. Pending Checker vault placement authorization.'
+          : 'تم بدء إجراءات استلام الشحنة بنجاح. بانتظار اعتماد المدقق للإيداع في الخزينة.');
+        setSelectedTransferForReceipt(null);
+        setCourierQrInput('');
+        setQrVerificationResult(null);
+        setReceiptNotes('');
+        setReceiptTargetLocationId(null);
+        fetchTransfers();
+        fetchInventory();
+        fetchWorkflows();
+      } else {
+        alert(await describeApiError(res, currentLang, 'Failed to initiate transfer receipt', 'فشل بدء إجراءات استلام الشحنة'));
+      }
+    } catch (_) {
+      alert(currentLang === 'en' ? 'Error initiating transfer receipt.' : 'حدث خطأ أثناء بدء استلام الشحنة.');
+    } finally {
+      setIsSubmittingReceipt(false);
+    }
+  };
+
+  const handleInitiateTransferReturn = async (transferId: number) => {
+    const finalReason = transferReturnReason === 'OTHER'
+      ? (transferReturnReasonCustomText.trim() || (currentLang === 'en' ? 'Custom return reason' : 'سبب إرجاع مخصص'))
+      : (transferReturnReasonCustomText.trim() ? `${transferReturnReason}: ${transferReturnReasonCustomText.trim()}` : transferReturnReason);
+    if (!finalReason) {
+      alert(currentLang === 'en' ? 'Please select or specify a return reason.' : 'يرجى اختيار أو تحديد سبب الإرجاع.');
+      return;
+    }
+    setIsSubmittingReturn(true);
+    try {
+      const res = await fetch(`${API_BASE}/transfers/${transferId}/initiate-return`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          returnReason: finalReason,
+          initiatedBy: displayName || username || 'SYSTEM',
+          notes: transferReturnNotes.trim() || null,
+          courierInfo: transferReturnCourier.trim() || 'Armored Return Courier Escort'
+        })
+      });
+      if (res.ok) {
+        alert(currentLang === 'en'
+          ? 'Return to Main Vault initiated successfully. Dispatch workflow created.'
+          : 'تم بدء طلب الإرجاع إلى الخزينة الرئيسية بنجاح. تم إنشاء مسار التحويل.');
+        setShowTransferReturnModal(false);
+        setSelectedTransferForReturn(null);
+        setSelectedTransferForReceipt(null);
+        setTransferReturnNotes('');
+        setTransferReturnCourier('');
+        setTransferReturnReasonCustomText('');
+        fetchTransfers();
+        fetchInventory();
+        fetchWorkflows();
+      } else {
+        alert(await describeApiError(res, currentLang, 'Failed to initiate return to Main Vault', 'فشل بدء طلب الإرجاع إلى الخزينة الرئيسية'));
+      }
+    } catch (_) {
+      alert(currentLang === 'en' ? 'Error initiating return to Main Vault.' : 'حدث خطأ أثناء بدء طلب الإرجاع للخزينة الرئيسية.');
+    } finally {
+      setIsSubmittingReturn(false);
+    }
+  };
+
   const handleReceiveTransfer = async (id: number) => {
     try {
       const res = await fetch(`${API_BASE}/transfers/${id}/receive`, {
@@ -6301,7 +6438,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
         csvContent += `"${row.exception_type}","${row.reference}","${(row.description || '').replace(/"/g, '""')}","${row.severity}","${new Date(row.raised_at).toLocaleString()}","${row.status}"\n`;
       });
     } else if (reportType === 'cost_analysis') {
-      csvContent += "Group / Metal,Product,Denomination,Total Weight (g),Average Unit Cost,Total Landed Cost,Market Value\n";
+      csvContent += "Group / Metal,Product,Denomination,Total Weight (g),Production Cost/g,Total Landed Cost,Market Value\n";
       reportData.forEach(row => {
         csvContent += `"${row.group_key || ''}","${row.product_name || ''}","${row.denomination || ''}",${row.weight_grams || 0},${row.avg_unit_cost || 0},${row.total_cost || 0},${row.market_value || 0}\n`;
       });
@@ -9918,127 +10055,507 @@ const [migrationApproved, setMigrationApproved] = useState(false);
           </div>
         </section>
 
-        {/* SCREEN VIEWPORT: BRANCH TRANSFERS */}
+        {/* SCREEN VIEWPORT: BRANCH & VAULT TRANSFERS (ISOLATED IN-TRANSIT & MAKER-CHECKER INTAKE) */}
         <section className={`screen-viewport ${activeTab === 'screen-transfers' ? 'active' : ''}`}>
-          <div className="split-grid-3">
-            <div className="glass-card" style={{ gridColumn: 'span 2' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                <h3 style={{ margin: 0 }}>{currentLang === 'en' ? 'Active Branch Transfers' : 'حركات تحويل الفروع النشطة'}</h3>
-                <span className="badge" style={{ background: 'rgba(59, 130, 246, 0.12)', color: '#2563eb', border: '1px solid rgba(59, 130, 246, 0.3)', padding: '4px 10px', fontSize: '11px' }}>
-                  <i className="fa-solid fa-shield-halved"></i> {currentLang === 'en' ? 'Customer Stock Movement Ledger' : 'سجل تحويلات سبائك العملاء'}
-                </span>
-              </div>
-              <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>
-                {currentLang === 'en' 
-                  ? 'Track customer-owned metal movements between Central Main Vault and KFH branches, including return-to-vault workflows for unclaimed holdings.' 
-                  : 'متابعة حركات سبائك العملاء بين الخزينة المركزية وفروع بيتك، بما في ذلك إجراءات إرجاع السبائك غير المستلمة إلى الخزينة الرئيسية.'}
+          {/* Header with Stats Overview */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+            <div>
+              <h2 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <i className="fa-solid fa-truck-arrow-right" style={{ color: 'var(--kfh-green)' }}></i>
+                {currentLang === 'en' ? 'Precious Metals Transfer & Transit Hub' : 'مركز تحويلات ونقل المعادن الثمينة'}
+              </h2>
+              <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: '4px 0 0 0' }}>
+                {currentLang === 'en'
+                  ? 'Manage secure bullion movement between Main Vault and KFH Branches with in-transit location isolation and dual Maker-Checker intake.'
+                  : 'إدارة حركة نقل السبائك المؤمنة بين الخزينة المركزية وفروع بيتك مع عزل موقع العبور واعتماد الاستلام المزدوج.'}
               </p>
+            </div>
+
+            {/* Quick Metrics Badges */}
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+              <div style={{ background: 'rgba(59, 130, 246, 0.1)', border: '1px solid rgba(59, 130, 246, 0.25)', borderRadius: '8px', padding: '6px 14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <i className="fa-solid fa-truck-fast" style={{ color: '#2563eb' }}></i>
+                <div>
+                  <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'In Transit to Branches' : 'في الطريق للفروع'}</div>
+                  <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#2563eb' }}>
+                    {transfersList.filter(t => (t.transfer_type !== 'RETURN_TO_VAULT') && (t.status_code === 'IN_TRANSIT' || t.status_code === 'PENDING_RECEIPT')).length}
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.25)', borderRadius: '8px', padding: '6px 14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <i className="fa-solid fa-arrow-rotate-left" style={{ color: '#dc2626' }}></i>
+                <div>
+                  <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Returns to Main Vault' : 'مرتجع للخزينة الرئيسية'}</div>
+                  <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#dc2626' }}>
+                    {transfersList.filter(t => (t.transfer_type === 'RETURN_TO_VAULT' || t.destination_branch === 'Main HO Vault Operations' || t.destination_branch_id === 1) && (t.status_code === 'IN_TRANSIT' || t.status_code === 'PENDING_RECEIPT')).length}
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.25)', borderRadius: '8px', padding: '6px 14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <i className="fa-solid fa-hourglass-half" style={{ color: '#d97706' }}></i>
+                <div>
+                  <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Pending Dispatch Approval' : 'بانتظار اعتماد الإرسال'}</div>
+                  <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#d97706' }}>
+                    {transfersList.filter(t => t.status_code === 'PENDING_APPROVAL').length}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Sub Navigation Tabs */}
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', borderBottom: '1px solid var(--surface-border)', paddingBottom: '12px', flexWrap: 'wrap' }}>
+            <button
+              className={`btn ${transfersSubTab === 'main-to-branch' ? 'btn-primary' : 'btn-outline'}`}
+              style={{ padding: '8px 16px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px' }}
+              onClick={() => { setTransfersSubTab('main-to-branch'); fetchTransfers(); }}
+            >
+              <i className="fa-solid fa-building-columns"></i>
+              {currentLang === 'en' ? 'Main Vault to Branches (Branch Intake)' : 'من الخزينة للفروع (استلام الفرع)'}
+              <span className="badge" style={{ background: 'rgba(255,255,255,0.2)', marginLeft: '4px' }}>
+                {transfersList.filter(t => t.transfer_type !== 'RETURN_TO_VAULT' && t.destination_branch_id !== 1).length}
+              </span>
+            </button>
+
+            <button
+              className={`btn ${transfersSubTab === 'branch-to-main' ? 'btn-primary' : 'btn-outline'}`}
+              style={{ padding: '8px 16px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px' }}
+              onClick={() => { setTransfersSubTab('branch-to-main'); fetchTransfers(); }}
+            >
+              <i className="fa-solid fa-arrow-rotate-left"></i>
+              {currentLang === 'en' ? 'Branches to Main Vault (Returns & Central Intake)' : 'من الفروع للخزينة (المرتجعات واستلام الخزينة)'}
+              <span className="badge" style={{ background: 'rgba(255,255,255,0.2)', marginLeft: '4px' }}>
+                {transfersList.filter(t => t.transfer_type === 'RETURN_TO_VAULT' || t.destination_branch_id === 1).length}
+              </span>
+            </button>
+
+            <button
+              className={`btn ${transfersSubTab === 'initiate' ? 'btn-primary' : 'btn-outline'}`}
+              style={{ padding: '8px 16px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px' }}
+              onClick={() => setTransfersSubTab('initiate')}
+            >
+              <i className="fa-solid fa-paper-plane"></i>
+              {currentLang === 'en' ? 'Initiate Metal Transfer' : 'بدء عملية تحويل سبيكة'}
+            </button>
+
+            <button
+              className={`btn ${transfersSubTab === 'audit-ledger' ? 'btn-primary' : 'btn-outline'}`}
+              style={{ padding: '8px 16px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px' }}
+              onClick={() => { setTransfersSubTab('audit-ledger'); fetchTransfers(); }}
+            >
+              <i className="fa-solid fa-list-check"></i>
+              {currentLang === 'en' ? 'All Transfers Audit Ledger' : 'سجل جميع التحويلات'}
+            </button>
+          </div>
+
+          {/* TAB 1: MAIN VAULT TO BRANCHES (BRANCH INTAKE & VERIFICATION) */}
+          {transfersSubTab === 'main-to-branch' && (
+            <div className="glass-card">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
+                <div>
+                  <h3 style={{ margin: 0 }}>{currentLang === 'en' ? 'Requests from Main Vault to Branches' : 'طلبات التحويل من الخزينة الرئيسية إلى الفروع'}</h3>
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                    {currentLang === 'en'
+                      ? 'Branch users verify bar QR code from courier against customer manifest before dual Maker-Checker intake.'
+                      : 'يقوم موظف الفرع بمسح رمز الاستجابة السريعة للسبيكة من الشاحن ومطابقتها مع بيانات العميل قبل اعتماد الاستلام.'}
+                  </div>
+                </div>
+
+                {/* Filters */}
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder={currentLang === 'en' ? 'Search request #, serial, customer, account...' : 'بحث برقم الطلب، التسلسل، العميل، الحساب...'}
+                    value={transfersSearchQuery}
+                    onChange={e => setTransfersSearchQuery(e.target.value)}
+                    style={{ width: '280px', fontSize: '12px' }}
+                  />
+                  <select
+                    className="form-control"
+                    value={transfersStatusFilter}
+                    onChange={e => setTransfersStatusFilter(e.target.value as any)}
+                    style={{ width: '170px', fontSize: '12px', color: '#000' }}
+                  >
+                    <option value="ALL">{currentLang === 'en' ? 'All Statuses' : 'جميع الحالات'}</option>
+                    <option value="IN_TRANSIT">{currentLang === 'en' ? '🚚 In Transit' : '🚚 قيد النقل'}</option>
+                    <option value="PENDING_RECEIPT">{currentLang === 'en' ? '📦 In Verification' : '📦 قيد فحص الاستلام'}</option>
+                    <option value="PENDING_APPROVAL">{currentLang === 'en' ? '⏳ Pending Dispatch' : '⏳ قيد الموافقة'}</option>
+                    <option value="RECEIVED">{currentLang === 'en' ? '✅ Received' : '✅ تم الاستلام'}</option>
+                    <option value="RETURNED">{currentLang === 'en' ? '↩️ Returned' : '↩️ مرتجع'}</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Notice Banner */}
+              <div style={{ padding: '10px 14px', background: 'rgba(59, 130, 246, 0.08)', border: '1px solid rgba(59, 130, 246, 0.25)', borderRadius: '8px', color: '#2563eb', fontSize: '12px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <i className="fa-solid fa-shield-halved" style={{ fontSize: '16px' }}></i>
+                <div>
+                  <strong>{currentLang === 'en' ? 'In-Transit Location Isolation Rule:' : 'قاعدة عزل موقع النقل:'}</strong>{' '}
+                  {currentLang === 'en'
+                    ? 'Bars approved for dispatch remain isolated in transit. Physical location is NEVER moved to the branch until physical courier verification and dual Maker-Checker approval.'
+                    : 'تبقى السبائك المعتمَد نقلها معزولة قيد العبور. ولا يتم تغيير موقعها للفرع إلا بعد التحقق من باركود الشاحن واعتماد الاستلام المزدوج.'}
+                </div>
+              </div>
+
               <div className="table-responsive">
                 <table>
                   <thead>
                     <tr>
-                      <th>{t('th_serial')}</th>
-                      <th>{t('th_metal')}</th>
-                      <th>{currentLang === 'en' ? 'Type' : 'النوع'}</th>
-                      <th>{currentLang === 'en' ? 'From' : 'من'}</th>
-                      <th>{currentLang === 'en' ? 'To' : 'إلى'}</th>
-                      <th>{currentLang === 'en' ? 'Return Reason / Notes' : 'سبب الإرجاع / البيان'}</th>
-                      <th>{currentLang === 'en' ? 'Courier' : 'الشاحن'}</th>
+                      <th>{currentLang === 'en' ? 'Request #' : 'رقم الطلب'}</th>
+                      <th>{currentLang === 'en' ? 'From ➔ To' : 'من ➔ إلى'}</th>
+                      <th>{currentLang === 'en' ? 'Customer Details' : 'بيانات العميل'}</th>
+                      <th>{currentLang === 'en' ? 'Denomination & Metal' : 'الفئة والمعدن'}</th>
+                      <th>{currentLang === 'en' ? 'Bar Serial' : 'الرقم التسلسلي'}</th>
+                      <th>{currentLang === 'en' ? 'Count' : 'العدد'}</th>
+                      <th>{currentLang === 'en' ? 'Courier Escort' : 'الناقل والشاحن'}</th>
                       <th>{t('th_status')}</th>
                       <th>{t('th_action')}</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {transfersList.length === 0 ? (
-                      <tr>
-                        <td colSpan={9} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '20px' }}>
-                          {currentLang === 'en' ? 'No branch transfers found.' : 'لا توجد حركات تحويل فرعي حالياً.'}
-                        </td>
-                      </tr>
-                    ) : (
-                      transfersList.map((tr: any, idx: number) => (
-                        <tr key={idx}>
-                          <td>
-                            <strong>{tr.serial_number}</strong>
-                            <div style={{ marginTop: '2px' }}>
-                              <span className="badge" style={{ background: 'rgba(59, 130, 246, 0.1)', color: '#2563eb', fontSize: '10px' }}>
-                                <i className="fa-solid fa-user-tag"></i> {currentLang === 'en' ? 'Customer Owned' : 'ملكية عميل'}
-                              </span>
-                            </div>
-                          </td>
-                          <td>
-                            {translateDb(tr.metal)} - {tr.denomination}
-                            {tr.weight_grams ? <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{tr.weight_grams}g</div> : null}
-                          </td>
-                          <td>
-                            {tr.transfer_type === 'RETURN_TO_VAULT' ? (
-                              <span className="badge" style={{ background: 'rgba(239, 68, 68, 0.12)', color: '#dc2626', border: '1px solid rgba(239, 68, 68, 0.3)', fontSize: '11px', whiteSpace: 'nowrap' }}>
-                                <i className="fa-solid fa-arrow-rotate-left"></i> {currentLang === 'en' ? 'Return to Vault' : 'إرجاع للخزينة'}
-                              </span>
-                            ) : tr.transfer_type === 'INTER_BRANCH' ? (
-                              <span className="badge" style={{ background: 'rgba(168, 85, 247, 0.12)', color: '#9333ea', border: '1px solid rgba(168, 85, 247, 0.3)', fontSize: '11px', whiteSpace: 'nowrap' }}>
-                                <i className="fa-solid fa-arrows-rotate"></i> {currentLang === 'en' ? 'Inter-Branch' : 'بين الفروع'}
-                              </span>
-                            ) : (
-                              <span className="badge" style={{ background: 'rgba(16, 185, 129, 0.12)', color: '#059669', border: '1px solid rgba(16, 185, 129, 0.3)', fontSize: '11px', whiteSpace: 'nowrap' }}>
-                                <i className="fa-solid fa-truck"></i> {currentLang === 'en' ? 'Outbound' : 'إرسال لفرع'}
-                              </span>
-                            )}
-                          </td>
-                          <td>{translateDb(tr.source_branch)}</td>
-                          <td>{translateDb(tr.destination_branch)}</td>
-                          <td>
-                            {tr.return_reason ? (
-                              <div style={{ fontSize: '12px', color: '#dc2626', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                <i className="fa-solid fa-triangle-exclamation"></i> {tr.return_reason}
+                    {(() => {
+                      const filtered = transfersList
+                        .filter(tr => tr.transfer_type !== 'RETURN_TO_VAULT' && tr.destination_branch_id !== 1)
+                        .filter(tr => {
+                          if (transfersStatusFilter !== 'ALL' && tr.status_code !== transfersStatusFilter) return false;
+                          if (!transfersSearchQuery.trim()) return true;
+                          const q = transfersSearchQuery.toLowerCase();
+                          return (
+                            (tr.request_number || '').toLowerCase().includes(q) ||
+                            (tr.serial_number || '').toLowerCase().includes(q) ||
+                            (tr.customer_name || '').toLowerCase().includes(q) ||
+                            (tr.account_number || '').toLowerCase().includes(q) ||
+                            (tr.source_branch || '').toLowerCase().includes(q) ||
+                            (tr.destination_branch || '').toLowerCase().includes(q)
+                          );
+                        });
+
+                      if (filtered.length === 0) {
+                        return (
+                          <tr>
+                            <td colSpan={9} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '30px' }}>
+                              <i className="fa-solid fa-inbox" style={{ fontSize: '24px', marginBottom: '8px', display: 'block' }}></i>
+                              {currentLang === 'en' ? 'No outbound transfer requests found.' : 'لا توجد طلبات تحويل صادرة حالياً.'}
+                            </td>
+                          </tr>
+                        );
+                      }
+
+                      return filtered.map((tr: any, idx: number) => {
+                        const reqNo = tr.request_number || `TR-${String(tr.transfer_id).padStart(6, '0')}`;
+                        const isActionable = tr.status_code === 'IN_TRANSIT' || tr.status_code === 'PENDING_RECEIPT' || tr.status_code === 'APPROVED';
+
+                        return (
+                          <tr key={idx}>
+                            <td>
+                              <strong style={{ color: 'var(--kfh-green)', fontFamily: 'monospace', fontSize: '13px' }}>{reqNo}</strong>
+                              <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                                {tr.created_at ? new Date(tr.created_at).toLocaleDateString() : '—'}
                               </div>
-                            ) : null}
-                            {tr.notes ? (
-                              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: tr.return_reason ? '2px' : 0 }}>
-                                {tr.notes}
+                            </td>
+                            <td>
+                              <div style={{ fontSize: '12px' }}>
+                                <span style={{ color: 'var(--text-muted)' }}>{translateDb(tr.source_branch)}</span>
+                                <div style={{ fontWeight: 600, color: '#2563eb' }}>➔ {translateDb(tr.destination_branch)}</div>
                               </div>
-                            ) : null}
-                            {!tr.return_reason && !tr.notes && <span style={{ color: 'var(--text-muted)' }}>-</span>}
-                          </td>
-                          <td><span style={{ fontSize: '12px' }}>{tr.courier_info}</span></td>
-                          <td>
-                            <span className={`badge badge-${tr.status_code.toLowerCase()}`}>
-                              {translateDb(tr.status_code)}
-                            </span>
-                          </td>
-                          <td>
-                            {tr.status_code === 'APPROVED' && canModify('purchase_orders') && (
-                              <button 
-                                className="btn btn-primary" 
-                                style={{ padding: '4px 10px', fontSize: '11px', whiteSpace: 'nowrap' }}
-                                onClick={() => handleReceiveTransfer(tr.transfer_id)}
-                              >
-                                <i className="fa-solid fa-box-open"></i> {currentLang === 'en' ? 'Receive' : 'استلام'}
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                      ))
-                    )}
+                            </td>
+                            <td>
+                              {tr.customer_name ? (
+                                <div>
+                                  <strong style={{ fontSize: '12px' }}>{tr.customer_name}</strong>
+                                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
+                                    <i className="fa-solid fa-id-card"></i> {tr.account_number || 'N/A'}
+                                  </div>
+                                </div>
+                              ) : (
+                                <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>—</span>
+                              )}
+                            </td>
+                            <td>
+                              <div style={{ fontWeight: 600, fontSize: '12px' }}>{translateDb(tr.metal)}</div>
+                              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                                {tr.denomination} {tr.weight_grams ? `(${tr.weight_grams}g)` : ''}
+                              </div>
+                            </td>
+                            <td>
+                              <strong style={{ fontFamily: 'monospace', color: 'var(--accent-gold)' }}>{tr.serial_number}</strong>
+                              {tr.verified_qr_code && (
+                                <div style={{ marginTop: '2px' }}>
+                                  <span className="badge" style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#059669', fontSize: '9px' }}>
+                                    <i className="fa-solid fa-qrcode"></i> {currentLang === 'en' ? 'QR Verified' : 'تم التحقق'}
+                                  </span>
+                                </div>
+                              )}
+                            </td>
+                            <td>
+                              <span className="badge" style={{ background: 'rgba(255,255,255,0.08)', fontWeight: 'bold' }}>
+                                {tr.item_count || 1} {currentLang === 'en' ? 'bar' : 'سبيكة'}
+                              </span>
+                            </td>
+                            <td>
+                              <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{tr.courier_info || 'Courier Escort'}</span>
+                            </td>
+                            <td>
+                              <span className={`badge badge-${tr.status_code.toLowerCase()}`}>
+                                {tr.status_code === 'IN_TRANSIT' ? (currentLang === 'en' ? '🚚 In Transit' : '🚚 قيد النقل') :
+                                 tr.status_code === 'PENDING_RECEIPT' ? (currentLang === 'en' ? '📦 In Verification' : '📦 قيد التحقق') :
+                                 tr.status_code === 'RECEIVED' ? (currentLang === 'en' ? '✅ Received' : '✅ تم الاستلام') :
+                                 tr.status_code === 'RETURNED' ? (currentLang === 'en' ? '↩️ Returned' : '↩️ مرتجع') :
+                                 translateDb(tr.status_code)}
+                              </span>
+                            </td>
+                            <td>
+                              <div style={{ display: 'flex', gap: '6px', flexWrap: 'nowrap' }}>
+                                {isActionable && (canModify('intake') || canModify('purchase_orders')) && (
+                                  <button
+                                    className="btn btn-primary"
+                                    style={{ padding: '5px 10px', fontSize: '11px', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '4px' }}
+                                    onClick={() => {
+                                      setSelectedTransferForReceipt(tr);
+                                      setCourierQrInput('');
+                                      setQrVerificationResult(null);
+                                      setReceiptNotes('');
+                                      setReceiptTargetLocationId(null);
+                                    }}
+                                  >
+                                    <i className="fa-solid fa-qrcode"></i> {currentLang === 'en' ? 'Verify & Receive' : 'فحص واستلام'}
+                                  </button>
+                                )}
+
+                                {tr.status_code === 'IN_TRANSIT' && (canModify('intake') || canModify('purchase_orders')) && (
+                                  <button
+                                    className="btn btn-outline"
+                                    style={{ padding: '5px 10px', fontSize: '11px', color: '#dc2626', borderColor: 'rgba(239, 68, 68, 0.4)', whiteSpace: 'nowrap' }}
+                                    onClick={() => {
+                                      setSelectedTransferForReturn(tr);
+                                      setTransferReturnReason('Customer sold bar during transit');
+                                      setTransferReturnReasonCustomText('');
+                                      setTransferReturnNotes('');
+                                      setTransferReturnCourier(tr.courier_info || 'Armored Return Escort');
+                                      setShowTransferReturnModal(true);
+                                    }}
+                                  >
+                                    <i className="fa-solid fa-arrow-rotate-left"></i> {currentLang === 'en' ? 'Return' : 'إرجاع'}
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      });
+                    })()}
                   </tbody>
                 </table>
               </div>
             </div>
+          )}
 
+          {/* TAB 2: BRANCHES TO MAIN VAULT (RETURNS & CENTRAL VAULT INTAKE) */}
+          {transfersSubTab === 'branch-to-main' && (
             <div className="glass-card">
-              <h3>{currentLang === 'en' ? 'Initiate Metal Transfer' : 'بدء عملية تحويل سبيكة'}</h3>
-              {!canModify('purchase_orders') && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
+                <div>
+                  <h3 style={{ margin: 0 }}>{currentLang === 'en' ? 'Requests from Branches to Main Vault (Returns & Intake)' : 'طلبات الإرجاع من الفروع إلى الخزينة الرئيسية'}</h3>
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                    {currentLang === 'en'
+                      ? 'Returns due to QR mismatch, customer sales during transit, buybacks, or unclaimed bars. Intake at Main Vault preserves ownership.'
+                      : 'المرتجعات بسبب عدم تطابق الباركود، بيع العميل أثناء النقل، إعادة الشراء، أو عدم الاستلام. استلام الخزينة يغير الموقع فقط ويثبت الملكية.'}
+                  </div>
+                </div>
+
+                {/* Filters */}
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder={currentLang === 'en' ? 'Search return #, serial, customer...' : 'بحث برقم الإرجاع، التسلسل، العميل...'}
+                    value={transfersSearchQuery}
+                    onChange={e => setTransfersSearchQuery(e.target.value)}
+                    style={{ width: '280px', fontSize: '12px' }}
+                  />
+                  <select
+                    className="form-control"
+                    value={transfersStatusFilter}
+                    onChange={e => setTransfersStatusFilter(e.target.value as any)}
+                    style={{ width: '170px', fontSize: '12px', color: '#000' }}
+                  >
+                    <option value="ALL">{currentLang === 'en' ? 'All Statuses' : 'جميع الحالات'}</option>
+                    <option value="IN_TRANSIT">{currentLang === 'en' ? '🚚 In Transit' : '🚚 قيد النقل'}</option>
+                    <option value="PENDING_RECEIPT">{currentLang === 'en' ? '📦 In Verification' : '📦 قيد التحقق'}</option>
+                    <option value="PENDING_APPROVAL">{currentLang === 'en' ? '⏳ Pending Dispatch' : '⏳ قيد الموافقة'}</option>
+                    <option value="RECEIVED">{currentLang === 'en' ? '✅ Received in Vault' : '✅ تم الإيداع بالخزينة'}</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Notice Banner */}
+              <div style={{ padding: '10px 14px', background: 'rgba(245, 158, 11, 0.08)', border: '1px solid rgba(245, 158, 11, 0.25)', borderRadius: '8px', color: '#d97706', fontSize: '12px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <i className="fa-solid fa-scale-balanced" style={{ fontSize: '16px' }}></i>
+                <div>
+                  <strong>{currentLang === 'en' ? 'Sharia Ownership Preservation Invariant:' : 'ثبات ملكية الشريعة الإسلامية:'}</strong>{' '}
+                  {currentLang === 'en'
+                    ? 'Receiving returned bars into Main Central Vault only updates physical Location to Main Vault. Ownership type and customer holdings remain completely untouched.'
+                    : 'استلام السبائك المرجعة بالخزينة الرئيسية يحدّث الموقع الفعلي إلى الخزينة المركزية فقط، مع الحفاظ التام على ملكية وسجل العميل دون أي تغيير.'}
+                </div>
+              </div>
+
+              <div className="table-responsive">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>{currentLang === 'en' ? 'Request #' : 'رقم الطلب'}</th>
+                      <th>{currentLang === 'en' ? 'From Branch ➔ Main Vault' : 'من الفرع ➔ الخزينة الرئيسية'}</th>
+                      <th>{currentLang === 'en' ? 'Customer / Owner' : 'العميل / الملكية'}</th>
+                      <th>{currentLang === 'en' ? 'Denomination & Metal' : 'الفئة والمعدن'}</th>
+                      <th>{currentLang === 'en' ? 'Bar Serial' : 'الرقم التسلسلي'}</th>
+                      <th>{currentLang === 'en' ? 'Return Reason' : 'سبب الإرجاع'}</th>
+                      <th>{currentLang === 'en' ? 'Courier' : 'الناقل'}</th>
+                      <th>{t('th_status')}</th>
+                      <th>{t('th_action')}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(() => {
+                      const returns = transfersList
+                        .filter(tr => tr.transfer_type === 'RETURN_TO_VAULT' || tr.destination_branch_id === 1)
+                        .filter(tr => {
+                          if (transfersStatusFilter !== 'ALL' && tr.status_code !== transfersStatusFilter) return false;
+                          if (!transfersSearchQuery.trim()) return true;
+                          const q = transfersSearchQuery.toLowerCase();
+                          return (
+                            (tr.request_number || '').toLowerCase().includes(q) ||
+                            (tr.serial_number || '').toLowerCase().includes(q) ||
+                            (tr.customer_name || '').toLowerCase().includes(q) ||
+                            (tr.return_reason || '').toLowerCase().includes(q) ||
+                            (tr.source_branch || '').toLowerCase().includes(q)
+                          );
+                        });
+
+                      if (returns.length === 0) {
+                        return (
+                          <tr>
+                            <td colSpan={9} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '30px' }}>
+                              <i className="fa-solid fa-arrow-rotate-left" style={{ fontSize: '24px', marginBottom: '8px', display: 'block' }}></i>
+                              {currentLang === 'en' ? 'No return requests to Main Vault found.' : 'لا توجد طلبات إرجاع إلى الخزينة الرئيسية حالياً.'}
+                            </td>
+                          </tr>
+                        );
+                      }
+
+                      return returns.map((tr: any, idx: number) => {
+                        const reqNo = tr.request_number || `TR-${String(tr.transfer_id).padStart(6, '0')}`;
+                        const isActionable = tr.status_code === 'IN_TRANSIT' || tr.status_code === 'PENDING_RECEIPT' || tr.status_code === 'APPROVED';
+
+                        return (
+                          <tr key={idx}>
+                            <td>
+                              <strong style={{ color: '#dc2626', fontFamily: 'monospace', fontSize: '13px' }}>{reqNo}</strong>
+                              <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                                {tr.created_at ? new Date(tr.created_at).toLocaleDateString() : '—'}
+                              </div>
+                            </td>
+                            <td>
+                              <div style={{ fontSize: '12px' }}>
+                                <span style={{ color: 'var(--text-muted)' }}>{translateDb(tr.source_branch)}</span>
+                                <div style={{ fontWeight: 600, color: 'var(--kfh-green)' }}>➔ {translateDb(tr.destination_branch)}</div>
+                              </div>
+                            </td>
+                            <td>
+                              {tr.customer_name ? (
+                                <div>
+                                  <strong style={{ fontSize: '12px' }}>{tr.customer_name}</strong>
+                                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
+                                    {tr.account_number || 'Customer Holding'}
+                                  </div>
+                                </div>
+                              ) : (
+                                <span className="badge" style={{ background: 'rgba(59, 130, 246, 0.1)', color: '#2563eb', fontSize: '10px' }}>
+                                  {currentLang === 'en' ? 'Customer Owned' : 'ملكية عميل'}
+                                </span>
+                              )}
+                            </td>
+                            <td>
+                              <div style={{ fontWeight: 600, fontSize: '12px' }}>{translateDb(tr.metal)}</div>
+                              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                                {tr.denomination} {tr.weight_grams ? `(${tr.weight_grams}g)` : ''}
+                              </div>
+                            </td>
+                            <td>
+                              <strong style={{ fontFamily: 'monospace', color: 'var(--accent-gold)' }}>{tr.serial_number}</strong>
+                            </td>
+                            <td>
+                              <div style={{ fontSize: '12px', color: '#dc2626', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                <i className="fa-solid fa-circle-exclamation"></i>
+                                {tr.return_reason || (currentLang === 'en' ? 'Return to Vault' : 'إرجاع للخزينة')}
+                              </div>
+                              {tr.notes && <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>{tr.notes}</div>}
+                            </td>
+                            <td>
+                              <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{tr.courier_info || 'Armored Escort'}</span>
+                            </td>
+                            <td>
+                              <span className={`badge badge-${tr.status_code.toLowerCase()}`}>
+                                {tr.status_code === 'IN_TRANSIT' ? (currentLang === 'en' ? '🚚 In Transit' : '🚚 قيد النقل') :
+                                 tr.status_code === 'PENDING_RECEIPT' ? (currentLang === 'en' ? '📦 In Verification' : '📦 قيد التحقق') :
+                                 tr.status_code === 'RECEIVED' ? (currentLang === 'en' ? '✅ Received in Vault' : '✅ تم الإيداع') :
+                                 translateDb(tr.status_code)}
+                              </span>
+                            </td>
+                            <td>
+                              {isActionable && (canModify('intake') || canModify('purchase_orders')) && (
+                                <button
+                                  className="btn btn-primary"
+                                  style={{ padding: '5px 10px', fontSize: '11px', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '4px' }}
+                                  onClick={() => {
+                                    setSelectedTransferForReceipt(tr);
+                                    setCourierQrInput('');
+                                    setQrVerificationResult(null);
+                                    setReceiptNotes('');
+                                    setReceiptTargetLocationId(null);
+                                  }}
+                                >
+                                  <i className="fa-solid fa-box-archive"></i> {currentLang === 'en' ? 'Verify & Receive into Vault' : 'فحص واستلام بالخزينة'}
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      });
+                    })()}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 3: INITIATE METAL TRANSFER FORM */}
+          {transfersSubTab === 'initiate' && (
+            <div className="glass-card" style={{ maxWidth: '800px', margin: '0 auto' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                <h3 style={{ margin: 0 }}>{currentLang === 'en' ? 'Initiate Metal Transfer Request' : 'بدء طلب تحويل سبيكة'}</h3>
+                <span className="badge" style={{ background: 'rgba(16, 185, 129, 0.12)', color: '#059669', padding: '4px 10px', fontSize: '11px' }}>
+                  <i className="fa-solid fa-lock"></i> {currentLang === 'en' ? 'Dual Maker-Checker Process' : 'اعتماد صناع ومدققين مزدوج'}
+                </span>
+              </div>
+
+              {!canModify('purchase_orders') && !canModify('intake') && (
                 <div style={{ padding: '10px', background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.25)', borderRadius: '8px', color: 'var(--accent-red)', fontSize: '12px', marginBottom: '15px' }}>
                   <i className="fa-solid fa-circle-exclamation"></i> {currentLang === 'en' ? 'Read-Only Mode: You cannot initiate branch transfers.' : 'وضع القراءة فقط: لا يمكنك بدء عملية تحويل الفروع.'}
                 </div>
               )}
               
-              <div style={{ padding: '10px 12px', background: 'rgba(59, 130, 246, 0.08)', border: '1px solid rgba(59, 130, 246, 0.25)', borderRadius: '8px', color: '#2563eb', fontSize: '12px', marginBottom: '15px', lineHeight: '1.4' }}>
-                <i className="fa-solid fa-circle-info"></i> <strong>{currentLang === 'en' ? 'Customer Gold Only:' : 'سبائك العملاء فقط:'}</strong> {currentLang === 'en' ? 'Branch Transfers are strictly restricted to customer-owned gold bars. KFH proprietary bars cannot be transferred.' : 'تحويلات الفروع مقتصرة حصرياً على سبائك العملاء، ولا يمكن تحويل سبائك بيتك الخاصة.'}
+              <div style={{ padding: '12px 14px', background: 'rgba(59, 130, 246, 0.08)', border: '1px solid rgba(59, 130, 246, 0.25)', borderRadius: '8px', color: '#2563eb', fontSize: '12px', marginBottom: '18px', lineHeight: '1.5' }}>
+                <i className="fa-solid fa-circle-info"></i> <strong>{currentLang === 'en' ? 'Customer Gold Invariant:' : 'سبائك العملاء فقط:'}</strong>{' '}
+                {currentLang === 'en'
+                  ? 'Branch Transfers are strictly restricted to customer-owned precious metal bars. Dispatch approval places the bar in transit without changing location until verified by branch intake.'
+                  : 'تحويلات الفروع مقتصرة حصرياً على سبائك العملاء. اعتماد الإرسال يضع السبيكة قيد العبور دون تغيير موقعها حتى يتم الاستلام بالفرع.'}
               </div>
 
               <div className="form-group">
-                <label style={{ fontWeight: 600 }}>{currentLang === 'en' ? 'Transfer Purpose / Direction' : 'غرض واتجاه التحويل'}</label>
+                <label style={{ fontWeight: 600 }}>{currentLang === 'en' ? 'Transfer Purpose / Direction' : 'غرض واتجاه التحويل'} *</label>
                 <select
                   value={transferType}
                   onChange={e => {
@@ -10052,29 +10569,29 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     }
                   }}
                   style={{ color: '#000', fontWeight: 600 }}
-                  disabled={!canModify('purchase_orders')}
+                  disabled={!canModify('purchase_orders') && !canModify('intake')}
                 >
-                  <option value="OUTBOUND_TO_BRANCH">{currentLang === 'en' ? '🚚 Outbound to Branch (Customer Delivery / Pickup)' : '🚚 إرسال للفرع (تسليم / استلام عميل)'}</option>
+                  <option value="OUTBOUND_TO_BRANCH">{currentLang === 'en' ? '🚚 Outbound to Branch (Customer Delivery / Branch Pickup)' : '🚚 إرسال للفرع (تسليم / استلام عميل)'}</option>
                   <option value="INTER_BRANCH">{currentLang === 'en' ? '🔄 Inter-Branch Transfer' : '🔄 تحويل بين الفروع'}</option>
-                  <option value="RETURN_TO_VAULT">{currentLang === 'en' ? '↩️ Return Back to Main Vault (Customer Unclaimed / Return)' : '↩️ إرجاع إلى الخزينة الرئيسية (عدم استلام العميل / إرجاع)'}</option>
+                  <option value="RETURN_TO_VAULT">{currentLang === 'en' ? '↩️ Return Back to Main Vault (Customer Unclaimed / Sold / Return)' : '↩️ إرجاع إلى الخزينة الرئيسية (عدم استلام / بيع / إرجاع)'}</option>
                 </select>
               </div>
 
-              <div className="form-group" style={{ background: 'rgba(0, 155, 78, 0.03)', padding: '10px', borderRadius: '8px', border: '1px solid rgba(0, 155, 78, 0.15)', marginBottom: '15px' }}>
+              <div className="form-group" style={{ background: 'rgba(0, 155, 78, 0.04)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(0, 155, 78, 0.2)', marginBottom: '15px' }}>
                 <label style={{ color: 'var(--kfh-green)', fontWeight: 'bold' }}>
-                  <i className="fa-solid fa-barcode"></i> {currentLang === 'en' ? 'Scan Barcode / Serial' : 'مسح الباركود / الرقم التسلسلي'}
+                  <i className="fa-solid fa-barcode"></i> {currentLang === 'en' ? 'Scan Barcode / Bar Serial' : 'مسح الباركود / الرقم التسلسلي للسبيكة'}
                 </label>
-                <div style={{ display: 'flex', gap: '8px' }}>
+                <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
                   <input 
                     type="text" 
                     className="form-control" 
-                    placeholder={currentLang === 'en' ? 'Scan barcode to auto-select item...' : 'امسح الباركود لتحديد القطعة تلقائياً...'}
+                    placeholder={currentLang === 'en' ? 'Scan barcode to auto-select customer bar...' : 'امسح الباركود لتحديد سبيكة العميل تلقائياً...'}
                     value={transferBarcodeQuery}
                     onChange={e => {
                       const val = e.target.value;
                       setTransferBarcodeQuery(val);
                       const parsed = parseGs1Barcode(val.trim());
-                      const found = inventoryList.find((item: any) => item.serial_number === parsed.serial);
+                      const found = inventoryList.find((item: any) => item.serial_number === parsed.serial || item.serial_number === val.trim());
                       if (found) {
                         if (found.is_damaged || found.status === 'DAMAGED') {
                           alert(currentLang === 'en'
@@ -10094,10 +10611,10 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                         }
                       }
                     }}
-                    disabled={!canModify('purchase_orders')}
+                    disabled={!canModify('purchase_orders') && !canModify('intake')}
                   />
                   {transferItemId ? (
-                    <span style={{ color: 'var(--accent-green)', display: 'flex', alignItems: 'center', fontSize: '12px' }}>
+                    <span style={{ color: 'var(--accent-green)', display: 'flex', alignItems: 'center', fontSize: '12px', whiteSpace: 'nowrap' }}>
                       <i className="fa-solid fa-circle-check" style={{ marginRight: '4px' }}></i> {currentLang === 'en' ? 'Selected' : 'محدد'}
                     </span>
                   ) : null}
@@ -10105,7 +10622,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
               </div>
 
               <div className="form-group">
-                <label>{currentLang === 'en' ? 'Select Metal Item (Customer Owned Only)' : 'اختر السبيكة (سبائك العملاء فقط)'}</label>
+                <label>{currentLang === 'en' ? 'Select Customer Metal Bar' : 'اختر سبيكة العميل'} *</label>
                 <select 
                   value={transferItemId || ''} 
                   onChange={e => {
@@ -10115,24 +10632,24 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     if (item) setTransferItemSerial(item.serial_number);
                   }}
                   style={{ color: '#000' }}
-                  disabled={!canModify('purchase_orders')}
+                  disabled={!canModify('purchase_orders') && !canModify('intake')}
                 >
                   <option value="">-- {currentLang === 'en' ? 'Choose Customer Bar' : 'اختر سبيكة العميل'} --</option>
                   {inventoryList.filter((i: any) => (i.ownership_type === 'CUSTOMER_OWNED' || !i.ownership_type) && (i.status === 'READY' || i.status === 'HELD_IN_CUSTODY')).map((item: any, idx: number) => (
                     <option key={idx} value={item.item_id}>
-                      {item.serial_number} - {item.metal} ({item.denomination}) [{currentLang === 'en' ? 'Customer' : 'عميل'}]
+                      {item.serial_number} - {item.metal} ({item.denomination}) [{currentLang === 'en' ? 'Customer Owned' : 'ملكية عميل'}]
                     </option>
                   ))}
                 </select>
               </div>
 
               <div className="form-group">
-                <label>{currentLang === 'en' ? 'Destination Branch / Vault' : 'الفرع أو الخزينة المستهدفة'}</label>
+                <label>{currentLang === 'en' ? 'Destination Branch / Vault' : 'الفرع أو الخزينة المستهدفة'} *</label>
                 <select 
                   value={transferDestBranchId} 
                   onChange={e => setTransferDestBranchId(e.target.value)} 
                   style={{ color: '#000' }}
-                  disabled={!canModify('purchase_orders')}
+                  disabled={!canModify('purchase_orders') && !canModify('intake')}
                 >
                   <option value="">-- {currentLang === 'en' ? 'Select Destination' : 'اختر الوجهة'} --</option>
                   {branchesList.map((b: any, idx: number) => (
@@ -10152,17 +10669,20 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     value={transferReturnReasonPreset}
                     onChange={e => setTransferReturnReasonPreset(e.target.value)}
                     style={{ color: '#000', marginBottom: '8px' }}
-                    disabled={!canModify('purchase_orders')}
+                    disabled={!canModify('purchase_orders') && !canModify('intake')}
                   >
                     <option value="">-- {currentLang === 'en' ? 'Select Reason' : 'اختر السبب'} --</option>
+                    <option value={currentLang === 'en' ? 'Customer sold bar during transit (Reassign to Central Vault)' : 'بيع العميل للسبيكة أثناء النقل (إعادة تعيين للخزينة المركزية)'}>
+                      {currentLang === 'en' ? 'Customer sold bar during transit (Reassign to Central Vault)' : 'بيع العميل للسبيكة أثناء النقل (إعادة تعيين للخزينة المركزية)'}
+                    </option>
+                    <option value={currentLang === 'en' ? 'QR Code Discrepancy / Bar Mismatch' : 'عدم تطابق رمز الاستجابة السريعة / السبيكة'}>
+                      {currentLang === 'en' ? 'QR Code Discrepancy / Bar Mismatch' : 'عدم تطابق رمز الاستجابة السريعة / السبيكة'}
+                    </option>
                     <option value={currentLang === 'en' ? 'Customer did not pickup within SLA (Unclaimed)' : 'عدم استلام العميل للطلب خلال المهلة المحددة'}>
                       {currentLang === 'en' ? 'Customer did not pickup within SLA (Unclaimed)' : 'عدم استلام العميل للطلب خلال المهلة المحددة'}
                     </option>
                     <option value={currentLang === 'en' ? 'Customer requested delivery cancellation' : 'طلب العميل إلغاء استلام السبيكة'}>
                       {currentLang === 'en' ? 'Customer requested delivery cancellation' : 'طلب العميل إلغاء استلام السبيكة'}
-                    </option>
-                    <option value={currentLang === 'en' ? 'Customer changed pickup branch location' : 'تغيير العميل لفرع الاستلام المطلوب'}>
-                      {currentLang === 'en' ? 'Customer changed pickup branch location' : 'تغيير العميل لفرع الاستلام المطلوب'}
                     </option>
                     <option value={currentLang === 'en' ? 'Branch vault security / capacity consolidation' : 'دواعي أمان الخزينة / إعادة تجميع المخزون'}>
                       {currentLang === 'en' ? 'Branch vault security / capacity consolidation' : 'دواعي أمان الخزينة / إعادة تجميع المخزون'}
@@ -10200,33 +10720,136 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     placeholder={currentLang === 'en' ? 'e.g. Customer branch pickup booking #1234' : 'مثال: حجز استلام عميل رقم 1234'}
                     value={transferNotes}
                     onChange={e => setTransferNotes(e.target.value)}
-                    disabled={!canModify('purchase_orders')}
+                    disabled={!canModify('purchase_orders') && !canModify('intake')}
                   />
                 </div>
               )}
 
               <div className="form-group">
-                <label>{currentLang === 'en' ? 'Courier & Escort Info' : 'معلومات الشاحن والمرافق الأمني'}</label>
+                <label>{currentLang === 'en' ? 'Courier & Escort Info' : 'معلومات الشاحن والمرافق الأمني'} *</label>
                 <input 
                   type="text" 
                   className="form-control" 
-                  placeholder="e.g. Secured Transport Security Alpha" 
+                  placeholder="e.g. Secured Armored Express Transport #12" 
                   value={transferCourierInfo} 
                   onChange={e => setTransferCourierInfo(e.target.value)} 
-                  disabled={!canModify('purchase_orders')}
+                  disabled={!canModify('purchase_orders') && !canModify('intake')}
                 />
               </div>
 
               <button
                 className="btn btn-primary"
-                style={{ width: '100%', marginTop: '10px' }}
+                style={{ width: '100%', marginTop: '15px', padding: '12px', fontSize: '14px' }}
                 onClick={handleInitiateBranchTransferTab}
-                disabled={!transferItemId || !transferDestBranchId || !canModify('purchase_orders') || (transferType === 'RETURN_TO_VAULT' && !transferReturnReasonPreset && !transferReturnReasonCustom)}
+                disabled={!transferItemId || !transferDestBranchId || (!canModify('purchase_orders') && !canModify('intake')) || (transferType === 'RETURN_TO_VAULT' && !transferReturnReasonPreset && !transferReturnReasonCustom)}
               >
-                <i className="fa-solid fa-paper-plane"></i> {currentLang === 'en' ? 'Initiate Transfer Workflow' : 'بدء مسار التحويل'}
+                <i className="fa-solid fa-paper-plane"></i> {currentLang === 'en' ? 'Submit Transfer for Maker-Checker Approval' : 'إرسال طلب التحويل للاعتماد المزدوج'}
               </button>
             </div>
-          </div>
+          )}
+
+          {/* TAB 4: ALL TRANSFERS AUDIT LEDGER */}
+          {transfersSubTab === 'audit-ledger' && (
+            <div className="glass-card">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
+                <div>
+                  <h3 style={{ margin: 0 }}>{currentLang === 'en' ? 'Complete Bullion Transfer Audit Ledger' : 'سجل تدقيق جميع حركات التحويل'}</h3>
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                    {currentLang === 'en' ? 'Full chronological ledger of all outbound, inter-branch, and return transfers.' : 'سجل زمني شامل لكافة حركات النقل الصادرة، البينية، والمرتجعة.'}
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder={currentLang === 'en' ? 'Filter ledger...' : 'تصفية السجل...'}
+                    value={transfersSearchQuery}
+                    onChange={e => setTransfersSearchQuery(e.target.value)}
+                    style={{ width: '250px', fontSize: '12px' }}
+                  />
+                </div>
+              </div>
+
+              <div className="table-responsive">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>{currentLang === 'en' ? 'Request #' : 'رقم الطلب'}</th>
+                      <th>{t('th_serial')}</th>
+                      <th>{t('th_metal')}</th>
+                      <th>{currentLang === 'en' ? 'Type' : 'النوع'}</th>
+                      <th>{currentLang === 'en' ? 'From' : 'من'}</th>
+                      <th>{currentLang === 'en' ? 'To' : 'إلى'}</th>
+                      <th>{currentLang === 'en' ? 'Customer / Owner' : 'العميل / المالك'}</th>
+                      <th>{currentLang === 'en' ? 'Courier' : 'الشاحن'}</th>
+                      <th>{t('th_status')}</th>
+                      <th>{currentLang === 'en' ? 'Receipt Details' : 'تفاصيل الاستلام'}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {transfersList.length === 0 ? (
+                      <tr>
+                        <td colSpan={10} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '20px' }}>
+                          {currentLang === 'en' ? 'No transfers recorded in ledger.' : 'لا توجد حركات تحويل مسجلة.'}
+                        </td>
+                      </tr>
+                    ) : (
+                      transfersList
+                        .filter(tr => {
+                          if (!transfersSearchQuery.trim()) return true;
+                          const q = transfersSearchQuery.toLowerCase();
+                          return (
+                            (tr.request_number || '').toLowerCase().includes(q) ||
+                            (tr.serial_number || '').toLowerCase().includes(q) ||
+                            (tr.customer_name || '').toLowerCase().includes(q) ||
+                            (tr.source_branch || '').toLowerCase().includes(q) ||
+                            (tr.destination_branch || '').toLowerCase().includes(q)
+                          );
+                        })
+                        .map((tr: any, idx: number) => (
+                          <tr key={idx}>
+                            <td><strong style={{ fontFamily: 'monospace' }}>{tr.request_number || `TR-${tr.transfer_id}`}</strong></td>
+                            <td><strong>{tr.serial_number}</strong></td>
+                            <td>{translateDb(tr.metal)} ({tr.denomination})</td>
+                            <td>
+                              {tr.transfer_type === 'RETURN_TO_VAULT' ? (
+                                <span className="badge" style={{ background: 'rgba(239, 68, 68, 0.12)', color: '#dc2626' }}>
+                                  <i className="fa-solid fa-arrow-rotate-left"></i> {currentLang === 'en' ? 'Return' : 'إرجاع'}
+                                </span>
+                              ) : (
+                                <span className="badge" style={{ background: 'rgba(16, 185, 129, 0.12)', color: '#059669' }}>
+                                  <i className="fa-solid fa-truck"></i> {currentLang === 'en' ? 'Outbound' : 'إرسال'}
+                                </span>
+                              )}
+                            </td>
+                            <td>{translateDb(tr.source_branch)}</td>
+                            <td>{translateDb(tr.destination_branch)}</td>
+                            <td>{tr.customer_name ? `${tr.customer_name} (${tr.account_number || ''})` : 'Customer Owned'}</td>
+                            <td>{tr.courier_info}</td>
+                            <td>
+                              <span className={`badge badge-${tr.status_code.toLowerCase()}`}>
+                                {translateDb(tr.status_code)}
+                              </span>
+                            </td>
+                            <td>
+                              {tr.received_at ? (
+                                <div style={{ fontSize: '11px' }}>
+                                  <div><i className="fa-solid fa-check" style={{ color: '#059669' }}></i> {new Date(tr.received_at).toLocaleDateString()}</div>
+                                  <div style={{ color: 'var(--text-muted)' }}>{tr.receipt_initiated_by || tr.approved_by}</div>
+                                </div>
+                              ) : (
+                                <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>—</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </section>
 
         {/* SCREEN VIEWPORT: GFS DELIVERY & DISPATCH (operational -- intake module) */}
@@ -14843,7 +15466,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                   <div className="form-group" style={{ marginBottom: 0, minWidth: '150px' }}>
                     <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', fontWeight: '600' }}>{currentLang === 'en' ? 'Valuation Method' : 'طريقة التقييم'}</label>
                     <select value={valuationMethod} onChange={e => { setValuationMethod(e.target.value); loadReport('valuation', e.target.value); }} style={{ width: '100%', padding: '10px', borderRadius: '8px', background: 'var(--bg-secondary)', border: '1px solid var(--surface-border)', color: '#000' }}>
-                      <option value="AVERAGE">{currentLang === 'en' ? 'Average Cost' : 'متوسط التكلفة'}</option>
+                      <option value="AVERAGE">{currentLang === 'en' ? 'Production Cost' : 'تكلفة الإنتاج'}</option>
                       <option value="FIFO">{currentLang === 'en' ? 'FIFO (First-In First-Out)' : 'الوارد أولاً يصرف أولاً'}</option>
                       <option value="LIFO">{currentLang === 'en' ? 'LIFO (Last-In First-Out)' : 'الوارد أخيراً يصرف أولاً'}</option>
                     </select>
@@ -18022,9 +18645,17 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                                 </div>
                               ) : inst.workflow_type === 'BRANCH_TRANSFER' ? (
                                 <div style={{ fontSize: '12px' }}>
-                                  <strong>{currentLang === 'en' ? 'Serial:' : 'الرقم التسلسلي:'} {inst.details.serial_number}</strong><br/>
+                                  <strong>{currentLang === 'en' ? 'Transfer Dispatch:' : 'إرسال تحويل:'} {inst.details.request_number || `TR-${inst.details.transfer_id}`} ({inst.details.serial_number})</strong><br/>
                                   <span style={{ color: 'var(--accent-gold)' }}>
                                     {inst.details.source_branch} ➔ {inst.details.destination_branch} ({inst.details.courier_info || 'Courier'})
+                                  </span>
+                                </div>
+                              ) : inst.workflow_type === 'TRANSFER_RECEIPT' ? (
+                                <div style={{ fontSize: '12px' }}>
+                                  <strong>{currentLang === 'en' ? 'Transfer Receipt Intake:' : 'استلام تحويل بالخزينة/الفرع:'} {inst.details.request_number || `TR-${inst.details.transfer_id}`} ({inst.details.serial_number})</strong><br/>
+                                  <span style={{ color: '#10B981', fontWeight: 600 }}>
+                                    {inst.details.customer_name ? `${inst.details.customer_name} (${inst.details.account_number}) | ` : ''}
+                                    {inst.details.source_branch} ➔ {inst.details.destination_branch} | QR: {inst.details.verified_qr_code || inst.details.serial_number}
                                   </span>
                                 </div>
                               ) : inst.workflow_type === 'INTAKE_SHIPMENT' && inst.details.source_type === 'CUSTOMER' ? (
@@ -18404,13 +19035,29 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                         </div>
                       ) : selectedWfInstance.workflow_type === "BRANCH_TRANSFER" ? (
                         <div className="split-grid-2" style={{ gap: '10px 20px' }}>
-                          <div><strong>{currentLang === 'en' ? 'Transfer ID:' : 'رمز التحويل:'}</strong> {selectedWfInstance.details.transfer_id}</div>
+                          <div><strong>{currentLang === 'en' ? 'Request Number:' : 'رقم الطلب:'}</strong> <span style={{ color: 'var(--kfh-green)', fontWeight: 'bold' }}>{selectedWfInstance.details.request_number || `TR-${selectedWfInstance.details.transfer_id}`}</span></div>
                           <div><strong>{currentLang === 'en' ? 'Serial Number:' : 'الرقم التسلسلي:'}</strong> {selectedWfInstance.details.serial_number}</div>
                           <div><strong>{currentLang === 'en' ? 'Product:' : 'المنتج:'}</strong> {selectedWfInstance.details.product_name}</div>
                           <div><strong>{currentLang === 'en' ? 'From:' : 'من:'}</strong> {selectedWfInstance.details.source_branch}</div>
                           <div><strong>{currentLang === 'en' ? 'To:' : 'إلى:'}</strong> {selectedWfInstance.details.destination_branch}</div>
                           <div><strong>{currentLang === 'en' ? 'Courier:' : 'الناقل:'}</strong> {selectedWfInstance.details.courier_info}</div>
                           <div><strong>{currentLang === 'en' ? 'Status Code:' : 'حالة النقل:'}</strong> {selectedWfInstance.details.status_code}</div>
+                        </div>
+                      ) : selectedWfInstance.workflow_type === "TRANSFER_RECEIPT" ? (
+                        <div className="split-grid-2" style={{ gap: '10px 20px' }}>
+                          <div><strong>{currentLang === 'en' ? 'Request Number:' : 'رقم الطلب:'}</strong> <span style={{ color: 'var(--kfh-green)', fontWeight: 'bold' }}>{selectedWfInstance.details.request_number || `TR-${selectedWfInstance.details.transfer_id}`}</span></div>
+                          <div><strong>{currentLang === 'en' ? 'Verified Bar Serial:' : 'الرقم التسلسلي المفحوص:'}</strong> <span style={{ color: 'var(--accent-gold)', fontWeight: 'bold' }}>{selectedWfInstance.details.serial_number}</span></div>
+                          <div><strong>{currentLang === 'en' ? 'Customer Name:' : 'اسم العميل:'}</strong> {selectedWfInstance.details.customer_name || 'N/A'}</div>
+                          <div><strong>{currentLang === 'en' ? 'Account Number:' : 'رقم الحساب:'}</strong> {selectedWfInstance.details.account_number || 'N/A'}</div>
+                          <div><strong>{currentLang === 'en' ? 'Product / Metal:' : 'المنتج / المعدن:'}</strong> {selectedWfInstance.details.product_name || selectedWfInstance.details.metal} ({selectedWfInstance.details.denomination})</div>
+                          <div><strong>{currentLang === 'en' ? 'Weight:' : 'الوزن:'}</strong> {selectedWfInstance.details.weight_grams}g</div>
+                          <div><strong>{currentLang === 'en' ? 'From (Source):' : 'من (المصدر):'}</strong> {selectedWfInstance.details.source_branch}</div>
+                          <div><strong>{currentLang === 'en' ? 'To (Destination):' : 'إلى (الوجهة):'}</strong> {selectedWfInstance.details.destination_branch}</div>
+                          <div><strong>{currentLang === 'en' ? 'Verified QR Code:' : 'رمز الاستجابة المفحوص:'}</strong> <span className="badge" style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#059669', fontSize: '11px' }}><i className="fa-solid fa-qrcode"></i> {selectedWfInstance.details.verified_qr_code || selectedWfInstance.details.serial_number}</span></div>
+                          <div><strong>{currentLang === 'en' ? 'Courier Escort:' : 'الناقل والشاحن:'}</strong> {selectedWfInstance.details.courier_info}</div>
+                          {selectedWfInstance.details.notes && (
+                            <div style={{ gridColumn: '1 / -1' }}><strong>{currentLang === 'en' ? 'Maker Receipt Notes:' : 'ملاحظات المستلم (المحرر):'}</strong> {selectedWfInstance.details.notes}</div>
+                          )}
                         </div>
                       ) : selectedWfInstance.workflow_type === "TURKEY_PURCHASE" ? (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -18968,6 +19615,340 @@ const [migrationApproved, setMigrationApproved] = useState(false);
           </div>
         )}
 
+        {/* BRANCH & VAULT TRANSFER RECEIPT & COURIER QR VERIFICATION MODAL */}
+        {selectedTransferForReceipt && (
+          <div className="modal-overlay active" onClick={() => setSelectedTransferForReceipt(null)}>
+            <div className="glass-card modal-content-box" style={{ width: '700px', maxWidth: '95%' }} onClick={e => e.stopPropagation()}>
+              <div className="modal-header">
+                <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--kfh-green)' }}>
+                  <i className="fa-solid fa-qrcode"></i>
+                  {currentLang === 'en' ? 'Physical Transfer Parcel Intake & QR Verification' : 'فحص واستلام شحنة التحويل والتحقق من باركود الساعي'}
+                </h3>
+                <span className="modal-close-btn" onClick={() => setSelectedTransferForReceipt(null)}>&times;</span>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginTop: '12px' }}>
+                {/* Transfer Details Card */}
+                <div style={{ background: 'rgba(255, 255, 255, 0.03)', border: '1px solid var(--surface-border)', borderRadius: '8px', padding: '14px' }}>
+                  <div className="split-grid-2" style={{ gap: '10px 16px', fontSize: '13px' }}>
+                    <div>
+                      <strong>{currentLang === 'en' ? 'Request Number:' : 'رقم طلب التحويل:'}</strong>{' '}
+                      <span style={{ color: 'var(--kfh-green)', fontFamily: 'monospace', fontWeight: 'bold' }}>
+                        {selectedTransferForReceipt.request_number || `TR-${selectedTransferForReceipt.transfer_id}`}
+                      </span>
+                    </div>
+                    <div>
+                      <strong>{currentLang === 'en' ? 'Direction:' : 'مسار النقل:'}</strong>{' '}
+                      <span style={{ fontWeight: 600 }}>{translateDb(selectedTransferForReceipt.source_branch)} ➔ {translateDb(selectedTransferForReceipt.destination_branch)}</span>
+                    </div>
+                    <div>
+                      <strong>{currentLang === 'en' ? 'Customer Name:' : 'اسم العميل:'}</strong>{' '}
+                      <span>{selectedTransferForReceipt.customer_name || (currentLang === 'en' ? 'Customer Owned Holding' : 'ملكية عميل')}</span>
+                    </div>
+                    <div>
+                      <strong>{currentLang === 'en' ? 'Account Number:' : 'رقم حساب العميل:'}</strong>{' '}
+                      <span style={{ fontFamily: 'monospace' }}>{selectedTransferForReceipt.account_number || 'N/A'}</span>
+                    </div>
+                    <div>
+                      <strong>{currentLang === 'en' ? 'Metal & Product:' : 'المعدن والفئة:'}</strong>{' '}
+                      <span>{translateDb(selectedTransferForReceipt.metal)} - {selectedTransferForReceipt.denomination} ({selectedTransferForReceipt.weight_grams}g)</span>
+                    </div>
+                    <div>
+                      <strong>{currentLang === 'en' ? 'Expected Bar Serial:' : 'الرقم التسلسلي المتوقع:'}</strong>{' '}
+                      <span style={{ color: 'var(--accent-gold)', fontFamily: 'monospace', fontWeight: 'bold' }}>
+                        {selectedTransferForReceipt.serial_number}
+                      </span>
+                    </div>
+                    <div>
+                      <strong>{currentLang === 'en' ? 'Item Count:' : 'العدد:'}</strong>{' '}
+                      <span className="badge">{selectedTransferForReceipt.item_count || 1} {currentLang === 'en' ? 'Bar' : 'سبيكة'}</span>
+                    </div>
+                    <div>
+                      <strong>{currentLang === 'en' ? 'Courier Escort:' : 'الناقل الأمني:'}</strong>{' '}
+                      <span style={{ color: 'var(--text-muted)' }}>{selectedTransferForReceipt.courier_info || 'Courier'}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Courier Physical QR Code Input */}
+                <div style={{ background: 'rgba(0, 155, 78, 0.05)', border: '1px solid rgba(0, 155, 78, 0.25)', borderRadius: '8px', padding: '16px' }}>
+                  <label style={{ color: 'var(--kfh-green)', fontWeight: 'bold', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
+                    <i className="fa-solid fa-barcode"></i>
+                    {currentLang === 'en' ? 'Scan Courier Parcel Barcode / QR Code on Physical Bar:' : 'امسح باركود أو رمز الاستجابة السريعة (QR) الملصق على السبيكة من الشاحن:'}
+                  </label>
+                  <div style={{ display: 'flex', gap: '10px' }}>
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder={currentLang === 'en' ? 'Scan or type bar QR code (e.g. KFH-GOLD-99901)...' : 'امسح أو اكتب الرمز التسلسلي/QR (مثال: KFH-GOLD-99901)...'}
+                      value={courierQrInput}
+                      onChange={e => {
+                        setCourierQrInput(e.target.value);
+                        setQrVerificationResult(null);
+                      }}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleVerifyTransferQr(selectedTransferForReceipt.transfer_id, courierQrInput);
+                        }
+                      }}
+                      style={{ fontSize: '14px', fontFamily: 'monospace', fontWeight: 600 }}
+                      autoFocus
+                    />
+                    <button
+                      className="btn btn-primary"
+                      style={{ padding: '0 20px', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '6px' }}
+                      onClick={() => handleVerifyTransferQr(selectedTransferForReceipt.transfer_id, courierQrInput)}
+                      disabled={isVerifyingQr}
+                    >
+                      {isVerifyingQr ? (
+                        <i className="fa-solid fa-spinner fa-spin"></i>
+                      ) : (
+                        <>
+                          <i className="fa-solid fa-magnifying-glass"></i>
+                          {currentLang === 'en' ? 'Verify QR' : 'فحص الرمز'}
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {/* Quick Auto-Fill for Testing / Operator Convenience */}
+                  <div style={{ marginTop: '8px', display: 'flex', justifyContent: 'flex-end' }}>
+                    <button
+                      type="button"
+                      className="btn btn-outline"
+                      style={{ padding: '3px 8px', fontSize: '11px', color: 'var(--text-muted)' }}
+                      onClick={() => {
+                        setCourierQrInput(selectedTransferForReceipt.serial_number);
+                        handleVerifyTransferQr(selectedTransferForReceipt.transfer_id, selectedTransferForReceipt.serial_number);
+                      }}
+                    >
+                      <i className="fa-solid fa-paste"></i> {currentLang === 'en' ? `Auto-Fill Serial (${selectedTransferForReceipt.serial_number})` : `إدراج الرقم التسلسلي (${selectedTransferForReceipt.serial_number})`}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Verification Feedback Section */}
+                {qrVerificationResult && (
+                  <div>
+                    {qrVerificationResult.isValid ? (
+                      <div style={{ background: 'rgba(16, 185, 129, 0.1)', border: '1px solid rgba(16, 185, 129, 0.4)', borderRadius: '8px', padding: '14px', color: '#059669' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', fontWeight: 'bold', marginBottom: '6px' }}>
+                          <i className="fa-solid fa-circle-check" style={{ fontSize: '18px' }}></i>
+                          {currentLang === 'en' ? 'QR Code Verified & Matched Customer Manifest!' : 'تم التحقق بنجاح ومطابقة بيانات السبيكة مع العميل!'}
+                        </div>
+                        <div style={{ fontSize: '12px', lineHeight: '1.5' }}>
+                          <div><strong>{currentLang === 'en' ? 'Customer:' : 'العميل:'}</strong> {qrVerificationResult.customerName || selectedTransferForReceipt.customer_name}</div>
+                          <div><strong>{currentLang === 'en' ? 'Account No:' : 'رقم الحساب:'}</strong> {qrVerificationResult.accountNumber || selectedTransferForReceipt.account_number}</div>
+                          <div><strong>{currentLang === 'en' ? 'Bar Serial:' : 'الرقم التسلسلي:'}</strong> {selectedTransferForReceipt.serial_number}</div>
+                        </div>
+
+                        {/* Optional Receipt Notes */}
+                        <div style={{ marginTop: '12px' }}>
+                          <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-color)', marginBottom: '4px', display: 'block' }}>
+                            {currentLang === 'en' ? 'Intake / Inspection Notes (Optional):' : 'ملاحظات المعاينة والاستلام:'}
+                          </label>
+                          <input
+                            type="text"
+                            className="form-control"
+                            placeholder={currentLang === 'en' ? 'e.g. Courier security seal intact, physical assay verified.' : 'مثال: ختم الشاحن الأمني سليم وتمت مطابقة فحص العيار.'}
+                            value={receiptNotes}
+                            onChange={e => setReceiptNotes(e.target.value)}
+                            style={{ fontSize: '12px' }}
+                          />
+                        </div>
+
+                        {/* Submit Receipt Button */}
+                        <button
+                          className="btn btn-primary"
+                          style={{ width: '100%', marginTop: '14px', padding: '12px', fontSize: '14px', background: 'linear-gradient(135deg, #059669 0%, #047857 100%)', borderColor: '#059669' }}
+                          onClick={() => handleInitiateTransferReceipt(selectedTransferForReceipt.transfer_id)}
+                          disabled={isSubmittingReceipt}
+                        >
+                          {isSubmittingReceipt ? (
+                            <i className="fa-solid fa-spinner fa-spin"></i>
+                          ) : (
+                            <>
+                              <i className="fa-solid fa-check-double" style={{ marginRight: '6px' }}></i>
+                              {currentLang === 'en'
+                                ? 'Initiate Intake Receipt (Send to Checker for Vault Placement)'
+                                : 'بدء اعتماد الاستلام (إرسال للمدقق للإيداع بالخزينة)'}
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    ) : (
+                      <div style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.4)', borderRadius: '8px', padding: '14px', color: '#dc2626' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', fontWeight: 'bold', marginBottom: '6px' }}>
+                          <i className="fa-solid fa-triangle-exclamation" style={{ fontSize: '18px' }}></i>
+                          {currentLang === 'en' ? 'QR Code Discrepancy / Bar Mismatch Detected!' : 'تنبيه: عدم تطابق رمز الاستجابة السريعة أو رقم السبيكة!'}
+                        </div>
+                        <p style={{ fontSize: '12px', margin: '4px 0 12px 0' }}>
+                          {qrVerificationResult.error || (currentLang === 'en' ? 'The scanned bar does not match this customer transfer manifest.' : 'الباركود الممسوح لا يطابق بيانات سبيكة العميل في هذا الطلب.')}
+                        </p>
+                        <button
+                          className="btn btn-outline"
+                          style={{ width: '100%', padding: '10px', fontSize: '13px', color: '#dc2626', borderColor: '#dc2626', background: 'rgba(239, 68, 68, 0.05)' }}
+                          onClick={() => {
+                            setSelectedTransferForReturn(selectedTransferForReceipt);
+                            setTransferReturnReason('QR Code Discrepancy / Bar Mismatch');
+                            setTransferReturnReasonCustomText(`Scanned code '${courierQrInput}' differs from manifest bar '${selectedTransferForReceipt.serial_number}'`);
+                            setTransferReturnNotes(`Courier barcode mismatch detected on intake. Returned to Central Vault.`);
+                            setTransferReturnCourier(selectedTransferForReceipt.courier_info || 'Armored Return Escort');
+                            setShowTransferReturnModal(true);
+                          }}
+                        >
+                          <i className="fa-solid fa-arrow-rotate-left"></i>{' '}
+                          {currentLang === 'en' ? 'Initiate Return to Main Vault Due to Discrepancy' : 'بدء طلب إرجاع إلى الخزينة الرئيسية بسبب عدم التطابق'}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Additional Modal Footer Options */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--surface-border)', paddingTop: '12px' }}>
+                  <button
+                    className="btn btn-outline"
+                    style={{ fontSize: '12px', color: '#dc2626', borderColor: 'rgba(239, 68, 68, 0.3)' }}
+                    onClick={() => {
+                      setSelectedTransferForReturn(selectedTransferForReceipt);
+                      setTransferReturnReason('Customer sold bar during transit');
+                      setTransferReturnReasonCustomText('');
+                      setTransferReturnNotes('');
+                      setTransferReturnCourier(selectedTransferForReceipt.courier_info || 'Armored Return Escort');
+                      setShowTransferReturnModal(true);
+                    }}
+                  >
+                    <i className="fa-solid fa-arrow-rotate-left"></i>{' '}
+                    {currentLang === 'en' ? 'Customer Sold / Direct Return to Vault' : 'بيع العميل / إرجاع مباشر للخزينة'}
+                  </button>
+
+                  <button
+                    className="btn"
+                    style={{ padding: '8px 20px', fontSize: '13px' }}
+                    onClick={() => setSelectedTransferForReceipt(null)}
+                  >
+                    {t('btn_close')}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* RETURN TO MAIN VAULT WORKFLOW INITIATION MODAL */}
+        {showTransferReturnModal && selectedTransferForReturn && (
+          <div className="modal-overlay active" onClick={() => setShowTransferReturnModal(false)}>
+            <div className="glass-card modal-content-box" style={{ width: '600px', maxWidth: '95%' }} onClick={e => e.stopPropagation()}>
+              <div className="modal-header">
+                <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#dc2626' }}>
+                  <i className="fa-solid fa-arrow-rotate-left"></i>
+                  {currentLang === 'en' ? 'Initiate Return to Main Central Vault' : 'بدء إجراءات إرجاع السبيكة إلى الخزينة الرئيسية'}
+                </h3>
+                <span className="modal-close-btn" onClick={() => setShowTransferReturnModal(false)}>&times;</span>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginTop: '12px' }}>
+                <div style={{ padding: '10px 14px', background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.25)', borderRadius: '8px', color: '#dc2626', fontSize: '12px' }}>
+                  <i className="fa-solid fa-circle-info" style={{ marginRight: '6px' }}></i>
+                  {currentLang === 'en'
+                    ? 'This will initiate a RETURN_TO_VAULT dispatch workflow. Ownership remains unchanged; upon receipt at Main Vault, the physical location will be updated.'
+                    : 'سيتم إنشاء مسار إرجاع للخزينة الرئيسية. تبقى الملكية كما هي دون تغيير، وعند استلام الخزينة سيتم تحديث الموقع الفعلي فقط.'}
+                </div>
+
+                {/* Transfer Info */}
+                <div style={{ background: 'rgba(255, 255, 255, 0.03)', border: '1px solid var(--surface-border)', borderRadius: '6px', padding: '10px 14px', fontSize: '12px' }}>
+                  <div><strong>{currentLang === 'en' ? 'Request Ref:' : 'مرجع الطلب:'}</strong> {selectedTransferForReturn.request_number || `TR-${selectedTransferForReturn.transfer_id}`}</div>
+                  <div><strong>{currentLang === 'en' ? 'Bar Serial:' : 'الرقم التسلسلي:'}</strong> <span style={{ color: 'var(--accent-gold)', fontFamily: 'monospace' }}>{selectedTransferForReturn.serial_number}</span></div>
+                  <div><strong>{currentLang === 'en' ? 'Customer / Owner:' : 'العميل / المالك:'}</strong> {selectedTransferForReturn.customer_name || 'Customer Owned'}</div>
+                </div>
+
+                {/* Return Reason Preset */}
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Select Return Reason' : 'اختر سبب الإرجاع'} *</label>
+                  <select
+                    className="form-control"
+                    value={transferReturnReason}
+                    onChange={e => setTransferReturnReason(e.target.value)}
+                    style={{ fontSize: '13px', color: '#000' }}
+                  >
+                    <option value="QR Code Discrepancy / Bar Mismatch">{currentLang === 'en' ? 'QR Code Discrepancy / Bar Mismatch' : 'عدم تطابق رمز الاستجابة السريعة / السبيكة'}</option>
+                    <option value="Customer sold bar during transit (Reassign to Central Vault)">{currentLang === 'en' ? 'Customer sold bar during transit (Reassign to Central Vault)' : 'بيع العميل للسبيكة أثناء النقل (إعادة تعيين للخزينة)'}</option>
+                    <option value="Customer buyback / portfolio liquidation">{currentLang === 'en' ? 'Customer buyback / portfolio liquidation' : 'إعادة شراء من العميل / تسييل المحفظة'}</option>
+                    <option value="Customer did not pickup within SLA (Unclaimed)">{currentLang === 'en' ? 'Customer did not pickup within SLA (Unclaimed)' : 'عدم استلام العميل للطلب خلال المهلة المحددة'}</option>
+                    <option value="Customer requested delivery cancellation">{currentLang === 'en' ? 'Customer requested delivery cancellation' : 'طلب العميل إلغاء استلام السبيكة'}</option>
+                    <option value="OTHER">{currentLang === 'en' ? 'Other custom reason' : 'سبب مخصص آخر'}</option>
+                  </select>
+                </div>
+
+                {transferReturnReason === 'OTHER' && (
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Specify Custom Reason' : 'حدد السبب المخصص'} *</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder={currentLang === 'en' ? 'Enter detailed return reason...' : 'اكتب سبب الإرجاع بالتفصيل...'}
+                      value={transferReturnReasonCustomText}
+                      onChange={e => setTransferReturnReasonCustomText(e.target.value)}
+                    />
+                  </div>
+                )}
+
+                {/* Courier Escort */}
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Return Courier & Escort' : 'الناقل الأمني للشحنة المرتجعة'} *</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder="e.g. Secured Armored Return Logistics #15"
+                    value={transferReturnCourier}
+                    onChange={e => setTransferReturnCourier(e.target.value)}
+                  />
+                </div>
+
+                {/* Notes */}
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Operational Notes (Optional)' : 'ملاحظات تشغيلية (اختياري)'}</label>
+                  <textarea
+                    rows={2}
+                    className="form-control"
+                    placeholder={currentLang === 'en' ? 'Additional comments / custody handover details...' : 'ملاحظات إضافية / تفاصيل تسليم العهدة...'}
+                    value={transferReturnNotes}
+                    onChange={e => setTransferReturnNotes(e.target.value)}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
+                  <button
+                    className="btn btn-primary"
+                    style={{ flex: 1, padding: '12px', background: 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)', borderColor: '#dc2626', fontWeight: 'bold' }}
+                    onClick={() => handleInitiateTransferReturn(selectedTransferForReturn.transfer_id)}
+                    disabled={isSubmittingReturn}
+                  >
+                    {isSubmittingReturn ? (
+                      <i className="fa-solid fa-spinner fa-spin"></i>
+                    ) : (
+                      <>
+                        <i className="fa-solid fa-paper-plane" style={{ marginRight: '6px' }}></i>
+                        {currentLang === 'en' ? 'Dispatch Return to Main Vault' : 'إرسال طلب الإرجاع إلى الخزينة الرئيسية'}
+                      </>
+                    )}
+                  </button>
+                  <button
+                    className="btn"
+                    style={{ padding: '12px 20px' }}
+                    onClick={() => setShowTransferReturnModal(false)}
+                    disabled={isSubmittingReturn}
+                  >
+                    {t('btn_close')}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* CREATE USER MODAL */}
         {showCreateUserModal && (
           <div className="modal-overlay active" onClick={() => setShowCreateUserModal(false)}>
@@ -19243,7 +20224,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     <div style={{ marginBottom: '8px' }}><strong>{currentLang === 'ar' ? 'الرقم التسلسلي:' : 'Serial Number:'}</strong> {scanQrResult.serialNumber}</div>
                     <div style={{ marginBottom: '8px' }}><strong>{currentLang === 'ar' ? 'الملكية:' : 'Ownership Type:'}</strong> {scanQrResult.ownershipType}</div>
                     <div style={{ marginBottom: '8px' }}><strong>{currentLang === 'ar' ? 'حساب العميل:' : 'Customer Account:'}</strong> {scanQrResult.customerAccountNumber || '—'}</div>
-                    <div style={{ marginBottom: '8px' }}><strong>{currentLang === 'ar' ? 'متوسط تكلفة الشراء:' : 'Average Purchase Cost:'}</strong> {scanQrResult.averagePurchaseCost ? `$${scanQrResult.averagePurchaseCost.toFixed(2)}` : '—'}</div>
+                    <div style={{ marginBottom: '8px' }}><strong>{currentLang === 'ar' ? 'تكلفة الإنتاج:' : 'Production Cost:'}</strong> {scanQrResult.averagePurchaseCost ? `$${scanQrResult.averagePurchaseCost.toFixed(2)}` : '—'}</div>
                     <div><strong>{currentLang === 'ar' ? 'آخر مزامنة مع GFS:' : 'GFS Last Sync:'}</strong> {scanQrResult.gfsLastSyncAt ? new Date(scanQrResult.gfsLastSyncAt).toLocaleString() : '—'}</div>
                   </div>
                 )}

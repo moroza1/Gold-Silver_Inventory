@@ -415,7 +415,7 @@ public partial class PMIMSControllers
 
     private async Task<(IReadOnlyList<string> headers, List<IReadOnlyList<string>> rows)> BuildCostAnalysisTableAsync(string groupBy)
     {
-        var headers = new[] { "Group", "Item Count", "Total Weight (g)", "Total Landed Cost", "Avg Unit Cost/g" };
+        var headers = new[] { "Group", "Item Count", "Total Weight (g)", "Total Landed Cost", "Production Cost/g" };
         var items = (await _repository.GetItemsAsync())
             .Where(i => i.StatusCode != "INACTIVE" && i.StatusCode != "WITHDRAWN" && i.Lot != null)
             .ToList();
@@ -457,7 +457,7 @@ public partial class PMIMSControllers
     // type/period = no variance line for it (nothing to compare against yet).
     private async Task<(IReadOnlyList<string> headers, List<IReadOnlyList<string>> rows)> BuildCostVarianceTableAsync(string? period)
     {
-        var headers = new[] { "Metal Type", "Period", "Budgeted Cost/g", "Actual Avg Cost/g", "Variance/g", "Variance %" };
+        var headers = new[] { "Metal Type", "Period", "Budgeted Cost/g", "Actual Production Cost/g", "Variance/g", "Variance %" };
         string effectivePeriod = string.IsNullOrWhiteSpace(period) ? System.DateTime.UtcNow.ToString("yyyy-MM") : period;
 
         var budgets = (await _repository.GetCostBudgetsAsync()).Where(b => b.Period == effectivePeriod).ToList();

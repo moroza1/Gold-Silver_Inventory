@@ -996,7 +996,7 @@ public class BranchTransfer
     public int SourceBranchId { get; set; }
     public int DestinationBranchId { get; set; }
     public string CourierInfo { get; set; } = null!;
-    public string StatusCode { get; set; } = "PENDING_APPROVAL"; // PENDING_APPROVAL, APPROVED, REJECTED, IN_TRANSIT, RECEIVED
+    public string StatusCode { get; set; } = "PENDING_APPROVAL"; // PENDING_APPROVAL, APPROVED, REJECTED, IN_TRANSIT, PENDING_RECEIPT, RECEIVED, RETURNED
     public string CreatedBy { get; set; } = null!;
     public string? ApprovedBy { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
@@ -1004,9 +1004,40 @@ public class BranchTransfer
     public string? ReturnReason { get; set; } // Reason if returning bar back to Main Vault / Branch
     public string? Notes { get; set; }
 
+    public string? VerifiedQrCode { get; set; }
+    public string? ReceiptInitiatedBy { get; set; }
+    public string? ReceiptApprovedBy { get; set; }
+    public DateTime? ReceivedAt { get; set; }
+    public string? ReceiptNotes { get; set; }
+    public string? DiscrepancyReason { get; set; }
+
     public InventoryItem? Item { get; set; }
     public Branch? SourceBranch { get; set; }
     public Branch? DestinationBranch { get; set; }
+}
+
+public class TransferReceiptValidationResult
+{
+    public bool IsValid { get; set; }
+    public int TransferId { get; set; }
+    public string RequestNumber { get; set; } = "";
+    public int ItemId { get; set; }
+    public string SerialNumber { get; set; } = "";
+    public string ScannedInput { get; set; } = "";
+    public string Metal { get; set; } = "";
+    public string Denomination { get; set; } = "";
+    public decimal WeightGrams { get; set; }
+    public decimal Purity { get; set; }
+    public string CustomerName { get; set; } = "";
+    public string AccountNumber { get; set; } = "";
+    public string OwnershipType { get; set; } = "";
+    public string SourceBranch { get; set; } = "";
+    public string DestinationBranch { get; set; } = "";
+    public string TransferType { get; set; } = "";
+    public string CourierInfo { get; set; } = "";
+    public string StatusCode { get; set; } = "";
+    public string Message { get; set; } = "";
+    public string? Error { get; set; }
 }
 
 // ============================================================

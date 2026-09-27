@@ -876,46 +876,142 @@ public partial class PMIMSControllers : ControllerBase
 
     [Authorize(Policy = "intake.read")]
     [HttpGet("transfers")]
-    public async Task<IActionResult> GetBranchTransfers()
+    public async Task<IActionResult> GetBranchTransfers([FromQuery] string? direction = null, [FromQuery] int? branch_id = null)
     {
         var list = await _repository.GetBranchTransfersAsync();
-        return Ok(list.Select(t => new {
-            transfer_id = t.TransferId,
-            item_id = t.ItemId,
-            serial_number = t.Item?.SerialNumber ?? "Unknown",
-            metal = t.Item?.Product?.MetalType?.MetalName ?? "Gold",
-            denomination = t.Item?.Product?.Denomination?.Label ?? "Bar",
-            weight_grams = t.Item?.Product?.Denomination?.WeightGrams ?? 0,
-            purity = t.Item?.Product?.Purity?.PurityValue ?? 0.9999m,
-            ownership_type = t.Item?.OwnershipType ?? "CUSTOMER_OWNED",
-            source_branch_id = t.SourceBranchId,
-            source_branch = t.SourceBranch?.BranchName ?? "Main Vault",
-            destination_branch_id = t.DestinationBranchId,
-            destination_branch = t.DestinationBranch?.BranchName ?? "Branch",
-            courier_info = t.CourierInfo,
-            transfer_type = t.TransferType ?? "OUTBOUND_TO_BRANCH",
-            return_reason = t.ReturnReason,
-            notes = t.Notes,
-            status_code = t.StatusCode,
-            created_by = t.CreatedBy,
-            created_at = t.CreatedAt,
-            approved_by = t.ApprovedBy
+        var allHoldings = (await _repository.GetAllCustomerHoldingsAsync())
+            .Where(h => h.StatusCode == "ACTIVE" || h.StatusCode == "HELD_IN_CUSTODY")
+            .ToList();
+        var holdingByItemId = allHoldings.GroupBy(h => h.ItemId).ToDictionary(g => g.Key, g => g.First());
+
+        var filtered = list.AsEnumerable();
+        if (!string.IsNullOrWhiteSpace(direction))
+        {
+            if (direction.Equals("outbound", StringComparison.OrdinalIgnoreCase) || direction.Equals("outbound_to_branch", StringComparison.OrdinalIgnoreCase))
+            {
+                filtered = filtered.Where(t => t.TransferType == "OUTBOUND_TO_BRANCH" || (t.SourceBranchId == 1 && t.DestinationBranchId != 1));
+            }
+            else if (direction.Equals("return", StringComparison.OrdinalIgnoreCase) || direction.Equals("return_to_vault", StringComparison.OrdinalIgnoreCase))
+            {
+                filtered = filtered.Where(t => t.TransferType == "RETURN_TO_VAULT" || t.DestinationBranchId == 1);
+            }
+        }
+        if (branch_id.HasValue && branch_id.Value > 0)
+        {
+            filtered = filtered.Where(t => t.SourceBranchId == branch_id.Value || t.DestinationBranchId == branch_id.Value);
+        }
+
+        return Ok(filtered.Select(t => {
+            holdingByItemId.TryGetValue(t.ItemId, out var holding);
+            string custName = holding?.Customer?.CustomerName ?? holding?.CustomerName ?? (t.Item?.OwnershipType == "KFH_OWNED" ? "Kuwait Finance House (KFH Treasury)" : "Customer Owned");
+            string acctNo = holding?.Account?.AccountNumber ?? (t.Item?.OwnershipType == "KFH_OWNED" ? "KFH-TREASURY-01" : "N/A");
+
+            return new {
+                transfer_id = t.TransferId,
+                request_number = $"TR-{t.TransferId:D6}",
+                item_id = t.ItemId,
+                serial_number = t.Item?.SerialNumber ?? "Unknown",
+                qr_code = t.Item?.SerialNumber ?? "",
+                metal = t.Item?.Product?.MetalType?.MetalName ?? "Gold",
+                denomination = t.Item?.Product?.Denomination?.Label ?? "Bar",
+                weight_grams = t.Item?.Product?.Denomination?.WeightGrams ?? 0,
+                purity = t.Item?.Product?.Purity?.PurityValue ?? 0.9999m,
+                ownership_type = t.Item?.OwnershipType ?? "CUSTOMER_OWNED",
+                customer_name = custName,
+                account_no = acctNo,
+                customer_id = holding?.CustomerId,
+                customer_rim = holding?.CustomerRim ?? holding?.Customer?.CivilId,
+                count = 1,
+                source_branch_id = t.SourceBranchId,
+                source_branch = t.SourceBranch?.BranchName ?? "Main Vault",
+                destination_branch_id = t.DestinationBranchId,
+                destination_branch = t.DestinationBranch?.BranchName ?? "Branch",
+                courier_info = t.CourierInfo,
+                transfer_type = t.TransferType ?? "OUTBOUND_TO_BRANCH",
+                return_reason = t.ReturnReason,
+                notes = t.Notes,
+                status_code = t.StatusCode,
+                created_by = t.CreatedBy,
+                created_at = t.CreatedAt,
+                approved_by = t.ApprovedBy,
+                verified_qr_code = t.VerifiedQrCode,
+                receipt_initiated_by = t.ReceiptInitiatedBy,
+                receipt_approved_by = t.ReceiptApprovedBy,
+                received_at = t.ReceivedAt,
+                receipt_notes = t.ReceiptNotes,
+                discrepancy_reason = t.DiscrepancyReason
+            };
         }));
+    }
+
+    [Authorize(Policy = "intake.read")]
+    [HttpPost("transfers/{id}/verify-qr")]
+    public async Task<IActionResult> VerifyTransferQr([FromRoute] int id, [FromBody] VerifyTransferQrRequest req)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(req.QrCode))
+                return BadRequest(new { error = "QR Code or Barcode input is required for verification." });
+
+            var result = await _repository.ValidateTransferQrCodeAsync(id, req.QrCode);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
+    [Authorize(Policy = "intake.write")]
+    [HttpPost("transfers/{id}/initiate-receipt")]
+    public async Task<IActionResult> InitiateTransferReceiptWorkflow([FromRoute] int id, [FromBody] InitiateTransferReceiptRequest req)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(req.ScannedQr))
+                return BadRequest(new { error = "Scanned QR code is mandatory to initiate transfer receipt." });
+
+            string initiator = User?.Identity?.Name ?? "SYSTEM";
+            var transfer = await _repository.InitiateWorkflowBranchTransferReceiptAsync(id, req.ScannedQr, initiator, req.Notes, req.TargetLocationId);
+
+            return Ok(new {
+                transfer_id = transfer.TransferId,
+                message = "Transfer receipt Maker verification submitted. Routed to Checker for vault placement authorization."
+            });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
+    [Authorize(Policy = "intake.write")]
+    [HttpPost("transfers/{id}/initiate-return")]
+    public async Task<IActionResult> InitiateTransferReturnWorkflow([FromRoute] int id, [FromBody] InitiateTransferReturnRequest req)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(req.ReturnReason))
+                return BadRequest(new { error = "Return reason is mandatory." });
+
+            string initiator = User?.Identity?.Name ?? "SYSTEM";
+            var returnTransfer = await _repository.InitiateWorkflowBranchTransferReturnAsync(id, req.ReturnReason, initiator, req.Notes, req.CourierInfo);
+
+            return Ok(new {
+                transfer_id = returnTransfer.TransferId,
+                message = "Return-to-Vault transfer workflow initiated successfully."
+            });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
     }
 
     [Authorize(Policy = "intake.write")]
     [HttpPost("transfers/{id}/receive")]
     public async Task<IActionResult> ReceiveBranchTransfer([FromRoute] int id, [FromBody] ReceiveTransferRequest req)
     {
-        // VALIDATION: Ensure BRANCH_TRANSFER workflow template exists before allowing transfer receipt
-        var transferWorkflow = await _repository.GetWorkflowTemplateByTypeAsync("BRANCH_TRANSFER");
-        if (transferWorkflow == null || !transferWorkflow.IsActive)
-        {
-            return BadRequest(new {
-                error = "Cannot receive branch transfer: No active BRANCH_TRANSFER workflow template is configured. Please contact an administrator to set up the workflow first."
-            });
-        }
-
         var result = await _repository.ReceiveBranchTransferAsync(id, req.ReceivedBy);
         if (result != "SUCCESS") return BadRequest(new { error = result });
 
@@ -1081,21 +1177,51 @@ public partial class PMIMSControllers : ControllerBase
     [HttpGet("reports/holdings")]
     public async Task<IActionResult> GetHoldingsReport()
     {
-        var holdings = await _repository.GetAllCustomerHoldingsAsync();
-        return Ok(holdings.Select(h => new
+        var holdings = (await _repository.GetAllCustomerHoldingsAsync()).ToList();
+        var holdingItemIds = holdings.Select(h => h.ItemId).ToHashSet();
+        
+        var standaloneCustodyItems = (await _repository.GetItemsAsync())
+            .Where(i => (i.OwnershipType == "CUSTOMER_OWNED" || i.StatusCode == "HELD_IN_CUSTODY") && !holdingItemIds.Contains(i.ItemId))
+            .ToList();
+
+        var list = new List<object>();
+        foreach (var h in holdings)
         {
-            holding_id = h.HoldingId,
-            civil_id = h.Customer?.CivilId,
-            customer_name = h.Customer?.CustomerName,
-            serial_number = h.Item?.SerialNumber,
-            metal_name = h.Item?.Product?.MetalType?.MetalName,
-            weight_grams = h.Item?.Product?.Denomination?.WeightGrams,
-            purity_value = h.Item?.Product?.Purity?.PurityValue,
-            vault_name = h.Item?.Location?.Vault?.VaultName,
-            location_description = h.Item?.Location?.Description,
-            status_code = h.StatusCode,
-            custody_agreement_number = h.CustodyAgreementNumber
-        }));
+            list.Add(new
+            {
+                holding_id = h.HoldingId,
+                civil_id = h.Customer?.CivilId ?? h.CustomerRim,
+                customer_name = h.Customer?.CustomerName ?? h.CustomerName ?? "Customer",
+                serial_number = h.Item?.SerialNumber,
+                metal_name = h.Item?.Product?.MetalType?.MetalName,
+                weight_grams = h.Item?.Product?.Denomination?.WeightGrams,
+                purity_value = h.Item?.Product?.Purity?.PurityValue,
+                vault_name = h.Item?.Location?.Vault?.VaultName,
+                location_description = h.Item?.Location?.Description,
+                status_code = h.StatusCode,
+                custody_agreement_number = h.CustodyAgreementNumber
+            });
+        }
+
+        foreach (var item in standaloneCustodyItems)
+        {
+            list.Add(new
+            {
+                holding_id = -(item.ItemId),
+                civil_id = item.CustomerAccountNumber ?? "N/A",
+                customer_name = !string.IsNullOrWhiteSpace(item.CustomerAccountNumber) ? $"Account: {item.CustomerAccountNumber}" : "Customer Owned",
+                serial_number = item.SerialNumber,
+                metal_name = item.Product?.MetalType?.MetalName,
+                weight_grams = item.Product?.Denomination?.WeightGrams,
+                purity_value = item.Product?.Purity?.PurityValue,
+                vault_name = item.Location?.Vault?.VaultName,
+                location_description = item.Location?.Description,
+                status_code = item.StatusCode,
+                custody_agreement_number = $"CUST-{item.CustomerAccountNumber ?? item.SerialNumber}"
+            });
+        }
+
+        return Ok(list);
     }
 
     [Authorize(Policy = "reports.read")]
@@ -1315,6 +1441,10 @@ public partial class PMIMSControllers : ControllerBase
         var list = new List<object>();
         var templates = await _repository.GetWorkflowTemplatesAsync();
         var purchaseOrders = await _repository.GetPurchaseOrdersAsync();
+        var allCustomerHoldings = (await _repository.GetAllCustomerHoldingsAsync())
+            .Where(h => h.StatusCode == "ACTIVE" || h.StatusCode == "HELD_IN_CUSTODY")
+            .ToList();
+        var holdingsByItemId = allCustomerHoldings.GroupBy(h => h.ItemId).ToDictionary(g => g.Key, g => g.First());
 
         foreach (var inst in instances)
         {
@@ -1387,12 +1517,23 @@ public partial class PMIMSControllers : ControllerBase
                 var tr = transfers.FirstOrDefault(t => t.TransferId == inst.EntityId);
                 if (tr != null)
                 {
+                    holdingsByItemId.TryGetValue(tr.ItemId, out var holding);
+                    string custName = holding?.Customer?.CustomerName ?? holding?.CustomerName ?? (tr.Item?.OwnershipType == "KFH_OWNED" ? "Kuwait Finance House (KFH Treasury)" : "Customer Owned");
+                    string acctNo = holding?.Account?.AccountNumber ?? (tr.Item?.OwnershipType == "KFH_OWNED" ? "KFH-TREASURY-01" : "N/A");
+
                     entityDetails = new
                     {
                         transfer_id = tr.TransferId,
+                        request_number = $"TR-{tr.TransferId:D6}",
                         item_id = tr.ItemId,
                         serial_number = tr.Item?.SerialNumber ?? "Unknown",
+                        customer_name = custName,
+                        account_number = acctNo,
                         product_name = tr.Item?.Product?.ProductCode ?? "Bar",
+                        denomination = tr.Item?.Product?.Denomination?.Label ?? "Bar",
+                        metal = tr.Item?.Product?.MetalType?.MetalName ?? "Gold",
+                        weight_grams = tr.Item?.Product?.Denomination?.WeightGrams ?? 0,
+                        count = 1,
                         ownership_type = tr.Item?.OwnershipType ?? "CUSTOMER_OWNED",
                         source_branch = tr.SourceBranch?.BranchName ?? "Main Vault",
                         destination_branch = tr.DestinationBranch?.BranchName ?? "Branch",
@@ -1402,6 +1543,41 @@ public partial class PMIMSControllers : ControllerBase
                         notes = tr.Notes,
                         status_code = tr.StatusCode,
                         created_by = tr.CreatedBy
+                    };
+                }
+            }
+            else if (inst.WorkflowType == "TRANSFER_RECEIPT")
+            {
+                var transfers = await _repository.GetBranchTransfersAsync();
+                var tr = transfers.FirstOrDefault(t => t.TransferId == inst.EntityId);
+                if (tr != null)
+                {
+                    holdingsByItemId.TryGetValue(tr.ItemId, out var holding);
+                    string custName = holding?.Customer?.CustomerName ?? holding?.CustomerName ?? (tr.Item?.OwnershipType == "KFH_OWNED" ? "Kuwait Finance House (KFH Treasury)" : "Customer Owned");
+                    string acctNo = holding?.Account?.AccountNumber ?? (tr.Item?.OwnershipType == "KFH_OWNED" ? "KFH-TREASURY-01" : "N/A");
+
+                    entityDetails = new
+                    {
+                        transfer_id = tr.TransferId,
+                        request_number = $"TR-{tr.TransferId:D6}",
+                        item_id = tr.ItemId,
+                        serial_number = tr.Item?.SerialNumber ?? "Unknown",
+                        verified_qr_code = tr.VerifiedQrCode ?? tr.Item?.SerialNumber,
+                        customer_name = custName,
+                        account_number = acctNo,
+                        product_name = tr.Item?.Product?.ProductCode ?? "Bar",
+                        denomination = tr.Item?.Product?.Denomination?.Label ?? "Bar",
+                        metal = tr.Item?.Product?.MetalType?.MetalName ?? "Gold",
+                        weight_grams = tr.Item?.Product?.Denomination?.WeightGrams ?? 0,
+                        count = 1,
+                        ownership_type = tr.Item?.OwnershipType ?? "CUSTOMER_OWNED",
+                        source_branch = tr.SourceBranch?.BranchName ?? "Main Vault",
+                        destination_branch = tr.DestinationBranch?.BranchName ?? "Branch",
+                        courier_info = tr.CourierInfo,
+                        transfer_type = tr.TransferType ?? "OUTBOUND_TO_BRANCH",
+                        receipt_notes = tr.ReceiptNotes,
+                        status_code = tr.StatusCode,
+                        created_by = tr.ReceiptInitiatedBy ?? tr.CreatedBy
                     };
                 }
             }
@@ -1719,6 +1895,12 @@ public partial class PMIMSControllers : ControllerBase
                 string extra = !string.IsNullOrWhiteSpace(tr.ReturnReason) ? $" ({tr.ReturnReason})" : "";
                 return $"{typePrefix} {tr.Item?.SerialNumber ?? "item"} -> {tr.DestinationBranch?.BranchName ?? "branch"}{extra}";
             }
+            if (workflowType == "TRANSFER_RECEIPT")
+            {
+                var tr = transfers.FirstOrDefault(t => t.TransferId == entityId);
+                if (tr == null) return $"Transfer Receipt #{entityId}";
+                return $"Transfer Receipt TR-{tr.TransferId:D6} (Bar {tr.Item?.SerialNumber ?? "item"} at {tr.DestinationBranch?.BranchName ?? "branch"})";
+            }
             if (workflowType == "TURKEY_PURCHASE")
             {
                 return $"Turkey Purchase #{entityId}";
@@ -1829,6 +2011,15 @@ public partial class PMIMSControllers : ControllerBase
         if (rangeEndExclusive.HasValue)
             holdings = holdings.Where(h => h.AllocationDate < rangeEndExclusive.Value);
 
+        var custodyItems = scopedItems.Where(i => i.OwnershipType == "CUSTOMER_OWNED" || i.StatusCode == "HELD_IN_CUSTODY").ToList();
+        foreach (var hItem in holdings.Where(h => h.Item != null).Select(h => h.Item!))
+        {
+            if (!custodyItems.Any(i => i.ItemId == hItem.ItemId))
+            {
+                custodyItems.Add(hItem);
+            }
+        }
+
         // ============================================================
         // PURCHASE ORDER RECEIPT TRACKING
         // ============================================================
@@ -1883,12 +2074,14 @@ public partial class PMIMSControllers : ControllerBase
             i.OwnershipType == "TURKEY_OWNED" ||
             i.OwnershipType == "KFH_OWNED" ||
             i.OwnershipType == "VIP_OWNED" ||
+            i.OwnershipType == "CUSTOMER_OWNED" ||
             i.StatusCode == "IN_TRANSFER" ||
             i.IsDamaged ||
             i.StatusCode == "QUARANTINED" ||
             i.StatusCode == "PENDING_APPROVAL" ||
             i.StatusCode == "READY" ||
-            i.StatusCode == "RESERVED"
+            i.StatusCode == "RESERVED" ||
+            i.StatusCode == "HELD_IN_CUSTODY"
         ).Distinct().ToList();
 
         decimal totalPreciousWeightKg = Math.Round((allPreciousItems.Sum(i => i.Product?.Denomination?.WeightGrams ?? 0m) + pendingTurkeyWeightGrams) / 1000m, 3);
@@ -1962,8 +2155,8 @@ public partial class PMIMSControllers : ControllerBase
             total_gold_weight_kg = Math.Round(proprietaryBeforeTransferWeightGrams / 1000m, 3),
             reserved_qty = scopedItems.Count(i => i.StatusCode == "RESERVED"),
             reserved_weight_kg = WeightKg(scopedItems.Where(i => i.StatusCode == "RESERVED").ToList()),
-            custody_qty = holdings.Count(),
-            custody_weight_kg = WeightKg(holdings.Select(h => h.Item).ToList()),
+            custody_qty = custodyItems.Count,
+            custody_weight_kg = WeightKg(custodyItems),
             main_vault_qty = mainVaultItems.Count,
             main_vault_weight_kg = WeightKg(mainVaultItems),
             sold_qty = soldItems.Count,
@@ -3156,5 +3349,25 @@ public class InitiateCustomsTransferRequest
     public decimal? CustomsDutyAmount { get; set; }
     public decimal? PurchasingCost { get => CustomsDutyAmount; set => CustomsDutyAmount = value; }
     public string? PortOfEntry { get; set; }
+}
+
+public class VerifyTransferQrRequest
+{
+    public string QrCode { get; set; } = null!;
+    public string? ScannedBy { get; set; }
+}
+
+public class InitiateTransferReceiptRequest
+{
+    public string ScannedQr { get; set; } = null!;
+    public string? Notes { get; set; }
+    public int? TargetLocationId { get; set; }
+}
+
+public class InitiateTransferReturnRequest
+{
+    public string ReturnReason { get; set; } = null!;
+    public string? Notes { get; set; }
+    public string? CourierInfo { get; set; }
 }
 

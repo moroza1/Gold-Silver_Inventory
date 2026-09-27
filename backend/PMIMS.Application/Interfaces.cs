@@ -144,7 +144,10 @@ public interface IInventoryRepository
     Task<IEnumerable<BranchTransfer>> GetBranchTransfersAsync();
     Task<BranchTransfer?> GetBranchTransferByIdAsync(int transferId);
     Task<BranchTransfer> InitiateWorkflowBranchTransferAsync(int itemId, int destinationBranchId, string courierInfo, string initiatedBy, string? transferType = null, string? returnReason = null, string? notes = null);
-    Task<string> ReceiveBranchTransferAsync(int transferId, string receivedBy);
+    Task<string> ReceiveBranchTransferAsync(int transferId, string receivedBy, int? targetLocationId = null);
+    Task<TransferReceiptValidationResult> ValidateTransferQrCodeAsync(int transferId, string scannedQr);
+    Task<BranchTransfer> InitiateWorkflowBranchTransferReceiptAsync(int transferId, string scannedQr, string initiatedBy, string? notes = null, int? targetLocationId = null);
+    Task<BranchTransfer> InitiateWorkflowBranchTransferReturnAsync(int transferId, string returnReason, string initiatedBy, string? notes = null, string? courierInfo = null);
     Task<PendingIntake> InitiateWorkflowIntakeAsync(int? poId, string lotNumber, int locationId, string receivedBy, string serialsJsonList,
         string sourceType = "SUPPLIER", int? customerId = null, int? accountId = null, string? receiptReason = null,
         int? vendorId = null, string? shipmentReference = null, string? deliveryNoteNumber = null, string? airwayBillNumber = null,

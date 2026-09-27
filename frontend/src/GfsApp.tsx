@@ -843,7 +843,7 @@ export default function GfsApp({ onBackToPmims, initialLang = 'en' }: GfsAppProp
       triggerImpact(
         'GFS_EOD_SYNC',
         `Synced 128 inventory items across GFS & PMIMS`,
-        `Reconciled all customer account balances, average costs, and physical bar coordinates.`
+        `Reconciled all customer account balances, production costs, and physical bar coordinates.`
       );
 
       setSyncLogs(prev => [

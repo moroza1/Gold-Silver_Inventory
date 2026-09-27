@@ -1188,6 +1188,16 @@ public static class DbSeeder
                 MakerDesc = "Maker selects damaged Turkey-owned bar, verifies physical defect report and MOCI assay, and initiates export request.",
                 CheckerStepName = "Damaged Export Checker Review",
                 CheckerDesc = "Checker reviews damage evidence, Turkey ownership, and validates export details."
+            },
+            new
+            {
+                WorkflowType = "TRANSFER_RECEIPT",
+                Name = "Default Branch & Vault Transfer Receipt Workflow",
+                Description = "Maker-Checker verification and QR validation for receiving in-transit gold bars at destination branch or main vault.",
+                MakerStepName = "Transfer Receipt Maker Verification & QR Scan",
+                MakerDesc = "Maker physically receives parcel from courier, scans bar QR code to verify customer and denomination manifest, and submits receipt verification.",
+                CheckerStepName = "Transfer Receipt Checker Vault Placement Authorization",
+                CheckerDesc = "Checker verifies scanned QR code, inspects physical bar seal and custody allocation, and authorizes placement into branch or vault location."
             }
         };
 

@@ -2108,6 +2108,15 @@ public class InventoryRepository : IInventoryRepository
                     }
                 }
             }
+            else if (instance.WorkflowType == "TRANSFER_RECEIPT")
+            {
+                var transfer = await _dbContext.BranchTransfers.FindAsync(instance.EntityId);
+                if (transfer != null)
+                {
+                    transfer.StatusCode = "IN_TRANSIT";
+                    transfer.ReceiptNotes = comments;
+                }
+            }
             else if (instance.WorkflowType == "INTAKE_SHIPMENT")
             {
                 var pending = await _dbContext.PendingIntakes.FindAsync(instance.EntityId);
@@ -2214,6 +2223,11 @@ public class InventoryRepository : IInventoryRepository
             {
                 var transfer = await _dbContext.BranchTransfers.FindAsync(instance.EntityId);
                 if (transfer != null) transfer.StatusCode = "PENDING_APPROVAL";
+            }
+            else if (instance.WorkflowType == "TRANSFER_RECEIPT")
+            {
+                var transfer = await _dbContext.BranchTransfers.FindAsync(instance.EntityId);
+                if (transfer != null) transfer.StatusCode = "PENDING_RECEIPT";
             }
             else if (instance.WorkflowType == "INTAKE_SHIPMENT")
             {
@@ -2333,17 +2347,16 @@ public class InventoryRepository : IInventoryRepository
                                 throw new InvalidOperationException($"Outbound movement rejected: Gold bar '{item.SerialNumber}' is marked as damaged and cannot be moved from the vault. Location remains unchanged.");
                             }
 
-                            transfer.StatusCode = "APPROVED";
+                            transfer.StatusCode = "IN_TRANSIT";
                             transfer.ApprovedBy = username;
 
-                            // Find a free destination location at the destination branch
                             var destLoc = await _dbContext.InventoryLocations
                                 .FirstOrDefaultAsync(l => l.BranchId == transfer.DestinationBranchId);
                             int destLocId = destLoc?.LocationId ?? 1;
 
                             int srcLoc = item.LocationId ?? 1;
-                            item.LocationId = destLocId;
-                            item.StatusCode = "IN_TRANSFER"; // Sets it to in transit
+                            // Keep location at source vault/branch -- DO NOT change location to destination branch until received by branch Maker-Checker
+                            item.StatusCode = "IN_TRANSFER";
 
                             var tx = new InventoryTransaction
                             {
@@ -2370,7 +2383,66 @@ public class InventoryRepository : IInventoryRepository
                             _dbContext.MovementTransactions.Add(move);
 
                             await RecalculateInventoryBalanceAsync(srcLoc, item.ProductId, item.OwnershipType);
+                        }
+                    }
+                }
+                else if (instance.WorkflowType == "TRANSFER_RECEIPT")
+                {
+                    var transfer = await _dbContext.BranchTransfers.FindAsync(instance.EntityId);
+                    if (transfer != null)
+                    {
+                        var item = await _dbContext.InventoryItems.FindAsync(transfer.ItemId);
+                        if (item != null)
+                        {
+                            var destLoc = await _dbContext.InventoryLocations
+                                .FirstOrDefaultAsync(l => l.BranchId == transfer.DestinationBranchId);
+                            int destLocId = destLoc?.LocationId ?? 1;
+                            int srcLoc = item.LocationId ?? 1;
+
+                            // Update location to destination branch/vault only after Maker-Checker receipt
+                            item.LocationId = destLocId;
+
+                            var holding = await _dbContext.CustomerHoldings.FirstOrDefaultAsync(h => h.ItemId == item.ItemId && (h.StatusCode == "ACTIVE" || h.StatusCode == "HELD_IN_CUSTODY"));
+                            if (holding != null || item.OwnershipType == "CUSTOMER_OWNED")
+                            {
+                                item.StatusCode = "HELD_IN_CUSTODY";
+                            }
+                            else
+                            {
+                                item.StatusCode = "READY";
+                            }
+
+                            if (holding != null)
+                            {
+                                var allocs = await _dbContext.CustomerAllocations.Where(a => a.HoldingId == holding.HoldingId && a.ReleasedAt == null).ToListAsync();
+                                foreach (var alloc in allocs)
+                                {
+                                    alloc.AssignedLocationId = destLocId;
+                                }
+                            }
+
+                            transfer.StatusCode = "RECEIVED";
+                            transfer.ReceiptApprovedBy = username;
+                            transfer.ReceivedAt = DateTime.UtcNow;
+
+                            await RecalculateInventoryBalanceAsync(srcLoc, item.ProductId, item.OwnershipType);
                             await RecalculateInventoryBalanceAsync(destLocId, item.ProductId, item.OwnershipType);
+
+                            string eventType = transfer.DestinationBranchId == 1 ? "RECEIVED_AT_MAIN_VAULT" : "RECEIVED_AT_BRANCH";
+                            await RecordChainOfCustodyEventAsync(item.ItemId, eventType, username, destLocId, $"TR-{transfer.TransferId}", $"Transfer received at branch #{transfer.DestinationBranchId}. Verified QR: {transfer.VerifiedQrCode ?? item.SerialNumber}.");
+
+                            var tx = await _dbContext.InventoryTransactions
+                                .FirstOrDefaultAsync(t => t.ItemId == transfer.ItemId && t.TransactionType == "TRANSFER" && t.DestinationLocationId == destLocId);
+                            if (tx != null)
+                            {
+                                var move = await _dbContext.MovementTransactions.FirstOrDefaultAsync(m => m.TransactionId == tx.TransactionId);
+                                if (move != null)
+                                {
+                                    move.ArrivalTime = DateTime.UtcNow;
+                                }
+                            }
+
+                            await SaveAuditLogAsync(username, "OPERATIONS", "TRANSFER_RECEIPT_APPROVED", $"Transfer receipt approved for TR-{transfer.TransferId} (Bar: {item.SerialNumber}, Dest Branch: #{transfer.DestinationBranchId}).", entityType: "BRANCH_TRANSFER", entityId: transfer.TransferId.ToString());
                         }
                     }
                 }
@@ -3602,7 +3674,9 @@ public class InventoryRepository : IInventoryRepository
     public async Task<IEnumerable<BranchTransfer>> GetBranchTransfersAsync()
     {
         return await _dbContext.BranchTransfers
-            .Include(t => t.Item).ThenInclude(i => i!.Product)
+            .Include(t => t.Item).ThenInclude(i => i!.Product).ThenInclude(p => p!.Denomination)
+            .Include(t => t.Item).ThenInclude(i => i!.Product).ThenInclude(p => p!.MetalType)
+            .Include(t => t.Item).ThenInclude(i => i!.Product).ThenInclude(p => p!.Purity)
             .Include(t => t.SourceBranch)
             .Include(t => t.DestinationBranch)
             .OrderByDescending(t => t.CreatedAt)
@@ -3612,7 +3686,9 @@ public class InventoryRepository : IInventoryRepository
     public async Task<BranchTransfer?> GetBranchTransferByIdAsync(int transferId)
     {
         return await _dbContext.BranchTransfers
-            .Include(t => t.Item).ThenInclude(i => i!.Product)
+            .Include(t => t.Item).ThenInclude(i => i!.Product).ThenInclude(p => p!.Denomination)
+            .Include(t => t.Item).ThenInclude(i => i!.Product).ThenInclude(p => p!.MetalType)
+            .Include(t => t.Item).ThenInclude(i => i!.Product).ThenInclude(p => p!.Purity)
             .Include(t => t.SourceBranch)
             .Include(t => t.DestinationBranch)
             .FirstOrDefaultAsync(t => t.TransferId == transferId);
@@ -3682,21 +3758,22 @@ public class InventoryRepository : IInventoryRepository
         return transfer;
     }
 
-    public async Task<string> ReceiveBranchTransferAsync(int transferId, string receivedBy)
+    public async Task<string> ReceiveBranchTransferAsync(int transferId, string receivedBy, int? targetLocationId = null)
     {
         var transfer = await _dbContext.BranchTransfers
             .Include(t => t.Item)
             .FirstOrDefaultAsync(t => t.TransferId == transferId);
         
         if (transfer == null) return "TRANSFER_NOT_FOUND";
-        if (transfer.StatusCode != "APPROVED") return "TRANSFER_NOT_APPROVED";
+        if (transfer.StatusCode != "APPROVED" && transfer.StatusCode != "IN_TRANSIT" && transfer.StatusCode != "PENDING_RECEIPT")
+            return "TRANSFER_NOT_APPROVED";
 
         var item = transfer.Item;
         if (item != null)
         {
             // Check if holding exists for customer-owned item
             var holding = await _dbContext.CustomerHoldings.FirstOrDefaultAsync(h => h.ItemId == item.ItemId && (h.StatusCode == "ACTIVE" || h.StatusCode == "HELD_IN_CUSTODY"));
-            if (holding != null)
+            if (holding != null || item.OwnershipType == "CUSTOMER_OWNED")
             {
                 item.StatusCode = "HELD_IN_CUSTODY";
             }
@@ -3705,11 +3782,19 @@ public class InventoryRepository : IInventoryRepository
                 item.StatusCode = "READY";
             }
             
-            // Recalculate balances
-            var loc = await _dbContext.InventoryLocations.FirstOrDefaultAsync(l => l.BranchId == transfer.DestinationBranchId);
-            int destLocId = loc?.LocationId ?? item.LocationId ?? 1;
+            // Determine destination location
+            int destLocId;
+            if (targetLocationId.HasValue && targetLocationId.Value > 0)
+            {
+                destLocId = targetLocationId.Value;
+            }
+            else
+            {
+                var loc = await _dbContext.InventoryLocations.FirstOrDefaultAsync(l => l.BranchId == transfer.DestinationBranchId);
+                destLocId = loc?.LocationId ?? (transfer.DestinationBranchId == 1 ? 1 : item.LocationId ?? 1);
+            }
+
             int srcLoc = item.LocationId ?? 1;
-            
             item.LocationId = destLocId;
 
             // Also update CustomerAllocation assigned location if any
@@ -3725,10 +3810,13 @@ public class InventoryRepository : IInventoryRepository
             await RecalculateInventoryBalanceAsync(srcLoc, item.ProductId, item.OwnershipType);
             await RecalculateInventoryBalanceAsync(destLocId, item.ProductId, item.OwnershipType);
 
-            await RecordChainOfCustodyEventAsync(item.ItemId, "RECEIVED_AT_BRANCH", receivedBy, destLocId, $"TR-{transfer.TransferId}", $"Transfer received at branch #{transfer.DestinationBranchId}. Type: {transfer.TransferType ?? "OUTBOUND_TO_BRANCH"}. Return Reason: {transfer.ReturnReason ?? "N/A"}.");
+            string eventType = transfer.DestinationBranchId == 1 ? "RECEIVED_AT_MAIN_VAULT" : "RECEIVED_AT_BRANCH";
+            await RecordChainOfCustodyEventAsync(item.ItemId, eventType, receivedBy, destLocId, $"TR-{transfer.TransferId}", $"Transfer received at branch #{transfer.DestinationBranchId}. Type: {transfer.TransferType ?? "OUTBOUND_TO_BRANCH"}. Return Reason: {transfer.ReturnReason ?? "N/A"}.");
         }
 
         transfer.StatusCode = "RECEIVED";
+        transfer.ReceiptApprovedBy = receivedBy;
+        transfer.ReceivedAt = DateTime.UtcNow;
         
         // Find movement transaction to update arrival time
         var tx = await _dbContext.InventoryTransactions
@@ -3745,6 +3833,204 @@ public class InventoryRepository : IInventoryRepository
         await SaveAuditLogAsync(receivedBy, "SYSTEM", "OPERATIONS", $"Received Branch Transfer ID: {transferId} (Type: {transfer.TransferType ?? "OUTBOUND_TO_BRANCH"}, Item: #{transfer.ItemId}, Dest Branch: #{transfer.DestinationBranchId}, Return Reason: {transfer.ReturnReason ?? "N/A"})", entityType: "BRANCH_TRANSFER", entityId: transferId.ToString());
         await _dbContext.SaveChangesAsync();
         return "SUCCESS";
+    }
+
+    public async Task<TransferReceiptValidationResult> ValidateTransferQrCodeAsync(int transferId, string scannedQr)
+    {
+        var transfer = await _dbContext.BranchTransfers
+            .Include(t => t.Item).ThenInclude(i => i!.Product).ThenInclude(p => p!.Denomination)
+            .Include(t => t.Item).ThenInclude(i => i!.Product).ThenInclude(p => p!.MetalType)
+            .Include(t => t.Item).ThenInclude(i => i!.Product).ThenInclude(p => p!.Purity)
+            .Include(t => t.SourceBranch)
+            .Include(t => t.DestinationBranch)
+            .FirstOrDefaultAsync(t => t.TransferId == transferId);
+
+        if (transfer == null)
+        {
+            return new TransferReceiptValidationResult
+            {
+                IsValid = false,
+                TransferId = transferId,
+                ScannedInput = scannedQr,
+                Error = $"Transfer request TR-{transferId} not found."
+            };
+        }
+
+        var item = transfer.Item;
+        if (item == null)
+        {
+            return new TransferReceiptValidationResult
+            {
+                IsValid = false,
+                TransferId = transferId,
+                ScannedInput = scannedQr,
+                Error = "Associated inventory bar item could not be loaded."
+            };
+        }
+
+        string cleanedScan = scannedQr?.Trim() ?? "";
+        string extractedSerial = cleanedScan;
+
+        if (cleanedScan.StartsWith("21") && cleanedScan.Length > 2)
+        {
+            extractedSerial = cleanedScan.Substring(2);
+        }
+        else if (cleanedScan.Contains("(21)"))
+        {
+            var match = System.Text.RegularExpressions.Regex.Match(cleanedScan, @"\(21\)([A-Za-z0-9\-]+)");
+            if (match.Success) extractedSerial = match.Groups[1].Value;
+        }
+        else if (cleanedScan.StartsWith("{") && cleanedScan.EndsWith("}"))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(cleanedScan);
+                if (doc.RootElement.TryGetProperty("serial_number", out var sn) ||
+                    doc.RootElement.TryGetProperty("serial", out sn) ||
+                    doc.RootElement.TryGetProperty("SerialNumber", out sn))
+                {
+                    extractedSerial = sn.GetString() ?? cleanedScan;
+                }
+            }
+            catch { }
+        }
+
+        var holding = await _dbContext.CustomerHoldings
+            .Include(h => h.Customer)
+            .Include(h => h.Account)
+            .FirstOrDefaultAsync(h => h.ItemId == item.ItemId && (h.StatusCode == "ACTIVE" || h.StatusCode == "HELD_IN_CUSTODY"));
+
+        string custName = holding?.Customer?.CustomerName ?? holding?.CustomerName ?? (item.OwnershipType == "KFH_OWNED" ? "Kuwait Finance House (KFH Treasury)" : "Customer Owned");
+        string acctNo = holding?.Account?.AccountNumber ?? (item.OwnershipType == "KFH_OWNED" ? "KFH-TREASURY-01" : "N/A");
+
+        bool matches = string.Equals(item.SerialNumber, extractedSerial, StringComparison.OrdinalIgnoreCase) ||
+                       string.Equals(item.SerialNumber, cleanedScan, StringComparison.OrdinalIgnoreCase);
+
+        var result = new TransferReceiptValidationResult
+        {
+            IsValid = matches,
+            TransferId = transfer.TransferId,
+            RequestNumber = $"TR-{transfer.TransferId:D6}",
+            ItemId = item.ItemId,
+            SerialNumber = item.SerialNumber,
+            ScannedInput = cleanedScan,
+            Metal = item.Product?.MetalType?.MetalName ?? "Gold",
+            Denomination = item.Product?.Denomination?.Label ?? "Bar",
+            WeightGrams = item.Product?.Denomination?.WeightGrams ?? 0,
+            Purity = item.Product?.Purity?.PurityValue ?? 0.9999m,
+            CustomerName = custName,
+            AccountNumber = acctNo,
+            OwnershipType = item.OwnershipType,
+            SourceBranch = transfer.SourceBranch?.BranchName ?? "Main Vault",
+            DestinationBranch = transfer.DestinationBranch?.BranchName ?? "Branch",
+            TransferType = transfer.TransferType ?? "OUTBOUND_TO_BRANCH",
+            CourierInfo = transfer.CourierInfo,
+            StatusCode = transfer.StatusCode
+        };
+
+        if (matches)
+        {
+            result.Message = $"QR/Serial verification successful: Bar '{item.SerialNumber}' matches transfer manifest for {custName} ({result.Denomination}).";
+        }
+        else
+        {
+            result.Error = $"QR Code Mismatch: Scanned serial '{extractedSerial}' does NOT match transfer manifest bar '{item.SerialNumber}'.";
+        }
+
+        return result;
+    }
+
+    public async Task<BranchTransfer> InitiateWorkflowBranchTransferReceiptAsync(int transferId, string scannedQr, string initiatedBy, string? notes = null, int? targetLocationId = null)
+    {
+        var transfer = await _dbContext.BranchTransfers
+            .Include(t => t.Item)
+            .FirstOrDefaultAsync(t => t.TransferId == transferId);
+
+        if (transfer == null)
+            throw new InvalidOperationException($"Transfer TR-{transferId} not found.");
+
+        if (transfer.StatusCode != "IN_TRANSIT" && transfer.StatusCode != "APPROVED")
+            throw new InvalidOperationException($"Transfer is in '{transfer.StatusCode}' status and cannot be received.");
+
+        var val = await ValidateTransferQrCodeAsync(transferId, scannedQr);
+        if (!val.IsValid)
+            throw new InvalidOperationException(val.Error ?? "Scanned QR code does not match transfer bar.");
+
+        var template = await _dbContext.WorkflowTemplates.Include(t => t.Steps)
+            .FirstOrDefaultAsync(t => t.WorkflowType == "TRANSFER_RECEIPT" && t.IsActive);
+
+        if (template == null || template.Steps.Count == 0)
+        {
+            await DbSeeder.EnsureWorkflowTemplatesAsync(_dbContext);
+            template = await _dbContext.WorkflowTemplates.Include(t => t.Steps)
+                .FirstOrDefaultAsync(t => t.WorkflowType == "TRANSFER_RECEIPT" && t.IsActive);
+        }
+
+        transfer.StatusCode = "PENDING_RECEIPT";
+        transfer.VerifiedQrCode = scannedQr.Trim();
+        transfer.ReceiptInitiatedBy = initiatedBy;
+        transfer.ReceiptNotes = notes;
+
+        await _dbContext.SaveChangesAsync();
+
+        if (template != null && template.Steps.Count > 0)
+        {
+            await StartWorkflowInstanceAsync("TRANSFER_RECEIPT", transfer.TransferId, initiatedBy);
+        }
+
+        await SaveAuditLogAsync(initiatedBy, "OPERATIONS", "TRANSFER_RECEIPT_INITIATED",
+            $"Transfer receipt Maker-Checker verification initiated for request TR-{transfer.TransferId} (Bar {transfer.Item?.SerialNumber}). QR verified. Dest: branch #{transfer.DestinationBranchId}.",
+            entityType: "BRANCH_TRANSFER", entityId: transfer.TransferId.ToString());
+
+        return transfer;
+    }
+
+    public async Task<BranchTransfer> InitiateWorkflowBranchTransferReturnAsync(int transferId, string returnReason, string initiatedBy, string? notes = null, string? courierInfo = null)
+    {
+        var originalTransfer = await _dbContext.BranchTransfers
+            .Include(t => t.Item)
+            .FirstOrDefaultAsync(t => t.TransferId == transferId);
+
+        if (originalTransfer == null)
+            throw new InvalidOperationException($"Original transfer TR-{transferId} not found.");
+
+        int itemId = originalTransfer.ItemId;
+        var item = await _dbContext.InventoryItems.FindAsync(itemId);
+        if (item == null)
+            throw new InvalidOperationException("Item not found.");
+
+        originalTransfer.StatusCode = "RETURNED";
+        originalTransfer.ReturnReason = returnReason;
+        originalTransfer.Notes = notes ?? originalTransfer.Notes;
+
+        int mainVaultBranchId = 1;
+        string courier = courierInfo ?? originalTransfer.CourierInfo ?? "Secured Armored Transport";
+
+        var returnTransfer = new BranchTransfer
+        {
+            ItemId = itemId,
+            SourceBranchId = originalTransfer.DestinationBranchId,
+            DestinationBranchId = mainVaultBranchId,
+            CourierInfo = courier,
+            TransferType = "RETURN_TO_VAULT",
+            ReturnReason = returnReason,
+            Notes = $"Return initiated from TR-{originalTransfer.TransferId}. {notes}".Trim(),
+            StatusCode = "PENDING_APPROVAL",
+            CreatedBy = initiatedBy,
+            CreatedAt = DateTime.UtcNow
+        };
+        _dbContext.BranchTransfers.Add(returnTransfer);
+
+        item.StatusCode = "RESERVED";
+        await _dbContext.SaveChangesAsync();
+
+        await StartWorkflowInstanceAsync("BRANCH_TRANSFER", returnTransfer.TransferId, initiatedBy);
+
+        await SaveAuditLogAsync(initiatedBy, "OPERATIONS", "RETURN_INITIATED",
+            $"Return-to-Vault transfer initiated for bar {item.SerialNumber} (TR-{returnTransfer.TransferId}). Reason: {returnReason}. Prior TR: #{originalTransfer.TransferId}.",
+            entityType: "BRANCH_TRANSFER", entityId: returnTransfer.TransferId.ToString());
+
+        return returnTransfer;
     }
 
     public async Task<IntakeSerialValidationResult> ValidateIntakeSerialsAsync(List<string> serialNumbers, string sourceType = "SUPPLIER", int? productId = null)
