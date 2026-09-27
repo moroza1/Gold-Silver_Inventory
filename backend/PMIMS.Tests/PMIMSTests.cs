@@ -490,100 +490,6 @@ public class PMIMSTests
         Assert.Equal(54.00m, lot!.AverageUnitCost);
     }
 
-    // Records every call it receives and persists a CoreBankingLedgerPosting exactly like
-    // the real CoreBankingGlAdapter (PMIMS.Infrastructure/ExternalServices.cs) does, so this
-    // exercises InventoryRepository's trigger logic without needing network/config.
-    private class StubCoreBankingLedgerService : ICoreBankingLedgerService
-    {
-        private readonly AppDbContext _dbContext;
-        public List<(string sourceType, int sourceId, decimal amount, string currency)> Calls { get; } = new();
-
-        public StubCoreBankingLedgerService(AppDbContext dbContext) { _dbContext = dbContext; }
-
-        public async Task<CoreBankingLedgerPosting> PostLedgerEntryAsync(string sourceType, int sourceId, string debitAccount, string creditAccount, decimal amount, string currency, string initiatedBy, string? memo = null)
-        {
-            Calls.Add((sourceType, sourceId, amount, currency));
-            var posting = new CoreBankingLedgerPosting
-            {
-                SourceType = sourceType,
-                SourceId = sourceId,
-                DebitAccount = debitAccount,
-                CreditAccount = creditAccount,
-                Amount = amount,
-                Currency = currency,
-                Memo = memo,
-                InitiatedBy = initiatedBy,
-                StatusCode = "POSTED",
-                CoreBankingReference = "TEST-REF",
-                CreatedAt = DateTime.UtcNow,
-                PostedAt = DateTime.UtcNow
-            };
-            _dbContext.CoreBankingLedgerPostings.Add(posting);
-            await _dbContext.SaveChangesAsync();
-            return posting;
-        }
-    }
-
-    [Fact]
-    public async Task TestCoreBankingGlPostingOnSupplierReceipt()
-    {
-        using var setup = CreateContext();
-        await SeedBasicDataAsync(setup.Context);
-
-        var stubGl = new StubCoreBankingLedgerService(setup.Context);
-        var repo = new InventoryRepository(setup.Context, rateFeed: null, coreBanking: stubGl);
-
-        var (poId, result) = await repo.CreatePurchaseOrderAsync("PO-GL-01", 1, 1000m, 50000m, "USD", "maker_user", "[]",
-            freightCost: 1000m, insuranceCost: 500m, customsDutyCost: 500m);
-        Assert.Equal("SUCCESS", result);
-
-        var po = await setup.Context.PurchaseOrders.FindAsync(poId);
-        po!.StatusCode = "APPROVED";
-        await setup.Context.SaveChangesAsync();
-
-        string serials = "[{\"serial\":\"BAR-GL-01\",\"product_id\":1}]";
-        var intakeResult = await repo.IntakeInventoryItemsAsync(poId, "LOT-GL-01", 1, "checker_user", serials);
-        Assert.Equal("SUCCESS", intakeResult);
-
-        // 50,000 + 1,000 + 500 + 500 = 52,000 landed cost -- exactly what should have been
-        // posted Debit Inventory-Precious Metals / Credit Accounts Payable-Vendor.
-        Assert.Single(stubGl.Calls);
-        Assert.Equal("PURCHASE_ORDER_RECEIPT", stubGl.Calls[0].sourceType);
-        Assert.Equal(poId, stubGl.Calls[0].sourceId);
-        Assert.Equal(52000m, stubGl.Calls[0].amount);
-        Assert.Equal("USD", stubGl.Calls[0].currency);
-
-        var postings = (await repo.GetCoreBankingPostingsAsync()).ToList();
-        Assert.Single(postings);
-        Assert.Equal("POSTED", postings[0].StatusCode);
-        Assert.Equal(52000m, postings[0].Amount);
-    }
-
-    [Fact]
-    public async Task TestNoGlPostingWithoutCoreBankingAdapterConfigured()
-    {
-        // Backward-compat guard: a repository constructed without the optional adapter
-        // (every pre-existing call site, including every other test in this file) must
-        // behave exactly as it did before this feature existed -- intake succeeds, no GL
-        // postings table entry appears.
-        using var setup = CreateContext();
-        await SeedBasicDataAsync(setup.Context);
-
-        var repo = new InventoryRepository(setup.Context);
-
-        var (poId, result) = await repo.CreatePurchaseOrderAsync("PO-NOGL-01", 1, 1000m, 50000m, "USD", "maker_user", "[]", freightCost: 1000m);
-        Assert.Equal("SUCCESS", result);
-        var po = await setup.Context.PurchaseOrders.FindAsync(poId);
-        po!.StatusCode = "APPROVED";
-        await setup.Context.SaveChangesAsync();
-
-        string serials = "[{\"serial\":\"BAR-NOGL-01\",\"product_id\":1}]";
-        var intakeResult = await repo.IntakeInventoryItemsAsync(poId, "LOT-NOGL-01", 1, "checker_user", serials);
-        Assert.Equal("SUCCESS", intakeResult);
-
-        Assert.Empty(await repo.GetCoreBankingPostingsAsync());
-    }
-
     [Fact]
     public async Task TestWorkflowExecutionApprovalProcess()
     {
@@ -1063,6 +969,7 @@ public class PMIMSTests
         var scannedItem = await repo.ScanBarWithGfsLookupAsync("SN-GFS-SCAN-TEST");
         Assert.NotNull(scannedItem);
         Assert.Equal("GFS-CUST-88771122", scannedItem!.CustomerAccountNumber);
+        Assert.Equal("RIM-998822", scannedItem.CustomerRimNumber);
         Assert.Equal(62.50m, scannedItem.AveragePurchaseCost);
         Assert.Equal("CUSTOMER_OWNED", scannedItem.OwnershipType);
     }

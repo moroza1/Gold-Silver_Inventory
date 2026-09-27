@@ -331,13 +331,6 @@ public interface IInventoryRepository
     Task<bool> ResetStoreDataAndAuditTrailAsync(string initiatedBy);
 
     // =========================================================================
-    // Cost Tracking & Valuation -- Core Banking (Phoenix) GL Integration
-    // =========================================================================
-    // Every GL posting PMIMS has pushed (or attempted to push) to Core Banking,
-    // newest first -- see CoreBankingLedgerPosting and ICoreBankingLedgerService.
-    Task<IEnumerable<CoreBankingLedgerPosting>> GetCoreBankingPostingsAsync();
-
-    // =========================================================================
     // KFHOnline Customer Portal - Inventory Integration
     // =========================================================================
     // Get available inventory for customer purchases (status = READY, not reserved/sold)
@@ -501,22 +494,6 @@ public interface IReconciliationService
     Task<bool> ResolveMismatchAsync(int caseId, string comments, string reasonCode, string resolvedBy);
 }
 
-// ============================================================
-// Cost Tracking & Valuation -- Core Banking (Phoenix) GL Integration adapter.
-// Same "adapter, not vendor lock-in" shape as IMonitoringAdapter -- posts one
-// journal entry and returns the durable local record of the attempt
-// (CoreBankingLedgerPosting), so callers (InventoryRepository) don't need to
-// know whether the entry was actually accepted by a live Core Banking
-// endpoint or simulated locally (no endpoint configured yet). Optional/
-// nullable at every injection point, same pattern as IRateFeedService, so
-// this is purely additive -- a caller/test that never supplies an
-// implementation just doesn't get GL postings.
-// ============================================================
-public interface ICoreBankingLedgerService
-{
-    Task<CoreBankingLedgerPosting> PostLedgerEntryAsync(string sourceType, int sourceId, string debitAccount, string creditAccount, decimal amount, string currency, string initiatedBy, string? memo = null);
-}
-
 public interface IBulkMigrationService
 {
     Task<dynamic> StageMigrationExcelAsync(string fileName, string fileContentBase64, string uploadedBy);
@@ -545,7 +522,7 @@ public interface IInventoryMonitoringNotifier
 // ============================================================
 public interface IGfsService
 {
-    Task<(bool success, string? customerAccount, decimal averageCost)> LookupBarAsync(string serialNumber);
+    Task<(bool success, string? customerAccount, string? rimNumber, decimal averageCost)> LookupBarAsync(string serialNumber);
     Task<PMIMS.Domain.GfsDeliveryRequest?> GetDeliveryRequestAsync(string gfsRefNumber);
     Task<PMIMS.Domain.HomeDeliveryRequest?> GetHomeDeliveryRequestAsync(string deliveryNumber);
     Task<(bool success, string? customerName, string? rim, string? accountNo, decimal goldHoldingGrams)> LookupCustomerProfileAsync(string civilIdOrAccount);

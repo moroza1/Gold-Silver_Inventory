@@ -1370,35 +1370,6 @@ public partial class PMIMSControllers : ControllerBase
         return Ok(valuationList);
     }
 
-    // Cost Tracking & Valuation -- Core Banking (Phoenix) GL Integration: every journal entry
-    // PMIMS has pushed (or attempted to push) to Core Banking's general ledger, newest first.
-    // Same `reports` module/tier as the rest of the financial reporting surface (valuation,
-    // transactions, reconciliation) -- this is the "did the ledger update actually happen"
-    // audit view for that integration, not a new operational workflow of its own.
-    [Authorize(Policy = "reports.read")]
-    [HttpGet("reports/gl-postings")]
-    public async Task<IActionResult> GetCoreBankingLedgerPostings()
-    {
-        var postings = await _repository.GetCoreBankingPostingsAsync();
-        return Ok(postings.Select(p => new
-        {
-            posting_id = p.PostingId,
-            source_type = p.SourceType,
-            source_id = p.SourceId,
-            debit_account = p.DebitAccount,
-            credit_account = p.CreditAccount,
-            amount = p.Amount,
-            currency = p.Currency,
-            memo = p.Memo,
-            status_code = p.StatusCode,
-            core_banking_reference = p.CoreBankingReference,
-            response_message = p.ResponseMessage,
-            initiated_by = p.InitiatedBy,
-            created_at = p.CreatedAt,
-            posted_at = p.PostedAt
-        }));
-    }
-
     // =========================================================================
     // 11. WORKFLOW ENGINE
     // =========================================================================

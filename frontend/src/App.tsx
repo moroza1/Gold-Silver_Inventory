@@ -264,7 +264,7 @@ const Translations: Record<string, Record<string, string>> = {
     btn_log_scan: "Log Scan Event",
     stocktake_disc_title: "Discrepancy & breaks Report",
     stocktake_disc_sub: "Comparison match between ledger expectations and scans",
-    btn_run_reconciliation: "Run Reconciliation Against Core Banking GL",
+    btn_run_reconciliation: "Run Inventory Reconciliation",
     btn_running_reconciliation: "Running Reconciliation...",
     th_expected_coords: "Expected Coordinate",
     th_owner: "Owner",
@@ -331,7 +331,6 @@ const Translations: Record<string, Record<string, string>> = {
     rep_transactions: "Transaction Ledger History",
     rep_inventory_balance: "Inventory Balance Report",
     rep_reconciliation: "Reconciliation Differences Report",
-    rep_gl_postings: "Core Banking (Phoenix) GL Postings",
     // Reporting Requirements Gap Analysis -- Items 4, 5, 8, 9
     rep_kpis: "KPIs (Efficiency, Error Rates, Volume)",
     rep_exceptions: "Exceptions Report",
@@ -357,14 +356,6 @@ const Translations: Record<string, Record<string, string>> = {
     th_inbound: "Inbound Count",
     th_outbound: "Outbound Count",
     th_net_weight: "Net Weight (g)",
-    th_gl_source: "Source",
-    th_gl_debit: "Debit Account",
-    th_gl_credit: "Credit Account",
-    th_gl_amount: "Amount",
-    th_gl_status: "Status",
-    th_gl_reference: "Core Banking Reference",
-    th_gl_initiated_by: "Initiated By",
-    th_gl_created_at: "Created At",
     th_cost_basis: "Production Cost",
     th_market_val: "Market Value (USD)",
     th_unrealized_pnl: "Unrealized P&L",
@@ -585,7 +576,7 @@ const Translations: Record<string, Record<string, string>> = {
     btn_log_scan: "تسجيل حركة المسح ماديًا",
     stocktake_disc_title: "تقرير مطابقة فروق الجرد والملاحظات",
     stocktake_disc_sub: "مقارنة المطابقة والتحقق بين الأرصدة الدفترية والمسوحات الفعلية",
-    btn_run_reconciliation: "تنفيذ المطابقة مع دفتر الأستاذ العام للخدمات المصرفية الأساسية",
+    btn_run_reconciliation: "تنفيذ مطابقة المخزون",
     btn_running_reconciliation: "جارٍ تنفيذ المطابقة...",
     th_expected_coords: "الإحداثيات المتوقعة",
     th_owner: "المالك",
@@ -652,7 +643,6 @@ const Translations: Record<string, Record<string, string>> = {
     rep_transactions: "حركات سجل الأستاذ التاريخية",
     rep_inventory_balance: "تقرير أرصدة المخزون",
     rep_reconciliation: "تقرير فروقات المطابقة",
-    rep_gl_postings: "قيود الأستاذ العام - النظام المصرفي الأساسي (Phoenix)",
     // تحليل فجوات متطلبات التقارير -- البنود 4، 5، 8، 9
     rep_kpis: "مؤشرات الأداء (الكفاءة، معدلات الخطأ، الحجم)",
     rep_exceptions: "تقرير الاستثناءات",
@@ -678,14 +668,6 @@ const Translations: Record<string, Record<string, string>> = {
     th_inbound: "عدد الوارد",
     th_outbound: "عدد الصادر",
     th_net_weight: "صافي الوزن (جم)",
-    th_gl_source: "المصدر",
-    th_gl_debit: "الحساب المدين",
-    th_gl_credit: "الحساب الدائن",
-    th_gl_amount: "المبلغ",
-    th_gl_status: "الحالة",
-    th_gl_reference: "مرجع النظام المصرفي",
-    th_gl_initiated_by: "بواسطة",
-    th_gl_created_at: "تاريخ الإنشاء",
     th_cost_basis: "تكلفة الإنتاج",
     th_market_val: "القيمة السوقية (USD)",
     th_unrealized_pnl: "الأرباح/الخسائر غير المحققة",
@@ -6320,7 +6302,6 @@ const [migrationApproved, setMigrationApproved] = useState(false);
       else if (type === 'audit') endpoint = 'audit-logs';
       else if (type === 'transactions') endpoint = 'transactions';
       else if (type === 'inventory_balance') endpoint = 'inventory-balance';
-      else if (type === 'gl_postings') endpoint = 'gl-postings';
       else if (type === 'kpis') endpoint = 'kpis';
       else if (type === 'exceptions') endpoint = 'exceptions';
       else if (type === 'cost_analysis') endpoint = 'cost-analysis';
@@ -6421,11 +6402,6 @@ const [migrationApproved, setMigrationApproved] = useState(false);
       csvContent += "Case ID,Serial Number,Denomination,Expected Location,Mismatch Location,Reason Code,Resolved By,Resolved At\n";
       reportData.forEach(row => {
         csvContent += `"${row.case_id}","${row.serial_number}","${row.denomination}","${row.expected}","${row.mismatch}","${row.reason_code || ''}","${row.resolved_by || ''}","${row.resolved_at ? new Date(row.resolved_at).toLocaleString() : ''}"\n`;
-      });
-    } else if (reportType === 'gl_postings') {
-      csvContent += "Source,Debit Account,Credit Account,Amount,Currency,Status,Core Banking Reference,Initiated By,Created At\n";
-      reportData.forEach(row => {
-        csvContent += `"${row.source_type} #${row.source_id}","${row.debit_account}","${row.credit_account}",${row.amount},"${row.currency}","${row.status_code}","${row.core_banking_reference || ''}","${row.initiated_by}","${new Date(row.created_at).toLocaleString()}"\n`;
       });
     } else if (reportType === 'kpis') {
       csvContent += "KPI Name,Value\n";
@@ -15393,7 +15369,6 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                   <option value="transactions">{t('rep_transactions')}</option>
                   <option value="inventory_balance">{t('rep_inventory_balance')}</option>
                   <option value="reconciliation">{t('rep_reconciliation')}</option>
-                  <option value="gl_postings">{t('rep_gl_postings')}</option>
                   <option value="kpis">{t('rep_kpis')}</option>
                   <option value="exceptions">{t('rep_exceptions')}</option>
                   <option value="cost_analysis">{t('rep_cost_analysis')}</option>
@@ -15487,7 +15462,6 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     {reportType === 'transactions' && t('rep_transactions')}
                     {reportType === 'inventory_balance' && t('rep_inventory_balance')}
                     {reportType === 'reconciliation' && t('rep_reconciliation')}
-                    {reportType === 'gl_postings' && t('rep_gl_postings')}
                     {reportType === 'kpis' && t('rep_kpis')}
                     {reportType === 'exceptions' && t('rep_exceptions')}
                     {reportType === 'cost_analysis' && t('rep_cost_analysis')}
@@ -15728,41 +15702,6 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                               <td>{row.reason_code || '—'}</td>
                               <td>{row.resolved_by || '—'}</td>
                               <td>{row.resolved_at ? new Date(row.resolved_at).toLocaleString() : '—'}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </>
-                    )}
-
-                    {reportType === 'gl_postings' && (
-                      <>
-                        <thead>
-                          <tr>
-                            <th>{t('th_gl_source')}</th>
-                            <th>{t('th_gl_debit')}</th>
-                            <th>{t('th_gl_credit')}</th>
-                            <th style={{ textAlign: 'right' }}>{t('th_gl_amount')}</th>
-                            <th>{t('th_gl_status')}</th>
-                            <th>{t('th_gl_reference')}</th>
-                            <th>{t('th_gl_initiated_by')}</th>
-                            <th>{t('th_gl_created_at')}</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {reportData.map((row, idx) => (
-                            <tr key={idx}>
-                              <td>{row.source_type} #{row.source_id}</td>
-                              <td>{row.debit_account}</td>
-                              <td>{row.credit_account}</td>
-                              <td style={{ textAlign: 'right' }}>{row.amount?.toLocaleString()} {row.currency}</td>
-                              <td>
-                                <span className={`badge ${row.status_code === 'POSTED' ? 'badge-ready' : row.status_code === 'FAILED' ? 'badge-quarantined' : 'badge-reserved'}`}>
-                                  {row.status_code}
-                                </span>
-                              </td>
-                              <td>{row.core_banking_reference || '—'}</td>
-                              <td>{row.initiated_by}</td>
-                              <td>{row.created_at ? new Date(row.created_at).toLocaleString() : '—'}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -20224,6 +20163,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     <div style={{ marginBottom: '8px' }}><strong>{currentLang === 'ar' ? 'الرقم التسلسلي:' : 'Serial Number:'}</strong> {scanQrResult.serialNumber}</div>
                     <div style={{ marginBottom: '8px' }}><strong>{currentLang === 'ar' ? 'الملكية:' : 'Ownership Type:'}</strong> {scanQrResult.ownershipType}</div>
                     <div style={{ marginBottom: '8px' }}><strong>{currentLang === 'ar' ? 'حساب العميل:' : 'Customer Account:'}</strong> {scanQrResult.customerAccountNumber || '—'}</div>
+                    <div style={{ marginBottom: '8px' }}><strong>{currentLang === 'ar' ? 'رقم العميل (RIM):' : 'Customer RIM #:'}</strong> {scanQrResult.customerRimNumber || '—'}</div>
                     <div style={{ marginBottom: '8px' }}><strong>{currentLang === 'ar' ? 'تكلفة الإنتاج:' : 'Production Cost:'}</strong> {scanQrResult.averagePurchaseCost ? `$${scanQrResult.averagePurchaseCost.toFixed(2)}` : '—'}</div>
                     <div><strong>{currentLang === 'ar' ? 'آخر مزامنة مع GFS:' : 'GFS Last Sync:'}</strong> {scanQrResult.gfsLastSyncAt ? new Date(scanQrResult.gfsLastSyncAt).toLocaleString() : '—'}</div>
                   </div>

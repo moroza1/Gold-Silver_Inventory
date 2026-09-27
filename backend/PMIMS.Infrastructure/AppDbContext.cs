@@ -156,9 +156,6 @@ public class AppDbContext : DbContext
     public DbSet<ChainOfCustodyEvent> ChainOfCustodyEvents { get; set; } = null!;
     public DbSet<IfrsValuationDisclosure> IfrsValuationDisclosures { get; set; } = null!;
 
-    // Cost Tracking & Valuation -- Core Banking (Phoenix) GL Integration
-    public DbSet<CoreBankingLedgerPosting> CoreBankingLedgerPostings { get; set; } = null!;
-
     // Reporting Requirements Gap Analysis -- Cost Analysis & Variance (Item 8)
     public DbSet<CostBudget> CostBudgets { get; set; } = null!;
 
@@ -356,6 +353,10 @@ public class AppDbContext : DbContext
             entity.Property(e => e.RowVersion).IsRowVersion();
             entity.Property(e => e.ChannelStatus).HasDefaultValue("ONLINE");
             entity.Property(e => e.ChannelCategory).HasDefaultValue("RETAIL_ONLINE");
+            entity.Property(e => e.CustomerAccountNumber).HasMaxLength(100);
+            entity.Property(e => e.CustomerRimNumber).HasMaxLength(100);
+            entity.Property(e => e.AveragePurchaseCost).HasPrecision(18, 4);
+            entity.Property(e => e.ProductionCostKwd).HasPrecision(18, 4);
         });
 
         // InventoryBalance Configuration
@@ -849,17 +850,6 @@ public class AppDbContext : DbContext
         {
             entity.HasKey(e => e.RouteId);
             entity.ToTable("monitoring_alert_routes");
-        });
-
-        // ============================================================
-        // Cost Tracking & Valuation -- Core Banking (Phoenix) GL Integration
-        // ============================================================
-        modelBuilder.Entity<CoreBankingLedgerPosting>(entity =>
-        {
-            entity.HasKey(e => e.PostingId);
-            entity.ToTable("core_banking_ledger_postings");
-            entity.HasIndex(e => new { e.SourceType, e.SourceId });
-            entity.HasIndex(e => e.CreatedAt);
         });
 
         // ============================================================

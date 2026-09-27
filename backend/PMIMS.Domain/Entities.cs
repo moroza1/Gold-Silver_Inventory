@@ -258,6 +258,7 @@ public class InventoryItem
 
     // GFS & Damaged fields
     public string? CustomerAccountNumber { get; set; }
+    public string? CustomerRimNumber { get; set; }
     public decimal? AveragePurchaseCost { get; set; }
     public DateTime? GfsLastSyncAt { get; set; }
     public bool IsDamaged { get; set; } = false;
@@ -1357,49 +1358,6 @@ public class FimSyncLog
     public string? DetailsJson { get; set; }
 }
 
-// ============================================================
-// Cost Tracking & Valuation -- Core Banking (Phoenix) GL Integration
-// ------------------------------------------------------------
-// A CoreBankingLedgerPosting is PMIMS's local, durable record of every
-// journal entry it has pushed (or attempted to push) to the Core Banking
-// System's general ledger -- e.g. "Debit Inventory-Precious Metals / Credit
-// Accounts Payable-Vendor" for the landed cost of a purchase-order receipt.
-// It is written PENDING *before* the outbound call and then updated to
-// POSTED/FAILED, after, mirroring the MonitoringEvent adapter philosophy
-// (GenericWebhookMonitoringAdapter) so this table is a reliable local audit
-// of what was (attempted to be) posted even if Core Banking/Phoenix is
-// unreachable. Adapter: ICoreBankingLedgerService (PMIMS.Application),
-// implemented by CoreBankingGlAdapter (PMIMS.Infrastructure/ExternalServices.cs).
-// This is distinct from ReconciliationService's existing (read-only,
-// simulated) comparison against Core Banking GL balances -- that reads Core
-// Banking's expected state to find breaks; this pushes PMIMS-originated
-// postings to it.
-// ============================================================
-public class CoreBankingLedgerPosting
-{
-    public int PostingId { get; set; }
-    // What PMIMS event caused this posting, e.g. "PURCHASE_ORDER_RECEIPT",
-    // "VALUATION_SNAPSHOT", "INVENTORY_ADJUSTMENT" -- and the PMIMS-native
-    // entity id it corresponds to (PoId, DisclosureId, ItemId, ...).
-    public string SourceType { get; set; } = null!;
-    public int SourceId { get; set; }
-    public string DebitAccount { get; set; } = null!;
-    public string CreditAccount { get; set; } = null!;
-    public decimal Amount { get; set; }
-    public string Currency { get; set; } = "KWD";
-    public string? Memo { get; set; }
-    // PENDING (queued locally, not yet sent) -> POSTED (Core Banking accepted
-    // it, or -- with no live endpoint configured -- accepted in simulation,
-    // same fallback posture as RateFeedService's live-feed-with-simulated-
-    // fallback pattern) | FAILED (Core Banking rejected it or was unreachable).
-    public string StatusCode { get; set; } = "PENDING";
-    // Core Banking's own confirmation/reference number for a POSTED entry.
-    public string? CoreBankingReference { get; set; }
-    public string? ResponseMessage { get; set; }
-    public string InitiatedBy { get; set; } = null!;
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-    public DateTime? PostedAt { get; set; }
-}
 
 // ============================================================
 // Reporting Requirements Gap Analysis -- Cost Analysis & Variance (Item 8)
