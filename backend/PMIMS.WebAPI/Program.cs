@@ -254,9 +254,11 @@ try
         // Reports write
         Write("reports.write", "reports");
 
-        // Barcode/QR Code Tracking
+        // Barcode/QR Code Tracking & Controlled Reprinting
         Read("barcode_qr_labeling.read", "barcode_qr_labeling");
         Write("barcode_qr_labeling.write", "barcode_qr_labeling");
+        Read("qr_reprint.read", "qr_reprint");
+        Write("qr_reprint.write", "qr_reprint");
 
         // Settings module
         Read("settings.read", "settings");

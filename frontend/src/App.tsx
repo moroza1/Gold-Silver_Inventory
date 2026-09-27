@@ -1892,6 +1892,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     { key: 'purchase_orders', label: 'Purchase Orders & Procurement', tier: 'Operations' },
     { key: 'dispensing', label: 'Gold Dispensing Machine (GDM)', tier: 'Operations' },
     { key: 'barcode_qr_labeling', label: 'Barcode & QR Code Tracking', tier: 'Operations' },
+    { key: 'qr_reprint', label: 'QR & Barcode Reprinting (إعادة طباعة الباركود)', tier: 'Operations' },
     // --- Administration / Setup ---
     { key: 'vault_location', label: 'Vault Location Setup (manage shelves)', tier: 'Administration' },
     { key: 'master_data', label: 'Master Data (branches, vendors, thresholds)', tier: 'Administration' },
@@ -6919,7 +6920,8 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     { type: 'item', key: 'screen-home-delivery', label: currentLang === 'en' ? 'Home Delivery' : 'توصيل المنازل', icon: 'fa-solid fa-house-chimney-user', permission: 'intake', onClick: () => { setActiveTab('screen-home-delivery'); fetchHomeDeliveries(); } },
     { type: 'item', key: 'screen-damaged-bars', label: currentLang === 'en' ? 'Damaged Bar Approvals' : 'اعتماد السبائك التالفة', icon: 'fa-solid fa-triangle-exclamation', permission: 'custody', onClick: () => { setActiveTab('screen-damaged-bars'); fetchDamagedBars(); fetchDamagedHighStockAlerts(); fetchDamagedReplacements(); fetchDamagedExports(); } },
     { type: 'item', key: 'screen-missing-serials', label: t('menu_missing_serials'), icon: 'fa-solid fa-file-circle-exclamation', permission: 'intake', onClick: () => { setActiveTab('screen-missing-serials'); fetchMissingSerialsScreenData(); } },
-    { type: 'item', key: 'screen-barcode-labeling', label: currentLang === 'en' ? 'Barcode & QR Labeling' : 'طباعة وتتبع الباركود و QR', icon: 'fa-solid fa-barcode', permission: 'barcode_qr_labeling', onClick: () => { setActiveTab('screen-barcode-labeling'); fetchInventory(); fetchLocations(); fetchQrReprintPrivilege(); } },
+    { type: 'item', key: 'screen-barcode-labeling', label: currentLang === 'en' ? 'Barcode & QR Labeling' : 'طباعة وتتبع الباركود و QR', icon: 'fa-solid fa-barcode', permission: 'barcode_qr_labeling', onClick: () => { setActiveTab('screen-barcode-labeling'); fetchInventory(); fetchLocations(); } },
+    { type: 'item', key: 'screen-qr-reprint', label: currentLang === 'en' ? 'QR & Barcode Reprinting' : 'إعادة طباعة الباركود و QR', icon: 'fa-solid fa-rotate-right', permission: 'qr_reprint', onClick: () => { setActiveTab('screen-barcode-labeling'); setBarcodeTab('reprint_approvals'); fetchPendingQrReprints(); fetchInventory(); } },
     { type: 'item', key: 'screen-bar-traceability', label: t('menu_bar_traceability'), icon: 'fa-solid fa-passport', permission: 'dashboard', onClick: () => { setActiveTab('screen-bar-traceability'); fetchInventory(); fetchProducts(); } },
 
     // 3. Stock Limits & Enterprise Thresholds
@@ -13577,14 +13579,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
               </p>
 
               {(() => {
-                const isAuthorizedForReprint = (() => {
-                  const r = userRole || '';
-                  if (r === 'IT/Admin' || r === 'IT Administrators' || displayName === 'system-admin') return true;
-                  if (qrReprintPrivilege === 'DISABLED') return false;
-                  if (qrReprintPrivilege === 'ADMIN_ONLY') return false;
-                  if (qrReprintPrivilege === 'CHECKER_AND_ADMIN') return r.includes('Checker');
-                  return canModify('barcode_qr_labeling');
-                })();
+                const isAuthorizedForReprint = canModify('qr_reprint');
 
                 return (
                   <>
@@ -13593,12 +13588,12 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                         <i className="fa-solid fa-triangle-exclamation" style={{ fontSize: '18px' }}></i>
                         <div>
                           <div style={{ fontWeight: 'bold' }}>
-                            {currentLang === 'en' ? 'Label Reprint Restricted by Security Policy' : 'إعادة الطباعة مقيدة بسياسة الأمان الحالية'}
+                            {currentLang === 'en' ? 'Label Reprint Restricted by Group Permission' : 'إعادة الطباعة مقيدة بصلاحيات المجموعة'}
                           </div>
                           <div style={{ fontSize: '12px', marginTop: '2px', opacity: 0.9 }}>
                             {currentLang === 'en'
-                              ? `Current policy requires [${qrReprintPrivilege}] privilege to re-issue QR code labels.`
-                              : `السياسة المعتمدة تتطلب صلاحية [${qrReprintPrivilege}] لإعادة إصدار ملصقات QR.`}
+                              ? 'Your user role or group does not hold write permissions on [qr_reprint]. Contact an administrator to grant reprint privileges.'
+                              : 'مجموعتك الحالية لا تملك صلاحية تعديل/كتابة لوظيفة [إعادة طباعة الباركود و QR]. يرجى مراجعة مسؤول النظام لتعيين الصلاحية.'}
                           </div>
                         </div>
                       </div>

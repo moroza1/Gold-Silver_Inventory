@@ -301,6 +301,10 @@ public static class DbSeeder
                     {
                         var itemColsToAdd = new List<(string Name, string Def)>
                         {
+                            ("customer_account_number", "TEXT"),
+                            ("customer_rim_number", "TEXT"),
+                            ("average_purchase_cost", "DECIMAL(18,4)"),
+                            ("gfs_last_sync_at", "TEXT"),
                             ("production_cost_kwd", "DECIMAL(18,4)"),
                             ("replaced_by_item_id", "INTEGER"),
                             ("replaces_item_id", "INTEGER"),
@@ -829,6 +833,26 @@ public static class DbSeeder
                             ALTER TABLE inventory_lots ADD port_of_entry NVARCHAR(100) NULL;
                         END
 
+                        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('inventory_items') AND name = 'customer_account_number')
+                        BEGIN
+                            ALTER TABLE inventory_items ADD customer_account_number NVARCHAR(100) NULL;
+                        END
+
+                        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('inventory_items') AND name = 'customer_rim_number')
+                        BEGIN
+                            ALTER TABLE inventory_items ADD customer_rim_number NVARCHAR(100) NULL;
+                        END
+
+                        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('inventory_items') AND name = 'average_purchase_cost')
+                        BEGIN
+                            ALTER TABLE inventory_items ADD average_purchase_cost DECIMAL(18,4) NULL;
+                        END
+
+                        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('inventory_items') AND name = 'gfs_last_sync_at')
+                        BEGIN
+                            ALTER TABLE inventory_items ADD gfs_last_sync_at DATETIME2 NULL;
+                        END
+
                         IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('inventory_items') AND name = 'production_cost_kwd')
                         BEGIN
                             ALTER TABLE inventory_items ADD production_cost_kwd DECIMAL(18,4) NULL;
@@ -1315,7 +1339,7 @@ public static class DbSeeder
             {"custody","READ_ONLY"}, {"stocktake","READ_ONLY"}, {"migration","HIDDEN"}, {"reports","READ_ONLY"},
             {"workflows","READ_ONLY"}, {"settings","HIDDEN"}, {"user_admin","HIDDEN"}, {"vault_location","HIDDEN"},
             {"master_data","HIDDEN"}, {"workflow_design","READ_ONLY"}, {"intake","FULL"}, {"rules_engine","HIDDEN"},
-            {"monitoring","HIDDEN"}, {"barcode_qr_labeling","FULL"}, {"purchase_orders","FULL"},
+            {"monitoring","HIDDEN"}, {"barcode_qr_labeling","FULL"}, {"qr_reprint","READ_WRITE"}, {"purchase_orders","FULL"},
             {"dispensing","FULL"}, {"device_integration","HIDDEN"}, {"notifications","READ_ONLY"},
         },
         ["Treasury Operations (Checker)"] = new()
@@ -1324,7 +1348,7 @@ public static class DbSeeder
             {"custody","READ_ONLY"}, {"stocktake","READ_WRITE"}, {"migration","HIDDEN"}, {"reports","READ_ONLY"},
             {"workflows","READ_ONLY"}, {"settings","HIDDEN"}, {"user_admin","HIDDEN"}, {"vault_location","HIDDEN"},
             {"master_data","HIDDEN"}, {"workflow_design","READ_ONLY"}, {"intake","READ_ONLY"}, {"rules_engine","HIDDEN"},
-            {"monitoring","HIDDEN"}, {"barcode_qr_labeling","READ_ONLY"}, {"purchase_orders","READ_ONLY"},
+            {"monitoring","HIDDEN"}, {"barcode_qr_labeling","READ_ONLY"}, {"qr_reprint","FULL"}, {"purchase_orders","READ_ONLY"},
             {"dispensing","READ_ONLY"}, {"device_integration","HIDDEN"}, {"notifications","READ_ONLY"},
         },
         ["Reconciliation Officers"] = new()
@@ -1333,7 +1357,7 @@ public static class DbSeeder
             {"custody","READ_ONLY"}, {"stocktake","FULL"}, {"migration","HIDDEN"}, {"reports","FULL"},
             {"workflows","READ_ONLY"}, {"settings","HIDDEN"}, {"user_admin","HIDDEN"}, {"vault_location","HIDDEN"},
             {"master_data","HIDDEN"}, {"workflow_design","READ_ONLY"}, {"intake","READ_ONLY"}, {"rules_engine","HIDDEN"},
-            {"monitoring","HIDDEN"}, {"barcode_qr_labeling","READ_ONLY"}, {"purchase_orders","READ_ONLY"},
+            {"monitoring","HIDDEN"}, {"barcode_qr_labeling","READ_ONLY"}, {"qr_reprint","READ_ONLY"}, {"purchase_orders","READ_ONLY"},
             {"dispensing","READ_ONLY"}, {"device_integration","HIDDEN"}, {"notifications","READ_ONLY"},
         },
         ["Senior Treasury Manager"] = new()
@@ -1342,7 +1366,7 @@ public static class DbSeeder
             {"custody","FULL"}, {"stocktake","READ_ONLY"}, {"migration","HIDDEN"}, {"reports","FULL"},
             {"workflows","FULL"}, {"settings","READ_ONLY"}, {"user_admin","READ_ONLY"}, {"vault_location","READ_ONLY"},
             {"master_data","READ_ONLY"}, {"workflow_design","READ_ONLY"}, {"intake","READ_ONLY"}, {"rules_engine","READ_ONLY"},
-            {"monitoring","FULL"}, {"barcode_qr_labeling","READ_ONLY"}, {"purchase_orders","FULL"},
+            {"monitoring","FULL"}, {"barcode_qr_labeling","READ_ONLY"}, {"qr_reprint","FULL"}, {"purchase_orders","FULL"},
             {"dispensing","FULL"}, {"device_integration","READ_ONLY"}, {"notifications","FULL"},
         },
         ["IT Administrators"] = new()
@@ -1351,7 +1375,7 @@ public static class DbSeeder
             {"custody","FULL"}, {"stocktake","FULL"}, {"migration","FULL"}, {"reports","FULL"},
             {"workflows","FULL"}, {"settings","FULL"}, {"user_admin","FULL"}, {"vault_location","FULL"},
             {"master_data","FULL"}, {"workflow_design","FULL"}, {"intake","FULL"}, {"rules_engine","FULL"},
-            {"monitoring","FULL"}, {"barcode_qr_labeling","FULL"}, {"purchase_orders","FULL"},
+            {"monitoring","FULL"}, {"barcode_qr_labeling","FULL"}, {"qr_reprint","FULL"}, {"purchase_orders","FULL"},
             {"dispensing","FULL"}, {"device_integration","FULL"}, {"notifications","FULL"},
         },
     };
@@ -1623,7 +1647,7 @@ public static class DbSeeder
         // while being denied the authority to create/delete physical shelf locations.
         // RFP items 5-8 (rules_engine, notifications, monitoring) are new admin-tier
         // modules, same governance tier as vault_location/master_data/workflow_design.
-        var allModules = new[] { "dashboard", "pending_actions", "spatial_map", "custody", "stocktake", "migration", "reports", "workflows", "settings", "user_admin", "vault_location", "master_data", "workflow_design", "intake", "rules_engine", "monitoring", "barcode_qr_labeling", "purchase_orders", "dispensing", "device_integration", "notifications" };
+        var allModules = new[] { "dashboard", "pending_actions", "spatial_map", "custody", "stocktake", "migration", "reports", "workflows", "settings", "user_admin", "vault_location", "master_data", "workflow_design", "intake", "rules_engine", "monitoring", "barcode_qr_labeling", "qr_reprint", "purchase_orders", "dispensing", "device_integration", "notifications" };
 
         var grpMaker = new PrivilegeGroup { GroupName = "Treasury Operations (Maker)", Description = "Initiates purchase orders, transfers, and branch operations.", IsSystem = true };
         var grpChecker = new PrivilegeGroup { GroupName = "Treasury Operations (Checker)", Description = "Reviews and approves purchase orders and intake verifications.", IsSystem = true };

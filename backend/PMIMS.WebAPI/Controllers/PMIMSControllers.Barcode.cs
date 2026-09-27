@@ -61,30 +61,13 @@ public partial class PMIMSControllers
         }
     }
 
-    [Authorize(Policy = "barcode_qr_labeling.write")]
+    [Authorize(Policy = "qr_reprint.write")]
     [HttpPost("barcode/items/{itemId:int}/reprint")]
     public async Task<IActionResult> ReprintItemLabel(int itemId, [FromBody] ReprintLabelRequest req)
     {
         if (string.IsNullOrWhiteSpace(req?.Reason))
         {
             return BadRequest(new { error = "Reprint reason is mandatory (e.g. 'LABEL_DAMAGED', 'PACKAGING_REPLACED', 'AUDIT_REQUEST')." });
-        }
-
-        string requiredPrivilege = await _repository.GetQrCodeReprintPrivilegeAsync();
-        bool isAdmin = User.IsInRole("IT/Admin") || User.IsInRole("IT Administrators");
-        bool isChecker = User.IsInRole("Treasury Operations (Checker)") || User.IsInRole("Checker");
-
-        if (requiredPrivilege == "DISABLED")
-        {
-            return StatusCode(403, new { error = "QR Code label reprinting is currently disabled in system configuration." });
-        }
-        else if (requiredPrivilege == "ADMIN_ONLY" && !isAdmin)
-        {
-            return StatusCode(403, new { error = "Unauthorized: QR Code label reprinting is restricted to Administrators in system settings." });
-        }
-        else if (requiredPrivilege == "CHECKER_AND_ADMIN" && !isAdmin && !isChecker)
-        {
-            return StatusCode(403, new { error = "Unauthorized: QR Code label reprinting requires Checker or Administrator privilege in system settings." });
         }
 
         var label = await _barcodeLabelService.GenerateItemLabelByIdAsync(itemId);
@@ -234,7 +217,7 @@ public partial class PMIMSControllers
         }
     }
 
-    [Authorize(Policy = "barcode_qr_labeling.write")]
+    [Authorize(Policy = "qr_reprint.write")]
     [HttpPost("barcode/reprint/initiate")]
     public async Task<IActionResult> InitiateQrReprint([FromBody] InitiateQrReprintRequest req)
     {
@@ -256,7 +239,7 @@ public partial class PMIMSControllers
         }
     }
 
-    [Authorize(Policy = "barcode_qr_labeling.read")]
+    [Authorize(Policy = "qr_reprint.read")]
     [HttpGet("barcode/reprint/pending")]
     public async Task<IActionResult> GetPendingQrReprints()
     {

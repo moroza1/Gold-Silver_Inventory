@@ -2462,7 +2462,7 @@ public partial class PMIMSControllers : ControllerBase
         "dashboard", "pending_actions", "spatial_map", "custody",
         "stocktake", "migration", "reports", "workflows", "settings", "user_admin",
         "vault_location", "master_data", "workflow_design", "intake",
-        "rules_engine", "monitoring", "barcode_qr_labeling",
+        "rules_engine", "monitoring", "barcode_qr_labeling", "qr_reprint",
         "purchase_orders", "dispensing", "device_integration", "notifications"
     };
 
