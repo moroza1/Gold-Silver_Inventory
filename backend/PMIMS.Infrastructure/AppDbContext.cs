@@ -81,8 +81,6 @@ public class AppDbContext : DbContext
     public DbSet<InventoryLocation> InventoryLocations { get; set; } = null!;
     public DbSet<Customer> Customers { get; set; } = null!;
     public DbSet<CustomerAccount> CustomerAccounts { get; set; } = null!;
-    public DbSet<PurchaseOrder> PurchaseOrders { get; set; } = null!;
-    public DbSet<POItem> POItems { get; set; } = null!;
     public DbSet<InventoryLot> InventoryLots { get; set; } = null!;
     public DbSet<InventoryItem> InventoryItems { get; set; } = null!;
     public DbSet<InventoryBalance> InventoryBalances { get; set; } = null!;
@@ -310,34 +308,12 @@ public class AppDbContext : DbContext
             entity.HasOne(e => e.Customer).WithMany().HasForeignKey(e => e.CustomerId);
         });
 
-        // PurchaseOrder Configuration
-        modelBuilder.Entity<PurchaseOrder>(entity =>
-        {
-            entity.HasKey(e => e.PoId);
-            entity.ToTable("purchase_orders");
-            entity.HasIndex(e => e.PoNumber).IsUnique();
-            entity.HasOne(e => e.Vendor).WithMany().HasForeignKey(e => e.VendorId);
-            // Computed in C# from other mapped columns (TotalCost + fees) -- not its own column.
-            entity.Ignore(e => e.LandedCost);
-        });
-
-        // POItem Configuration
-        modelBuilder.Entity<POItem>(entity =>
-        {
-            entity.HasKey(e => e.PoItemId);
-            entity.ToTable("po_items");
-            entity.HasOne(e => e.Product).WithMany().HasForeignKey(e => e.ProductId);
-            // Configure the relationship between POItem and PurchaseOrder so Items are properly loaded
-            entity.HasOne<PurchaseOrder>().WithMany(p => p.Items).HasForeignKey(e => e.PoId);
-        });
-
         // InventoryLot Configuration
         modelBuilder.Entity<InventoryLot>(entity =>
         {
             entity.HasKey(e => e.LotId);
             entity.ToTable("inventory_lots");
             entity.HasIndex(e => e.LotNumber).IsUnique();
-            entity.HasOne(e => e.PurchaseOrder).WithMany().HasForeignKey(e => e.PoId);
             entity.HasOne(e => e.Vendor).WithMany().HasForeignKey(e => e.VendorId);
         });
 
@@ -728,9 +704,6 @@ public class AppDbContext : DbContext
             entity.HasKey(e => e.PendingIntakeId);
             entity.ToTable("pending_intakes");
             entity.Property(e => e.CourierInfo).HasMaxLength(200);
-            // Optional now -- a CUSTOMER-sourced receipt (buyback/custody deposit/return) has
-            // no Purchase Order at all. SUPPLIER receipts still always set PoId.
-            entity.HasOne(e => e.PurchaseOrder).WithMany().HasForeignKey(e => e.PoId).IsRequired(false);
             entity.HasOne(e => e.Location).WithMany().HasForeignKey(e => e.LocationId);
             entity.HasOne(e => e.Customer).WithMany().HasForeignKey(e => e.CustomerId).IsRequired(false);
             entity.HasOne(e => e.DestinationBranch).WithMany().HasForeignKey(e => e.DestinationBranchId).IsRequired(false);

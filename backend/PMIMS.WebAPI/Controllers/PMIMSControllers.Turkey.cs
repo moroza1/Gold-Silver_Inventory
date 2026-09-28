@@ -16,7 +16,7 @@ public partial class PMIMSControllers
     // =========================================================================
 
     [HttpGet("inventory/turkey")]
-    [Authorize(Policy = "purchase_orders.read")]
+    [Authorize(Policy = "intake.read")]
     public async Task<IActionResult> GetTurkeyInventory()
     {
         try
@@ -87,7 +87,7 @@ public partial class PMIMSControllers
     }
 
     [HttpGet("inventory/turkey/pending")]
-    [Authorize(Policy = "purchase_orders.read")]
+    [Authorize(Policy = "intake.read")]
     public async Task<IActionResult> GetPendingTurkeyPurchases()
     {
         try
@@ -117,7 +117,7 @@ public partial class PMIMSControllers
     }
 
     [HttpPost("inventory/turkey/purchase")]
-    [Authorize(Policy = "purchase_orders.write")]
+    [Authorize(Policy = "intake.write")]
     public async Task<IActionResult> InitiateTurkeyPurchase([FromBody] TurkeyPurchaseRequest req)
     {
         try
@@ -222,7 +222,7 @@ public partial class PMIMSControllers
     }
 
     [HttpGet("inventory/kfh-available")]
-    [Authorize(Policy = "purchase_orders.read")]
+    [Authorize(Policy = "intake.read")]
     public async Task<IActionResult> GetKfhAvailableInventory()
     {
         try
@@ -328,7 +328,7 @@ public partial class PMIMSControllers
 
     [HttpPost("inventory/vip/deallocate")]
     [HttpPost("inventory/vip/return-to-kfh")]
-    [Authorize(Policy = "purchase_orders.write")]
+    [Authorize(Policy = "intake.write")]
     public async Task<IActionResult> InitiateVipDeallocation([FromBody] VipDeallocationRequest req)
     {
         try
@@ -395,7 +395,7 @@ public partial class PMIMSControllers
     }
 
     [HttpPost("inventory/vip/allocate")]
-    [Authorize(Policy = "purchase_orders.write")]
+    [Authorize(Policy = "intake.write")]
     public async Task<IActionResult> InitiateVipAllocation([FromBody] VipAllocationRequest req)
     {
         try
@@ -492,7 +492,7 @@ public partial class PMIMSControllers
     }
 
     [HttpPost("inventory/turkey/return")]
-    [Authorize(Policy = "purchase_orders.write")]
+    [Authorize(Policy = "intake.write")]
     public async Task<IActionResult> InitiateTurkeyReturn([FromBody] TurkeyReturnRequest req)
     {
         try
@@ -564,7 +564,7 @@ public partial class PMIMSControllers
     }
 
     [HttpGet("inventory/turkey/missing-items")]
-    [Authorize(Policy = "purchase_orders.read")]
+    [Authorize(Policy = "intake.read")]
     public async Task<IActionResult> GetTurkeyMissingItems()
     {
         try
@@ -592,7 +592,7 @@ public partial class PMIMSControllers
     }
 
     [HttpGet("inventory/missing-items")]
-    [Authorize(Policy = "purchase_orders.read")]
+    [Authorize(Policy = "intake.read")]
     public async Task<IActionResult> GetAllMissingItems([FromQuery] string? ownershipType = null)
     {
         try
@@ -620,7 +620,7 @@ public partial class PMIMSControllers
     }
 
     [HttpPost("inventory/turkey/missing-items/report")]
-    [Authorize(Policy = "purchase_orders.write")]
+    [Authorize(Policy = "intake.write")]
     public async Task<IActionResult> InitiateMissingItemsReport([FromBody] MissingItemsReportRequest req)
     {
         try
@@ -661,7 +661,7 @@ public partial class PMIMSControllers
     // =========================================================================
 
     [HttpGet("inventory/damaged/eligible-replacements/{damagedItemId:int}")]
-    [Authorize(Policy = "purchase_orders.read")]
+    [Authorize(Policy = "intake.read")]
     public async Task<IActionResult> GetEligibleTurkeyReplacements(int damagedItemId)
     {
         try
@@ -717,7 +717,7 @@ public partial class PMIMSControllers
     }
 
     [HttpGet("inventory/damaged/replacements")]
-    [Authorize(Policy = "purchase_orders.read")]
+    [Authorize(Policy = "intake.read")]
     public async Task<IActionResult> GetDamagedBarReplacements([FromQuery] string? status)
     {
         try

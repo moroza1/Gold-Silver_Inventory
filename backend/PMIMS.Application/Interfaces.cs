@@ -8,16 +8,9 @@ namespace PMIMS.Application;
 public interface IInventoryRepository
 {
     // Stored Procedure operations
-    // supplierInvoiceNumber/supplierInvoiceDate + the four fee fields are the Cost Tracking &
-    // Valuation purchase-cost-detail additions (see PurchaseOrder.LandedCost) -- appended as
-    // optional params so every existing positional call site keeps compiling unchanged.
-    Task<(int poId, string result)> CreatePurchaseOrderAsync(string poNumber, int vendorId, decimal totalWeightGrams, decimal totalCost, string currency, string createdBy, string poItemJsonList,
-        string? supplierInvoiceNumber = null, DateTime? supplierInvoiceDate = null, decimal freightCost = 0, decimal insuranceCost = 0, decimal customsDutyCost = 0, decimal otherFeesCost = 0, string? otherFeesDescription = null);
-    Task<bool> UpdatePurchaseOrderAsync(int poId, int vendorId, decimal totalWeightGrams, decimal totalCost, string currency, string username, string poItemJsonList,
-        string? supplierInvoiceNumber = null, DateTime? supplierInvoiceDate = null, decimal freightCost = 0, decimal insuranceCost = 0, decimal customsDutyCost = 0, decimal otherFeesCost = 0, string? otherFeesDescription = null);
-    // sourceType: "SUPPLIER" (default, requires poId) or "CUSTOMER" (requires customerId;
+    // sourceType: "SUPPLIER" (default) or "CUSTOMER" (requires customerId;
     // receiptReason of BUYBACK/RETURN -> KFH_OWNED, CUSTODY_DEPOSIT -> CUSTOMER_OWNED + custody holding).
-    Task<string> IntakeInventoryItemsAsync(int? poId, string lotNumber, int locationId, string receivedBy, string serialsJsonList,
+    Task<string> IntakeInventoryItemsAsync(string lotNumber, int locationId, string receivedBy, string serialsJsonList,
         string sourceType = "SUPPLIER", int? customerId = null, int? accountId = null, string? receiptReason = null,
         int? vendorId = null, string? shipmentReference = null, string? deliveryNoteNumber = null, string? airwayBillNumber = null,
         string? supportingDocumentUrl = null, string? discrepancyNotes = null, DateTime? receivingDate = null, string ownershipType = "KFH_OWNED",
@@ -45,8 +38,6 @@ public interface IInventoryRepository
     Task<InventoryLocation> AddLocationAsync(int vaultId, int? branchId, string zoneRoom, string shelfRow, string slotBin);
     Task<bool> DeleteLocationAsync(int locationId);
     Task<IEnumerable<InventoryItem>> GetItemsAsync();
-    Task<IEnumerable<PurchaseOrder>> GetPurchaseOrdersAsync();
-    Task<string> DeletePurchaseOrderAsync(int poId, string username);
     Task<IEnumerable<CustomerHolding>> GetCustomerHoldingsAsync(int customerId);
     Task<IEnumerable<CustomerHolding>> GetAllCustomerHoldingsAsync();
     Task<IEnumerable<InventoryTransaction>> GetTransactionsAsync();
@@ -132,7 +123,6 @@ public interface IInventoryRepository
     Task<IEnumerable<PendingThresholdChange>> GetPendingThresholdChangesAsync(string? thresholdType = null);
     Task<IEnumerable<StockAlertItem>> CheckStockAlertsAsync();
     Task<IEnumerable<StockAlertItem>> CheckLowStockAlertsAsync();
-    Task<(int poId, string result)> CreateDraftPurchaseOrderAsync(int thresholdId, string createdBy);
     Task<IEnumerable<DamagedHighStockAlert>> GetDamagedHighStockAlertsAsync(int? metalTypeId = null);
     Task<IEnumerable<DamagedBarExportCandidate>> GetDamagedExportCandidatesAsync(int? metalTypeId = null, int? vendorId = null);
     Task<DamagedExportManifestResult> GenerateDamagedExportManifestAsync(int metalTypeId, int? vendorId, List<int> itemIds, string generatedBy, string? notes);
@@ -148,7 +138,7 @@ public interface IInventoryRepository
     Task<TransferReceiptValidationResult> ValidateTransferQrCodeAsync(int transferId, string scannedQr);
     Task<BranchTransfer> InitiateWorkflowBranchTransferReceiptAsync(int transferId, string scannedQr, string initiatedBy, string? notes = null, int? targetLocationId = null);
     Task<BranchTransfer> InitiateWorkflowBranchTransferReturnAsync(int transferId, string returnReason, string initiatedBy, string? notes = null, string? courierInfo = null);
-    Task<PendingIntake> InitiateWorkflowIntakeAsync(int? poId, string lotNumber, int locationId, string receivedBy, string serialsJsonList,
+    Task<PendingIntake> InitiateWorkflowIntakeAsync(string lotNumber, int locationId, string receivedBy, string serialsJsonList,
         string sourceType = "SUPPLIER", int? customerId = null, int? accountId = null, string? receiptReason = null,
         int? vendorId = null, string? shipmentReference = null, string? deliveryNoteNumber = null, string? airwayBillNumber = null,
         string? supportingDocumentUrl = null, string? discrepancyNotes = null, DateTime? receivingDate = null, string ownershipType = "KFH_OWNED",

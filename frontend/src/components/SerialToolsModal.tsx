@@ -8,12 +8,63 @@ export interface GeneratedSerialItem {
   refiner_name: string;
 }
 
+export const getSupplierAffiliatedBrands = (
+  vendorId?: number,
+  suppliers: any[] = [],
+  brands: any[] = []
+): any[] => {
+  if (!vendorId || suppliers.length === 0 || brands.length === 0) return brands;
+  const vendor = suppliers.find((v: any) => v.vendor_id === vendorId);
+  if (!vendor) return brands;
+
+  const vName = (vendor.name || vendor.vendor_name || '').toLowerCase();
+  const vCode = (vendor.code || vendor.vendor_code || '').toLowerCase();
+  const vCountry = (vendor.country || vendor.country_of_origin || '').toLowerCase();
+
+  const matching = brands.filter((b: any) => {
+    const bName = (b.brand_name || '').toLowerCase();
+    const bCode = (b.brand_code || '').toLowerCase();
+    const bCountry = (b.country_of_origin || '').toLowerCase();
+
+    // Direct name or code match
+    if (bName.includes(vName) || vName.includes(bName) || (bCode && vCode && bCode === vCode)) return true;
+
+    // Known vendor affiliations & country matches
+    if (vName.includes('nadir') || vCode.includes('nad') || vCountry.includes('turk')) {
+      return bCountry.includes('turk') || bName.includes('nadir') || bName.includes('igr') || bCode.includes('nad') || bCode.includes('igr');
+    }
+    if (vName.includes('valcambi') || vCode.includes('val') || vCountry.includes('switz')) {
+      return bCountry.includes('switz') || bName.includes('valcambi') || bName.includes('pamp') || bName.includes('argor') || bCode.includes('val') || bCode.includes('pamp') || bCode.includes('arg');
+    }
+    if (vName.includes('emirates') || vCountry.includes('emirates') || vCountry.includes('uae')) {
+      return bCountry.includes('emirates') || bCountry.includes('uae') || bName.includes('emirates');
+    }
+    if (vName.includes('perth') || vCountry.includes('australia')) {
+      return bCountry.includes('australia') || bName.includes('perth');
+    }
+    if (vName.includes('kfh') || vCountry.includes('kwt') || vCountry.includes('kuwait')) {
+      return bCountry.includes('kuwait') || bName.includes('kfh');
+    }
+
+    // Generic country match
+    if (vCountry && bCountry && (vCountry === bCountry || bCountry.includes(vCountry) || vCountry.includes(bCountry))) {
+      return true;
+    }
+
+    return false;
+  });
+
+  return matching.length > 0 ? matching : brands;
+};
+
 interface SerialToolsModalProps {
   isOpen: boolean;
   onClose: () => void;
   onAddSerials: (items: GeneratedSerialItem[], purchasingCost?: number) => void;
   products: any[];
   brands: any[];
+  suppliers?: any[];
+  selectedVendorId?: number;
   currentLang: string;
   existingSerials?: string[];
   denominationPurchasingCosts?: { [productId: number]: number };
@@ -26,6 +77,8 @@ export const SerialToolsModal: React.FC<SerialToolsModalProps> = ({
   onAddSerials,
   products,
   brands,
+  suppliers = [],
+  selectedVendorId,
   currentLang,
   existingSerials = [],
   denominationPurchasingCosts = {},
@@ -40,6 +93,33 @@ export const SerialToolsModal: React.FC<SerialToolsModalProps> = ({
   const [selectedProductId, setSelectedProductId] = useState<number>(products[0]?.product_id || 1);
   const [selectedBrandName, setSelectedBrandName] = useState<string>(brands[0]?.brand_name || 'Nadir Gold Refinery');
   const [purchasingCost, setPurchasingCost] = useState<string>('');
+  const [showAllBrands, setShowAllBrands] = useState<boolean>(false);
+
+  const currentVendor = (suppliers || []).find((v: any) => v.vendor_id === selectedVendorId);
+  const affiliatedBrands = getSupplierAffiliatedBrands(selectedVendorId, suppliers, brands);
+  const displayedBrands = showAllBrands ? brands : affiliatedBrands;
+
+  useEffect(() => {
+    if (isOpen) {
+      setShowAllBrands(false);
+      const aff = getSupplierAffiliatedBrands(selectedVendorId, suppliers, brands);
+      if (aff.length > 0) {
+        const bestMatch = aff[0]?.brand_name;
+        if (bestMatch) {
+          setSelectedBrandName(bestMatch);
+          const lower = bestMatch.toLowerCase();
+          if (lower.includes('nadir')) setPrefix('TR-2026-');
+          else if (lower.includes('valcambi')) setPrefix('VAL-');
+          else if (lower.includes('pamp')) setPrefix('PAMP-');
+          else if (lower.includes('argor')) setPrefix('ARG-');
+          else if (lower.includes('igr')) setPrefix('IGR-');
+          else if (lower.includes('emirates')) setPrefix('EG-');
+          else if (lower.includes('perth')) setPrefix('PM-');
+          else if (lower.includes('kfh')) setPrefix('KFH-');
+        }
+      }
+    }
+  }, [isOpen, selectedVendorId, suppliers, brands]);
 
   useEffect(() => {
     if (products.length > 0 && !selectedProductId) {
@@ -279,16 +359,44 @@ export const SerialToolsModal: React.FC<SerialToolsModalProps> = ({
               </div>
 
               <div className="form-group" style={{ marginBottom: 0 }}>
-                <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Refiner / Brand' : 'المصفاة / الماركة'}</label>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '3px' }}>
+                  <label style={{ fontSize: '12px', fontWeight: 600, margin: 0 }}>
+                    {currentLang === 'en' ? 'Refiner / Brand' : 'المصفاة / الماركة'}
+                    {currentVendor && !showAllBrands && (
+                      <span style={{ fontSize: '10px', color: 'var(--kfh-green)', fontWeight: 'bold', marginLeft: '5px' }}>
+                        ({currentVendor.name || currentVendor.vendor_name})
+                      </span>
+                    )}
+                  </label>
+                  {affiliatedBrands.length < brands.length && (
+                    <button
+                      type="button"
+                      onClick={() => setShowAllBrands(!showAllBrands)}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--accent-gold)',
+                        fontSize: '11px',
+                        cursor: 'pointer',
+                        padding: 0,
+                        textDecoration: 'underline'
+                      }}
+                    >
+                      {showAllBrands
+                        ? (currentLang === 'en' ? 'Filter by Supplier' : 'فلترة حسب المورد')
+                        : (currentLang === 'en' ? 'Show All' : 'عرض الكل')}
+                    </button>
+                  )}
+                </div>
                 <select
                   className="form-control"
                   value={selectedBrandName}
                   onChange={e => setSelectedBrandName(e.target.value)}
                   style={{ fontSize: '12px' }}
                 >
-                  {brands.map((b: any) => (
+                  {displayedBrands.map((b: any) => (
                     <option key={b.brand_id} value={b.brand_name}>
-                      {b.brand_name}
+                      {b.brand_name} {b.is_lbma_certified ? '★ LBMA' : ''} {b.country_of_origin ? `(${b.country_of_origin})` : ''}
                     </option>
                   ))}
                 </select>

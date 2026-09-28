@@ -1065,16 +1065,6 @@ public static class DbSeeder
         {
             new
             {
-                WorkflowType = "PURCHASE_ORDER",
-                Name = "Default Purchase Order Workflow",
-                Description = "Standard Maker-Checker approval for procurement purchase orders.",
-                MakerStepName = "Purchase Order Maker Creation",
-                MakerDesc = "Maker drafts purchase order, assigns supplier, quantities, and agreed prices.",
-                CheckerStepName = "Purchase Order Checker Approval",
-                CheckerDesc = "Checker reviews PO terms, budget, and authorizes supplier procurement."
-            },
-            new
-            {
                 WorkflowType = "INTAKE_SHIPMENT",
                 Name = "Default Intake Shipment Workflow",
                 Description = "Standard Maker-Checker verification for incoming shipments.",
@@ -1339,7 +1329,7 @@ public static class DbSeeder
             {"custody","READ_ONLY"}, {"stocktake","READ_ONLY"}, {"migration","HIDDEN"}, {"reports","READ_ONLY"},
             {"workflows","READ_ONLY"}, {"settings","HIDDEN"}, {"user_admin","HIDDEN"}, {"vault_location","HIDDEN"},
             {"master_data","HIDDEN"}, {"workflow_design","READ_ONLY"}, {"intake","FULL"}, {"rules_engine","HIDDEN"},
-            {"monitoring","HIDDEN"}, {"barcode_qr_labeling","FULL"}, {"qr_reprint","READ_WRITE"}, {"purchase_orders","FULL"},
+            {"monitoring","HIDDEN"}, {"barcode_qr_labeling","FULL"}, {"qr_reprint","READ_WRITE"},
             {"dispensing","FULL"}, {"device_integration","HIDDEN"}, {"notifications","READ_ONLY"},
         },
         ["Treasury Operations (Checker)"] = new()
@@ -1348,7 +1338,7 @@ public static class DbSeeder
             {"custody","READ_ONLY"}, {"stocktake","READ_WRITE"}, {"migration","HIDDEN"}, {"reports","READ_ONLY"},
             {"workflows","READ_ONLY"}, {"settings","HIDDEN"}, {"user_admin","HIDDEN"}, {"vault_location","HIDDEN"},
             {"master_data","HIDDEN"}, {"workflow_design","READ_ONLY"}, {"intake","READ_ONLY"}, {"rules_engine","HIDDEN"},
-            {"monitoring","HIDDEN"}, {"barcode_qr_labeling","READ_ONLY"}, {"qr_reprint","FULL"}, {"purchase_orders","READ_ONLY"},
+            {"monitoring","HIDDEN"}, {"barcode_qr_labeling","READ_ONLY"}, {"qr_reprint","FULL"},
             {"dispensing","READ_ONLY"}, {"device_integration","HIDDEN"}, {"notifications","READ_ONLY"},
         },
         ["Reconciliation Officers"] = new()
@@ -1357,7 +1347,7 @@ public static class DbSeeder
             {"custody","READ_ONLY"}, {"stocktake","FULL"}, {"migration","HIDDEN"}, {"reports","FULL"},
             {"workflows","READ_ONLY"}, {"settings","HIDDEN"}, {"user_admin","HIDDEN"}, {"vault_location","HIDDEN"},
             {"master_data","HIDDEN"}, {"workflow_design","READ_ONLY"}, {"intake","READ_ONLY"}, {"rules_engine","HIDDEN"},
-            {"monitoring","HIDDEN"}, {"barcode_qr_labeling","READ_ONLY"}, {"qr_reprint","READ_ONLY"}, {"purchase_orders","READ_ONLY"},
+            {"monitoring","HIDDEN"}, {"barcode_qr_labeling","READ_ONLY"}, {"qr_reprint","READ_ONLY"},
             {"dispensing","READ_ONLY"}, {"device_integration","HIDDEN"}, {"notifications","READ_ONLY"},
         },
         ["Senior Treasury Manager"] = new()
@@ -1366,7 +1356,7 @@ public static class DbSeeder
             {"custody","FULL"}, {"stocktake","READ_ONLY"}, {"migration","HIDDEN"}, {"reports","FULL"},
             {"workflows","FULL"}, {"settings","READ_ONLY"}, {"user_admin","READ_ONLY"}, {"vault_location","READ_ONLY"},
             {"master_data","READ_ONLY"}, {"workflow_design","READ_ONLY"}, {"intake","READ_ONLY"}, {"rules_engine","READ_ONLY"},
-            {"monitoring","FULL"}, {"barcode_qr_labeling","READ_ONLY"}, {"qr_reprint","FULL"}, {"purchase_orders","FULL"},
+            {"monitoring","FULL"}, {"barcode_qr_labeling","READ_ONLY"}, {"qr_reprint","FULL"},
             {"dispensing","FULL"}, {"device_integration","READ_ONLY"}, {"notifications","FULL"},
         },
         ["IT Administrators"] = new()
@@ -1375,7 +1365,7 @@ public static class DbSeeder
             {"custody","FULL"}, {"stocktake","FULL"}, {"migration","FULL"}, {"reports","FULL"},
             {"workflows","FULL"}, {"settings","FULL"}, {"user_admin","FULL"}, {"vault_location","FULL"},
             {"master_data","FULL"}, {"workflow_design","FULL"}, {"intake","FULL"}, {"rules_engine","FULL"},
-            {"monitoring","FULL"}, {"barcode_qr_labeling","FULL"}, {"qr_reprint","FULL"}, {"purchase_orders","FULL"},
+            {"monitoring","FULL"}, {"barcode_qr_labeling","FULL"}, {"qr_reprint","FULL"},
             {"dispensing","FULL"}, {"device_integration","FULL"}, {"notifications","FULL"},
         },
     };
@@ -1647,7 +1637,7 @@ public static class DbSeeder
         // while being denied the authority to create/delete physical shelf locations.
         // RFP items 5-8 (rules_engine, notifications, monitoring) are new admin-tier
         // modules, same governance tier as vault_location/master_data/workflow_design.
-        var allModules = new[] { "dashboard", "pending_actions", "spatial_map", "custody", "stocktake", "migration", "reports", "workflows", "settings", "user_admin", "vault_location", "master_data", "workflow_design", "intake", "rules_engine", "monitoring", "barcode_qr_labeling", "qr_reprint", "purchase_orders", "dispensing", "device_integration", "notifications" };
+        var allModules = new[] { "dashboard", "pending_actions", "spatial_map", "custody", "stocktake", "migration", "reports", "workflows", "settings", "user_admin", "vault_location", "master_data", "workflow_design", "intake", "rules_engine", "monitoring", "barcode_qr_labeling", "qr_reprint", "dispensing", "device_integration", "notifications" };
 
         var grpMaker = new PrivilegeGroup { GroupName = "Treasury Operations (Maker)", Description = "Initiates purchase orders, transfers, and branch operations.", IsSystem = true };
         var grpChecker = new PrivilegeGroup { GroupName = "Treasury Operations (Checker)", Description = "Reviews and approves purchase orders and intake verifications.", IsSystem = true };
@@ -1702,24 +1692,20 @@ public static class DbSeeder
         // independent of (finer-grained than) the module-level Profile
         // (PrivilegeGroup) permission grants above. Mirrors the legacy
         // UserPermission names already used for the demo Maker/Checker roles.
-        var rightPoCreate = new FimRight { RightCode = "PO_CREATE", RightName = "Create Purchase Orders", Description = "Initiate new purchase orders for precious metals procurement.", ModuleKey = "purchase_orders" };
-        var rightPoApprove = new FimRight { RightCode = "PO_APPROVE", RightName = "Approve Purchase Orders", Description = "Checker-level approval of pending purchase orders.", ModuleKey = "purchase_orders" };
         var rightIntakeVerify = new FimRight { RightCode = "INTAKE_VERIFY", RightName = "Verify Shipment Intake", Description = "Verify weight/serials and approve incoming shipment intake.", ModuleKey = "intake" };
-        var rightTransferMake = new FimRight { RightCode = "TRANSFER_MAKE", RightName = "Initiate Branch Transfer", Description = "Initiate inter-branch/vault transfer of inventory items.", ModuleKey = "purchase_orders" };
+        var rightTransferMake = new FimRight { RightCode = "TRANSFER_MAKE", RightName = "Initiate Branch Transfer", Description = "Initiate inter-branch/vault transfer of inventory items.", ModuleKey = "intake" };
         var rightStocktakeExec = new FimRight { RightCode = "STOCKTAKE_EXECUTE", RightName = "Execute Stocktake Session", Description = "Start and scan a physical stocktake reconciliation session.", ModuleKey = "stocktake" };
         var rightUserProvision = new FimRight { RightCode = "USER_PROVISION", RightName = "Provision Users & Profiles", Description = "Create/update/remove users, profiles and rights via FIM.", ModuleKey = "user_admin" };
         var rightWorkflowDesign = new FimRight { RightCode = "WORKFLOW_DESIGN", RightName = "Author Workflow Templates", Description = "Design/modify Maker-Checker workflow templates and steps.", ModuleKey = "workflow_design" };
         var rightVaultManage = new FimRight { RightCode = "VAULT_MANAGE", RightName = "Manage Vault Locations", Description = "Create/update/delete physical vault shelf/slot locations.", ModuleKey = "vault_location" };
-        context.FimRights.AddRange(rightPoCreate, rightPoApprove, rightIntakeVerify, rightTransferMake, rightStocktakeExec, rightUserProvision, rightWorkflowDesign, rightVaultManage);
+        context.FimRights.AddRange(rightIntakeVerify, rightTransferMake, rightStocktakeExec, rightUserProvision, rightWorkflowDesign, rightVaultManage);
         await context.SaveChangesAsync();
 
         // Demo direct user->right bindings (independent of the Profile/module
         // grants above), so GetAllRightsForUser/AddUserToRight are exercisable
         // out of the box.
         context.FimUserRights.AddRange(
-            new FimUserRight { UserId = userMaker.UserId, RightId = rightPoCreate.RightId, GrantedBy = "SYSTEM" },
             new FimUserRight { UserId = userMaker.UserId, RightId = rightTransferMake.RightId, GrantedBy = "SYSTEM" },
-            new FimUserRight { UserId = userChecker.UserId, RightId = rightPoApprove.RightId, GrantedBy = "SYSTEM" },
             new FimUserRight { UserId = userChecker.UserId, RightId = rightIntakeVerify.RightId, GrantedBy = "SYSTEM" },
             new FimUserRight { UserId = userRecon.UserId, RightId = rightStocktakeExec.RightId, GrantedBy = "SYSTEM" },
             new FimUserRight { UserId = userAdmin.UserId, RightId = rightUserProvision.RightId, GrantedBy = "SYSTEM" },

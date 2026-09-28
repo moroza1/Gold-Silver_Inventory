@@ -372,6 +372,11 @@ public partial class PMIMSControllers : ControllerBase
             location_id = i.LocationId,
             status = i.StatusCode,
             ownership = i.OwnershipType,
+            customer_account_number = i.CustomerAccountNumber,
+            customer_rim_number = i.CustomerRimNumber,
+            average_purchase_cost = i.AveragePurchaseCost,
+            production_cost_kwd = i.ProductionCostKwd,
+            gfs_last_sync_at = i.GfsLastSyncAt,
             is_damaged = i.IsDamaged,
             damage_status = i.DamageApprovalStatus ?? (i.IsDamaged ? "APPROVED" : "NONE"),
             damage_reason = i.DamageReason,
@@ -438,153 +443,7 @@ public partial class PMIMSControllers : ControllerBase
         return Ok(stock);
     }
 
-    [Authorize(Policy = "purchase_orders.write")]
-    [HttpPost("purchase-orders")]
-    public async Task<IActionResult> CreatePurchaseOrder([FromBody] CreatePORequest req)
-    {
-        try
-        {
-            // VALIDATION: Ensure PURCHASE_ORDER workflow template exists before allowing PO creation
-            var poWorkflow = await _repository.GetWorkflowTemplateByTypeAsync("PURCHASE_ORDER");
-            if (poWorkflow == null || !poWorkflow.IsActive)
-            {
-                return BadRequest(new {
-                    error = "Cannot create Purchase Order: No active PURCHASE_ORDER workflow template is configured. Please contact an administrator to set up the workflow first."
-                });
-            }
 
-            string itemsJson = JsonSerializer.Serialize(req.Items);
-            string creator = User?.Identity?.Name ?? req.CreatedBy;
-            var (poId, result) = await _repository.CreatePurchaseOrderAsync(req.PoNumber, req.VendorId, req.TotalWeightGrams, req.TotalCost, req.Currency, creator, itemsJson,
-                req.SupplierInvoiceNumber, req.SupplierInvoiceDate, req.FreightCost, req.InsuranceCost, req.CustomsDutyCost, req.OtherFeesCost, req.OtherFeesDescription);
-
-            if (result != "SUCCESS") return BadRequest(result);
-            return Created($"/api/purchase-orders/{poId}", new { po_id = poId, message = "Purchase Order created and staged under Maker-Checker review." });
-        }
-        catch (Exception ex)
-        {
-            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
-        }
-    }
-
-    [Authorize(Policy = "purchase_orders.write")]
-    [HttpPut("purchase-orders/{id}")]
-    public async Task<IActionResult> UpdatePurchaseOrder(int id, [FromBody] CreatePORequest req)
-    {
-        try
-        {
-            string itemsJson = JsonSerializer.Serialize(req.Items);
-            var success = await _repository.UpdatePurchaseOrderAsync(id, req.VendorId, req.TotalWeightGrams, req.TotalCost, req.Currency, req.CreatedBy, itemsJson,
-                req.SupplierInvoiceNumber, req.SupplierInvoiceDate, req.FreightCost, req.InsuranceCost, req.CustomsDutyCost, req.OtherFeesCost, req.OtherFeesDescription);
-            if (!success) return NotFound();
-            return Ok(new { message = "Purchase Order amended successfully." });
-        }
-        catch (Exception ex)
-        {
-            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
-        }
-    }
-
-    // Deletion is a harder action than the ordinary create/edit covered by
-    // "purchase_orders.write" (FULL is held by Maker too) -- it erases the P.O.'s audit
-    // and workflow trail entirely rather than amending it, so it's reserved for IT/Admin
-    // regardless of the caller's purchase_orders module grant.
-    [Authorize]
-    [HttpDelete("purchase-orders/{id}")]
-    public async Task<IActionResult> DeletePurchaseOrder(int id, [FromQuery] string? username)
-    {
-        if (!User.IsInRole("IT/Admin"))
-        {
-            return Forbid();
-        }
-        try
-        {
-            var result = await _repository.DeletePurchaseOrderAsync(id, username ?? User.Identity?.Name ?? "unknown");
-            if (result == "SUCCESS") return Ok(new { message = "Purchase Order deleted." });
-            if (result == "PO_NOT_FOUND") return NotFound();
-            return BadRequest(new { error = result });
-        }
-        catch (Exception ex)
-        {
-            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
-        }
-    }
-
-    [Authorize(Policy = "purchase_orders.read")]
-    [HttpGet("purchase-orders")]
-    public async Task<IActionResult> GetPurchaseOrders()
-    {
-        var list = await _repository.GetPurchaseOrdersAsync();
-        var activeInstances = (await _repository.GetActiveWorkflowInstancesAsync()).ToList();
-        var templates = (await _repository.GetWorkflowTemplatesAsync()).ToList();
-
-        var poList = new List<object>();
-        foreach (var po in list)
-        {
-            string? requiredRole = null;
-            bool isWithMaker = false;
-            var inst = activeInstances.FirstOrDefault(i => i.WorkflowType == "PURCHASE_ORDER" && i.EntityId == po.PoId);
-            if (inst != null)
-            {
-                var template = templates.FirstOrDefault(t => t.TemplateId == inst.TemplateId);
-                var currentStep = template?.Steps.FirstOrDefault(s => s.StepOrder == inst.CurrentStepOrder);
-                
-                var historyActions = await _repository.GetApprovalActionsForInstanceAsync(inst.InstanceId);
-                var lastAction = historyActions.OrderByDescending(a => a.ActionTimestamp).ThenByDescending(a => a.ActionId).FirstOrDefault();
-                
-                if (lastAction != null && lastAction.ActionTaken == "RETURNED")
-                {
-                    isWithMaker = true;
-                    requiredRole = "Operations Maker";
-                }
-                else
-                {
-                    isWithMaker = false;
-                    requiredRole = currentStep?.RequiredRole;
-                }
-            }
-
-            var firstItem = po.Items?.FirstOrDefault();
-            poList.Add(new {
-                po_id = po.PoId,
-                po_number = po.PoNumber,
-                vendor_id = po.VendorId,
-                supplier = po.Vendor?.VendorName ?? "Unknown Supplier",
-                weight = po.TotalWeightGrams,
-                cost = po.TotalCost,
-                currency = po.Currency,
-                // Cost Tracking & Valuation -- purchase cost detail + the landed cost that
-                // actually feeds InventoryLot.AverageUnitCost at intake (see PurchaseOrder.LandedCost).
-                supplier_invoice_number = po.SupplierInvoiceNumber,
-                supplier_invoice_date = po.SupplierInvoiceDate,
-                freight_cost = po.FreightCost,
-                insurance_cost = po.InsuranceCost,
-                customs_duty_cost = po.CustomsDutyCost,
-                other_fees_cost = po.OtherFeesCost,
-                other_fees_description = po.OtherFeesDescription,
-                landed_cost = po.LandedCost,
-                status_code = po.StatusCode,
-                created_by = po.CreatedBy,
-                approved_by = po.ApprovedBy,
-                required_role = requiredRole,
-                is_with_maker = isWithMaker,
-                // Back-compat aliases for any caller still reading a single item: first line's
-                // product, and total units summed across all lines.
-                product_id = firstItem?.ProductId ?? 1,
-                qty = po.Items != null && po.Items.Count > 0 ? po.Items.Sum(i => i.OrderedQuantity) : 1,
-                line_count = po.Items?.Count ?? 0,
-                // Full line-item breakdown (per-unit weight is resolved on the frontend from the product catalog).
-                items = (po.Items ?? new List<POItem>()).Select(i => new {
-                    product_id = i.ProductId,
-                    product_code = i.Product?.ProductCode,
-                    qty = i.OrderedQuantity,
-                    unit_cost = i.UnitCost,
-                    received = i.ReceivedQuantity
-                })
-            });
-        }
-        return Ok(poList);
-    }
 
     [HttpPost("vault/intake")]
     [Authorize(Policy = "intake.write")]
@@ -612,11 +471,10 @@ public partial class PMIMSControllers : ControllerBase
             string? prodCostsJson = req.ProductionCosts != null && req.ProductionCosts.Count > 0
                 ? JsonSerializer.Serialize(req.ProductionCosts)
                 : null;
-            int? poId = (req.PoId == 0) ? null : req.PoId;
             int locationId = req.LocationId > 0 ? req.LocationId : 1;
             string initiator = User?.Identity?.Name ?? req.ReceivedBy;
             var pending = await _repository.InitiateWorkflowIntakeAsync(
-                poId, req.LotNumber, locationId, initiator, itemsJson,
+                req.LotNumber, locationId, initiator, itemsJson,
                 sourceType: "SUPPLIER", customerId: null, accountId: null, receiptReason: null,
                 vendorId: vendorId, shipmentReference: req.ShipmentReference, deliveryNoteNumber: req.DeliveryNoteNumber,
                 airwayBillNumber: req.AirwayBillNumber, supportingDocumentUrl: req.SupportingDocumentUrl,
@@ -811,7 +669,7 @@ public partial class PMIMSControllers : ControllerBase
             }
 
             string itemsJson = JsonSerializer.Serialize(req.Items);
-            var pending = await _repository.InitiateWorkflowIntakeAsync(null, req.LotNumber, req.LocationId, req.ReceivedBy, itemsJson,
+            var pending = await _repository.InitiateWorkflowIntakeAsync(req.LotNumber, req.LocationId, req.ReceivedBy, itemsJson,
                 sourceType: "CUSTOMER", customerId: req.CustomerId, accountId: req.AccountId, receiptReason: req.ReceiptReason,
                 transferToMainVault: req.TransferToMainVault, courierInfo: req.CourierInfo, destinationBranchId: req.DestinationBranchId);
             return Ok(new { pending_id = pending.PendingIntakeId, message = "Customer receipt verification request initiated and routed to the Maker-Checker workflow approval." });
@@ -1411,7 +1269,6 @@ public partial class PMIMSControllers : ControllerBase
         var instances = await _repository.GetActiveWorkflowInstancesAsync();
         var list = new List<object>();
         var templates = await _repository.GetWorkflowTemplatesAsync();
-        var purchaseOrders = await _repository.GetPurchaseOrdersAsync();
         var allCustomerHoldings = (await _repository.GetAllCustomerHoldingsAsync())
             .Where(h => h.StatusCode == "ACTIVE" || h.StatusCode == "HELD_IN_CUSTODY")
             .ToList();
@@ -1424,26 +1281,7 @@ public partial class PMIMSControllers : ControllerBase
             var approvalActions = await _repository.GetApprovalActionsForInstanceAsync(inst.InstanceId);
             
             object? entityDetails = null;
-            if (inst.WorkflowType == "PURCHASE_ORDER")
-            {
-                var po = purchaseOrders.FirstOrDefault(p => p.PoId == inst.EntityId);
-                if (po != null)
-                {
-                    entityDetails = new
-                    {
-                        po_id = po.PoId,
-                        po_number = po.PoNumber,
-                        vendor_id = po.VendorId,
-                        vendor_name = po.Vendor?.VendorName,
-                        total_weight = po.TotalWeightGrams,
-                        total_cost = po.TotalCost,
-                        currency = po.Currency,
-                        status_code = po.StatusCode,
-                        created_by = po.CreatedBy
-                    };
-                }
-            }
-            else if (inst.WorkflowType == "INTAKE_SHIPMENT")
+            if (inst.WorkflowType == "INTAKE_SHIPMENT")
             {
                 var pendingIntakes = await _repository.GetPendingIntakesAsync();
                 var pending = pendingIntakes.FirstOrDefault(pi => pi.PendingIntakeId == inst.EntityId);
@@ -1461,8 +1299,6 @@ public partial class PMIMSControllers : ControllerBase
                         supporting_document_url = pending.SupportingDocumentUrl,
                         discrepancy_notes = pending.DiscrepancyNotes,
                         receiving_date = pending.ReceivingDate ?? pending.CreatedAt,
-                        po_id = pending.PoId,
-                        po_number = pending.SourceType == "CUSTOMER" ? null : (pending.PurchaseOrder?.PoNumber ?? "Direct Shipment"),
                         customer_id = pending.CustomerId,
                         customer_name = pending.Customer?.CustomerName,
                         account_id = pending.AccountId,
@@ -1839,24 +1675,18 @@ public partial class PMIMSControllers : ControllerBase
             pending = pending.Where(p => p.CreatedAt < rangeEndExclusive.Value).ToList();
         }
 
-        var purchaseOrders = (await _repository.GetPurchaseOrdersAsync()).ToList();
         var pendingIntakes = (await _repository.GetPendingIntakesAsync()).ToList();
         var transfers = (await _repository.GetBranchTransfersAsync()).ToList();
 
         string Summarize(string workflowType, int entityId)
         {
-            if (workflowType == "PURCHASE_ORDER")
-            {
-                var po = purchaseOrders.FirstOrDefault(p => p.PoId == entityId);
-                return po != null ? $"PO {po.PoNumber} ({po.Vendor?.VendorName ?? "Vendor"})" : $"PO #{entityId}";
-            }
             if (workflowType == "INTAKE_SHIPMENT")
             {
                 var pi = pendingIntakes.FirstOrDefault(p => p.PendingIntakeId == entityId);
                 if (pi == null) return $"Intake #{entityId}";
                 return pi.SourceType == "CUSTOMER"
                     ? $"Intake lot {pi.LotNumber} (Customer {pi.Customer?.CustomerName ?? "Unknown"} -- {pi.ReceiptReason})"
-                    : $"Intake lot {pi.LotNumber} (PO {pi.PurchaseOrder?.PoNumber ?? "Unknown"})";
+                    : $"Intake lot {pi.LotNumber} (Shipment {pi.ShipmentReference ?? "Direct"})";
             }
             if (workflowType == "BRANCH_TRANSFER")
             {
@@ -1991,16 +1821,7 @@ public partial class PMIMSControllers : ControllerBase
             }
         }
 
-        // ============================================================
-        // PURCHASE ORDER RECEIPT TRACKING
-        // ============================================================
-        var purchaseOrders = (await _repository.GetPurchaseOrdersAsync())
-            .AsEnumerable();
-        if (rangeStart.HasValue)
-            purchaseOrders = purchaseOrders.Where(p => p.CreatedAt >= rangeStart.Value);
-        if (rangeEndExclusive.HasValue)
-            purchaseOrders = purchaseOrders.Where(p => p.CreatedAt < rangeEndExclusive.Value);
-        var scopedPOs = purchaseOrders.ToList();
+
 
         // ============================================================
         // Breakdown categories & Summation for all precious metals:
@@ -2134,33 +1955,6 @@ public partial class PMIMSControllers : ControllerBase
             sold_weight_kg = WeightKg(soldItems),
             available_qty = availableItems.Count,
             available_weight_kg = WeightKg(availableItems),
-            purchase_orders = new
-            {
-                total = scopedPOs.Count,
-                pending_approval = scopedPOs.Count(p => p.StatusCode == "PENDING_APPROVAL"),
-                approved = scopedPOs.Count(p => p.StatusCode == "APPROVED"),
-                partial_receipt = scopedPOs.Count(p => p.StatusCode == "PARTIAL_RECEIPT"),
-                fully_received = scopedPOs.Count(p => p.StatusCode == "RECEIVED")
-            },
-            purchase_order_list = scopedPOs.Select(p => new
-            {
-                po_id = p.PoId,
-                po_number = p.PoNumber,
-                vendor_name = p.Vendor?.VendorName ?? "Unknown",
-                status = p.StatusCode,
-                total_cost = p.TotalCost,
-                currency = p.Currency,
-                created_at = p.CreatedAt,
-                order_date = p.OrderDate,
-                expected_delivery = p.ExpectedDeliveryDate,
-                items = p.Items.Select(i => new
-                {
-                    product_id = i.ProductId,
-                    ordered_qty = i.OrderedQuantity,
-                    received_qty = i.ReceivedQuantity,
-                    product_name = i.Product?.ProductCode ?? "Unknown"
-                })
-            }),
             items = scopedItems.Select(i => new
             {
                 item_id = i.ItemId,
@@ -2463,7 +2257,7 @@ public partial class PMIMSControllers : ControllerBase
         "stocktake", "migration", "reports", "workflows", "settings", "user_admin",
         "vault_location", "master_data", "workflow_design", "intake",
         "rules_engine", "monitoring", "barcode_qr_labeling", "qr_reprint",
-        "purchase_orders", "dispensing", "device_integration", "notifications"
+        "dispensing", "device_integration", "notifications"
     };
 
     // Reconstructs the caller's effective module permissions from the JWT "perm:*" claims.
@@ -3032,22 +2826,8 @@ public class ProcessThresholdActionRequest { public string Action { get; set; } 
 // Request and DTO payloads
 public class LoginRequest { public string Username { get; set; } = null!; public string Password { get; set; } = null!; }
 public class CreateLocationRequest { public string ZoneRoom { get; set; } = null!; public string ShelfRow { get; set; } = null!; public string SlotBin { get; set; } = null!; }
-public class CreatePORequest {
-    public string PoNumber { get; set; } = null!; public int VendorId { get; set; } public decimal TotalWeightGrams { get; set; } public decimal TotalCost { get; set; } public string Currency { get; set; } = "USD"; public string CreatedBy { get; set; } = null!; public List<POItemDTO> Items { get; set; } = new();
-    // Cost Tracking & Valuation -- purchase cost detail (supplier invoice + acquisition fees).
-    // All optional so an existing/simple client that doesn't know about them still works.
-    public string? SupplierInvoiceNumber { get; set; }
-    public DateTime? SupplierInvoiceDate { get; set; }
-    public decimal FreightCost { get; set; } = 0;
-    public decimal InsuranceCost { get; set; } = 0;
-    public decimal CustomsDutyCost { get; set; } = 0;
-    public decimal OtherFeesCost { get; set; } = 0;
-    public string? OtherFeesDescription { get; set; }
-}
-public class POItemDTO { public int product_id { get; set; } public int qty { get; set; } public decimal unit_cost { get; set; } }
 public class IntakeRequest
 {
-    public int? PoId { get; set; }
     public int? VendorId { get; set; }
     public string? ShipmentReference { get; set; }
     public string? DeliveryNoteNumber { get; set; }

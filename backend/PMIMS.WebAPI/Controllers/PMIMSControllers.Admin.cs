@@ -438,7 +438,6 @@ public partial class PMIMSControllers
             || User.Claims.Any(c => c.Type == ClaimTypes.Role && c.Value.Contains("Management", StringComparison.OrdinalIgnoreCase));
 
         bool hasOperationalGrant = User.IsInRole("IT/Admin")
-            || User.HasClaim(c => c.Type == "perm:purchase_orders" && c.Value != "HIDDEN")
             || User.HasClaim(c => c.Type == "perm:master_data" && c.Value != "HIDDEN")
             || User.HasClaim(c => c.Type == "perm:intake" && c.Value != "HIDDEN");
 
@@ -461,7 +460,6 @@ public partial class PMIMSControllers
             || User.Claims.Any(c => c.Type == ClaimTypes.Role && c.Value.Contains("Management", StringComparison.OrdinalIgnoreCase));
 
         bool hasOperationalGrant = User.IsInRole("IT/Admin")
-            || User.HasClaim(c => c.Type == "perm:purchase_orders" && c.Value != "HIDDEN")
             || User.HasClaim(c => c.Type == "perm:master_data" && c.Value != "HIDDEN")
             || User.HasClaim(c => c.Type == "perm:intake" && c.Value != "HIDDEN");
 
@@ -472,27 +470,6 @@ public partial class PMIMSControllers
 
         var alerts = await _repository.CheckStockAlertsAsync();
         return Ok(alerts);
-    }
-
-    [Authorize(Policy = "purchase_orders.write")]
-    [HttpPost("inventory/low-stock-alerts/{thresholdId:int}/draft-po")]
-    public async Task<IActionResult> CreateDraftPO(int thresholdId, [FromBody] DraftPORequest req)
-    {
-        try
-        {
-            var user = req?.CreatedBy ?? User.Identity?.Name ?? "system-admin";
-            var (poId, result) = await _repository.CreateDraftPurchaseOrderAsync(thresholdId, user);
-            return Ok(new
-            {
-                po_id = poId,
-                status = result,
-                already_exists = result == "DRAFT_EXISTS"
-            });
-        }
-        catch (Exception ex)
-        {
-            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
-        }
     }
 
     // =========================================================================

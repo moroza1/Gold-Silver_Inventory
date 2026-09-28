@@ -75,163 +75,6 @@ public class InventoryRepository : IInventoryRepository
         await _dbContext.SaveChangesAsync();
     }
 
-    // sp_CreatePurchaseOrder execution / emulation
-    public async Task<(int poId, string result)> CreatePurchaseOrderAsync(string poNumber, int vendorId, decimal totalWeightGrams, decimal totalCost, string currency, string createdBy, string poItemJsonList,
-        string? supplierInvoiceNumber = null, DateTime? supplierInvoiceDate = null, decimal freightCost = 0, decimal insuranceCost = 0, decimal customsDutyCost = 0, decimal otherFeesCost = 0, string? otherFeesDescription = null)
-    {
-        if (IsSqlServer)
-        {
-            // NOTE: sp_CreatePurchaseOrder (database/procedures.sql) does not yet accept the
-            // cost-detail params (supplierInvoiceNumber/supplierInvoiceDate/fees) -- this is a
-            // known follow-up for the SQL Server production path, same "documented gap, not a
-            // silent drop" posture as the rest of this codebase's greenfield integrations. The
-            // SQLite emulation branch below (what every local/dev/test run actually exercises)
-            // persists them.
-            var poIdParam = new SqlParameter("@POID", SqlDbType.Int) { Direction = ParameterDirection.Output };
-            var resultParam = new SqlParameter("@result", SqlDbType.VarChar, 50) { Direction = ParameterDirection.Output };
-
-            await _dbContext.Database.ExecuteSqlRawAsync(
-                "EXEC sp_CreatePurchaseOrder @PONumber, @VendorID, @TotalWeightGrams, @TotalCost, @Currency, @CreatedBy, @POItemIDList, @POID OUTPUT, @result OUTPUT",
-                new SqlParameter("@PONumber", poNumber),
-                new SqlParameter("@VendorID", vendorId),
-                new SqlParameter("@TotalWeightGrams", totalWeightGrams),
-                new SqlParameter("@TotalCost", totalCost),
-                new SqlParameter("@Currency", currency),
-                new SqlParameter("@CreatedBy", createdBy),
-                new SqlParameter("@POItemIDList", poItemJsonList),
-                poIdParam,
-                resultParam
-            );
-
-            return ((int)poIdParam.Value, poIdParam.Value.ToString() ?? "SUCCESS");
-        }
-        else
-        {
-            // Emulation
-            var existingPo = await _dbContext.PurchaseOrders.AnyAsync(p => p.PoNumber == poNumber);
-            if (existingPo)
-            {
-                throw new InvalidOperationException($"Cannot create Purchase Order: A purchase order with number '{poNumber}' already exists.");
-            }
-
-            var vendor = await _dbContext.Vendors.FindAsync(vendorId);
-            if (vendor == null || !vendor.IsShariaCompliant)
-            {
-                throw new InvalidOperationException("Selected vendor is not approved for Sharia transactions.");
-            }
-
-            var template = await _dbContext.WorkflowTemplates.Include(t => t.Steps)
-                .FirstOrDefaultAsync(t => t.WorkflowType == "PURCHASE_ORDER" && t.IsActive);
-            if (template == null || template.Steps.Count == 0)
-            {
-                throw new InvalidOperationException("Cannot create Purchase Order: No active PO approval workflow template or steps are defined in the setup.");
-            }
-
-            var po = new PurchaseOrder
-            {
-                PoNumber = poNumber,
-                VendorId = vendorId,
-                OrderDate = DateTime.UtcNow,
-                TotalWeightGrams = totalWeightGrams,
-                TotalCost = totalCost,
-                Currency = currency,
-                StatusCode = "PENDING_APPROVAL",
-                CreatedBy = createdBy,
-                CreatedAt = DateTime.UtcNow,
-                SupplierInvoiceNumber = supplierInvoiceNumber,
-                SupplierInvoiceDate = supplierInvoiceDate,
-                FreightCost = freightCost,
-                InsuranceCost = insuranceCost,
-                CustomsDutyCost = customsDutyCost,
-                OtherFeesCost = otherFeesCost,
-                OtherFeesDescription = otherFeesDescription
-            };
-            _dbContext.PurchaseOrders.Add(po);
-            await _dbContext.SaveChangesAsync();
-
-            // Parse json items
-            using var doc = JsonDocument.Parse(poItemJsonList);
-            foreach (var item in doc.RootElement.EnumerateArray())
-            {
-                var poItem = new POItem
-                {
-                    PoId = po.PoId,
-                    ProductId = item.GetProperty("product_id").GetInt32(),
-                    OrderedQuantity = item.GetProperty("qty").GetInt32(),
-                    UnitCost = item.GetProperty("unit_cost").GetDecimal(),
-                    ReceivedQuantity = 0
-                };
-                _dbContext.POItems.Add(poItem);
-            }
-            await _dbContext.SaveChangesAsync();
-
-            await SaveAuditLogAsync(createdBy, "SYSTEM", "PROCUREMENT", $"Created Purchase Order ID: {po.PoId}");
-
-            if (template != null)
-            {
-                await StartWorkflowInstanceAsync("PURCHASE_ORDER", po.PoId, createdBy);
-            }
-
-            return (po.PoId, "SUCCESS");
-    }
-}
-    public async Task<bool> UpdatePurchaseOrderAsync(int poId, int vendorId, decimal totalWeightGrams, decimal totalCost, string currency, string username, string poItemJsonList,
-        string? supplierInvoiceNumber = null, DateTime? supplierInvoiceDate = null, decimal freightCost = 0, decimal insuranceCost = 0, decimal customsDutyCost = 0, decimal otherFeesCost = 0, string? otherFeesDescription = null)
-    {
-        var po = await _dbContext.PurchaseOrders.FindAsync(poId);
-        if (po == null) return false;
-
-        // Check if the workflow is currently at the first stage (with the maker)
-        var instance = await _dbContext.WorkflowInstances
-            .FirstOrDefaultAsync(i => i.WorkflowType == "PURCHASE_ORDER" && i.EntityId == poId);
-        
-        if (instance == null || instance.StatusCode != "PENDING_MAKER" || instance.CurrentStepOrder != 1)
-        {
-            throw new InvalidOperationException("This P.O. cannot be edited because it is not currently in the Maker stage.");
-        }
-
-        var vendor = await _dbContext.Vendors.FindAsync(vendorId);
-        if (vendor == null || !vendor.IsShariaCompliant)
-        {
-            throw new InvalidOperationException("Selected vendor is not approved for Sharia transactions.");
-        }
-
-        // Update PO details
-        po.VendorId = vendorId;
-        po.TotalWeightGrams = totalWeightGrams;
-        po.TotalCost = totalCost;
-        po.Currency = currency;
-        po.SupplierInvoiceNumber = supplierInvoiceNumber;
-        po.SupplierInvoiceDate = supplierInvoiceDate;
-        po.FreightCost = freightCost;
-        po.InsuranceCost = insuranceCost;
-        po.CustomsDutyCost = customsDutyCost;
-        po.OtherFeesCost = otherFeesCost;
-        po.OtherFeesDescription = otherFeesDescription;
-
-        // Remove existing items and add new ones
-        var existingItems = _dbContext.POItems.Where(i => i.PoId == poId);
-        _dbContext.POItems.RemoveRange(existingItems);
-
-        using var doc = JsonDocument.Parse(poItemJsonList);
-        foreach (var item in doc.RootElement.EnumerateArray())
-        {
-            var poItem = new POItem
-            {
-                PoId = poId,
-                ProductId = item.GetProperty("product_id").GetInt32(),
-                OrderedQuantity = item.GetProperty("qty").GetInt32(),
-                UnitCost = item.GetProperty("unit_cost").GetDecimal(),
-                ReceivedQuantity = 0
-            };
-            _dbContext.POItems.Add(poItem);
-        }
-
-        await _dbContext.SaveChangesAsync();
-        await SaveAuditLogAsync(username, "SYSTEM", "PROCUREMENT", $"Amended Purchase Order ID: {poId}");
-        return true;
-    }
-
     // A customer-sourced receipt (buyback/custody deposit/return) has no vendor -- but
     // InventoryLot.VendorId is a required column, so a dedicated internal "walk-in"
     // vendor row stands in for "no vendor" without loosening that column's non-null
@@ -257,10 +100,8 @@ public class InventoryRepository : IInventoryRepository
     }
 
     // sp_IntakeInventoryItems execution / emulation -- receipt of precious metals into the
-    // vault ledger, from either a supplier (sourceType SUPPLIER, tied to an approved PO) or
-    // a customer (sourceType CUSTOMER). See the PendingIntake doc comment (Entities.cs) for
-    // what each receiptReason means.
-    public async Task<string> IntakeInventoryItemsAsync(int? poId, string lotNumber, int locationId, string receivedBy, string serialsJsonList,
+    // vault ledger, from either a supplier (sourceType SUPPLIER) or a customer (sourceType CUSTOMER).
+    public async Task<string> IntakeInventoryItemsAsync(string lotNumber, int locationId, string receivedBy, string serialsJsonList,
         string sourceType = "SUPPLIER", int? customerId = null, int? accountId = null, string? receiptReason = null,
         int? vendorId = null, string? shipmentReference = null, string? deliveryNoteNumber = null, string? airwayBillNumber = null,
         string? supportingDocumentUrl = null, string? discrepancyNotes = null, DateTime? receivingDate = null, string ownershipType = "KFH_OWNED",
@@ -273,7 +114,7 @@ public class InventoryRepository : IInventoryRepository
         {
             await _dbContext.Database.ExecuteSqlRawAsync(
                 "EXEC sp_IntakeInventoryItems @POID, @LotNumber, @LocationID, @ReceivedBy, @SerialsList, @SourceType, @CustomerID, @AccountID, @ReceiptReason",
-                new SqlParameter("@POID", (object?)poId ?? DBNull.Value),
+                new SqlParameter("@POID", DBNull.Value),
                 new SqlParameter("@LotNumber", lotNumber),
                 new SqlParameter("@LocationID", locationId),
                 new SqlParameter("@ReceivedBy", receivedBy),
@@ -287,7 +128,6 @@ public class InventoryRepository : IInventoryRepository
         }
         else
         {
-            PurchaseOrder? po = null;
             Customer? customer = null;
             int effectiveVendorId;
             decimal avgCost = 0;
@@ -318,14 +158,12 @@ public class InventoryRepository : IInventoryRepository
             }
             else
             {
-                po = poId.HasValue ? await _dbContext.PurchaseOrders.Include(p => p.Items).FirstOrDefaultAsync(p => p.PoId == poId.Value) : null;
-                if (po != null && po.StatusCode != "APPROVED")
+                effectiveVendorId = vendorId ?? 1;
+                var vendor = await _dbContext.Vendors.FindAsync(effectiveVendorId);
+                if (vendor != null && !vendor.IsShariaCompliant)
                 {
-                    throw new InvalidOperationException("Cannot receive shipment: The associated purchase order must be fully approved.");
+                    throw new InvalidOperationException("Selected vendor is not approved for Sharia transactions.");
                 }
-                effectiveVendorId = vendorId ?? po?.VendorId ?? 1;
-                // Cost Tracking & Valuation: Average Cost is computed off the full landed cost
-                avgCost = po != null && po.TotalWeightGrams > 0 ? po.LandedCost / po.TotalWeightGrams : 0;
             }
 
             using var doc = JsonDocument.Parse(serialsJsonList);
@@ -335,7 +173,7 @@ public class InventoryRepository : IInventoryRepository
             {
                 lotNumber = isCustomerReceipt 
                     ? $"RCPT-CUST-{DateTime.UtcNow:yyyyMMddHHmmss}" 
-                    : (poId.HasValue ? $"LOT-PO-{poId}-{DateTime.UtcNow:yyyyMMddHHmmss}" : $"LOT-SUP-{DateTime.UtcNow:yyyyMMddHHmmss}");
+                    : $"LOT-SUP-{DateTime.UtcNow:yyyyMMddHHmmss}";
             }
 
             var lot = await _dbContext.InventoryLots.FirstOrDefaultAsync(l => l.LotNumber == lotNumber);
@@ -344,7 +182,6 @@ public class InventoryRepository : IInventoryRepository
                 lot = new InventoryLot
                 {
                     LotNumber = lotNumber,
-                    PoId = isCustomerReceipt ? null : poId,
                     VendorId = effectiveVendorId,
                     AcquisitionDate = receivingDate ?? DateTime.UtcNow,
                     TotalItems = totalItems,
@@ -372,7 +209,6 @@ public class InventoryRepository : IInventoryRepository
             else
             {
                 lot.TotalItems += totalItems;
-                if (lot.PoId == null && !isCustomerReceipt && poId.HasValue) lot.PoId = poId;
                 if (avgCost > 0) lot.AverageUnitCost = avgCost;
                 else if (customsDutyAmount.HasValue && customsDutyAmount.Value > 0) lot.AverageUnitCost = customsDutyAmount.Value;
                 if (!string.IsNullOrWhiteSpace(shipmentReference)) lot.ShipmentReference = shipmentReference;
@@ -627,45 +463,6 @@ public class InventoryRepository : IInventoryRepository
             foreach (var prodId in affectedProducts)
             {
                 await RecalculateInventoryBalanceAsync(locationId, prodId, finalOwnershipType);
-            }
-
-            if (po != null)
-            {
-                // ============================================================
-                // P.O. PARTIAL RECEIPT TRACKING
-                // Count items received per product and update POItem.ReceivedQuantity.
-                // Only mark P.O. as RECEIVED when all items have been fully received.
-                // Otherwise mark as PARTIAL_RECEIPT to indicate awaiting remaining shipment.
-                // ============================================================
-                var itemsReceivedByProduct = newItems.GroupBy(i => i.ProductId)
-                    .ToDictionary(g => g.Key, g => g.Count());
-
-                bool allItemsReceived = true;
-                foreach (var poItem in po.Items)
-                {
-                    if (itemsReceivedByProduct.ContainsKey(poItem.ProductId))
-                    {
-                        poItem.ReceivedQuantity += itemsReceivedByProduct[poItem.ProductId];
-                    }
-
-                    // Check if this line item is fully received
-                    if (poItem.ReceivedQuantity < poItem.OrderedQuantity)
-                    {
-                        allItemsReceived = false;
-                    }
-                }
-
-                // Set P.O. status based on receipt completeness
-                if (allItemsReceived && po.Items.All(item => item.ReceivedQuantity == item.OrderedQuantity))
-                {
-                    po.StatusCode = "RECEIVED";
-                }
-                else
-                {
-                    po.StatusCode = "PARTIAL_RECEIPT";
-                }
-
-                await _dbContext.SaveChangesAsync();
             }
 
             // Lot-level summary entry (one row per intake batch rather than per bar, to avoid
@@ -1519,50 +1316,6 @@ public class InventoryRepository : IInventoryRepository
     // Lot.Vendor added for the Reporting Requirements Gap Analysis's Item 8 cost-analysis
     // rollup (cost by vendor) -- purely additive eager-load, no existing caller is affected.
     public async Task<IEnumerable<InventoryItem>> GetItemsAsync() => await _dbContext.InventoryItems.Include(i => i.Product).ThenInclude(p => p!.MetalType).Include(i => i.Product).ThenInclude(p => p!.Denomination).Include(i => i.Location).ThenInclude(l => l!.Vault).Include(i => i.Lot).ThenInclude(l => l!.Vendor).ToListAsync();
-    public async Task<IEnumerable<PurchaseOrder>> GetPurchaseOrdersAsync() =>
-        await _dbContext.PurchaseOrders
-            .Include(p => p.Items)
-                .ThenInclude(i => i.Product)
-            .Include(p => p.Vendor)
-            .ToListAsync();
-
-
-
-    // Hard delete of a Purchase Order -- reserved for IT/Admin cleanup of erroneous/test
-    // records (there's no "undo" here, unlike REJECTED which preserves the audit trail).
-    // Blocked once the P.O. has been intake-processed, since that creates real downstream
-    // inventory/PendingIntake records that would otherwise be orphaned.
-    public async Task<string> DeletePurchaseOrderAsync(int poId, string username)
-    {
-        var po = await _dbContext.PurchaseOrders.FindAsync(poId);
-        if (po == null) return "PO_NOT_FOUND";
-
-        var hasIntake = await _dbContext.PendingIntakes.AnyAsync(pi => pi.PoId == poId);
-        if (hasIntake)
-        {
-            return "This P.O. has already been received/intake-processed against real inventory records. It can't be deleted -- reject or otherwise resolve it instead of removing it.";
-        }
-
-        var instances = await _dbContext.WorkflowInstances
-            .Where(i => i.WorkflowType == "PURCHASE_ORDER" && i.EntityId == poId)
-            .ToListAsync();
-        foreach (var inst in instances)
-        {
-            var actions = await _dbContext.ApprovalActions.Where(a => a.InstanceId == inst.InstanceId).ToListAsync();
-            _dbContext.ApprovalActions.RemoveRange(actions);
-        }
-        _dbContext.WorkflowInstances.RemoveRange(instances);
-
-        var items = await _dbContext.POItems.Where(i => i.PoId == poId).ToListAsync();
-        _dbContext.POItems.RemoveRange(items);
-
-        _dbContext.PurchaseOrders.Remove(po);
-        await _dbContext.SaveChangesAsync();
-
-        await SaveAuditLogAsync(username, "SYSTEM", "PROCUREMENT", $"Deleted Purchase Order '{po.PoNumber}' (ID: {poId}) and its workflow history.");
-
-        return "SUCCESS";
-    }
     public async Task<IEnumerable<CustomerHolding>> GetCustomerHoldingsAsync(int customerId) => await _dbContext.CustomerHoldings.Include(h => h.Customer).Include(h => h.Account).Include(h => h.Item).ThenInclude(i => i!.Product).Where(h => h.CustomerId == customerId).ToListAsync();
     public async Task<IEnumerable<CustomerHolding>> GetAllCustomerHoldingsAsync() => await _dbContext.CustomerHoldings.Include(h => h.Customer).Include(h => h.Account).Include(h => h.Item).ThenInclude(i => i!.Product).ThenInclude(p => p!.Denomination).Include(h => h.Item).ThenInclude(i => i!.Product).ThenInclude(p => p!.Purity).Include(h => h.Item).ThenInclude(i => i!.Product).ThenInclude(p => p!.MetalType).Include(h => h.Item).ThenInclude(i => i!.Location).ThenInclude(l => l!.Vault).ToListAsync();
     public async Task<IEnumerable<InventoryTransaction>> GetTransactionsAsync() => await _dbContext.InventoryTransactions.Include(t => t.Item).ThenInclude(i => i!.Product).ThenInclude(p => p!.Denomination).Include(t => t.SourceLocation).ThenInclude(l => l!.Vault).Include(t => t.DestinationLocation).ThenInclude(l => l!.Vault).OrderByDescending(t => t.TransactionTimestamp).ToListAsync();
@@ -1920,12 +1673,7 @@ public class InventoryRepository : IInventoryRepository
         if (action == "REJECTED")
         {
             instance.StatusCode = "REJECTED";
-            if (instance.WorkflowType == "PURCHASE_ORDER")
-            {
-                var po = await _dbContext.PurchaseOrders.FindAsync(instance.EntityId);
-                if (po != null) po.StatusCode = "REJECTED";
-            }
-            else if (instance.WorkflowType == "BRANCH_TRANSFER")
+            if (instance.WorkflowType == "BRANCH_TRANSFER")
             {
                 var transfer = await _dbContext.BranchTransfers.FindAsync(instance.EntityId);
                 if (transfer != null)
@@ -2046,12 +1794,7 @@ public class InventoryRepository : IInventoryRepository
         else if (action == "RETURNED")
         {
             instance.CurrentStepOrder = 1;
-            if (instance.WorkflowType == "PURCHASE_ORDER")
-            {
-                var po = await _dbContext.PurchaseOrders.FindAsync(instance.EntityId);
-                if (po != null) po.StatusCode = "PENDING_APPROVAL";
-            }
-            else if (instance.WorkflowType == "BRANCH_TRANSFER")
+            if (instance.WorkflowType == "BRANCH_TRANSFER")
             {
                 var transfer = await _dbContext.BranchTransfers.FindAsync(instance.EntityId);
                 if (transfer != null) transfer.StatusCode = "PENDING_APPROVAL";
@@ -2149,15 +1892,6 @@ public class InventoryRepository : IInventoryRepository
                         exp.StatusCode = "APPROVED";
                         exp.SeniorManagerApprovedBy = username;
                         exp.ApprovedAt = DateTime.UtcNow;
-                    }
-                }
-                else if (instance.WorkflowType == "PURCHASE_ORDER")
-                {
-                    var po = await _dbContext.PurchaseOrders.FindAsync(instance.EntityId);
-                    if (po != null)
-                    {
-                        po.StatusCode = "APPROVED";
-                        po.ApprovedBy = username;
                     }
                 }
                 else if (instance.WorkflowType == "BRANCH_TRANSFER")
@@ -2284,7 +2018,7 @@ public class InventoryRepository : IInventoryRepository
                     if (pending != null)
                     {
                         pending.StatusCode = "APPROVED";
-                        string result = await IntakeInventoryItemsAsync(pending.PoId, pending.LotNumber, pending.LocationId, pending.ReceivedBy, pending.SerialsJsonList,
+                        string result = await IntakeInventoryItemsAsync(pending.LotNumber, pending.LocationId, pending.ReceivedBy, pending.SerialsJsonList,
                             pending.SourceType, pending.CustomerId, pending.AccountId, pending.ReceiptReason,
                             pending.VendorId, pending.ShipmentReference, pending.DeliveryNoteNumber, pending.AirwayBillNumber,
                             pending.SupportingDocumentUrl, pending.DiscrepancyNotes, pending.ReceivingDate, pending.OwnershipType,
@@ -3417,47 +3151,6 @@ public class InventoryRepository : IInventoryRepository
         return await CheckStockAlertsAsync();
     }
 
-    public async Task<(int poId, string result)> CreateDraftPurchaseOrderAsync(int thresholdId, string createdBy)
-    {
-        var threshold = await _dbContext.ReorderThresholds
-            .Include(t => t.Product).ThenInclude(p => p!.Denomination)
-            .Include(t => t.Vendor)
-            .FirstOrDefaultAsync(t => t.ThresholdId == thresholdId);
-
-        if (threshold == null) return (0, "THRESHOLD_NOT_FOUND");
-
-        // Generate a unique PO number
-        var poNumber = $"PO-AUTO-{DateTime.UtcNow:yyyyMMdd}-{thresholdId:D3}";
-
-        // Check if a DRAFT PO already exists for this threshold to avoid duplicates
-        var vendorId = threshold.VendorId ?? 1;
-        var existingDraft = await _dbContext.PurchaseOrders
-            .FirstOrDefaultAsync(po => po.PoNumber.StartsWith($"PO-AUTO-") && po.VendorId == vendorId && po.StatusCode == "DRAFT");
-        if (existingDraft != null)
-            return (existingDraft.PoId, "DRAFT_EXISTS");
-
-        var weightPerUnit = threshold.Product?.Denomination?.WeightGrams ?? 1000m;
-        var totalWeight = weightPerUnit * threshold.ReorderQty;
-
-        var po = new PurchaseOrder
-        {
-            PoNumber = poNumber,
-            VendorId = vendorId,
-            TotalWeightGrams = totalWeight,
-            TotalCost = 0m, // To be filled by treasury
-            Currency = "USD",
-            StatusCode = "DRAFT",
-            CreatedBy = createdBy
-        };
-        _dbContext.PurchaseOrders.Add(po);
-        await _dbContext.SaveChangesAsync();
-
-        await SaveAuditLogAsync(createdBy, "SYSTEM", "Purchase Orders",
-            $"Auto-generated DRAFT P.O. {poNumber} for {threshold.ReorderQty}x {threshold.Product?.ProductCode ?? "?"} from {threshold.Vendor?.VendorName ?? "?"}");
-
-        return (po.PoId, "SUCCESS");
-    }
-
     // =========================================================================
     // KFH Branch settings CRUD & Workflow Transfers
     // =========================================================================
@@ -3999,7 +3692,7 @@ public class InventoryRepository : IInventoryRepository
         return await query.ToListAsync();
     }
 
-    public async Task<PendingIntake> InitiateWorkflowIntakeAsync(int? poId, string lotNumber, int locationId, string receivedBy, string serialsJsonList,
+    public async Task<PendingIntake> InitiateWorkflowIntakeAsync(string lotNumber, int locationId, string receivedBy, string serialsJsonList,
         string sourceType = "SUPPLIER", int? customerId = null, int? accountId = null, string? receiptReason = null,
         int? vendorId = null, string? shipmentReference = null, string? deliveryNoteNumber = null, string? airwayBillNumber = null,
         string? supportingDocumentUrl = null, string? discrepancyNotes = null, DateTime? receivingDate = null, string ownershipType = "KFH_OWNED",
@@ -4049,16 +3742,12 @@ public class InventoryRepository : IInventoryRepository
 
         if (sourceType == "SUPPLIER")
         {
-            if (poId != null)
+            if (vendorId.HasValue)
             {
-                var po = await _dbContext.PurchaseOrders.FindAsync(poId.Value);
-                if (po == null)
+                var vendor = await _dbContext.Vendors.FindAsync(vendorId.Value);
+                if (vendor != null && !vendor.IsShariaCompliant)
                 {
-                    throw new InvalidOperationException("Associated Purchase Order not found.");
-                }
-                if (po.StatusCode != "APPROVED")
-                {
-                    throw new InvalidOperationException("Associated Purchase Order is not approved yet.");
+                    throw new InvalidOperationException("Selected vendor is not approved for Sharia transactions.");
                 }
             }
 
@@ -4124,7 +3813,6 @@ public class InventoryRepository : IInventoryRepository
 
         var pending = new PendingIntake
         {
-            PoId = sourceType == "SUPPLIER" ? poId : null,
             SourceType = sourceType,
             VendorId = sourceType == "SUPPLIER" ? vendorId : null,
             ShipmentReference = shipmentReference,
@@ -4230,7 +3918,6 @@ public class InventoryRepository : IInventoryRepository
     public async Task<IEnumerable<PendingIntake>> GetPendingIntakesAsync()
     {
         return await _dbContext.PendingIntakes
-            .Include(pi => pi.PurchaseOrder)
             .Include(pi => pi.Location)
             .Include(pi => pi.Customer)
             .Include(pi => pi.Vendor)
@@ -7552,11 +7239,9 @@ public class InventoryRepository : IInventoryRepository
                     DELETE FROM gfs_delivery_requests;
                     DELETE FROM home_delivery_requests;
                     DELETE FROM gfs_sync_logs;
-                    DELETE FROM po_items;
                     DELETE FROM inventory_items;
                     DELETE FROM inventory_balances;
                     DELETE FROM inventory_lots;
-                    DELETE FROM purchase_orders;
                     DELETE FROM gl_journal_lines;
                     DELETE FROM gl_journal_entries;
                     DELETE FROM audit_logs;
@@ -7620,8 +7305,6 @@ public class InventoryRepository : IInventoryRepository
             _dbContext.GfsDeliveryRequests.RemoveRange(_dbContext.GfsDeliveryRequests);
             _dbContext.HomeDeliveryRequests.RemoveRange(_dbContext.HomeDeliveryRequests);
             _dbContext.GfsSyncLogs.RemoveRange(_dbContext.GfsSyncLogs);
-            _dbContext.POItems.RemoveRange(_dbContext.POItems);
-            _dbContext.PurchaseOrders.RemoveRange(_dbContext.PurchaseOrders);
 
             // 2. Remove physical inventory items, balances, and lots
             _dbContext.InventoryItems.RemoveRange(_dbContext.InventoryItems);

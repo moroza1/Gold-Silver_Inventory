@@ -149,7 +149,6 @@ public class PMIMSTests
         {
             LotId = 1,
             LotNumber = "LOT-KFH-INIT-01",
-            PoId = null,
             VendorId = 1,
             AcquisitionDate = DateTime.UtcNow,
             TotalItems = 1,
@@ -203,21 +202,21 @@ public class PMIMSTests
     [Fact]
     public async Task TestShariaSupplierVerification()
     {
-        // Verify that procurement validation blocks non-Sharia refiners
+        // Verify that procurement/intake validation blocks non-Sharia refiners
         using var setup = CreateContext();
         await SeedBasicDataAsync(setup.Context);
 
         var repo = new InventoryRepository(setup.Context);
 
-        // Attempting to create a PO for compliant supplier should succeed
-        var (poId, result) = await repo.CreatePurchaseOrderAsync("PO-COMPLIANT-01", 1, 1000m, 73000m, "USD", "maker_user", "[]");
-        Assert.Equal("SUCCESS", result);
-        Assert.True(poId > 0);
+        // Attempting intake for compliant supplier should succeed
+        string serials = "[{\"serial\":\"BAR-SHARIA-OK-01\",\"product_id\":1}]";
+        var res = await repo.IntakeInventoryItemsAsync(lotNumber: "LOT-SHARIA-01", locationId: 1, receivedBy: "maker_user", serialsJsonList: serials, vendorId: 1);
+        Assert.Equal("SUCCESS", res);
 
-        // Attempting to create a PO for non-compliant supplier should fail
+        // Attempting intake for non-compliant supplier should fail
         await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {
-            await repo.CreatePurchaseOrderAsync("PO-NON-COMPLIANT-01", 2, 1000m, 73000m, "USD", "maker_user", "[]");
+            await repo.IntakeInventoryItemsAsync(lotNumber: "LOT-SHARIA-FAIL", locationId: 1, receivedBy: "maker_user", serialsJsonList: serials, vendorId: 2);
         });
     }
 
@@ -344,21 +343,9 @@ public class PMIMSTests
 
         var repo = new InventoryRepository(setup.Context);
 
-        // Test intake average cost calculation
-        // Create PO: Total weight = 2000g, total cost = 146000 USD (avg cost = 73 USD/gram)
-        var (poId, result) = await repo.CreatePurchaseOrderAsync("PO-VAL-01", 1, 2000m, 146000m, "USD", "maker_user", "[]");
-        Assert.Equal("SUCCESS", result);
-
-        var po = await setup.Context.PurchaseOrders.FindAsync(poId);
-        if (po != null)
-        {
-            po.StatusCode = "APPROVED";
-            await setup.Context.SaveChangesAsync();
-        }
-
-        // Intake items: 2 items, total weight = 2000g
+        // Intake items: 2 items, unit cost = 73 USD/gram
         string intakeSerials = "[{\"serial\":\"BAR-VAL-01\",\"product_id\":1},{\"serial\":\"BAR-VAL-02\",\"product_id\":1}]";
-        string intakeResult = await repo.IntakeInventoryItemsAsync(poId, "LOT-VAL-01", 1, "checker_user", intakeSerials);
+        string intakeResult = await repo.IntakeInventoryItemsAsync(lotNumber: "LOT-VAL-01", locationId: 1, receivedBy: "checker_user", serialsJsonList: intakeSerials, customsDutyAmount: 73.00m);
         Assert.Equal("SUCCESS", intakeResult);
 
         // Assert average cost is stored correctly on the items' lot
@@ -378,26 +365,12 @@ public class PMIMSTests
 
         var repo = new InventoryRepository(setup.Context);
 
-        // 1. Create two purchase orders representing different times/prices
-        // PO 1 (Oldest): 1000g, 50,000 USD (50 USD/g)
-        var (poId1, res1) = await repo.CreatePurchaseOrderAsync("PO-FIFO-01", 1, 1000m, 50000m, "USD", "maker_user", "[]");
-        Assert.Equal("SUCCESS", res1);
-        var po1 = await setup.Context.PurchaseOrders.FindAsync(poId1);
-        po1!.StatusCode = "APPROVED";
-
-        // PO 2 (Newest): 1000g, 60,000 USD (60 USD/g)
-        var (poId2, res2) = await repo.CreatePurchaseOrderAsync("PO-FIFO-02", 1, 1000m, 60000m, "USD", "maker_user", "[]");
-        Assert.Equal("SUCCESS", res2);
-        var po2 = await setup.Context.PurchaseOrders.FindAsync(poId2);
-        po2!.StatusCode = "APPROVED";
-        await setup.Context.SaveChangesAsync();
-
-        // 2. Intake items for both lots (each lot has 1 item of product 1)
+        // 1. Intake items for both lots (each lot has 1 item of product 1)
         string serial1 = "[{\"serial\":\"BAR-FIFO-OLD\",\"product_id\":1}]";
-        await repo.IntakeInventoryItemsAsync(poId1, "LOT-FIFO-OLD", 1, "checker_user", serial1);
+        await repo.IntakeInventoryItemsAsync(lotNumber: "LOT-FIFO-OLD", locationId: 1, receivedBy: "checker_user", serialsJsonList: serial1, customsDutyAmount: 50.00m);
 
         string serial2 = "[{\"serial\":\"BAR-FIFO-NEW\",\"product_id\":1}]";
-        await repo.IntakeInventoryItemsAsync(poId2, "LOT-FIFO-NEW", 1, "checker_user", serial2);
+        await repo.IntakeInventoryItemsAsync(lotNumber: "LOT-FIFO-NEW", locationId: 1, receivedBy: "checker_user", serialsJsonList: serial2, customsDutyAmount: 60.00m);
 
         // Manually adjust the second lot's acquisition date to make it newer
         var lotOld = setup.Context.InventoryLots.First(l => l.LotNumber == "LOT-FIFO-OLD");
@@ -466,23 +439,9 @@ public class PMIMSTests
 
         var repo = new InventoryRepository(setup.Context);
 
-        // Line-item cost 50,000 USD for 1000g (50.00 USD/g), plus 4,000 USD in acquisition
-        // fees (freight 2000 + insurance 500 + customs 1000 + other 500) => landed cost
-        // 54,000 USD, landed average cost 54.00 USD/g. This is what should end up on the
-        // lot -- not the bare 50.00 the vendor invoiced for the metal itself.
-        var (poId, result) = await repo.CreatePurchaseOrderAsync("PO-LANDED-01", 1, 1000m, 50000m, "USD", "maker_user", "[]",
-            supplierInvoiceNumber: "INV-VAL-001", freightCost: 2000m, insuranceCost: 500m, customsDutyCost: 1000m, otherFeesCost: 500m);
-        Assert.Equal("SUCCESS", result);
-
-        var po = await setup.Context.PurchaseOrders.FindAsync(poId);
-        Assert.NotNull(po);
-        Assert.Equal("INV-VAL-001", po!.SupplierInvoiceNumber);
-        Assert.Equal(54000m, po.LandedCost);
-        po.StatusCode = "APPROVED";
-        await setup.Context.SaveChangesAsync();
-
+        // Intake gold bar with customs duty / landed cost
         string intakeSerials = "[{\"serial\":\"BAR-LANDED-01\",\"product_id\":1}]";
-        string intakeResult = await repo.IntakeInventoryItemsAsync(poId, "LOT-LANDED-01", 1, "checker_user", intakeSerials);
+        string intakeResult = await repo.IntakeInventoryItemsAsync(lotNumber: "LOT-LANDED-01", locationId: 1, receivedBy: "checker_user", serialsJsonList: intakeSerials, customsDutyAmount: 54.00m);
         Assert.Equal("SUCCESS", intakeResult);
 
         var lot = setup.Context.InventoryLots.FirstOrDefault(l => l.LotNumber == "LOT-LANDED-01");
@@ -520,23 +479,21 @@ public class PMIMSTests
 
         var repo = new InventoryRepository(setup.Context);
 
-        // 1. Create a custom template with 2 steps
+        // 1. Create a custom template with 2 steps for INTAKE_SHIPMENT
         string stepsJson = "[{\"step_name\":\"Step 1\",\"required_role\":\"Operations Checker\",\"description\":\"Initial check\"},{\"step_name\":\"Step 2\",\"required_role\":\"Reconciliation Officer\",\"description\":\"Audit reconciliation\"}]";
-        var template = await repo.SaveWorkflowTemplateAsync("PURCHASE_ORDER", "Custom PO Flow", "2-step approval test template", stepsJson);
+        var template = await repo.SaveWorkflowTemplateAsync("INTAKE_SHIPMENT", "Custom Intake Flow", "2-step approval test template", stepsJson);
         Assert.NotNull(template);
         Assert.Equal(2, template.Steps.Count);
 
-        // 2. Create PO (should auto-start workflow because template is active)
-        var (poId, result) = await repo.CreatePurchaseOrderAsync("PO-WF-TEST-01", 1, 1000m, 73000m, "USD", "treasury-maker", "[]");
-        Assert.Equal("SUCCESS", result);
-
-        var po = await setup.Context.PurchaseOrders.FindAsync(poId);
-        Assert.NotNull(po);
-        Assert.Equal("PENDING_APPROVAL", po.StatusCode);
+        // 2. Initiate intake workflow
+        string intakeSerials = "[{\"serial\":\"BAR-WF-01\",\"product_id\":1}]";
+        var pending = await repo.InitiateWorkflowIntakeAsync("LOT-WF-01", 1, "treasury-maker", intakeSerials);
+        Assert.NotNull(pending);
+        Assert.True(pending.PendingIntakeId > 0);
 
         // Find active instance
         var activeInstances = (await repo.GetActiveWorkflowInstancesAsync()).ToList();
-        var instance = activeInstances.FirstOrDefault(i => i.EntityId == poId && i.WorkflowType == "PURCHASE_ORDER");
+        var instance = activeInstances.FirstOrDefault(i => i.EntityId == pending.PendingIntakeId && i.WorkflowType == "INTAKE_SHIPMENT");
         Assert.NotNull(instance);
         Assert.Equal("PENDING_MAKER", instance.StatusCode);
         Assert.Equal(1, instance.CurrentStepOrder);
@@ -551,25 +508,18 @@ public class PMIMSTests
 
         // Current step should increment
         Assert.Equal(2, instance.CurrentStepOrder);
-        var poRefreshed = await setup.Context.PurchaseOrders.FindAsync(poId);
-        Assert.Equal("PENDING_APPROVAL", poRefreshed!.StatusCode);
 
-        // 5. Approve Step 2 with Reconciliation Officer -> should succeed and finalize the PO
+        // 5. Approve Step 2 with Reconciliation Officer -> should succeed and finalize the intake
         var step2Result = await repo.ProcessWorkflowActionAsync(instance.InstanceId, "reconciliation-reconciler", "APPROVED", "Approved step 2");
         Assert.Equal("SUCCESS", step2Result);
 
         // Workflow instance status should be APPROVED
         Assert.Equal("APPROVED", instance.StatusCode);
-        
-        // PO status should update to APPROVED
-        var poFinal = await setup.Context.PurchaseOrders.FindAsync(poId);
-        Assert.Equal("APPROVED", poFinal!.StatusCode);
-        Assert.Equal("reconciliation-reconciler", poFinal.ApprovedBy);
     }
 
     // =========================================================================
     // Receipt of precious metals from a customer (buyback / custody deposit / return) --
-    // the mirror of the supplier PO-based intake flow above, exercised directly through
+    // the mirror of the supplier intake flow above, exercised directly through
     // IntakeInventoryItemsAsync (same level TestAverageCostValuation exercises the
     // supplier path at) and through InitiateWorkflowIntakeAsync's validation surface.
     // =========================================================================
@@ -583,7 +533,7 @@ public class PMIMSTests
         var repo = new InventoryRepository(setup.Context);
 
         string serials = "[{\"serial\":\"BUYBACK-01\",\"product_id\":1}]";
-        string result = await repo.IntakeInventoryItemsAsync(null, "LOT-BUYBACK-01", 1, "checker_user", serials,
+        string result = await repo.IntakeInventoryItemsAsync("LOT-BUYBACK-01", 1, "checker_user", serials,
             sourceType: "CUSTOMER", customerId: 1, accountId: null, receiptReason: "BUYBACK");
         Assert.Equal("SUCCESS", result);
 
@@ -596,8 +546,7 @@ public class PMIMSTests
         // carry no Purchase Order.
         var lot = await setup.Context.InventoryLots.FindAsync(item.LotId);
         Assert.NotNull(lot);
-        Assert.Null(lot!.PoId);
-        var vendor = await setup.Context.Vendors.FindAsync(lot.VendorId);
+        var vendor = await setup.Context.Vendors.FindAsync(lot!.VendorId);
         Assert.Equal("WALK-IN", vendor!.VendorCode);
 
         // No custody holding should be created for a buyback -- KFH owns the bar outright.
@@ -612,7 +561,7 @@ public class PMIMSTests
         var repo = new InventoryRepository(setup.Context);
 
         string serials = "[{\"serial\":\"DEPOSIT-01\",\"product_id\":1}]";
-        string result = await repo.IntakeInventoryItemsAsync(null, "LOT-DEPOSIT-01", 1, "checker_user", serials,
+        string result = await repo.IntakeInventoryItemsAsync("LOT-DEPOSIT-01", 1, "checker_user", serials,
             sourceType: "CUSTOMER", customerId: 1, accountId: 1, receiptReason: "CUSTODY_DEPOSIT");
         Assert.Equal("SUCCESS", result);
 
@@ -641,7 +590,7 @@ public class PMIMSTests
 
         string serials = "[{\"serial\":\"DEPOSIT-NOACCT\",\"product_id\":1}]";
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            repo.IntakeInventoryItemsAsync(null, "LOT-DEPOSIT-02", 1, "checker_user", serials,
+            repo.IntakeInventoryItemsAsync("LOT-DEPOSIT-02", 1, "checker_user", serials,
                 sourceType: "CUSTOMER", customerId: 1, accountId: null, receiptReason: "CUSTODY_DEPOSIT"));
     }
 
@@ -654,7 +603,7 @@ public class PMIMSTests
 
         string serials = "[{\"serial\":\"BUYBACK-BADCUST\",\"product_id\":1}]";
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            repo.IntakeInventoryItemsAsync(null, "LOT-BADCUST-01", 1, "checker_user", serials,
+            repo.IntakeInventoryItemsAsync("LOT-BADCUST-01", 1, "checker_user", serials,
                 sourceType: "CUSTOMER", customerId: 9999, accountId: null, receiptReason: "BUYBACK"));
     }
 
@@ -666,18 +615,18 @@ public class PMIMSTests
         var repo = new InventoryRepository(setup.Context);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            repo.InitiateWorkflowIntakeAsync(null, "LOT-X", 1, "maker_user", "[]", sourceType: "CUSTOMER"));
+            repo.InitiateWorkflowIntakeAsync("LOT-X", 1, "maker_user", "[]", sourceType: "CUSTOMER"));
     }
 
     [Fact]
-    public async Task TestInitiateWorkflowIntake_SupplierReceiptWithoutPo_Throws()
+    public async Task TestInitiateWorkflowIntake_SupplierReceiptWithoutVendor_Throws()
     {
         using var setup = CreateContext();
         await SeedBasicDataAsync(setup.Context);
         var repo = new InventoryRepository(setup.Context);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            repo.InitiateWorkflowIntakeAsync(null, "LOT-X", 1, "maker_user", "[]"));
+            repo.InitiateWorkflowIntakeAsync("LOT-X", 1, "maker_user", "[]", sourceType: "SUPPLIER", vendorId: null));
     }
 
     [Fact]
@@ -723,12 +672,11 @@ public class PMIMSTests
 
         var repo = new InventoryRepository(setup.Context);
         string serials = "[{\"serial\":\"DEPOSIT-WF-01\",\"product_id\":1}]";
-        var pending = await repo.InitiateWorkflowIntakeAsync(null, "LOT-WF-01", 1, "maker_user", serials,
+        var pending = await repo.InitiateWorkflowIntakeAsync("LOT-WF-01", 1, "maker_user", serials,
             sourceType: "CUSTOMER", customerId: 1, accountId: 1, receiptReason: "CUSTODY_DEPOSIT");
 
         Assert.True(pending.PendingIntakeId > 0);
         Assert.Equal("CUSTOMER", pending.SourceType);
-        Assert.Null(pending.PoId);
         Assert.Equal(1, pending.CustomerId);
         Assert.Equal("PENDING_APPROVAL", pending.StatusCode);
 
@@ -1400,7 +1348,7 @@ public class PMIMSTests
         // 2. Intake shipment with OwnershipType = "TURKEY_OWNED"
         string serialsJson = "[{\"serial\":\"TR-GOLD-001\",\"product_id\":1},{\"serial\":\"TR-GOLD-002\",\"product_id\":1}]";
         var pendingIntake = await repo.InitiateWorkflowIntakeAsync(
-            null, "LOT-TR-001", 1, "maker_user", serialsJson,
+            "LOT-TR-001", 1, "maker_user", serialsJson,
             sourceType: "SUPPLIER", vendorId: 1, ownershipType: "TURKEY_OWNED");
 
         Assert.Equal("TURKEY_OWNED", pendingIntake.OwnershipType);
@@ -2178,7 +2126,7 @@ public class PMIMSTests
         // 1. Intake shipment with OwnershipType = "CUSTOMS_OWNED" and Customs metadata
         string serialsJson = "[{\"serial\":\"CUSTOMS-AU-001\",\"product_id\":1},{\"serial\":\"CUSTOMS-AU-002\",\"product_id\":1}]";
         var pendingIntake = await repo.InitiateWorkflowIntakeAsync(
-            null, "LOT-CUSTOMS-2026-001", 1, "customs_maker", serialsJson,
+            "LOT-CUSTOMS-2026-001", 1, "customs_maker", serialsJson,
             sourceType: "SUPPLIER", vendorId: 1, ownershipType: "CUSTOMS_OWNED",
             customsDeclarationNumber: "BAYAN-KWT-2026-9912",
             customsDutyAmount: 1250.50m,
@@ -2289,7 +2237,7 @@ public class PMIMSTests
         // Intake items directly with CUSTOMS_OWNED
         string serialsJson = "[{\"serial\":\"TR-CUSTOMS-BAR-01\",\"product_id\":1},{\"serial\":\"TR-CUSTOMS-BAR-02\",\"product_id\":1}]";
         var intakeRes = await repo.IntakeInventoryItemsAsync(
-            null, "LOT-BONDED-TR-99", 1, "customs_agent", serialsJson,
+            "LOT-BONDED-TR-99", 1, "customs_agent", serialsJson,
             sourceType: "SUPPLIER", vendorId: 1, ownershipType: "CUSTOMS_OWNED",
             customsDeclarationNumber: "BAYAN-TR-2026-110",
             portOfEntry: "Shuwaikh Port Customs");
@@ -2375,20 +2323,22 @@ public class PMIMSTests
 
         // 2. Configure workflow where Step 1 is Maker, Step 2 is Checker
         string stepsJson = "[{\"step_name\":\"Maker Draft\",\"required_role\":\"Treasury Operations (Maker)\",\"description\":\"Maker creation\"},{\"step_name\":\"Checker Approval\",\"required_role\":\"Treasury Operations (Checker)\",\"description\":\"Checker review\"}]";
-        await repo.SaveWorkflowTemplateAsync("PURCHASE_ORDER", "PO Workflow", "Maker to Checker flow", stepsJson);
+        await repo.SaveWorkflowTemplateAsync("INTAKE_SHIPMENT", "Intake Workflow", "Maker to Checker flow", stepsJson);
 
         // 3. Checker tries to initiate workflow -> MUST BE REJECTED
+        string serials = "[{\"serial\":\"BAR-CHK-FAIL-01\",\"product_id\":1}]";
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {
-            await repo.CreatePurchaseOrderAsync("PO-CHECKER-BLOCKED-01", 1, 1000m, 73000m, "USD", "real-checker", "[]");
+            await repo.InitiateWorkflowIntakeAsync("LOT-CHK-FAIL", 1, "real-checker", serials);
         });
         Assert.Contains("not authorized to initiate", ex.Message);
         Assert.Contains("Treasury Operations (Maker)", ex.Message);
 
         // 4. Maker initiates workflow -> MUST SUCCEED (Maker IS the start point)
-        var (poId, result) = await repo.CreatePurchaseOrderAsync("PO-MAKER-ALLOWED-01", 1, 1000m, 73000m, "USD", "real-maker", "[]");
-        Assert.Equal("SUCCESS", result);
-        Assert.True(poId > 0);
+        string makerSerials = "[{\"serial\":\"BAR-MKR-OK-01\",\"product_id\":1}]";
+        var pending = await repo.InitiateWorkflowIntakeAsync("LOT-MKR-OK", 1, "real-maker", makerSerials);
+        Assert.NotNull(pending);
+        Assert.True(pending.PendingIntakeId > 0);
 
         // 5. Test reverse workflow where Checker IS configured as the start point (Step 1 = Checker)
         string checkerStartSteps = "[{\"step_name\":\"Checker Audit First\",\"required_role\":\"Treasury Operations (Checker)\",\"description\":\"Checker start\"}]";
@@ -3167,7 +3117,7 @@ public class PMIMSTests
         var ex1 = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {
             await repo.InitiateWorkflowIntakeAsync(
-                null, "LOT-FAIL-DUP-01", 1, "treasury-maker", dupBatchSerials,
+                "LOT-FAIL-DUP-01", 1, "treasury-maker", dupBatchSerials,
                 sourceType: "SUPPLIER", vendorId: 1, productionCostsJson: prodCosts);
         });
         Assert.Contains("Duplicate serial number", ex1.Message);
@@ -3189,7 +3139,7 @@ public class PMIMSTests
         var ex2 = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {
             await repo.InitiateWorkflowIntakeAsync(
-                null, "LOT-FAIL-DUP-02", 1, "treasury-maker", existingDupSerials,
+                "LOT-FAIL-DUP-02", 1, "treasury-maker", existingDupSerials,
                 sourceType: "SUPPLIER", vendorId: 1, productionCostsJson: prodCosts);
         });
         Assert.Contains("already exists in inventory records", ex2.Message);
@@ -3197,7 +3147,7 @@ public class PMIMSTests
         // 3. Duplicate against in-flight pending intake should fail at Maker submission
         string validSerials1 = "[{\"serial\":\"INFLIGHT-BAR-01\",\"product_id\":1}]";
         var pending1 = await repo.InitiateWorkflowIntakeAsync(
-            null, "LOT-INFLIGHT-01", 1, "treasury-maker", validSerials1,
+            "LOT-INFLIGHT-01", 1, "treasury-maker", validSerials1,
             sourceType: "SUPPLIER", vendorId: 1, productionCostsJson: prodCosts);
         Assert.NotNull(pending1);
 
@@ -3205,7 +3155,7 @@ public class PMIMSTests
         var ex3 = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {
             await repo.InitiateWorkflowIntakeAsync(
-                null, "LOT-FAIL-DUP-03", 1, "treasury-maker", inflightDupSerials,
+                "LOT-FAIL-DUP-03", 1, "treasury-maker", inflightDupSerials,
                 sourceType: "SUPPLIER", vendorId: 1, productionCostsJson: prodCosts);
         });
         Assert.Contains("already pending approval in another intake request", ex3.Message);
@@ -3226,7 +3176,7 @@ public class PMIMSTests
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {
             await repo.InitiateWorkflowIntakeAsync(
-                null, "LOT-COST-ZERO", 1, "treasury-maker", serialsJson1,
+                "LOT-COST-ZERO", 1, "treasury-maker", serialsJson1,
                 sourceType: "SUPPLIER", vendorId: 1, productionCostsJson: zeroCosts);
         });
         Assert.Contains("Mandatory Production Cost in KWD is required", ex.Message);
@@ -3234,7 +3184,7 @@ public class PMIMSTests
         // 2. Shipment A with Production Cost = 12.500 KWD
         string validCostsA = "[{\"metalTypeId\":1,\"denominationId\":1,\"productionCostKwd\":12.500}]";
         var pendingA = await repo.InitiateWorkflowIntakeAsync(
-            null, "LOT-SHIPMENT-A", 1, "treasury-maker", serialsJson1,
+            "LOT-SHIPMENT-A", 1, "treasury-maker", serialsJson1,
             sourceType: "SUPPLIER", vendorId: 1, shipmentReference: "SHIP-REF-2026-A",
             productionCostsJson: validCostsA);
         Assert.NotNull(pendingA);
@@ -3248,7 +3198,7 @@ public class PMIMSTests
         string serialsJson2 = "[{\"serial\":\"SHIP-COST-BAR-02\",\"product_id\":1}]";
         string validCostsB = "[{\"metalTypeId\":1,\"denominationId\":1,\"productionCostKwd\":18.750}]";
         var pendingB = await repo.InitiateWorkflowIntakeAsync(
-            null, "LOT-SHIPMENT-B", 1, "treasury-maker", serialsJson2,
+            "LOT-SHIPMENT-B", 1, "treasury-maker", serialsJson2,
             sourceType: "SUPPLIER", vendorId: 1, shipmentReference: "SHIP-REF-2026-B",
             productionCostsJson: validCostsB);
         Assert.NotNull(pendingB);
@@ -4063,7 +4013,6 @@ public class PMIMSTests
         });
 
         string intakeResult = await repo.IntakeInventoryItemsAsync(
-            poId: null,
             lotNumber: "LOT-REUSE-2026-01",
             locationId: 1,
             receivedBy: "treasury-maker",
@@ -4352,7 +4301,6 @@ public class PMIMSTests
         // 4. Initiate Customer Custody Deposit at Salmiya Branch (Location 102) with TransferToMainVault = true
         var itemsJson = JsonSerializer.Serialize(new[] { new { serial = "KFH-GOLD-PRIOR-01", product_id = 1 } });
         var pendingIntake = await repo.InitiateWorkflowIntakeAsync(
-            poId: null,
             lotNumber: "LOT-CUST-DEPOSIT-01",
             locationId: 102,
             receivedBy: "salmiya-officer",

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import GfsApp from './GfsApp';
-import { SerialToolsModal, type GeneratedSerialItem } from './components/SerialToolsModal';
+import { SerialToolsModal, getSupplierAffiliatedBrands, type GeneratedSerialItem } from './components/SerialToolsModal';
 import { TurkeyPurchaseScreen } from './components/TurkeyPurchaseScreen';
 import { APP_VERSION } from './version';
 const rawApiUrl = (import.meta as any).env?.VITE_API_URL;
@@ -137,13 +137,109 @@ const permissionDeniedMessage = (lang: string) =>
     ? "You don't have permission to perform this action. Your account does not have the required access level for this module. Contact your system administrator if you believe this is a mistake."
     : "ليس لديك صلاحية للقيام بهذا الإجراء. لا يملك حسابك مستوى الوصول المطلوب لهذه الوحدة. يرجى التواصل مع مسؤول النظام إذا كنت تعتقد أن هذا خطأ.";
 
-const describeApiError = async (res: Response, lang: string, fallbackEn: string, fallbackAr: string): Promise<string> => {
-  if (res.status === 401 || res.status === 403) return permissionDeniedMessage(lang);
-  const err = await res.json().catch(() => ({} as any));
-  const detail = (err as any)?.error;
-  return lang === 'en'
-    ? `${fallbackEn}: ${detail || 'Server error'}`
-    : `${fallbackAr}: ${detail || 'خطأ في الخادم'}`;
+const getScreenTitleForTab = (tabKey: string, lang: string): string => {
+  const map: Record<string, { en: string; ar: string }> = {
+    'screen-exec': { en: 'Executive Board', ar: 'لوحة التحكم التنفيذية' },
+    'screen-compliance': { en: 'Compliance Dashboard', ar: 'لوحة الامتثال والرقابة' },
+    'screen-po': { en: 'P.O. & Procurement', ar: 'طلبات الشراء والتوريد' },
+    'screen-intake': { en: 'Receipt of Precious Metals from Supplier (UC03)', ar: 'استلام شحنة معادن ثمينة من المورد (UC03)' },
+    'screen-spatial': { en: 'Vault Spatial Map', ar: 'خريطة الخزينة المكانية' },
+    'screen-transfers': { en: 'Branch Transfers & Movement', ar: 'تحويلات الفروع وحركة المخزون' },
+    'screen-customer-receipt': { en: 'Customer Receipt & Buyback', ar: 'استلام المعادن من العميل / الشراء العكسي' },
+    'screen-custody': { en: 'Customer Custody Management', ar: 'إدارة أمانات العملاء' },
+    'screen-stocktake': { en: 'Stocktake & Physical Audit', ar: 'الجرد الفعلي للمخزون' },
+    'screen-audit-trail': { en: 'System Audit Trail', ar: 'سجل تدقيق النظام' },
+    'screen-kfhonline-logs': { en: 'KFHOnline Transaction Logs', ar: 'سجلات عمليات KFHOnline' },
+    'screen-migration': { en: 'Bulk Ingestion & Migration', ar: 'الترحيل والاستيراد الشامل' },
+    'screen-settings': { en: 'System Settings & Rules', ar: 'إعدادات النظام وقواعد العمل' },
+    'screen-my-activity': { en: 'My Activity Dashboard', ar: 'لوحة نشاطاتي واعتمادياتي' },
+    'screen-turkey-purchase': { en: 'Purchase Gold from Turkey', ar: 'شراء الذهب من تركيا' }
+  };
+  const item = map[tabKey];
+  if (!item) return tabKey;
+  return lang === 'ar' ? item.ar : item.en;
+};
+
+const logClientErrorToBackend = async (data: {
+  incidentId: string;
+  screen: string;
+  functionName: string;
+  module?: string;
+  errorMessage: string;
+  details?: string;
+  username?: string;
+  userRole?: string;
+  httpStatus?: number;
+}) => {
+  try {
+    await fetch(`${API_BASE}/audit/client-error`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...data,
+        timestamp: new Date().toISOString()
+      })
+    });
+  } catch (e) {
+    console.warn('Failed to log client error to backend audit service:', e);
+  }
+};
+
+const describeApiError = async (
+  res: Response,
+  lang: string,
+  fallbackEn: string,
+  fallbackAr: string,
+  context?: {
+    functionName?: string;
+    screen?: string;
+    module?: string;
+    username?: string;
+    userRole?: string;
+  }
+): Promise<string> => {
+  const incidentId = `INC-${Date.now().toString().slice(-6)}`;
+  const timestamp = new Date().toLocaleString('en-GB', { timeZone: 'Asia/Kuwait' }) + ' (Kuwait GMT+3)';
+  const status = res.status;
+  
+  let rawDetail = '';
+  if (status === 401 || status === 403) {
+    rawDetail = permissionDeniedMessage(lang);
+  } else {
+    const err = await res.json().catch(() => ({} as any));
+    rawDetail = (err as any)?.error || (err as any)?.message || `HTTP ${status} Server error`;
+  }
+
+  const primaryMessage = lang === 'en'
+    ? `${fallbackEn}: ${rawDetail}`
+    : `${fallbackAr}: ${rawDetail}`;
+
+  // Log to backend audit log asynchronously
+  logClientErrorToBackend({
+    incidentId,
+    screen: context?.screen || 'Current Screen',
+    functionName: context?.functionName || 'describeApiError',
+    module: context?.module || 'SYSTEM',
+    errorMessage: primaryMessage,
+    details: `HTTP ${status}: ${rawDetail}`,
+    username: context?.username || 'Current User',
+    userRole: context?.userRole || 'N/A',
+    httpStatus: status
+  });
+
+  // Diagnostic screenshot header
+  const diagnosticCaption = 
+`\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📌 SUPPORT DIAGNOSTIC CAPTION (FOR SCREENSHOT):
+• Incident ID : ${incidentId}
+• Screen      : ${context?.screen || 'Current Screen'}
+• Function    : ${context?.functionName || 'API Operation'}
+• User        : ${context?.username || 'Current User'} (${context?.userRole || 'Role'})
+• Timestamp   : ${timestamp}
+• HTTP Status : ${status}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
+
+  return primaryMessage + diagnosticCaption;
 };
 
 // Translations Dictionary matching prototype high fidelity
@@ -806,6 +902,71 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('screen-exec');
   const [currentLang, setCurrentLang] = useState('en');
 
+  // Global Diagnostic Error Modal state (for high-clarity screenshots and support audit)
+  const [diagnosticErrorModal, setDiagnosticErrorModal] = useState<{
+    incidentId: string;
+    title: string;
+    message: string;
+    functionName: string;
+    screenName: string;
+    moduleName: string;
+    username: string;
+    userRole: string;
+    timestamp: string;
+    httpStatus?: number;
+    details?: string;
+    suggestion?: string;
+  } | null>(null);
+
+  const showDiagnosticError = (opts: {
+    titleEn: string;
+    titleAr: string;
+    message: string;
+    functionName: string;
+    screenName?: string;
+    moduleName?: string;
+    httpStatus?: number;
+    details?: string;
+    suggestionEn?: string;
+    suggestionAr?: string;
+  }) => {
+    const incidentId = `INC-${Date.now().toString().slice(-6)}`;
+    const nowKuwait = new Date().toLocaleString('en-GB', { timeZone: 'Asia/Kuwait' }) + ' (Kuwait GMT+3)';
+    const activeScreen = opts.screenName || getScreenTitleForTab(activeTab, currentLang) || activeTab;
+    const currentModule = opts.moduleName || 'SYSTEM';
+
+    const errObj = {
+      incidentId,
+      title: currentLang === 'ar' ? opts.titleAr : opts.titleEn,
+      message: opts.message,
+      functionName: opts.functionName,
+      screenName: activeScreen,
+      moduleName: currentModule,
+      username: username || displayName || 'Anonymous',
+      userRole: userRole || (userRoles && userRoles.length > 0 ? userRoles.join(', ') : 'User'),
+      timestamp: nowKuwait,
+      httpStatus: opts.httpStatus,
+      details: opts.details,
+      suggestion: currentLang === 'ar' ? opts.suggestionAr : opts.suggestionEn
+    };
+
+    // 1. Log issue to backend audit service for support team tracking
+    logClientErrorToBackend({
+      incidentId,
+      screen: activeScreen,
+      functionName: opts.functionName,
+      module: currentModule,
+      errorMessage: `${errObj.title}: ${errObj.message}`,
+      details: opts.details || errObj.message,
+      username: errObj.username,
+      userRole: errObj.userRole,
+      httpStatus: opts.httpStatus
+    });
+
+    // 2. Open rich diagnostic error popup designed for screenshots
+    setDiagnosticErrorModal(errObj);
+  };
+
   // Reporting States
   const [reportType, setReportType] = useState('valuation');
   const [reportData, setReportData] = useState<any[]>([]);
@@ -1016,6 +1177,7 @@ export default function App() {
   const [pendingTurkeyPurchases, setPendingTurkeyPurchases] = useState<any[]>([]);
   const [pendingIntakesList, setPendingIntakesList] = useState<any[]>([]);
   const [intakeActiveSubTab, setIntakeActiveSubTab] = useState<'RECEIVE_FORM' | 'IN_FLIGHT_LOG'>('RECEIVE_FORM');
+  const [isIntakeSubmitting, setIsIntakeSubmitting] = useState(false);
   const [collapsedSections, setCollapsedSections] = useState<{ [key: string]: boolean }>({
     'section-operations': true,
     'section-controls': true,
@@ -1889,7 +2051,6 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     { key: 'reports', label: 'Reporting & Analytics', tier: 'Operations' },
     { key: 'workflows', label: 'Workflow Actions (approve/reject)', tier: 'Operations' },
     { key: 'intake', label: 'Receive Shipment', tier: 'Operations' },
-    { key: 'purchase_orders', label: 'Purchase Orders & Procurement', tier: 'Operations' },
     { key: 'dispensing', label: 'Gold Dispensing Machine (GDM)', tier: 'Operations' },
     { key: 'barcode_qr_labeling', label: 'Barcode & QR Code Tracking', tier: 'Operations' },
     { key: 'qr_reprint', label: 'QR & Barcode Reprinting (إعادة طباعة الباركود)', tier: 'Operations' },
@@ -2097,7 +2258,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
 
     // Show for operational groups (Treasury Operations, Reconciliation)
     // and users holding purchase_orders, master_data, or intake permissions
-    return canAccess('purchase_orders') || canAccess('master_data') || canAccess('intake') ||
+    return canAccess('master_data') || canAccess('intake') ||
       userRoles.some(r => /operations|maker|checker|reconciliation/i.test(r));
   };
 
@@ -5871,7 +6032,8 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   const handleAddIntakeBar = () => {
     const nextIdx = intakeBars.length + 1;
     const defaultProduct = products.length > 0 ? products[0] : null;
-    const defaultBrand = brandsList.length > 0 ? brandsList[0].brand_name : 'Valcambi Suisse';
+    const affiliated = getSupplierAffiliatedBrands(intakeVendorId, suppliersList, brandsList);
+    const defaultBrand = affiliated.length > 0 ? affiliated[0].brand_name : (brandsList.length > 0 ? brandsList[0].brand_name : 'Valcambi Suisse');
     setIntakeBars([
       ...intakeBars,
       {
@@ -5891,7 +6053,8 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   const handleAdd5BatchDemo = () => {
     const baseTime = Date.now().toString().slice(-4);
     const defaultProduct = products.length > 0 ? products[0] : null;
-    const defaultBrand = brandsList.length > 0 ? brandsList[0].brand_name : 'Valcambi Suisse';
+    const affiliated = getSupplierAffiliatedBrands(intakeVendorId, suppliersList, brandsList);
+    const defaultBrand = affiliated.length > 0 ? affiliated[0].brand_name : (brandsList.length > 0 ? brandsList[0].brand_name : 'Valcambi Suisse');
     const newBars = Array.from({ length: 5 }, (_, i) => {
       const idx = intakeBars.length + i + 1;
       return {
@@ -5903,7 +6066,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
         is_damaged: false,
         damage_reason: '',
         refiner_name: defaultBrand,
-        assay_certificate_number: `ASSAY-VAL-${idx}`
+        assay_certificate_number: `ASSAY-${defaultBrand.slice(0, 3).toUpperCase()}-${idx}`
       };
     });
     setIntakeBars([...intakeBars, ...newBars]);
@@ -5911,6 +6074,15 @@ const [migrationApproved, setMigrationApproved] = useState(false);
 
   const handleRemoveIntakeBar = (id: string) => {
     setIntakeBars(intakeBars.filter(b => b.id !== id));
+  };
+
+  const handleRemoveAllIntakeBars = () => {
+    if (intakeBars.length === 0) return;
+    if (window.confirm(currentLang === 'en'
+      ? `Are you sure you want to remove all ${intakeBars.length} serials from this shipment manifest?`
+      : `هل أنت متأكد من رغبتك في حذف جميع السبائك (${intakeBars.length}) من كشف الشحنة؟`)) {
+      setIntakeBars([]);
+    }
   };
 
   const handleUpdateIntakeBar = (id: string, field: string, value: any) => {
@@ -5935,13 +6107,35 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   };
 
   const handleSubmitUC03Intake = async () => {
+    if (isIntakeSubmitting) return;
+
+    const screenLabel = getScreenTitleForTab('screen-intake', currentLang);
+
     if (intakeBars.length === 0) {
-      alert(currentLang === 'en' ? 'Please add at least one bar to the shipment.' : 'يرجى إضافة سبيكة واحدة على الأقل للشحنة.');
+      showDiagnosticError({
+        titleEn: 'Validation Failed',
+        titleAr: 'فشل التحقق',
+        message: currentLang === 'en' ? 'Please add at least one bar to the shipment.' : 'يرجى إضافة سبيكة واحدة على الأقل للشحنة.',
+        functionName: 'handleSubmitUC03Intake',
+        screenName: screenLabel,
+        moduleName: 'intake',
+        suggestionEn: 'Click "+ Add Serials" above to add bars before submitting.',
+        suggestionAr: 'انقر على "إضافة أرقام تسلسلية" لإدراج السبائك قبل الإرسال.'
+      });
       return;
     }
     const emptySerial = intakeBars.find(b => !b.serial.trim());
     if (emptySerial) {
-      alert(currentLang === 'en' ? 'Every bar must have a Serial Number.' : 'يجب أن تحتوي كل سبيكة على رقم تسلسلي.');
+      showDiagnosticError({
+        titleEn: 'Validation Failed',
+        titleAr: 'فشل التحقق',
+        message: currentLang === 'en' ? 'Every bar must have a Serial Number.' : 'يجب أن تحتوي كل سبيكة على رقم تسلسلي.',
+        functionName: 'handleSubmitUC03Intake',
+        screenName: screenLabel,
+        moduleName: 'intake',
+        suggestionEn: 'Fill in or remove empty serial rows in the manifest.',
+        suggestionAr: 'يرجى ملء الأرقام التسلسلية الفارغة أو حذف الصفوف غير المكتملة.'
+      });
       return;
     }
 
@@ -5950,9 +6144,18 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     const duplicates = serialsList.filter((item, index) => serialsList.indexOf(item) !== index);
     if (duplicates.length > 0) {
       const dupSerial = duplicates[0];
-      alert(currentLang === 'en' 
-        ? `Duplicate serial detected in shipment: "${dupSerial}". Every bar serial number must be globally unique across all products and denominations.` 
-        : `تم اكتشاف رقم تسلسلي مكرر في الشحنة: "${dupSerial}". يجب أن يكون الرقم التسلسلي فريداً تماماً عبر جميع المنتجات والفئات.`);
+      showDiagnosticError({
+        titleEn: 'Duplicate Serial in Batch',
+        titleAr: 'رقم تسلسلي مكرر في الدفعة',
+        message: currentLang === 'en' 
+          ? `Duplicate serial detected in shipment: "${dupSerial}". Every bar serial number must be globally unique across all products and denominations.` 
+          : `تم اكتشاف رقم تسلسلي مكرر في الشحنة: "${dupSerial}". يجب أن يكون الرقم التسلسلي فريداً تماماً عبر جميع المنتجات والفئات.`,
+        functionName: 'handleSubmitUC03Intake',
+        screenName: screenLabel,
+        moduleName: 'intake',
+        suggestionEn: 'Ensure all serials in the batch are unique.',
+        suggestionAr: 'تأكد من عدم تكرار أي رقم تسلسلي داخل نفس الشحنة.'
+      });
       return;
     }
 
@@ -5961,9 +6164,18 @@ const [migrationApproved, setMigrationApproved] = useState(false);
       const sUpper = bar.serial.trim().toUpperCase();
       const existingInInv = inventoryList.find((i: any) => i.serial_number?.toUpperCase() === sUpper && i.status !== 'EXPORTED');
       if (existingInInv) {
-        alert(currentLang === 'en'
-          ? `Serial number "${bar.serial.trim()}" already exists in inventory (Status: ${existingInInv.status}, Location: ${existingInInv.location_name || 'Vault'}). Submission blocked.`
-          : `الرقم التسلسلي "${bar.serial.trim()}" مسجل بالفعل في المخزون (الحالة: ${existingInInv.status}). تم إيقاف الإرسال لمنع التكرار.`);
+        showDiagnosticError({
+          titleEn: 'Serial Already In Active Inventory',
+          titleAr: 'الرقم التسلسلي مسجل بالفعل في المخزون',
+          message: currentLang === 'en'
+            ? `Serial number "${bar.serial.trim()}" already exists in inventory (Status: ${existingInInv.status}, Location: ${existingInInv.location_name || 'Vault'}). Submission blocked.`
+            : `الرقم التسلسلي "${bar.serial.trim()}" مسجل بالفعل في المخزون (الحالة: ${existingInInv.status}). تم إيقاف الإرسال لمنع التكرار.`,
+          functionName: 'handleSubmitUC03Intake',
+          screenName: screenLabel,
+          moduleName: 'intake',
+          suggestionEn: 'An existing serial may only be reused if the previous damaged bar reached EXPORTED status.',
+          suggestionAr: 'لا يمكن إعادة استخدام رقم تسلسلي إلا إذا كانت السبيكة السابقة قد وصلت إلى حالة التصدير (EXPORTED).'
+        });
         return;
       }
     }
@@ -5982,130 +6194,206 @@ const [migrationApproved, setMigrationApproved] = useState(false);
         return false;
       });
       if (existingInPending) {
-        alert(currentLang === 'en'
-          ? `Serial number "${bar.serial.trim()}" is already pending approval in another intake request (Pending ID: #${existingInPending.pending_id || existingInPending.id || ''}). Submission blocked.`
-          : `الرقم التسلسلي "${bar.serial.trim()}" قيد الاعتماد بالفعل في طلب استلام شحنة آخر. تم إيقاف الإرسال.`);
+        showDiagnosticError({
+          titleEn: 'Serial Pending in In-Flight Request',
+          titleAr: 'الرقم التسلسلي قيد الاعتماد في طلب آخر',
+          message: currentLang === 'en'
+            ? `Serial number "${bar.serial.trim()}" is already pending approval in another intake request (Pending ID: #${existingInPending.pending_id || existingInPending.id || ''}). Submission blocked.`
+            : `الرقم التسلسلي "${bar.serial.trim()}" قيد الاعتماد بالفعل في طلب استلام شحنة آخر. تم إيقاف الإرسال.`,
+          functionName: 'handleSubmitUC03Intake',
+          screenName: screenLabel,
+          moduleName: 'intake',
+          suggestionEn: 'Check the In-Flight Log sub-tab or log in as Checker to review and approve the pending request.',
+          suggestionAr: 'يرجى مراجعة تبويب "سجل الطلبات قيد الإجراء" أو الدخول بحساب المراجع لاعتماد الطلب المعلق.'
+        });
         return;
       }
     }
 
-    // ============================================================
-    // 4. Pre-flight Maker-phase serial validation: check duplicates on server with auth
-    // ============================================================
+    setIsIntakeSubmitting(true);
     try {
-      const valRes = await fetch(`${API_BASE}/vault/intake/validate-serials`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-        body: JSON.stringify({
-          serialNumbers: intakeBars.map(b => b.serial.trim()),
-          sourceType: 'SUPPLIER'
-        })
-      });
-      if (valRes.ok) {
-        const valData = await valRes.json();
-        if (!valData.isValid) {
-          alert(currentLang === 'en' 
-            ? `Maker Serial Validation Failed:\n${valData.errors.join('\n')}` 
-            : `فشل التحقق من الأرقام التسلسلية (مرحلة المنشئ):\n${valData.errors.join('\n')}`);
+      // ============================================================
+      // 4. Pre-flight Maker-phase serial validation: check duplicates on server with auth
+      // ============================================================
+      try {
+        const valRes = await fetch(`${API_BASE}/vault/intake/validate-serials`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+          body: JSON.stringify({
+            serialNumbers: intakeBars.map(b => b.serial.trim()),
+            sourceType: 'SUPPLIER'
+          })
+        });
+        if (valRes.ok) {
+          const valData = await valRes.json();
+          if (!valData.isValid) {
+            showDiagnosticError({
+              titleEn: 'Maker Serial Validation Failed',
+              titleAr: 'فشل التحقق من الأرقام التسلسلية (مرحلة المنشئ)',
+              message: valData.errors.join('\n'),
+              functionName: 'handleSubmitUC03Intake (ValidateSerials)',
+              screenName: screenLabel,
+              moduleName: 'intake',
+              suggestionEn: 'Resolve the duplicate/in-flight serial conflicts listed above before submitting.',
+              suggestionAr: 'يرجى حل تضارب الأرقام التسلسلية المعلقة أو المكررة الموضحة أعلاه.'
+            });
+            return;
+          }
+        } else {
+          const errMsg = await describeApiError(valRes, currentLang, 'Maker Serial Validation Failed', 'فشل التحقق من الأرقام التسلسلية', {
+            functionName: 'handleSubmitUC03Intake (ValidateSerials)',
+            screen: screenLabel,
+            module: 'intake',
+            username,
+            userRole
+          });
+          showDiagnosticError({
+            titleEn: 'Maker Serial Validation Failed',
+            titleAr: 'فشل التحقق من الأرقام التسلسلية',
+            message: errMsg,
+            functionName: 'handleSubmitUC03Intake (ValidateSerials)',
+            screenName: screenLabel,
+            moduleName: 'intake',
+            httpStatus: valRes.status
+          });
           return;
         }
-      } else {
-        alert(await describeApiError(valRes, currentLang, 'Maker Serial Validation Failed', 'فشل التحقق من الأرقام التسلسلية'));
+      } catch (err: any) {
+        showDiagnosticError({
+          titleEn: 'Validation Network Error',
+          titleAr: 'خطأ اتصال أثناء التحقق',
+          message: err?.message || 'Server connection error during serial validation',
+          functionName: 'handleSubmitUC03Intake',
+          screenName: screenLabel,
+          moduleName: 'intake'
+        });
         return;
       }
-    } catch (err: any) {
-      alert(currentLang === 'en' ? `Validation error: ${err?.message || 'Server error'}` : `خطأ أثناء التحقق: ${err?.message || 'خطأ في الخادم'}`);
-      return;
-    }
 
-    // ============================================================
-    // Mandatory Production Cost in KWD per (Metal Type, Denomination)
-    // ============================================================
-    const uniquePids = Array.from(new Set(intakeBars.map(b => b.product_id)));
-    const missingCostLabels: string[] = [];
-    const productionCostsList = uniquePids.map(pid => {
-      const prod = products.find((p: any) => p.product_id === pid);
-      const cost = denominationPurchasingCosts[pid] !== undefined ? Number(denominationPurchasingCosts[pid]) : Number(intakeCustomsDuty || 0);
-      if (!cost || cost <= 0) {
-        const label = prod ? `${prod.metal_name} ${prod.denomination_label}` : `#${pid}`;
-        missingCostLabels.push(label);
-      }
-      return {
-        metalTypeId: prod?.metal_type_id || 1,
-        metalTypeName: prod?.metal_name || 'Gold',
-        denominationId: prod?.denomination_id || pid,
-        denominationName: prod?.denomination_label || `${prod?.weight_grams}g`,
-        productionCostKwd: cost || 0
-      };
-    });
-
-    if (missingCostLabels.length > 0) {
-      alert(currentLang === 'en'
-        ? `Mandatory Production Cost (KWD) is missing for:\n${missingCostLabels.join(', ')}\nEvery combination of (Metal Type, Denomination, Shipment) must capture a positive Production Cost in KWD.`
-        : `يجب تحديد تكلفة الإنتاج (د.ك) لكل من:\n${missingCostLabels.join(', ')}\nيرجى إدخال تكلفة إنتاج موجبة بالدينار الكويتي لجميع فئات الشحنة.`);
-      return;
-    }
-
-    try {
-      const payload = {
-        vendorId: intakeVendorId || (suppliersList.length > 0 ? suppliersList[0].vendor_id : 1),
-        shipmentReference: intakeShipmentRef || null,
-        deliveryNoteNumber: intakeDeliveryNote || null,
-        airwayBillNumber: intakeAirwayBill || null,
-        receivingDate: intakeReceivingDate ? new Date(intakeReceivingDate).toISOString() : new Date().toISOString(),
-        supportingDocumentUrl: intakeDocUrl || null,
-        discrepancyNotes: intakeDiscrepancyNotes || null,
-        lotNumber: intakeLotNum.trim() || `LOT-SUP-${Date.now()}`,
-        locationId: intakeSelectedLocation || 1,
-        receivedBy: displayName,
-        ownershipType: intakeOwnershipType,
-        customsDeclarationNumber: intakeOwnershipType === 'CUSTOMS_OWNED' ? (intakeCustomsDeclarationNo.trim() || null) : null,
-        customsDutyAmount: intakeOwnershipType === 'CUSTOMS_OWNED' ? intakeCustomsDuty : null,
-        portOfEntry: intakeOwnershipType === 'CUSTOMS_OWNED' ? (intakePortOfEntry.trim() || null) : null,
-        productionCosts: productionCostsList,
-        items: intakeBars.map(b => {
-          const cost = denominationPurchasingCosts[b.product_id] !== undefined ? denominationPurchasingCosts[b.product_id] : (intakeCustomsDuty || 0);
-          return {
-            serial: b.serial.trim(),
-            product_id: b.product_id,
-            weight_grams: b.weight_grams,
-            purity: b.purity,
-            unit_cost: cost,
-            purchasing_cost: cost,
-            is_damaged: b.is_damaged,
-            damage_reason: b.is_damaged ? (b.damage_reason || 'Damaged upon supplier receipt') : null,
-            refiner_name: b.refiner_name,
-            fineness_ppt: b.purity,
-            assay_certificate_number: b.assay_certificate_number || `CERT-${b.serial.trim()}`
-          };
-        })
-      };
-
-      const res = await fetch(`${API_BASE}/vault/intake`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-        body: JSON.stringify(payload)
+      // ============================================================
+      // Mandatory Production Cost in KWD per (Metal Type, Denomination)
+      // ============================================================
+      const uniquePids = Array.from(new Set(intakeBars.map(b => b.product_id)));
+      const missingCostLabels: string[] = [];
+      const productionCostsList = uniquePids.map(pid => {
+        const prod = products.find((p: any) => p.product_id === pid);
+        const cost = denominationPurchasingCosts[pid] !== undefined ? Number(denominationPurchasingCosts[pid]) : Number(intakeCustomsDuty || 0);
+        if (!cost || cost <= 0) {
+          const label = prod ? `${prod.metal_name} ${prod.denomination_label}` : `#${pid}`;
+          missingCostLabels.push(label);
+        }
+        return {
+          metalTypeId: prod?.metal_type_id || 1,
+          metalTypeName: prod?.metal_name || 'Gold',
+          denominationId: prod?.denomination_id || pid,
+          denominationName: prod?.denomination_label || `${prod?.weight_grams}g`,
+          productionCostKwd: cost || 0
+        };
       });
 
-      if (res.ok) {
-        alert(currentLang === 'en' 
-          ? 'Supplier shipment receipt recorded successfully! Routed to Vault Checker Maker-Checker review.' 
-          : 'تم تسجيل استلام شحنة المورد بنجاح وتوجيهها لاعتماد مراجع الخزينة!');
-        setIntakeLotNum(`LOT-SUP-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${Date.now().toString().slice(-4)}`);
-        setIntakeShipmentRef('');
-        setIntakeDeliveryNote('');
-        setIntakeAirwayBill('');
-        setIntakeDocUrl('');
-        setIntakeDiscrepancyNotes('');
-        setIntakeBars([]);
-        fetchPendingIntakes();
-        fetchWorkflows();
-        setIntakeActiveSubTab('IN_FLIGHT_LOG');
-      } else {
-        alert(await describeApiError(res, currentLang, 'Failed to record shipment intake', 'فشل تسجيل استلام الشحنة'));
+      if (missingCostLabels.length > 0) {
+        showDiagnosticError({
+          titleEn: 'Mandatory Production Cost Missing',
+          titleAr: 'تكلفة الإنتاج الإلزامية مفقودة',
+          message: currentLang === 'en'
+            ? `Mandatory Production Cost (KWD) is missing for:\n${missingCostLabels.join(', ')}\nEvery combination of (Metal Type, Denomination, Shipment) must capture a positive Production Cost in KWD.`
+            : `يجب تحديد تكلفة الإنتاج (د.ك) لكل من:\n${missingCostLabels.join(', ')}\nيرجى إدخال تكلفة إنتاج موجبة بالدينار الكويتي لجميع فئات الشحنة.`,
+          functionName: 'handleSubmitUC03Intake',
+          screenName: screenLabel,
+          moduleName: 'intake',
+          suggestionEn: 'Enter production costs in the chips above the manifest or in the Add Serials modal.',
+          suggestionAr: 'حدد تكلفة الإنتاج للفئات عبر الأزرار أعلى الكشف أو من نافذة إضافة الأرقام التسلسلية.'
+        });
+        return;
       }
-    } catch (e) {
-      alert(currentLang === 'en' ? 'Network error submitting supplier receipt.' : 'خطأ في الشبكة أثناء إرسال استلام المورد.');
+
+      try {
+        const payload = {
+          vendorId: intakeVendorId || (suppliersList.length > 0 ? suppliersList[0].vendor_id : 1),
+          shipmentReference: intakeShipmentRef || null,
+          deliveryNoteNumber: intakeDeliveryNote || null,
+          airwayBillNumber: intakeAirwayBill || null,
+          receivingDate: intakeReceivingDate ? new Date(intakeReceivingDate).toISOString() : new Date().toISOString(),
+          supportingDocumentUrl: intakeDocUrl || null,
+          discrepancyNotes: intakeDiscrepancyNotes || null,
+          lotNumber: intakeLotNum.trim() || `LOT-SUP-${Date.now()}`,
+          locationId: intakeSelectedLocation || 1,
+          receivedBy: displayName,
+          ownershipType: intakeOwnershipType,
+          customsDeclarationNumber: intakeOwnershipType === 'CUSTOMS_OWNED' ? (intakeCustomsDeclarationNo.trim() || null) : null,
+          customsDutyAmount: intakeOwnershipType === 'CUSTOMS_OWNED' ? intakeCustomsDuty : null,
+          portOfEntry: intakeOwnershipType === 'CUSTOMS_OWNED' ? (intakePortOfEntry.trim() || null) : null,
+          productionCosts: productionCostsList,
+          items: intakeBars.map(b => {
+            const cost = denominationPurchasingCosts[b.product_id] !== undefined ? denominationPurchasingCosts[b.product_id] : (intakeCustomsDuty || 0);
+            return {
+              serial: b.serial.trim(),
+              product_id: b.product_id,
+              weight_grams: b.weight_grams,
+              purity: b.purity,
+              unit_cost: cost,
+              purchasing_cost: cost,
+              is_damaged: b.is_damaged,
+              damage_reason: b.is_damaged ? (b.damage_reason || 'Damaged upon supplier receipt') : null,
+              refiner_name: b.refiner_name,
+              fineness_ppt: b.purity,
+              assay_certificate_number: b.assay_certificate_number || `CERT-${b.serial.trim()}`
+            };
+          })
+        };
+
+        const res = await fetch(`${API_BASE}/vault/intake`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+          body: JSON.stringify(payload)
+        });
+
+        if (res.ok) {
+          alert(currentLang === 'en' 
+            ? 'Supplier shipment receipt recorded successfully! Routed to Vault Checker Maker-Checker review.' 
+            : 'تم تسجيل استلام شحنة المورد بنجاح وتوجيهها لاعتماد مراجع الخزينة!');
+          setIntakeLotNum(`LOT-SUP-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${Date.now().toString().slice(-4)}`);
+          setIntakeShipmentRef('');
+          setIntakeDeliveryNote('');
+          setIntakeAirwayBill('');
+          setIntakeDocUrl('');
+          setIntakeDiscrepancyNotes('');
+          setIntakeBars([]);
+          fetchPendingIntakes();
+          fetchWorkflows();
+          setIntakeActiveSubTab('IN_FLIGHT_LOG');
+        } else {
+          const errMsg = await describeApiError(res, currentLang, 'Failed to record shipment intake', 'فشل تسجيل استلام الشحنة', {
+            functionName: 'handleSubmitUC03Intake (POST /vault/intake)',
+            screen: screenLabel,
+            module: 'intake',
+            username,
+            userRole
+          });
+          showDiagnosticError({
+            titleEn: 'Shipment Intake Submission Failed',
+            titleAr: 'فشل تسجيل استلام الشحنة',
+            message: errMsg,
+            functionName: 'handleSubmitUC03Intake (POST /vault/intake)',
+            screenName: screenLabel,
+            moduleName: 'intake',
+            httpStatus: res.status,
+            suggestionEn: 'If serials are already pending approval, check the In-Flight Log sub-tab or log in as Checker to approve.',
+            suggestionAr: 'إذا كانت الأرقام التسلسلية قيد الاعتماد، يرجى مراجعة سجل الطلبات المعلقة أو اعتمادها بحساب المراجع.'
+          });
+        }
+      } catch (e: any) {
+        showDiagnosticError({
+          titleEn: 'Network Error',
+          titleAr: 'خطأ في الشبكة',
+          message: e?.message || (currentLang === 'en' ? 'Network error submitting supplier receipt.' : 'خطأ في الشبكة أثناء إرسال استلام المورد.'),
+          functionName: 'handleSubmitUC03Intake',
+          screenName: screenLabel,
+          moduleName: 'intake'
+        });
+      }
+    } finally {
+      setIsIntakeSubmitting(false);
     }
   };
 
@@ -9462,9 +9750,36 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                         );
                       })()}
                       {canModify('intake') && (
-                        <button className="btn btn-primary" style={{ fontSize: '12px', padding: '7px 14px', fontWeight: 'bold' }} onClick={() => setShowSerialToolsModal(true)}>
-                          <i className="fa-solid fa-plus"></i> {currentLang === 'en' ? 'Add Serials' : 'إضافة أرقام تسلسلية'}
-                        </button>
+                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                          {intakeBars.length > 0 && (
+                            <button
+                              type="button"
+                              className="btn"
+                              style={{
+                                fontSize: '12px',
+                                padding: '7px 14px',
+                                fontWeight: 'bold',
+                                color: '#EF4444',
+                                border: '1px solid rgba(239, 68, 68, 0.4)',
+                                background: 'rgba(239, 68, 68, 0.08)',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '6px'
+                              }}
+                              onClick={handleRemoveAllIntakeBars}
+                              title={currentLang === 'en' ? 'Remove all serials from shipment manifest' : 'حذف جميع الأرقام التسلسلية من كشف الشحنة'}
+                            >
+                              <i className="fa-solid fa-trash-can"></i> {currentLang === 'en' ? `Remove All (${intakeBars.length})` : `حذف الكل (${intakeBars.length})`}
+                            </button>
+                          )}
+                          <button
+                            className="btn btn-primary"
+                            style={{ fontSize: '12px', padding: '7px 14px', fontWeight: 'bold', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                            onClick={() => setShowSerialToolsModal(true)}
+                          >
+                            <i className="fa-solid fa-plus"></i> {currentLang === 'en' ? 'Add Serials' : 'إضافة أرقام تسلسلية'}
+                          </button>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -9524,7 +9839,19 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                           <th style={{ minWidth: '260px' }}>{currentLang === 'en' ? 'Product / Denomination' : 'نوع المنتج / الفئة'}</th>
                           <th style={{ width: '140px' }}>{currentLang === 'en' ? 'Production Cost' : 'تكلفة الإنتاج'}</th>
                           <th style={{ minWidth: '200px' }}>{currentLang === 'en' ? 'Refiner / Brand' : 'المصفاة / الماركة'}</th>
-                          <th style={{ width: '50px' }}></th>
+                          <th style={{ width: '50px', textAlign: 'center' }}>
+                            {intakeBars.length > 0 && canModify('intake') && (
+                              <button
+                                type="button"
+                                className="btn"
+                                style={{ padding: '2px 6px', fontSize: '11px', color: 'var(--accent-red)', background: 'transparent' }}
+                                onClick={handleRemoveAllIntakeBars}
+                                title={currentLang === 'en' ? 'Remove All' : 'حذف الكل'}
+                              >
+                                <i className="fa-solid fa-trash-can"></i>
+                              </button>
+                            )}
+                          </th>
                         </tr>
                       </thead>
                       <tbody>
@@ -9619,18 +9946,24 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                                 </span>
                               </td>
                               <td>
-                                <select
-                                  className="form-control"
-                                  value={bar.refiner_name}
-                                  onChange={e => handleUpdateIntakeBar(bar.id, 'refiner_name', e.target.value)}
-                                  style={{ fontSize: '12px', padding: '4px 8px' }}
-                                >
-                                  {brandsList.map((b: any) => (
-                                    <option key={b.brand_id} value={b.brand_name}>
-                                      {b.brand_name} {b.is_lbma_certified ? '★ LBMA' : ''}
-                                    </option>
-                                  ))}
-                                </select>
+                                {(() => {
+                                  const affiliated = getSupplierAffiliatedBrands(intakeVendorId, suppliersList, brandsList);
+                                  const isAffiliated = (bName: string) => affiliated.some((ab: any) => ab.brand_name === bName);
+                                  return (
+                                    <select
+                                      className="form-control"
+                                      value={bar.refiner_name}
+                                      onChange={e => handleUpdateIntakeBar(bar.id, 'refiner_name', e.target.value)}
+                                      style={{ fontSize: '12px', padding: '4px 8px' }}
+                                    >
+                                      {brandsList.map((b: any) => (
+                                        <option key={b.brand_id} value={b.brand_name}>
+                                          {isAffiliated(b.brand_name) ? '✓ ' : ''}{b.brand_name} {b.is_lbma_certified ? '★ LBMA' : ''} {b.country_of_origin ? `(${b.country_of_origin})` : ''}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  );
+                                })()}
                               </td>
                               <td>
                                 <button
@@ -9745,13 +10078,13 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                             padding: '10px 20px',
                             fontSize: '13px',
                             fontWeight: 'bold',
-                            opacity: hasDuplicateSerials ? 0.6 : 1,
-                            cursor: hasDuplicateSerials ? 'not-allowed' : 'pointer'
+                            opacity: (hasDuplicateSerials || isIntakeSubmitting) ? 0.6 : 1,
+                            cursor: (hasDuplicateSerials || isIntakeSubmitting) ? 'not-allowed' : 'pointer'
                           }}
                           onClick={handleSubmitUC03Intake}
-                          disabled={hasDuplicateSerials}
+                          disabled={hasDuplicateSerials || isIntakeSubmitting}
                         >
-                          <i className="fa-solid fa-paper-plane"></i> {currentLang === 'en' ? 'Submit for Vault Checker Approval' : 'إرسال لاعتماد مراجع الخزينة (Maker-Checker)'}
+                          <i className={`fa-solid ${isIntakeSubmitting ? 'fa-spinner fa-spin' : 'fa-paper-plane'}`}></i> {isIntakeSubmitting ? (currentLang === 'en' ? 'Submitting...' : 'جاري الإرسال...') : (currentLang === 'en' ? 'Submit for Vault Checker Approval' : 'إرسال لاعتماد مراجع الخزينة (Maker-Checker)')}
                         </button>
                       )}
                     </div>
@@ -9774,7 +10107,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
             onSubmitPurchase={handleTurkeyPurchase}
             goldRate={goldRate}
             currentLang={currentLang}
-            canModify={canModify('purchase_orders')}
+            canModify={canModify('intake')}
             userRole={userRole}
             displayName={displayName}
             initialSubTab="STOCK_PURCHASE"
@@ -10287,7 +10620,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                             </td>
                             <td>
                               <div style={{ display: 'flex', gap: '6px', flexWrap: 'nowrap' }}>
-                                {isActionable && (canModify('intake') || canModify('purchase_orders')) && (
+                                {isActionable && (canModify('intake') || canModify('intake')) && (
                                   <button
                                     className="btn btn-primary"
                                     style={{ padding: '5px 10px', fontSize: '11px', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '4px' }}
@@ -10303,7 +10636,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                                   </button>
                                 )}
 
-                                {tr.status_code === 'IN_TRANSIT' && (canModify('intake') || canModify('purchase_orders')) && (
+                                {tr.status_code === 'IN_TRANSIT' && (canModify('intake') || canModify('intake')) && (
                                   <button
                                     className="btn btn-outline"
                                     style={{ padding: '5px 10px', fontSize: '11px', color: '#dc2626', borderColor: 'rgba(239, 68, 68, 0.4)', whiteSpace: 'nowrap' }}
@@ -10483,7 +10816,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                               </span>
                             </td>
                             <td>
-                              {isActionable && (canModify('intake') || canModify('purchase_orders')) && (
+                              {isActionable && (canModify('intake') || canModify('intake')) && (
                                 <button
                                   className="btn btn-primary"
                                   style={{ padding: '5px 10px', fontSize: '11px', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '4px' }}
@@ -10519,7 +10852,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                 </span>
               </div>
 
-              {!canModify('purchase_orders') && !canModify('intake') && (
+              {!canModify('intake') && (
                 <div style={{ padding: '10px', background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.25)', borderRadius: '8px', color: 'var(--accent-red)', fontSize: '12px', marginBottom: '15px' }}>
                   <i className="fa-solid fa-circle-exclamation"></i> {currentLang === 'en' ? 'Read-Only Mode: You cannot initiate branch transfers.' : 'وضع القراءة فقط: لا يمكنك بدء عملية تحويل الفروع.'}
                 </div>
@@ -10547,7 +10880,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     }
                   }}
                   style={{ color: '#000', fontWeight: 600 }}
-                  disabled={!canModify('purchase_orders') && !canModify('intake')}
+                  disabled={!canModify('intake')}
                 >
                   <option value="OUTBOUND_TO_BRANCH">{currentLang === 'en' ? '🚚 Outbound to Branch (Customer Delivery / Branch Pickup)' : '🚚 إرسال للفرع (تسليم / استلام عميل)'}</option>
                   <option value="INTER_BRANCH">{currentLang === 'en' ? '🔄 Inter-Branch Transfer' : '🔄 تحويل بين الفروع'}</option>
@@ -10589,7 +10922,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                         }
                       }
                     }}
-                    disabled={!canModify('purchase_orders') && !canModify('intake')}
+                    disabled={!canModify('intake')}
                   />
                   {transferItemId ? (
                     <span style={{ color: 'var(--accent-green)', display: 'flex', alignItems: 'center', fontSize: '12px', whiteSpace: 'nowrap' }}>
@@ -10610,7 +10943,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     if (item) setTransferItemSerial(item.serial_number);
                   }}
                   style={{ color: '#000' }}
-                  disabled={!canModify('purchase_orders') && !canModify('intake')}
+                  disabled={!canModify('intake')}
                 >
                   <option value="">-- {currentLang === 'en' ? 'Choose Customer Bar' : 'اختر سبيكة العميل'} --</option>
                   {inventoryList.filter((i: any) => (i.ownership_type === 'CUSTOMER_OWNED' || !i.ownership_type) && (i.status === 'READY' || i.status === 'HELD_IN_CUSTODY')).map((item: any, idx: number) => (
@@ -10627,7 +10960,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                   value={transferDestBranchId} 
                   onChange={e => setTransferDestBranchId(e.target.value)} 
                   style={{ color: '#000' }}
-                  disabled={!canModify('purchase_orders') && !canModify('intake')}
+                  disabled={!canModify('intake')}
                 >
                   <option value="">-- {currentLang === 'en' ? 'Select Destination' : 'اختر الوجهة'} --</option>
                   {branchesList.map((b: any, idx: number) => (
@@ -10647,7 +10980,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     value={transferReturnReasonPreset}
                     onChange={e => setTransferReturnReasonPreset(e.target.value)}
                     style={{ color: '#000', marginBottom: '8px' }}
-                    disabled={!canModify('purchase_orders') && !canModify('intake')}
+                    disabled={!canModify('intake')}
                   >
                     <option value="">-- {currentLang === 'en' ? 'Select Reason' : 'اختر السبب'} --</option>
                     <option value={currentLang === 'en' ? 'Customer sold bar during transit (Reassign to Central Vault)' : 'بيع العميل للسبيكة أثناء النقل (إعادة تعيين للخزينة المركزية)'}>
@@ -10698,7 +11031,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     placeholder={currentLang === 'en' ? 'e.g. Customer branch pickup booking #1234' : 'مثال: حجز استلام عميل رقم 1234'}
                     value={transferNotes}
                     onChange={e => setTransferNotes(e.target.value)}
-                    disabled={!canModify('purchase_orders') && !canModify('intake')}
+                    disabled={!canModify('intake')}
                   />
                 </div>
               )}
@@ -10711,7 +11044,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                   placeholder="e.g. Secured Armored Express Transport #12" 
                   value={transferCourierInfo} 
                   onChange={e => setTransferCourierInfo(e.target.value)} 
-                  disabled={!canModify('purchase_orders') && !canModify('intake')}
+                  disabled={!canModify('intake')}
                 />
               </div>
 
@@ -10719,7 +11052,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                 className="btn btn-primary"
                 style={{ width: '100%', marginTop: '15px', padding: '12px', fontSize: '14px' }}
                 onClick={handleInitiateBranchTransferTab}
-                disabled={!transferItemId || !transferDestBranchId || (!canModify('purchase_orders') && !canModify('intake')) || (transferType === 'RETURN_TO_VAULT' && !transferReturnReasonPreset && !transferReturnReasonCustom)}
+                disabled={!transferItemId || !transferDestBranchId || (!canModify('intake')) || (transferType === 'RETURN_TO_VAULT' && !transferReturnReasonPreset && !transferReturnReasonCustom)}
               >
                 <i className="fa-solid fa-paper-plane"></i> {currentLang === 'en' ? 'Submit Transfer for Maker-Checker Approval' : 'إرسال طلب التحويل للاعتماد المزدوج'}
               </button>
@@ -13235,6 +13568,24 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                           <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{currentLang === 'en' ? 'Ownership:' : 'نوع الملكية:'}</span>
                           <div style={{ fontWeight: 600 }}>{selectedBar.ownership || 'KFH_OWNED'}</div>
                         </div>
+                        {selectedBar.customer_account_number && (
+                          <div>
+                            <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{currentLang === 'en' ? 'Customer Account:' : 'حساب العميل:'}</span>
+                            <div style={{ fontWeight: 600, color: 'var(--accent-gold)' }}>{selectedBar.customer_account_number}</div>
+                          </div>
+                        )}
+                        {selectedBar.customer_rim_number && (
+                          <div>
+                            <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{currentLang === 'en' ? 'Customer RIM #:' : 'رقم العميل (RIM):'}</span>
+                            <div style={{ fontWeight: 600, color: 'var(--accent-gold)' }}>{selectedBar.customer_rim_number}</div>
+                          </div>
+                        )}
+                        {(selectedBar.production_cost_kwd || selectedBar.average_purchase_cost) && (
+                          <div>
+                            <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{currentLang === 'en' ? 'Production Cost:' : 'تكلفة الإنتاج:'}</span>
+                            <div style={{ fontWeight: 600 }}>{(selectedBar.production_cost_kwd || selectedBar.average_purchase_cost).toFixed(3)} KWD</div>
+                          </div>
+                        )}
                       </div>
 
                       <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px dashed rgba(212, 175, 55, 0.25)', fontSize: '12px' }}>
@@ -14769,9 +15120,27 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                         <strong style={{ color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Ownership:' : 'الملكية:'}</strong>{' '}
                         <span>{translateDb(selectedBar.ownership)}</span>
                       </div>
+                      {selectedBar.customer_account_number && (
+                        <div>
+                          <strong style={{ color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Customer Account:' : 'حساب العميل:'}</strong>{' '}
+                          <span style={{ color: 'var(--accent-gold)', fontWeight: '600' }}>{selectedBar.customer_account_number}</span>
+                        </div>
+                      )}
+                      {selectedBar.customer_rim_number && (
+                        <div>
+                          <strong style={{ color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Customer RIM #:' : 'رقم العميل (RIM):'}</strong>{' '}
+                          <span style={{ color: 'var(--accent-gold)', fontWeight: '600' }}>{selectedBar.customer_rim_number}</span>
+                        </div>
+                      )}
+                      {(selectedBar.production_cost_kwd || selectedBar.average_purchase_cost) && (
+                        <div>
+                          <strong style={{ color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Production Cost:' : 'تكلفة الإنتاج:'}</strong>{' '}
+                          <span style={{ fontWeight: '600' }}>{(selectedBar.production_cost_kwd || selectedBar.average_purchase_cost).toFixed(3)} KWD</span>
+                        </div>
+                      )}
                       <div style={{ gridColumn: 'span 2', marginTop: '4px', paddingTop: '8px', borderTop: '1px solid rgba(255, 255, 255, 0.05)' }}>
                         <strong style={{ color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Location Context:' : 'سياق الموقع:'}</strong>{' '}
-                        <span style={{ color: 'var(--text-primary)', fontWeight: '500' }}>{selectedBar.location_context}</span>
+                        <span style={{ color: 'var(--text-primary)', fontWeight: '500' }}>{selectedBar.location_context || selectedBar.location}</span>
                       </div>
                     </div>
                   </div>
@@ -21289,6 +21658,8 @@ const [migrationApproved, setMigrationApproved] = useState(false);
           }}
           products={products}
           brands={brandsList}
+          suppliers={suppliersList}
+          selectedVendorId={intakeVendorId}
           currentLang={currentLang}
           existingSerials={[
             ...intakeBars.map(b => b.serial.trim()),
@@ -21532,6 +21903,243 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* ============================================================ */}
+        {/* SYSTEM EXCEPTION & DIAGNOSTIC MODAL (OPTIMIZED FOR SCREENSHOTS & AUDIT LOGGING) */}
+        {/* ============================================================ */}
+        {diagnosticErrorModal && (
+          <div style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            width: '100vw',
+            height: '100vh',
+            backgroundColor: 'rgba(0, 0, 0, 0.75)',
+            backdropFilter: 'blur(6px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 100000,
+            padding: '20px'
+          }}>
+            <div className="glass-card" style={{
+              width: '100%',
+              maxWidth: '680px',
+              padding: '0',
+              borderRadius: '12px',
+              border: '2px solid rgba(239, 68, 68, 0.6)',
+              boxShadow: '0 25px 50px rgba(0, 0, 0, 0.8), 0 0 30px rgba(239, 68, 68, 0.25)',
+              overflow: 'hidden'
+            }}>
+              {/* Header */}
+              <div style={{
+                background: 'linear-gradient(90deg, #7F1D1D 0%, #991B1B 100%)',
+                padding: '16px 20px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                borderBottom: '1px solid rgba(255, 255, 255, 0.1)'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div style={{
+                    width: '36px',
+                    height: '36px',
+                    borderRadius: '8px',
+                    background: 'rgba(255, 255, 255, 0.15)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '18px',
+                    color: '#FFF'
+                  }}>
+                    <i className="fa-solid fa-triangle-exclamation"></i>
+                  </div>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: '#FFF' }}>
+                      {diagnosticErrorModal.title || (currentLang === 'ar' ? 'استثناء النظام / تقرير الخطأ' : 'System Error / Diagnostic Report')}
+                    </h3>
+                    <span style={{ fontSize: '11px', color: 'rgba(255, 255, 255, 0.8)', display: 'block', marginTop: '2px' }}>
+                      {currentLang === 'ar' ? 'تم تسجيل هذه الواقعة في سجلات تدقيق النظام' : 'This incident has been logged to the central system audit log'}
+                    </span>
+                  </div>
+                </div>
+
+                <span style={{
+                  padding: '4px 10px',
+                  background: 'rgba(0, 0, 0, 0.4)',
+                  borderRadius: '20px',
+                  fontFamily: 'monospace',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  color: '#FCA5A5',
+                  border: '1px solid rgba(252, 165, 165, 0.3)'
+                }}>
+                  {diagnosticErrorModal.incidentId}
+                </span>
+              </div>
+
+              {/* Body */}
+              <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px', maxHeight: '75vh', overflowY: 'auto' }}>
+                
+                {/* 📌 SCREENSHOT DIAGNOSTIC CAPTION BOX */}
+                <div style={{
+                  background: 'rgba(0, 0, 0, 0.4)',
+                  border: '1px solid rgba(245, 158, 11, 0.35)',
+                  borderRadius: '8px',
+                  padding: '14px 16px'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                    <span style={{
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      color: '#F59E0B',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.5px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px'
+                    }}>
+                      <i className="fa-solid fa-camera"></i> {currentLang === 'ar' ? 'بيانات التشخيص للدعم الفني (لقطة الشاشة)' : 'Diagnostic Caption (For Support Screenshots)'}
+                    </span>
+                    <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                      <i className="fa-solid fa-shield-halved" style={{ color: '#10B981', marginRight: '4px' }}></i>
+                      {currentLang === 'ar' ? 'مسجل في Audit Log' : 'Audit Logged'}
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '8px', fontSize: '12px' }}>
+                    <div style={{ background: 'rgba(255,255,255,0.03)', padding: '6px 10px', borderRadius: '6px' }}>
+                      <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10px' }}>{currentLang === 'ar' ? 'الوظيفة / الإجراء:' : 'Function / Action:'}</span>
+                      <strong style={{ fontFamily: 'monospace', color: '#60A5FA', fontSize: '12px' }}>{diagnosticErrorModal.functionName}()</strong>
+                    </div>
+
+                    <div style={{ background: 'rgba(255,255,255,0.03)', padding: '6px 10px', borderRadius: '6px' }}>
+                      <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10px' }}>{currentLang === 'ar' ? 'الشاشة / النافذة:' : 'Screen / View:'}</span>
+                      <strong style={{ color: 'var(--text-primary)' }}>{diagnosticErrorModal.screenName}</strong>
+                    </div>
+
+                    <div style={{ background: 'rgba(255,255,255,0.03)', padding: '6px 10px', borderRadius: '6px' }}>
+                      <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10px' }}>{currentLang === 'ar' ? 'المستخدم والصلاحية:' : 'User & Role:'}</span>
+                      <strong style={{ color: '#34D399' }}>{diagnosticErrorModal.username}</strong> <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>({diagnosticErrorModal.userRole})</span>
+                    </div>
+
+                    <div style={{ background: 'rgba(255,255,255,0.03)', padding: '6px 10px', borderRadius: '6px' }}>
+                      <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10px' }}>{currentLang === 'ar' ? 'الوقت والتاريخ:' : 'Date & Time:'}</span>
+                      <strong style={{ color: 'var(--text-primary)' }}>{diagnosticErrorModal.timestamp}</strong>
+                    </div>
+
+                    {diagnosticErrorModal.httpStatus && (
+                      <div style={{ background: 'rgba(255,255,255,0.03)', padding: '6px 10px', borderRadius: '6px' }}>
+                        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10px' }}>HTTP Status:</span>
+                        <strong style={{ color: '#F87171' }}>{diagnosticErrorModal.httpStatus}</strong>
+                      </div>
+                    )}
+
+                    {diagnosticErrorModal.moduleName && (
+                      <div style={{ background: 'rgba(255,255,255,0.03)', padding: '6px 10px', borderRadius: '6px' }}>
+                        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10px' }}>Module Key:</span>
+                        <strong style={{ color: '#C084FC' }}>{diagnosticErrorModal.moduleName}</strong>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* ⚠️ ERROR MESSAGE DETAIL */}
+                <div style={{
+                  background: 'rgba(239, 68, 68, 0.08)',
+                  border: '1px solid rgba(239, 68, 68, 0.25)',
+                  borderRadius: '8px',
+                  padding: '14px 16px'
+                }}>
+                  <div style={{ fontSize: '11px', fontWeight: 700, color: '#EF4444', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <i className="fa-solid fa-circle-xmark"></i> {currentLang === 'ar' ? 'تفاصيل الخطأ وسبب الرفض:' : 'Error Message & Failure Reason:'}
+                  </div>
+                  <div style={{
+                    fontSize: '13px',
+                    lineHeight: '1.5',
+                    color: 'var(--text-primary)',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                    fontFamily: 'system-ui, sans-serif'
+                  }}>
+                    {diagnosticErrorModal.message}
+                  </div>
+                </div>
+
+                {/* 💡 SUGGESTED ACTION / ROOT CAUSE */}
+                {diagnosticErrorModal.suggestion && (
+                  <div style={{
+                    background: 'rgba(59, 130, 246, 0.08)',
+                    border: '1px solid rgba(59, 130, 246, 0.25)',
+                    borderRadius: '8px',
+                    padding: '12px 16px'
+                  }}>
+                    <div style={{ fontSize: '11px', fontWeight: 700, color: '#60A5FA', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <i className="fa-solid fa-lightbulb"></i> {currentLang === 'ar' ? 'الإجراء المقترح / الحل:' : 'Suggested Resolution:'}
+                    </div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                      {diagnosticErrorModal.suggestion}
+                    </div>
+                  </div>
+                )}
+
+              </div>
+
+              {/* Footer Actions */}
+              <div style={{
+                background: 'rgba(0, 0, 0, 0.25)',
+                padding: '14px 20px',
+                borderTop: '1px solid var(--surface-border)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '10px'
+              }}>
+                <button
+                  type="button"
+                  className="btn"
+                  style={{
+                    fontSize: '12px',
+                    padding: '7px 14px',
+                    color: 'var(--text-primary)',
+                    background: 'rgba(255,255,255,0.06)',
+                    border: '1px solid var(--surface-border)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                  onClick={() => {
+                    const text = `[PMIMS ERROR DIAGNOSTIC REPORT]
+Incident ID : ${diagnosticErrorModal.incidentId}
+Screen      : ${diagnosticErrorModal.screenName}
+Function    : ${diagnosticErrorModal.functionName}()
+User        : ${diagnosticErrorModal.username} (${diagnosticErrorModal.userRole})
+Timestamp   : ${diagnosticErrorModal.timestamp}
+Module      : ${diagnosticErrorModal.moduleName || 'N/A'}
+HTTP Status : ${diagnosticErrorModal.httpStatus || 'N/A'}
+Error       : ${diagnosticErrorModal.message}
+${diagnosticErrorModal.suggestion ? `Resolution  : ${diagnosticErrorModal.suggestion}` : ''}`;
+                    navigator.clipboard.writeText(text);
+                    alert(currentLang === 'ar' ? 'تم نسخ بيانات التشخيص إلى الحافظة بنجاح.' : 'Diagnostic report copied to clipboard.');
+                  }}
+                >
+                  <i className="fa-solid fa-copy"></i> {currentLang === 'ar' ? 'نسخ بيانات التشخيص' : 'Copy Diagnostic Info'}
+                </button>
+
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  style={{ padding: '8px 22px', fontSize: '13px', fontWeight: 'bold' }}
+                  onClick={() => setDiagnosticErrorModal(null)}
+                >
+                  {currentLang === 'ar' ? 'إغلاق' : 'Close'}
+                </button>
+              </div>
+
             </div>
           </div>
         )}

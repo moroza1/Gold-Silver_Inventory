@@ -143,68 +143,10 @@ public class CustomerAccount
     public Customer? Customer { get; set; }
 }
 
-public class PurchaseOrder
-{
-    public int PoId { get; set; }
-    public string PoNumber { get; set; } = null!;
-    public int VendorId { get; set; }
-    public DateTime OrderDate { get; set; } = DateTime.UtcNow;
-    public DateTime? ExpectedDeliveryDate { get; set; }
-    public decimal TotalWeightGrams { get; set; }
-    public decimal TotalCost { get; set; }
-    public string Currency { get; set; } = "USD";
-    public string StatusCode { get; set; } = "PENDING_APPROVAL";
-    public string CreatedBy { get; set; } = null!;
-    public string? ApprovedBy { get; set; }
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-
-    // ============================================================
-    // Cost Tracking & Valuation -- purchase cost detail (RFP: "Record purchase
-    // cost details (supplier, invoice, fees)"). Supplier is already captured
-    // via VendorId/Vendor; these add the supplier invoice reference and the
-    // landed-cost fee breakdown (freight/insurance/customs/other) that a real
-    // acquisition incurs on top of the line-item cost (TotalCost). All
-    // nullable/defaulted to 0 so this is purely additive -- every existing PO
-    // (seeded or created before this field set existed) just has no fees.
-    // ============================================================
-    public string? SupplierInvoiceNumber { get; set; }
-    public DateTime? SupplierInvoiceDate { get; set; }
-    public decimal FreightCost { get; set; } = 0;
-    public decimal InsuranceCost { get; set; } = 0;
-    public decimal CustomsDutyCost { get; set; } = 0;
-    public decimal OtherFeesCost { get; set; } = 0;
-    public string? OtherFeesDescription { get; set; }
-
-    // Total acquisition ("landed") cost = line-item cost plus every acquisition
-    // fee above. This -- not the bare TotalCost -- is what actually flows into
-    // InventoryLot.AverageUnitCost at intake (see
-    // InventoryRepository.IntakeInventoryItemsAsync), so the Average Cost
-    // Method valuation reflects the true cost of getting the metal into the
-    // vault, not just what the vendor invoiced for the metal itself. Computed,
-    // not persisted (see AppDbContext: Ignore(e => e.LandedCost)).
-    public decimal LandedCost => TotalCost + FreightCost + InsuranceCost + CustomsDutyCost + OtherFeesCost;
-
-    public Vendor? Vendor { get; set; }
-    public List<POItem> Items { get; set; } = new();
-}
-
-public class POItem
-{
-    public int PoItemId { get; set; }
-    public int PoId { get; set; }
-    public int ProductId { get; set; }
-    public int OrderedQuantity { get; set; }
-    public int ReceivedQuantity { get; set; }
-    public decimal UnitCost { get; set; }
-
-    public MetalProduct? Product { get; set; }
-}
-
 public class InventoryLot
 {
     public int LotId { get; set; }
     public string LotNumber { get; set; } = null!;
-    public int? PoId { get; set; }
     public int VendorId { get; set; }
     public DateTime AcquisitionDate { get; set; } = DateTime.UtcNow;
     public int TotalItems { get; set; }
@@ -221,7 +163,6 @@ public class InventoryLot
     public string? CustomsDeclarationNumber { get; set; }
     public string? PortOfEntry { get; set; }
 
-    public PurchaseOrder? PurchaseOrder { get; set; }
     public Vendor? Vendor { get; set; }
 }
 
@@ -1065,7 +1006,6 @@ public class TransferReceiptValidationResult
 public class PendingIntake
 {
     public int PendingIntakeId { get; set; }
-    public int? PoId { get; set; }
     public string SourceType { get; set; } = "SUPPLIER"; // SUPPLIER | CUSTOMER
     public int? VendorId { get; set; }
     public string? ShipmentReference { get; set; }
@@ -1093,7 +1033,6 @@ public class PendingIntake
     public string StatusCode { get; set; } = "PENDING_APPROVAL"; // PENDING_APPROVAL, APPROVED, REJECTED
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
-    public PurchaseOrder? PurchaseOrder { get; set; }
     public Vendor? Vendor { get; set; }
     public InventoryLocation? Location { get; set; }
     public Customer? Customer { get; set; }

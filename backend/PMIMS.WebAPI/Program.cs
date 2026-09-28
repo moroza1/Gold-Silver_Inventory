@@ -201,10 +201,6 @@ try
         // any-authenticated-user read (see comment at that endpoint), not a module-level one.
         Read("dashboard.read", "dashboard");
 
-        // Purchase Orders
-        Read("purchase_orders.read", "purchase_orders");
-        Write("purchase_orders.write", "purchase_orders");
-
         // Custody, stocktake, workflows and reports (operational modules)
         Read("custody.read", "custody");
         Write("custody.write", "custody");
