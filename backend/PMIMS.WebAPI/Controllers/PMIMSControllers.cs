@@ -15,6 +15,7 @@ using PMIMS.Domain;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace PMIMS.WebAPI.Controllers;
 
@@ -298,7 +299,7 @@ public partial class PMIMSControllers : ControllerBase
                         metal_type = itemsInSlot.FirstOrDefault()?.Product?.MetalType?.MetalName
                     };
                 })
-                .OrderBy(s => s.slot_bin)
+                .OrderBy(s => ExtractSlotNumber(s.slot_bin))
                 .ToList();
 
                 return new
@@ -314,10 +315,16 @@ public partial class PMIMSControllers : ControllerBase
                     slots
                 };
             })
-            .OrderBy(g => g.shelf_row)
+            .OrderBy(g => ExtractSlotNumber(g.shelf_row))
             .ToList();
 
         return Ok(grouped);
+    }
+
+    private static int ExtractSlotNumber(string text)
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(text ?? "", @"\d+");
+        return match.Success ? int.Parse(match.Value) : 0;
     }
 
     [Authorize(Policy = "vault_location.write")]
@@ -351,6 +358,92 @@ public partial class PMIMSControllers : ControllerBase
         }
     }
 
+    [Authorize(Policy = "spatial_map.write")]
+    [HttpPost("vault/relocate")]
+    [HttpPost("catalog/locations/relocate")]
+    public async Task<IActionResult> RelocateItem([FromBody] RelocateItemRequest req)
+    {
+        try
+        {
+            int itemId = req.ItemId;
+            if (itemId <= 0 && !string.IsNullOrWhiteSpace(req.SerialNumber))
+            {
+                var allItems = await _repository.GetItemsAsync();
+                var matched = allItems.FirstOrDefault(i => string.Equals(i.SerialNumber, req.SerialNumber?.Trim(), StringComparison.OrdinalIgnoreCase));
+                if (matched != null) itemId = matched.ItemId;
+            }
+
+            if (itemId <= 0 || req.TargetLocationId <= 0)
+            {
+                return BadRequest(new { error = "Valid ItemId and TargetLocationId are required." });
+            }
+
+            var username = User.Identity?.Name ?? "SYSTEM";
+            var (success, message, item) = await _repository.RelocateInventoryItemAsync(itemId, req.TargetLocationId, username, req.Notes);
+            if (!success)
+            {
+                return BadRequest(new { error = message });
+            }
+
+            return Ok(new
+            {
+                success = true,
+                message,
+                item_id = item?.ItemId,
+                serial_number = item?.SerialNumber,
+                target_location_id = req.TargetLocationId,
+                target_location_context = item?.Location?.Description
+            });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
+    [Authorize(Policy = "spatial_map.write")]
+    [HttpPost("vault/batch-relocate")]
+    public async Task<IActionResult> BatchRelocateItems([FromBody] BatchRelocateRequest req)
+    {
+        try
+        {
+            if (req.ItemIds == null || req.ItemIds.Count == 0 || req.TargetLocationId <= 0)
+            {
+                return BadRequest(new { error = "Valid ItemIds list and TargetLocationId are required." });
+            }
+
+            var username = User.Identity?.Name ?? "SYSTEM";
+            var results = new List<object>();
+            var errors = new List<string>();
+
+            foreach (var itemId in req.ItemIds)
+            {
+                var (success, message, item) = await _repository.RelocateInventoryItemAsync(itemId, req.TargetLocationId, username, req.Notes);
+                if (success)
+                {
+                    results.Add(new { item_id = itemId, serial_number = item?.SerialNumber, success = true, message });
+                }
+                else
+                {
+                    errors.Add($"Item #{itemId}: {message}");
+                }
+            }
+
+            return Ok(new
+            {
+                success = errors.Count == 0,
+                relocated_count = results.Count,
+                errors_count = errors.Count,
+                results,
+                errors
+            });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
     [HttpGet("stock/items")]
     public async Task<IActionResult> GetItemsRegistry()
     {
@@ -365,7 +458,20 @@ public partial class PMIMSControllers : ControllerBase
             location = i.Location?.Description ?? "Unknown",
             location_id = i.LocationId,
             status = i.StatusCode,
-            ownership = i.OwnershipType
+            ownership = i.OwnershipType,
+            customer_account_number = i.CustomerAccountNumber,
+            customer_rim_number = i.CustomerRimNumber,
+            average_purchase_cost = i.AveragePurchaseCost,
+            production_cost_kwd = i.ProductionCostKwd,
+            gfs_last_sync_at = i.GfsLastSyncAt,
+            is_damaged = i.IsDamaged,
+            damage_status = i.DamageApprovalStatus ?? (i.IsDamaged ? "APPROVED" : "NONE"),
+            damage_reason = i.DamageReason,
+            damage_description = i.DamageDescription,
+            damage_doc_id = i.DamageEvidenceDocId,
+            damage_reported_by = i.DamageReportedBy,
+            damage_approved_by = i.DamageApprovedBy,
+            damage_approved_at = i.DamageApprovedAt
         }));
     }
 
@@ -424,152 +530,7 @@ public partial class PMIMSControllers : ControllerBase
         return Ok(stock);
     }
 
-    [Authorize(Policy = "purchase_orders.write")]
-    [HttpPost("purchase-orders")]
-    public async Task<IActionResult> CreatePurchaseOrder([FromBody] CreatePORequest req)
-    {
-        try
-        {
-            // VALIDATION: Ensure PURCHASE_ORDER workflow template exists before allowing PO creation
-            var poWorkflow = await _repository.GetWorkflowTemplateByTypeAsync("PURCHASE_ORDER");
-            if (poWorkflow == null || !poWorkflow.IsActive)
-            {
-                return BadRequest(new {
-                    error = "Cannot create Purchase Order: No active PURCHASE_ORDER workflow template is configured. Please contact an administrator to set up the workflow first."
-                });
-            }
 
-            string itemsJson = JsonSerializer.Serialize(req.Items);
-            var (poId, result) = await _repository.CreatePurchaseOrderAsync(req.PoNumber, req.VendorId, req.TotalWeightGrams, req.TotalCost, req.Currency, req.CreatedBy, itemsJson,
-                req.SupplierInvoiceNumber, req.SupplierInvoiceDate, req.FreightCost, req.InsuranceCost, req.CustomsDutyCost, req.OtherFeesCost, req.OtherFeesDescription);
-
-            if (result != "SUCCESS") return BadRequest(result);
-            return Created($"/api/purchase-orders/{poId}", new { po_id = poId, message = "Purchase Order created and staged under Maker-Checker review." });
-        }
-        catch (Exception ex)
-        {
-            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
-        }
-    }
-
-    [Authorize(Policy = "purchase_orders.write")]
-    [HttpPut("purchase-orders/{id}")]
-    public async Task<IActionResult> UpdatePurchaseOrder(int id, [FromBody] CreatePORequest req)
-    {
-        try
-        {
-            string itemsJson = JsonSerializer.Serialize(req.Items);
-            var success = await _repository.UpdatePurchaseOrderAsync(id, req.VendorId, req.TotalWeightGrams, req.TotalCost, req.Currency, req.CreatedBy, itemsJson,
-                req.SupplierInvoiceNumber, req.SupplierInvoiceDate, req.FreightCost, req.InsuranceCost, req.CustomsDutyCost, req.OtherFeesCost, req.OtherFeesDescription);
-            if (!success) return NotFound();
-            return Ok(new { message = "Purchase Order amended successfully." });
-        }
-        catch (Exception ex)
-        {
-            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
-        }
-    }
-
-    // Deletion is a harder action than the ordinary create/edit covered by
-    // "purchase_orders.write" (FULL is held by Maker too) -- it erases the P.O.'s audit
-    // and workflow trail entirely rather than amending it, so it's reserved for IT/Admin
-    // regardless of the caller's purchase_orders module grant.
-    [Authorize]
-    [HttpDelete("purchase-orders/{id}")]
-    public async Task<IActionResult> DeletePurchaseOrder(int id, [FromQuery] string? username)
-    {
-        if (!User.IsInRole("IT/Admin"))
-        {
-            return Forbid();
-        }
-        try
-        {
-            var result = await _repository.DeletePurchaseOrderAsync(id, username ?? User.Identity?.Name ?? "unknown");
-            if (result == "SUCCESS") return Ok(new { message = "Purchase Order deleted." });
-            if (result == "PO_NOT_FOUND") return NotFound();
-            return BadRequest(new { error = result });
-        }
-        catch (Exception ex)
-        {
-            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
-        }
-    }
-
-    [Authorize(Policy = "purchase_orders.read")]
-    [HttpGet("purchase-orders")]
-    public async Task<IActionResult> GetPurchaseOrders()
-    {
-        var list = await _repository.GetPurchaseOrdersAsync();
-        var activeInstances = (await _repository.GetActiveWorkflowInstancesAsync()).ToList();
-        var templates = (await _repository.GetWorkflowTemplatesAsync()).ToList();
-
-        var poList = new List<object>();
-        foreach (var po in list)
-        {
-            string? requiredRole = null;
-            bool isWithMaker = false;
-            var inst = activeInstances.FirstOrDefault(i => i.WorkflowType == "PURCHASE_ORDER" && i.EntityId == po.PoId);
-            if (inst != null)
-            {
-                var template = templates.FirstOrDefault(t => t.TemplateId == inst.TemplateId);
-                var currentStep = template?.Steps.FirstOrDefault(s => s.StepOrder == inst.CurrentStepOrder);
-                
-                var historyActions = await _repository.GetApprovalActionsForInstanceAsync(inst.InstanceId);
-                var lastAction = historyActions.OrderByDescending(a => a.ActionTimestamp).ThenByDescending(a => a.ActionId).FirstOrDefault();
-                
-                if (lastAction != null && lastAction.ActionTaken == "RETURNED")
-                {
-                    isWithMaker = true;
-                    requiredRole = "Operations Maker";
-                }
-                else
-                {
-                    isWithMaker = false;
-                    requiredRole = currentStep?.RequiredRole;
-                }
-            }
-
-            var firstItem = po.Items?.FirstOrDefault();
-            poList.Add(new {
-                po_id = po.PoId,
-                po_number = po.PoNumber,
-                vendor_id = po.VendorId,
-                supplier = po.Vendor?.VendorName ?? "Unknown Supplier",
-                weight = po.TotalWeightGrams,
-                cost = po.TotalCost,
-                currency = po.Currency,
-                // Cost Tracking & Valuation -- purchase cost detail + the landed cost that
-                // actually feeds InventoryLot.AverageUnitCost at intake (see PurchaseOrder.LandedCost).
-                supplier_invoice_number = po.SupplierInvoiceNumber,
-                supplier_invoice_date = po.SupplierInvoiceDate,
-                freight_cost = po.FreightCost,
-                insurance_cost = po.InsuranceCost,
-                customs_duty_cost = po.CustomsDutyCost,
-                other_fees_cost = po.OtherFeesCost,
-                other_fees_description = po.OtherFeesDescription,
-                landed_cost = po.LandedCost,
-                status_code = po.StatusCode,
-                created_by = po.CreatedBy,
-                approved_by = po.ApprovedBy,
-                required_role = requiredRole,
-                is_with_maker = isWithMaker,
-                // Back-compat aliases for any caller still reading a single item: first line's
-                // product, and total units summed across all lines.
-                product_id = firstItem?.ProductId ?? 1,
-                qty = po.Items != null && po.Items.Count > 0 ? po.Items.Sum(i => i.OrderedQuantity) : 1,
-                line_count = po.Items?.Count ?? 0,
-                // Full line-item breakdown (per-unit weight is resolved on the frontend from the product catalog).
-                items = (po.Items ?? new List<POItem>()).Select(i => new {
-                    product_id = i.ProductId,
-                    product_code = i.Product?.ProductCode,
-                    qty = i.OrderedQuantity,
-                    unit_cost = i.UnitCost,
-                    received = i.ReceivedQuantity
-                })
-            });
-        }
-        return Ok(poList);
-    }
 
     [HttpPost("vault/intake")]
     [Authorize(Policy = "intake.write")]
@@ -594,14 +555,22 @@ public partial class PMIMSControllers : ControllerBase
             }
 
             string itemsJson = JsonSerializer.Serialize(req.Items);
-            int? poId = (req.PoId == 0) ? null : req.PoId;
+            string? prodCostsJson = req.ProductionCosts != null && req.ProductionCosts.Count > 0
+                ? JsonSerializer.Serialize(req.ProductionCosts)
+                : null;
+            int locationId = req.LocationId > 0 ? req.LocationId : 1;
+            string initiator = User?.Identity?.Name ?? req.ReceivedBy;
             var pending = await _repository.InitiateWorkflowIntakeAsync(
-                poId, req.LotNumber, req.LocationId, req.ReceivedBy, itemsJson,
+                req.LotNumber, locationId, initiator, itemsJson,
                 sourceType: "SUPPLIER", customerId: null, accountId: null, receiptReason: null,
                 vendorId: vendorId, shipmentReference: req.ShipmentReference, deliveryNoteNumber: req.DeliveryNoteNumber,
                 airwayBillNumber: req.AirwayBillNumber, supportingDocumentUrl: req.SupportingDocumentUrl,
                 discrepancyNotes: req.DiscrepancyNotes, receivingDate: req.ReceivingDate,
-                ownershipType: string.IsNullOrWhiteSpace(req.OwnershipType) ? "KFH_OWNED" : req.OwnershipType);
+                ownershipType: string.IsNullOrWhiteSpace(req.OwnershipType) ? "CUSTOMS_OWNED" : req.OwnershipType,
+                customsDeclarationNumber: req.CustomsDeclarationNumber,
+                customsDutyAmount: req.CustomsDutyAmount,
+                portOfEntry: req.PortOfEntry,
+                productionCostsJson: prodCostsJson);
 
             return Ok(new { pending_id = pending.PendingIntakeId, message = "Intake shipment verification request initiated and routed to the Maker-Checker workflow approval." });
         }
@@ -611,12 +580,110 @@ public partial class PMIMSControllers : ControllerBase
         }
     }
 
+    [HttpPost("vault/intake/customs-clearance")]
+    [Authorize(Policy = "intake.write")]
+    public async Task<IActionResult> ClearCustomsShipment([FromBody] ClearCustomsRequest req)
+    {
+        try
+        {
+            var username = User?.Identity?.Name ?? "system-admin";
+            var result = await _repository.ClearCustomsShipmentAsync(req.PendingIntakeIdOrLotId, req.TargetOwnership, username, req.ClearanceNotes);
+            if (result != "SUCCESS")
+            {
+                return BadRequest(new { error = result });
+            }
+            return Ok(new { message = $"Customs shipment successfully cleared and transferred to {req.TargetOwnership}." });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
+    [HttpPost("vault/intake/customs-transfer/initiate")]
+    [Authorize(Policy = "intake.write")]
+    public async Task<IActionResult> InitiateCustomsTransfer([FromBody] InitiateCustomsTransferRequest req)
+    {
+        try
+        {
+            var username = User?.Identity?.Name ?? "treasury-maker";
+            var result = await _repository.InitiateCustomsTransferWorkflowAsync(
+                req.LotId,
+                req.ItemId,
+                req.TargetOwnership,
+                username,
+                req.ClearanceNotes,
+                req.CustomsDeclarationNumber,
+                req.CustomsDutyAmount,
+                req.PortOfEntry
+            );
+            return Ok(new
+            {
+                message = "Customs ownership transfer workflow initiated successfully.",
+                pending_transfer_id = result.PendingTransferId,
+                target_ownership = result.TargetOwnership,
+                status_code = result.StatusCode
+            });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
+    [HttpGet("vault/intake/customs-transfers")]
+    [Authorize(Policy = "intake.read")]
+    public async Task<IActionResult> GetCustomsTransfers()
+    {
+        var list = await _repository.GetPendingCustomsTransfersAsync();
+        return Ok(list.Select(ct => new
+        {
+            pending_transfer_id = ct.PendingTransferId,
+            lot_id = ct.LotId,
+            lot_number = ct.Lot?.LotNumber,
+            item_id = ct.ItemId,
+            serial_number = ct.Item?.SerialNumber,
+            target_ownership = ct.TargetOwnership,
+            requested_by = ct.RequestedBy,
+            clearance_notes = ct.ClearanceNotes,
+            customs_declaration_number = ct.CustomsDeclarationNumber,
+            customs_duty_amount = ct.CustomsDutyAmount,
+            port_of_entry = ct.PortOfEntry,
+            status_code = ct.StatusCode,
+            created_at = ct.CreatedAt,
+            approved_by = ct.ApprovedBy,
+            approved_at = ct.ApprovedAt
+        }));
+    }
+
+    [HttpGet("vault/intake/customs-shipments")]
+    [Authorize(Policy = "intake.read")]
+    public async Task<IActionResult> GetCustomsShipments()
+    {
+        var list = await _repository.GetCustomsShipmentsAsync();
+        return Ok(list.Select(s => new
+        {
+            lot_id = s.LotId,
+            lot_number = s.LotNumber,
+            shipment_reference = s.ShipmentReference,
+            vendor_name = s.VendorName,
+            customs_declaration_number = s.CustomsDeclarationNumber,
+            customs_duty_amount = s.CustomsDutyAmount,
+            port_of_entry = s.PortOfEntry,
+            total_bars = s.TotalBars,
+            total_weight_kg = s.TotalWeightKg,
+            status_code = s.StatusCode,
+            created_at = s.CreatedAt
+        }));
+    }
+
     [HttpGet("vault/intake/pending")]
     [Authorize(Policy = "intake.read")]
     public async Task<IActionResult> GetPendingIntakes()
     {
         var list = await _repository.GetPendingIntakesAsync();
-        return Ok(list.Select(pi => new {
+        var activePending = list.Where(pi => pi.StatusCode != "REJECTED" && pi.StatusCode != "APPROVED" && pi.StatusCode != "CANCELLED" && pi.StatusCode != "COMPLETED");
+        return Ok(activePending.Select(pi => new {
             pending_id = pi.PendingIntakeId,
             lot_number = pi.LotNumber,
             source_type = pi.SourceType,
@@ -629,12 +696,45 @@ public partial class PMIMSControllers : ControllerBase
             supporting_document_url = pi.SupportingDocumentUrl,
             discrepancy_notes = pi.DiscrepancyNotes,
             receiving_date = pi.ReceivingDate ?? pi.CreatedAt,
+            customs_declaration_number = pi.CustomsDeclarationNumber,
+            customs_duty_amount = pi.CustomsDutyAmount,
+            port_of_entry = pi.PortOfEntry,
+            customs_clearance_date = pi.CustomsClearanceDate,
             status_code = pi.StatusCode,
             received_by = pi.ReceivedBy,
             location_id = pi.LocationId,
             location_desc = pi.Location != null ? $"{pi.Location.ZoneRoom} - {pi.Location.ShelfRow} - {pi.Location.SlotBin}" : "Main Vault",
             serials_json = pi.SerialsJsonList,
+            production_costs_json = pi.ProductionCostsJson,
             created_at = pi.CreatedAt
+        }));
+    }
+
+    [HttpPost("vault/intake/validate-serials")]
+    [Authorize(Policy = "intake.read")]
+    public async Task<IActionResult> ValidateIntakeSerials([FromBody] IntakeSerialValidationRequest req)
+    {
+        var result = await _repository.ValidateIntakeSerialsAsync(req.SerialNumbers, req.SourceType, req.ProductId);
+        return Ok(result);
+    }
+
+    [HttpGet("vault/shipments/production-costs")]
+    [Authorize(Policy = "intake.read")]
+    public async Task<IActionResult> GetShipmentProductionCosts([FromQuery] int? pendingIntakeId, [FromQuery] int? lotId)
+    {
+        var costs = await _repository.GetShipmentProductionCostsAsync(pendingIntakeId, lotId);
+        return Ok(costs.Select(c => new {
+            id = c.Id,
+            pending_intake_id = c.PendingIntakeId,
+            lot_id = c.LotId,
+            shipment_reference = c.ShipmentReference,
+            metal_type_id = c.MetalTypeId,
+            metal_type_name = c.MetalType?.MetalName,
+            denomination_id = c.DenominationId,
+            denomination_weight_grams = c.Denomination?.WeightGrams,
+            denomination_name = c.Denomination != null ? (c.Denomination.WeightGrams >= 1000 ? $"{c.Denomination.WeightGrams / 1000m} KG" : $"{c.Denomination.WeightGrams}g") : null,
+            production_cost_kwd = c.ProductionCostKwd,
+            created_at = c.CreatedAt
         }));
     }
 
@@ -657,8 +757,9 @@ public partial class PMIMSControllers : ControllerBase
             }
 
             string itemsJson = JsonSerializer.Serialize(req.Items);
-            var pending = await _repository.InitiateWorkflowIntakeAsync(null, req.LotNumber, req.LocationId, req.ReceivedBy, itemsJson,
-                sourceType: "CUSTOMER", customerId: req.CustomerId, accountId: req.AccountId, receiptReason: req.ReceiptReason);
+            var pending = await _repository.InitiateWorkflowIntakeAsync(req.LotNumber, req.LocationId, req.ReceivedBy, itemsJson,
+                sourceType: "CUSTOMER", customerId: req.CustomerId, accountId: req.AccountId, receiptReason: req.ReceiptReason,
+                transferToMainVault: req.TransferToMainVault, courierInfo: req.CourierInfo, destinationBranchId: req.DestinationBranchId);
             return Ok(new { pending_id = pending.PendingIntakeId, message = "Customer receipt verification request initiated and routed to the Maker-Checker workflow approval." });
         }
         catch (Exception ex)
@@ -671,10 +772,17 @@ public partial class PMIMSControllers : ControllerBase
     [HttpPost("transfers")]
     public async Task<IActionResult> TransferStock([FromBody] TransferRequest req)
     {
-        string result = await _repository.InitiateBranchTransferAsync(req.ItemId, req.DestinationLocationId, req.CourierInfo, req.InitiatedBy);
-        if (result != "SUCCESS") return BadRequest(result);
+        try
+        {
+            string result = await _repository.InitiateBranchTransferAsync(req.ItemId, req.DestinationLocationId, req.CourierInfo, req.InitiatedBy, req.TransferType, req.ReturnReason, req.Notes);
+            if (result != "SUCCESS") return BadRequest(result);
 
-        return Ok(new { message = "Branch transfer initiated successfully. Stock locked in TRANSIT status." });
+            return Ok(new { message = "Branch transfer initiated successfully. Stock locked in TRANSIT status." });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
     }
 
     [Authorize(Policy = "intake.write")]
@@ -700,8 +808,9 @@ public partial class PMIMSControllers : ControllerBase
                 }
             }
 
+            string initiator = User?.Identity?.Name ?? req.InitiatedBy;
             var transfer = await _repository.InitiateWorkflowBranchTransferAsync(
-                req.ItemId, req.DestinationBranchId, req.CourierInfo, req.InitiatedBy);
+                req.ItemId, req.DestinationBranchId, req.CourierInfo, initiator, req.TransferType, req.ReturnReason, req.Notes);
 
             return Ok(new { transfer_id = transfer.TransferId, message = "Branch transfer workflow initiated successfully." });
         }
@@ -713,40 +822,142 @@ public partial class PMIMSControllers : ControllerBase
 
     [Authorize(Policy = "intake.read")]
     [HttpGet("transfers")]
-    public async Task<IActionResult> GetBranchTransfers()
+    public async Task<IActionResult> GetBranchTransfers([FromQuery] string? direction = null, [FromQuery] int? branch_id = null)
     {
         var list = await _repository.GetBranchTransfersAsync();
-        return Ok(list.Select(t => new {
-            transfer_id = t.TransferId,
-            item_id = t.ItemId,
-            serial_number = t.Item?.SerialNumber ?? "Unknown",
-            metal = t.Item?.Product?.MetalType?.MetalName ?? "Gold",
-            denomination = t.Item?.Product?.Denomination?.Label ?? "Bar",
-            source_branch_id = t.SourceBranchId,
-            source_branch = t.SourceBranch?.BranchName ?? "Main Vault",
-            destination_branch_id = t.DestinationBranchId,
-            destination_branch = t.DestinationBranch?.BranchName ?? "Branch",
-            courier_info = t.CourierInfo,
-            status_code = t.StatusCode,
-            created_by = t.CreatedBy,
-            created_at = t.CreatedAt,
-            approved_by = t.ApprovedBy
+        var allHoldings = (await _repository.GetAllCustomerHoldingsAsync())
+            .Where(h => h.StatusCode == "ACTIVE" || h.StatusCode == "HELD_IN_CUSTODY")
+            .ToList();
+        var holdingByItemId = allHoldings.GroupBy(h => h.ItemId).ToDictionary(g => g.Key, g => g.First());
+
+        var filtered = list.AsEnumerable();
+        if (!string.IsNullOrWhiteSpace(direction))
+        {
+            if (direction.Equals("outbound", StringComparison.OrdinalIgnoreCase) || direction.Equals("outbound_to_branch", StringComparison.OrdinalIgnoreCase))
+            {
+                filtered = filtered.Where(t => t.TransferType == "OUTBOUND_TO_BRANCH" || (t.SourceBranchId == 1 && t.DestinationBranchId != 1));
+            }
+            else if (direction.Equals("return", StringComparison.OrdinalIgnoreCase) || direction.Equals("return_to_vault", StringComparison.OrdinalIgnoreCase))
+            {
+                filtered = filtered.Where(t => t.TransferType == "RETURN_TO_VAULT" || t.DestinationBranchId == 1);
+            }
+        }
+        if (branch_id.HasValue && branch_id.Value > 0)
+        {
+            filtered = filtered.Where(t => t.SourceBranchId == branch_id.Value || t.DestinationBranchId == branch_id.Value);
+        }
+
+        return Ok(filtered.Select(t => {
+            holdingByItemId.TryGetValue(t.ItemId, out var holding);
+            string custName = holding?.Customer?.CustomerName ?? holding?.CustomerName ?? (t.Item?.OwnershipType == "KFH_OWNED" ? "Kuwait Finance House (KFH Treasury)" : "Customer Owned");
+            string acctNo = holding?.Account?.AccountNumber ?? (t.Item?.OwnershipType == "KFH_OWNED" ? "KFH-TREASURY-01" : "N/A");
+
+            return new {
+                transfer_id = t.TransferId,
+                request_number = $"TR-{t.TransferId:D6}",
+                item_id = t.ItemId,
+                serial_number = t.Item?.SerialNumber ?? "Unknown",
+                qr_code = t.Item?.SerialNumber ?? "",
+                metal = t.Item?.Product?.MetalType?.MetalName ?? "Gold",
+                denomination = t.Item?.Product?.Denomination?.Label ?? "Bar",
+                weight_grams = t.Item?.Product?.Denomination?.WeightGrams ?? 0,
+                purity = t.Item?.Product?.Purity?.PurityValue ?? 0.9999m,
+                ownership_type = t.Item?.OwnershipType ?? "CUSTOMER_OWNED",
+                customer_name = custName,
+                account_no = acctNo,
+                customer_id = holding?.CustomerId,
+                customer_rim = holding?.CustomerRim ?? holding?.Customer?.CivilId,
+                count = 1,
+                source_branch_id = t.SourceBranchId,
+                source_branch = t.SourceBranch?.BranchName ?? "Main Vault",
+                destination_branch_id = t.DestinationBranchId,
+                destination_branch = t.DestinationBranch?.BranchName ?? "Branch",
+                courier_info = t.CourierInfo,
+                transfer_type = t.TransferType ?? "OUTBOUND_TO_BRANCH",
+                return_reason = t.ReturnReason,
+                notes = t.Notes,
+                status_code = t.StatusCode,
+                created_by = t.CreatedBy,
+                created_at = t.CreatedAt,
+                approved_by = t.ApprovedBy,
+                verified_qr_code = t.VerifiedQrCode,
+                receipt_initiated_by = t.ReceiptInitiatedBy,
+                receipt_approved_by = t.ReceiptApprovedBy,
+                received_at = t.ReceivedAt,
+                receipt_notes = t.ReceiptNotes,
+                discrepancy_reason = t.DiscrepancyReason
+            };
         }));
+    }
+
+    [Authorize(Policy = "intake.read")]
+    [HttpPost("transfers/{id}/verify-qr")]
+    public async Task<IActionResult> VerifyTransferQr([FromRoute] int id, [FromBody] VerifyTransferQrRequest req)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(req.QrCode))
+                return BadRequest(new { error = "QR Code or Barcode input is required for verification." });
+
+            var result = await _repository.ValidateTransferQrCodeAsync(id, req.QrCode);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
+    [Authorize(Policy = "intake.write")]
+    [HttpPost("transfers/{id}/initiate-receipt")]
+    public async Task<IActionResult> InitiateTransferReceiptWorkflow([FromRoute] int id, [FromBody] InitiateTransferReceiptRequest req)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(req.ScannedQr))
+                return BadRequest(new { error = "Scanned QR code is mandatory to initiate transfer receipt." });
+
+            string initiator = User?.Identity?.Name ?? "SYSTEM";
+            var transfer = await _repository.InitiateWorkflowBranchTransferReceiptAsync(id, req.ScannedQr, initiator, req.Notes, req.TargetLocationId);
+
+            return Ok(new {
+                transfer_id = transfer.TransferId,
+                message = "Transfer receipt Maker verification submitted. Routed to Checker for vault placement authorization."
+            });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
+    [Authorize(Policy = "intake.write")]
+    [HttpPost("transfers/{id}/initiate-return")]
+    public async Task<IActionResult> InitiateTransferReturnWorkflow([FromRoute] int id, [FromBody] InitiateTransferReturnRequest req)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(req.ReturnReason))
+                return BadRequest(new { error = "Return reason is mandatory." });
+
+            string initiator = User?.Identity?.Name ?? "SYSTEM";
+            var returnTransfer = await _repository.InitiateWorkflowBranchTransferReturnAsync(id, req.ReturnReason, initiator, req.Notes, req.CourierInfo);
+
+            return Ok(new {
+                transfer_id = returnTransfer.TransferId,
+                message = "Return-to-Vault transfer workflow initiated successfully."
+            });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
     }
 
     [Authorize(Policy = "intake.write")]
     [HttpPost("transfers/{id}/receive")]
     public async Task<IActionResult> ReceiveBranchTransfer([FromRoute] int id, [FromBody] ReceiveTransferRequest req)
     {
-        // VALIDATION: Ensure BRANCH_TRANSFER workflow template exists before allowing transfer receipt
-        var transferWorkflow = await _repository.GetWorkflowTemplateByTypeAsync("BRANCH_TRANSFER");
-        if (transferWorkflow == null || !transferWorkflow.IsActive)
-        {
-            return BadRequest(new {
-                error = "Cannot receive branch transfer: No active BRANCH_TRANSFER workflow template is configured. Please contact an administrator to set up the workflow first."
-            });
-        }
-
         var result = await _repository.ReceiveBranchTransferAsync(id, req.ReceivedBy);
         if (result != "SUCCESS") return BadRequest(new { error = result });
 
@@ -910,37 +1121,79 @@ public partial class PMIMSControllers : ControllerBase
 
     [Authorize(Policy = "reports.read")]
     [HttpGet("reports/holdings")]
-    public async Task<IActionResult> GetHoldingsReport()
+    public async Task<IActionResult> GetHoldingsReport([FromQuery] string? supplier = null)
     {
-        var holdings = await _repository.GetAllCustomerHoldingsAsync();
-        return Ok(holdings.Select(h => new
+        var holdings = (await _repository.GetAllCustomerHoldingsAsync()).ToList();
+        var holdingItemIds = holdings.Select(h => h.ItemId).ToHashSet();
+        
+        var standaloneCustodyItems = (await _repository.GetItemsAsync())
+            .Where(i => (i.OwnershipType == "CUSTOMER_OWNED" || i.StatusCode == "HELD_IN_CUSTODY") && !holdingItemIds.Contains(i.ItemId))
+            .ToList();
+
+        var list = new List<object>();
+        foreach (var h in holdings)
         {
-            holding_id = h.HoldingId,
-            civil_id = h.Customer?.CivilId,
-            customer_name = h.Customer?.CustomerName,
-            serial_number = h.Item?.SerialNumber,
-            metal_name = h.Item?.Product?.MetalType?.MetalName,
-            weight_grams = h.Item?.Product?.Denomination?.WeightGrams,
-            purity_value = h.Item?.Product?.Purity?.PurityValue,
-            vault_name = h.Item?.Location?.Vault?.VaultName,
-            location_description = h.Item?.Location?.Description,
-            status_code = h.StatusCode,
-            custody_agreement_number = h.CustodyAgreementNumber
-        }));
+            list.Add(new
+            {
+                holding_id = h.HoldingId,
+                civil_id = h.Customer?.CivilId ?? h.CustomerRim,
+                customer_name = h.Customer?.CustomerName ?? h.CustomerName ?? "Customer",
+                serial_number = h.Item?.SerialNumber,
+                metal_name = h.Item?.Product?.MetalType?.MetalName,
+                weight_grams = h.Item?.Product?.Denomination?.WeightGrams,
+                purity_value = h.Item?.Product?.Purity?.PurityValue,
+                supplier_name = h.Item?.Lot?.Vendor?.VendorName ?? h.Item?.RefinerName ?? h.Item?.Product?.Brand?.BrandName ?? "N/A",
+                vault_name = h.Item?.Location?.Vault?.VaultName,
+                location_description = h.Item?.Location?.Description,
+                status_code = h.StatusCode,
+                custody_agreement_number = h.CustodyAgreementNumber
+            });
+        }
+
+        foreach (var item in standaloneCustodyItems)
+        {
+            list.Add(new
+            {
+                holding_id = -(item.ItemId),
+                civil_id = item.CustomerAccountNumber ?? "N/A",
+                customer_name = !string.IsNullOrWhiteSpace(item.CustomerAccountNumber) ? $"Account: {item.CustomerAccountNumber}" : "Customer Owned",
+                serial_number = item.SerialNumber,
+                metal_name = item.Product?.MetalType?.MetalName,
+                weight_grams = item.Product?.Denomination?.WeightGrams,
+                purity_value = item.Product?.Purity?.PurityValue,
+                supplier_name = item.Lot?.Vendor?.VendorName ?? item.RefinerName ?? item.Product?.Brand?.BrandName ?? "N/A",
+                vault_name = item.Location?.Vault?.VaultName,
+                location_description = item.Location?.Description,
+                status_code = item.StatusCode,
+                custody_agreement_number = $"CUST-{item.CustomerAccountNumber ?? item.SerialNumber}"
+            });
+        }
+
+        if (!string.IsNullOrWhiteSpace(supplier))
+        {
+            list = list.Where(h =>
+            {
+                var s = (string?)h.GetType().GetProperty("supplier_name")?.GetValue(h) ?? "";
+                return s.Contains(supplier, StringComparison.OrdinalIgnoreCase);
+            }).ToList();
+        }
+
+        return Ok(list);
     }
 
     [Authorize(Policy = "reports.read")]
     [HttpGet("reports/transactions")]
-    public async Task<IActionResult> GetTransactionsReport()
+    public async Task<IActionResult> GetTransactionsReport([FromQuery] string? supplier = null)
     {
         var txs = await _repository.GetTransactionsAsync();
-        return Ok(txs.Select(t => new
+        var mapped = txs.Select(t => new
         {
             transaction_id = t.TransactionId,
             transaction_number = t.TransactionNumber,
             serial_number = t.Item?.SerialNumber,
             metal_name = t.Item?.Product?.MetalType?.MetalName,
             weight_grams = t.Item?.Product?.Denomination?.WeightGrams,
+            supplier_name = t.Item?.Lot?.Vendor?.VendorName ?? t.Item?.RefinerName ?? t.Item?.Product?.Brand?.BrandName ?? "N/A",
             transaction_type = t.TransactionType,
             source_vault = t.SourceLocation?.Vault?.VaultName,
             source_location = t.SourceLocation?.Description,
@@ -951,7 +1204,14 @@ public partial class PMIMSControllers : ControllerBase
             initiated_by = t.InitiatedBy,
             approved_by = t.ApprovedBy,
             timestamp = t.TransactionTimestamp
-        }));
+        });
+
+        if (!string.IsNullOrWhiteSpace(supplier))
+        {
+            mapped = mapped.Where(t => t.supplier_name.Contains(supplier, StringComparison.OrdinalIgnoreCase));
+        }
+
+        return Ok(mapped);
     }
 
     // Assembles one movement's full traceability picture: the ledger row, its matched
@@ -967,9 +1227,19 @@ public partial class PMIMSControllers : ControllerBase
         return Ok(trace);
     }
 
+    [Authorize(Policy = "intake.read")]
+    [HttpGet("inventory/traceability/passport")]
+    public async Task<IActionResult> GetBarPassport([FromQuery] string query)
+    {
+        if (string.IsNullOrWhiteSpace(query)) return BadRequest(new { error = "Query parameter (serial number or bar ID) is required." });
+        var passport = await _repository.GetBarPassportAndHistoryAsync(query);
+        if (passport == null) return NotFound(new { error = $"Gold/Silver bar with identifier '{query}' was not found in vault records." });
+        return Ok(passport);
+    }
+
     [Authorize(Policy = "reports.read")]
     [HttpGet("reports/valuation")]
-    public async Task<IActionResult> GetValuationReport([FromQuery] string method = "AVERAGE")
+    public async Task<IActionResult> GetValuationReport([FromQuery] string method = "AVERAGE", [FromQuery] string? supplier = null)
     {
         var items = await _repository.GetItemsAsync();
         var goldRate = await _rateFeed.GetLiveRatesAsync("Gold");
@@ -1047,46 +1317,33 @@ public partial class PMIMSControllers : ControllerBase
                     denomination = item.Product?.Denomination?.Label,
                     weight_grams = weight,
                     purity = item.Product?.Purity?.PurityValue,
+                    supplier_name = item.Lot?.Vendor?.VendorName ?? item.RefinerName ?? item.Product?.Brand?.BrandName ?? "NADIR",
+                    vendor_code = item.Lot?.Vendor?.VendorCode ?? "",
                     location = item.Location?.Description ?? "Unknown",
                     status_code = item.StatusCode,
                     ownership_type = item.OwnershipType,
-                    cost_basis = Math.Round(costBasis, 2),
+                    is_damaged = item.IsDamaged,
+                    damage_status = item.DamageApprovalStatus ?? (item.IsDamaged ? "APPROVED" : "NONE"),
+                    damage_reason = item.DamageReason,
+                    damage_description = item.DamageDescription,
+                    average_cost = item.AveragePurchaseCost ?? 0m,
+                    cost_basis = (methodUpper == "FIFO" || methodUpper == "LIFO") ? costBasis : (item.AveragePurchaseCost ?? costBasis),
                     market_value = Math.Round(currentMarketValue, 2),
                     unrealized_pnl = Math.Round(unrealizedPnl, 2)
                 });
             }
         }
 
-        return Ok(valuationList);
-    }
-
-    // Cost Tracking & Valuation -- Core Banking (IMAL) GL Integration: every journal entry
-    // PMIMS has pushed (or attempted to push) to Core Banking's general ledger, newest first.
-    // Same `reports` module/tier as the rest of the financial reporting surface (valuation,
-    // transactions, reconciliation) -- this is the "did the ledger update actually happen"
-    // audit view for that integration, not a new operational workflow of its own.
-    [Authorize(Policy = "reports.read")]
-    [HttpGet("reports/gl-postings")]
-    public async Task<IActionResult> GetCoreBankingLedgerPostings()
-    {
-        var postings = await _repository.GetCoreBankingPostingsAsync();
-        return Ok(postings.Select(p => new
+        if (!string.IsNullOrWhiteSpace(supplier))
         {
-            posting_id = p.PostingId,
-            source_type = p.SourceType,
-            source_id = p.SourceId,
-            debit_account = p.DebitAccount,
-            credit_account = p.CreditAccount,
-            amount = p.Amount,
-            currency = p.Currency,
-            memo = p.Memo,
-            status_code = p.StatusCode,
-            core_banking_reference = p.CoreBankingReference,
-            response_message = p.ResponseMessage,
-            initiated_by = p.InitiatedBy,
-            created_at = p.CreatedAt,
-            posted_at = p.PostedAt
-        }));
+            valuationList = valuationList.Where(v =>
+            {
+                var s = (string?)v.GetType().GetProperty("supplier_name")?.GetValue(v) ?? "";
+                return s.Contains(supplier, StringComparison.OrdinalIgnoreCase);
+            }).ToList();
+        }
+
+        return Ok(valuationList);
     }
 
     // =========================================================================
@@ -1130,7 +1387,10 @@ public partial class PMIMSControllers : ControllerBase
         var instances = await _repository.GetActiveWorkflowInstancesAsync();
         var list = new List<object>();
         var templates = await _repository.GetWorkflowTemplatesAsync();
-        var purchaseOrders = await _repository.GetPurchaseOrdersAsync();
+        var allCustomerHoldings = (await _repository.GetAllCustomerHoldingsAsync())
+            .Where(h => h.StatusCode == "ACTIVE" || h.StatusCode == "HELD_IN_CUSTODY")
+            .ToList();
+        var holdingsByItemId = allCustomerHoldings.GroupBy(h => h.ItemId).ToDictionary(g => g.Key, g => g.First());
 
         foreach (var inst in instances)
         {
@@ -1139,26 +1399,7 @@ public partial class PMIMSControllers : ControllerBase
             var approvalActions = await _repository.GetApprovalActionsForInstanceAsync(inst.InstanceId);
             
             object? entityDetails = null;
-            if (inst.WorkflowType == "PURCHASE_ORDER")
-            {
-                var po = purchaseOrders.FirstOrDefault(p => p.PoId == inst.EntityId);
-                if (po != null)
-                {
-                    entityDetails = new
-                    {
-                        po_id = po.PoId,
-                        po_number = po.PoNumber,
-                        vendor_id = po.VendorId,
-                        vendor_name = po.Vendor?.VendorName,
-                        total_weight = po.TotalWeightGrams,
-                        total_cost = po.TotalCost,
-                        currency = po.Currency,
-                        status_code = po.StatusCode,
-                        created_by = po.CreatedBy
-                    };
-                }
-            }
-            else if (inst.WorkflowType == "INTAKE_SHIPMENT")
+            if (inst.WorkflowType == "INTAKE_SHIPMENT")
             {
                 var pendingIntakes = await _repository.GetPendingIntakesAsync();
                 var pending = pendingIntakes.FirstOrDefault(pi => pi.PendingIntakeId == inst.EntityId);
@@ -1176,8 +1417,6 @@ public partial class PMIMSControllers : ControllerBase
                         supporting_document_url = pending.SupportingDocumentUrl,
                         discrepancy_notes = pending.DiscrepancyNotes,
                         receiving_date = pending.ReceivingDate ?? pending.CreatedAt,
-                        po_id = pending.PoId,
-                        po_number = pending.SourceType == "CUSTOMER" ? null : (pending.PurchaseOrder?.PoNumber ?? "Direct Shipment"),
                         customer_id = pending.CustomerId,
                         customer_name = pending.Customer?.CustomerName,
                         account_id = pending.AccountId,
@@ -1187,7 +1426,12 @@ public partial class PMIMSControllers : ControllerBase
                         location_name = $"{pending.Location?.ZoneRoom}-{pending.Location?.ShelfRow}-{pending.Location?.SlotBin}",
                         received_by = pending.ReceivedBy,
                         status_code = pending.StatusCode,
+                        ownership_type = pending.OwnershipType,
+                        customs_declaration_number = pending.CustomsDeclarationNumber,
+                        customs_duty_amount = pending.CustomsDutyAmount,
+                        port_of_entry = pending.PortOfEntry,
                         serials_json = pending.SerialsJsonList,
+                        production_costs_json = pending.ProductionCostsJson,
                         created_by = pending.ReceivedBy
                     };
                 }
@@ -1198,17 +1442,67 @@ public partial class PMIMSControllers : ControllerBase
                 var tr = transfers.FirstOrDefault(t => t.TransferId == inst.EntityId);
                 if (tr != null)
                 {
+                    holdingsByItemId.TryGetValue(tr.ItemId, out var holding);
+                    string custName = holding?.Customer?.CustomerName ?? holding?.CustomerName ?? (tr.Item?.OwnershipType == "KFH_OWNED" ? "Kuwait Finance House (KFH Treasury)" : "Customer Owned");
+                    string acctNo = holding?.Account?.AccountNumber ?? (tr.Item?.OwnershipType == "KFH_OWNED" ? "KFH-TREASURY-01" : "N/A");
+
                     entityDetails = new
                     {
                         transfer_id = tr.TransferId,
+                        request_number = $"TR-{tr.TransferId:D6}",
                         item_id = tr.ItemId,
                         serial_number = tr.Item?.SerialNumber ?? "Unknown",
+                        customer_name = custName,
+                        account_number = acctNo,
                         product_name = tr.Item?.Product?.ProductCode ?? "Bar",
+                        denomination = tr.Item?.Product?.Denomination?.Label ?? "Bar",
+                        metal = tr.Item?.Product?.MetalType?.MetalName ?? "Gold",
+                        weight_grams = tr.Item?.Product?.Denomination?.WeightGrams ?? 0,
+                        count = 1,
+                        ownership_type = tr.Item?.OwnershipType ?? "CUSTOMER_OWNED",
                         source_branch = tr.SourceBranch?.BranchName ?? "Main Vault",
                         destination_branch = tr.DestinationBranch?.BranchName ?? "Branch",
                         courier_info = tr.CourierInfo,
+                        transfer_type = tr.TransferType ?? "OUTBOUND_TO_BRANCH",
+                        return_reason = tr.ReturnReason,
+                        notes = tr.Notes,
                         status_code = tr.StatusCode,
                         created_by = tr.CreatedBy
+                    };
+                }
+            }
+            else if (inst.WorkflowType == "TRANSFER_RECEIPT")
+            {
+                var transfers = await _repository.GetBranchTransfersAsync();
+                var tr = transfers.FirstOrDefault(t => t.TransferId == inst.EntityId);
+                if (tr != null)
+                {
+                    holdingsByItemId.TryGetValue(tr.ItemId, out var holding);
+                    string custName = holding?.Customer?.CustomerName ?? holding?.CustomerName ?? (tr.Item?.OwnershipType == "KFH_OWNED" ? "Kuwait Finance House (KFH Treasury)" : "Customer Owned");
+                    string acctNo = holding?.Account?.AccountNumber ?? (tr.Item?.OwnershipType == "KFH_OWNED" ? "KFH-TREASURY-01" : "N/A");
+
+                    entityDetails = new
+                    {
+                        transfer_id = tr.TransferId,
+                        request_number = $"TR-{tr.TransferId:D6}",
+                        item_id = tr.ItemId,
+                        serial_number = tr.Item?.SerialNumber ?? "Unknown",
+                        verified_qr_code = tr.VerifiedQrCode ?? tr.Item?.SerialNumber,
+                        customer_name = custName,
+                        account_number = acctNo,
+                        product_name = tr.Item?.Product?.ProductCode ?? "Bar",
+                        denomination = tr.Item?.Product?.Denomination?.Label ?? "Bar",
+                        metal = tr.Item?.Product?.MetalType?.MetalName ?? "Gold",
+                        weight_grams = tr.Item?.Product?.Denomination?.WeightGrams ?? 0,
+                        count = 1,
+                        ownership_type = tr.Item?.OwnershipType ?? "CUSTOMER_OWNED",
+                        source_branch = tr.SourceBranch?.BranchName ?? "Main Vault",
+                        destination_branch = tr.DestinationBranch?.BranchName ?? "Branch",
+                        courier_info = tr.CourierInfo,
+                        transfer_type = tr.TransferType ?? "OUTBOUND_TO_BRANCH",
+                        receipt_notes = tr.ReceiptNotes,
+                        status_code = tr.StatusCode,
+                        created_by = tr.ReceiptInitiatedBy ?? tr.CreatedBy
                     };
                 }
             }
@@ -1218,6 +1512,32 @@ public partial class PMIMSControllers : ControllerBase
                 var pur = purchases.FirstOrDefault(p => p.PendingPurchaseId == inst.EntityId);
                 if (pur != null)
                 {
+                    List<string> serials = new();
+                    try
+                    {
+                        serials = JsonSerializer.Deserialize<List<string>>(pur.SerialsJsonList ?? "[]") ?? new();
+                    }
+                    catch { }
+
+                    var allItems = await _repository.GetItemsAsync();
+                    var matchedItems = allItems
+                        .Where(i => serials.Contains(i.SerialNumber))
+                        .Select(i => new
+                        {
+                            item_id = i.ItemId,
+                            serial_number = i.SerialNumber,
+                            product_code = i.Product?.ProductCode ?? "N/A",
+                            product_name = i.Product?.Denomination?.Label ?? i.Product?.ProductCode ?? "Gold Bar",
+                            weight_grams = i.Product?.Denomination?.WeightGrams ?? 0,
+                            metal_type = i.Product?.MetalType?.MetalName ?? "Gold",
+                            purity = i.Product?.Purity?.PurityValue ?? i.FinenessPpt ?? 999.9m,
+                            brand_name = i.Product?.Brand?.BrandName ?? i.Product?.BrandName ?? i.RefinerName ?? "N/A",
+                            origin_country = i.Product?.OriginCountry ?? i.Product?.Brand?.CountryOfOrigin ?? (i.RefinerName != null && (i.RefinerName.Contains("IGR") || i.RefinerName.Contains("Nadir")) ? "Turkey" : "Switzerland"),
+                            status_code = i.StatusCode,
+                            location_code = i.Location?.Description ?? (i.Location != null ? $"{i.Location.ZoneRoom} - {i.Location.ShelfRow} - {i.Location.SlotBin}" : "Main Vault")
+                        })
+                        .ToList();
+
                     entityDetails = new
                     {
                         pending_purchase_id = pur.PendingPurchaseId,
@@ -1229,6 +1549,7 @@ public partial class PMIMSControllers : ControllerBase
                         requested_by = pur.RequestedBy,
                         notes = pur.Notes,
                         serials_json = pur.SerialsJsonList,
+                        items = matchedItems,
                         status_code = pur.StatusCode,
                         created_by = pur.RequestedBy
                     };
@@ -1251,6 +1572,121 @@ public partial class PMIMSControllers : ControllerBase
                         damage_doc_id = item.DamageEvidenceDocId,
                         status_code = item.StatusCode,
                         created_by = item.DamageReportedBy ?? "SYSTEM"
+                    };
+                }
+            }
+            else if (inst.WorkflowType == "THRESHOLD_CONFIG")
+            {
+                var change = await _repository.GetPendingThresholdChangeByIdAsync(inst.EntityId);
+                if (change != null)
+                {
+                    entityDetails = new
+                    {
+                        pending_change_id = change.PendingChangeId,
+                        change_type = change.ChangeType,
+                        threshold_type = change.ThresholdType,
+                        threshold_id = change.ThresholdId,
+                        product_id = change.ProductId,
+                        product_code = change.Product?.ProductCode ?? "",
+                        product_name = $"{change.Product?.MetalType?.MetalName ?? ""} {change.Product?.Denomination?.Label ?? ""}",
+                        vendor_id = change.VendorId,
+                        vendor_name = change.Vendor?.VendorName ?? "",
+                        min_stock_qty = change.MinStockQty,
+                        max_stock_qty = change.MaxStockQty,
+                        reorder_qty = change.ReorderQty,
+                        is_active = change.IsActive,
+                        status_code = change.StatusCode,
+                        created_by = change.RequestedBy,
+                        comments = change.Comments
+                    };
+                }
+            }
+            else if (inst.WorkflowType == "HOME_DELIVERY")
+            {
+                var hd = await _repository.GetHomeDeliveryRequestByIdAsync(inst.EntityId);
+                if (hd != null)
+                {
+                    entityDetails = new
+                    {
+                        request_id = hd.RequestId,
+                        delivery_number = hd.DeliveryNumber,
+                        customer_name = hd.CustomerName,
+                        customer_civil_id = hd.CustomerCivilId,
+                        customer_phone = hd.CustomerPhone,
+                        customer_account = hd.CustomerAccountNumber,
+                        governorate = hd.Governorate,
+                        area = hd.Area,
+                        block = hd.Block,
+                        street = hd.Street,
+                        building_house = hd.BuildingHouse,
+                        floor_flat = hd.FloorFlat,
+                        address = $"{hd.Governorate}, {hd.Area}, Block {hd.Block}, Street {hd.Street}, Building {hd.BuildingHouse}" + (!string.IsNullOrWhiteSpace(hd.FloorFlat) ? $", {hd.FloorFlat}" : ""),
+                        special_instructions = hd.SpecialInstructions,
+                        bar_id = hd.BarId,
+                        serial_number = hd.Bar?.SerialNumber,
+                        product_name = $"{hd.Bar?.Product?.MetalType?.MetalName ?? "Gold"} {hd.Bar?.Product?.Denomination?.Label ?? ""}",
+                        weight_grams = hd.Bar?.Product?.Denomination?.WeightGrams ?? 0,
+                        verification_otp = hd.VerificationOtp,
+                        status_code = hd.Status,
+                        created_by = hd.CreatedBy
+                    };
+                }
+            }
+            else if (inst.WorkflowType == "CUSTOMS_TRANSFER")
+            {
+                var transfers = await _repository.GetPendingCustomsTransfersAsync();
+                var ct = transfers.FirstOrDefault(t => t.PendingTransferId == inst.EntityId);
+                if (ct != null)
+                {
+                    entityDetails = new
+                    {
+                        pending_transfer_id = ct.PendingTransferId,
+                        lot_id = ct.LotId,
+                        lot_number = ct.Lot?.LotNumber,
+                        item_id = ct.ItemId,
+                        serial_number = ct.Item?.SerialNumber,
+                        target_ownership = ct.TargetOwnership,
+                        requested_by = ct.RequestedBy,
+                        clearance_notes = ct.ClearanceNotes,
+                        customs_declaration_number = ct.CustomsDeclarationNumber,
+                        customs_duty_amount = ct.CustomsDutyAmount,
+                        port_of_entry = ct.PortOfEntry,
+                        status_code = ct.StatusCode,
+                        created_by = ct.RequestedBy
+                    };
+                }
+            }
+            else if (inst.WorkflowType == "MISSING_ITEMS")
+            {
+                var reports = await _repository.GetPendingMissingItemReportsAsync();
+                var rep = reports.FirstOrDefault(r => r.PendingReportId == inst.EntityId);
+                if (rep != null)
+                {
+                    List<string> serials = new();
+                    try
+                    {
+                        serials = JsonSerializer.Deserialize<List<string>>(rep.SerialsJsonList ?? "[]") ?? new();
+                    }
+                    catch { }
+
+                    entityDetails = new
+                    {
+                        pending_report_id = rep.PendingReportId,
+                        report_reference = rep.ReportReference,
+                        ownership_type = rep.OwnershipType,
+                        lot_id = rep.LotId,
+                        lot_number = rep.LotNumber,
+                        total_items = rep.TotalItems,
+                        total_weight_grams = rep.TotalWeightGrams,
+                        discrepancy_reason = rep.DiscrepancyReason,
+                        serials_json = rep.SerialsJsonList,
+                        serials = serials,
+                        notes = rep.Notes,
+                        status_code = rep.StatusCode,
+                        requested_by = rep.RequestedBy,
+                        created_by = rep.RequestedBy,
+                        approved_by = rep.ApprovedBy,
+                        approved_at = rep.ApprovedAt
                     };
                 }
             }
@@ -1357,33 +1793,56 @@ public partial class PMIMSControllers : ControllerBase
             pending = pending.Where(p => p.CreatedAt < rangeEndExclusive.Value).ToList();
         }
 
-        var purchaseOrders = (await _repository.GetPurchaseOrdersAsync()).ToList();
         var pendingIntakes = (await _repository.GetPendingIntakesAsync()).ToList();
         var transfers = (await _repository.GetBranchTransfersAsync()).ToList();
 
         string Summarize(string workflowType, int entityId)
         {
-            if (workflowType == "PURCHASE_ORDER")
-            {
-                var po = purchaseOrders.FirstOrDefault(p => p.PoId == entityId);
-                return po != null ? $"PO {po.PoNumber} ({po.Vendor?.VendorName ?? "Vendor"})" : $"PO #{entityId}";
-            }
             if (workflowType == "INTAKE_SHIPMENT")
             {
                 var pi = pendingIntakes.FirstOrDefault(p => p.PendingIntakeId == entityId);
                 if (pi == null) return $"Intake #{entityId}";
                 return pi.SourceType == "CUSTOMER"
                     ? $"Intake lot {pi.LotNumber} (Customer {pi.Customer?.CustomerName ?? "Unknown"} -- {pi.ReceiptReason})"
-                    : $"Intake lot {pi.LotNumber} (PO {pi.PurchaseOrder?.PoNumber ?? "Unknown"})";
+                    : $"Intake lot {pi.LotNumber} (Shipment {pi.ShipmentReference ?? "Direct"})";
             }
             if (workflowType == "BRANCH_TRANSFER")
             {
                 var tr = transfers.FirstOrDefault(t => t.TransferId == entityId);
-                return tr != null ? $"Transfer {tr.Item?.SerialNumber ?? "item"} -> {tr.DestinationBranch?.BranchName ?? "branch"}" : $"Transfer #{entityId}";
+                if (tr == null) return $"Transfer #{entityId}";
+                string typePrefix = tr.TransferType == "RETURN_TO_VAULT" ? "Return to Vault" : (tr.TransferType == "INTER_BRANCH" ? "Inter-Branch Transfer" : "Branch Transfer");
+                string extra = !string.IsNullOrWhiteSpace(tr.ReturnReason) ? $" ({tr.ReturnReason})" : "";
+                return $"{typePrefix} {tr.Item?.SerialNumber ?? "item"} -> {tr.DestinationBranch?.BranchName ?? "branch"}{extra}";
+            }
+            if (workflowType == "TRANSFER_RECEIPT")
+            {
+                var tr = transfers.FirstOrDefault(t => t.TransferId == entityId);
+                if (tr == null) return $"Transfer Receipt #{entityId}";
+                return $"Transfer Receipt TR-{tr.TransferId:D6} (Bar {tr.Item?.SerialNumber ?? "item"} at {tr.DestinationBranch?.BranchName ?? "branch"})";
             }
             if (workflowType == "TURKEY_PURCHASE")
             {
                 return $"Turkey Purchase #{entityId}";
+            }
+            if (workflowType == "TURKEY_RETURN")
+            {
+                return $"Turkey Return #{entityId} (KFH/VIP -> Consignment)";
+            }
+            if (workflowType == "VIP_ALLOCATION")
+            {
+                return $"VIP Stock Allocation #{entityId}";
+            }
+            if (workflowType == "VIP_DISPENSE")
+            {
+                return $"VIP Dispensation #{entityId}";
+            }
+            if (workflowType == "CUSTOMS_TRANSFER")
+            {
+                return $"Customs Transfer #{entityId} (Bonded -> Turkey/Kuwait)";
+            }
+            if (workflowType == "MISSING_ITEMS")
+            {
+                return $"Missing Items Discrepancy #{entityId} (Turkey Consignment)";
             }
             return $"{workflowType} #{entityId}";
         }
@@ -1418,6 +1877,96 @@ public partial class PMIMSControllers : ControllerBase
             actions_taken = actionsTaken,
             pending = pendingList
         });
+    }
+
+    public static string DeterminePreciousType(InventoryItem i)
+    {
+        var metal = i.Product?.MetalType?.MetalName ?? "";
+        var code = i.Product?.ProductCode ?? "";
+        if (metal.Equals("Silver", StringComparison.OrdinalIgnoreCase) ||
+            code.StartsWith("AG-", StringComparison.OrdinalIgnoreCase) ||
+            code.Contains("SILVER", StringComparison.OrdinalIgnoreCase))
+        {
+            return "SILVER";
+        }
+
+        var origin = i.Product?.OriginCountry ?? "";
+        var brand = i.Product?.BrandName ?? i.Product?.Brand?.BrandName ?? "";
+        var refiner = i.RefinerName ?? "";
+        var serial = i.SerialNumber ?? "";
+        var vendorName = i.Lot?.Vendor?.VendorName ?? "";
+        var vendorCode = i.Lot?.Vendor?.VendorCode ?? "";
+        var vendorOrigin = i.Lot?.Vendor?.CountryOfOrigin ?? "";
+
+        // 1. Explicit Swiss product code, country of origin, brand, or serial prefix
+        if (code.Contains("SWISS", StringComparison.OrdinalIgnoreCase) ||
+            code.EndsWith("-CH", StringComparison.OrdinalIgnoreCase) ||
+            code.Contains("-CH-", StringComparison.OrdinalIgnoreCase) ||
+            origin.Contains("Switzerland", StringComparison.OrdinalIgnoreCase) ||
+            origin.Equals("CH", StringComparison.OrdinalIgnoreCase) ||
+            origin.Contains("Swiss", StringComparison.OrdinalIgnoreCase) ||
+            brand.Contains("Valcambi", StringComparison.OrdinalIgnoreCase) ||
+            brand.Contains("PAMP", StringComparison.OrdinalIgnoreCase) ||
+            brand.Contains("Argor", StringComparison.OrdinalIgnoreCase) ||
+            brand.Contains("Suisse", StringComparison.OrdinalIgnoreCase) ||
+            brand.Contains("Metalor", StringComparison.OrdinalIgnoreCase) ||
+            brand.Contains("KFH Custom Mint", StringComparison.OrdinalIgnoreCase) ||
+            refiner.Contains("Valcambi", StringComparison.OrdinalIgnoreCase) ||
+            refiner.Contains("PAMP", StringComparison.OrdinalIgnoreCase) ||
+            refiner.Contains("Argor", StringComparison.OrdinalIgnoreCase) ||
+            refiner.Contains("Suisse", StringComparison.OrdinalIgnoreCase) ||
+            refiner.Contains("Swiss", StringComparison.OrdinalIgnoreCase) ||
+            serial.StartsWith("VAL-", StringComparison.OrdinalIgnoreCase) ||
+            serial.StartsWith("PAMP-", StringComparison.OrdinalIgnoreCase) ||
+            serial.StartsWith("ARG-", StringComparison.OrdinalIgnoreCase) ||
+            serial.StartsWith("CH-", StringComparison.OrdinalIgnoreCase) ||
+            serial.StartsWith("SWISS-", StringComparison.OrdinalIgnoreCase))
+        {
+            return "SWISS";
+        }
+
+        // 2. Explicit Turkey product code, country of origin, brand, or serial prefix
+        if (code.Contains("TURK", StringComparison.OrdinalIgnoreCase) ||
+            code.EndsWith("-TR", StringComparison.OrdinalIgnoreCase) ||
+            code.Contains("-TR-", StringComparison.OrdinalIgnoreCase) ||
+            origin.Contains("Turkey", StringComparison.OrdinalIgnoreCase) ||
+            origin.Equals("TR", StringComparison.OrdinalIgnoreCase) ||
+            brand.Contains("Nadir", StringComparison.OrdinalIgnoreCase) ||
+            brand.Contains("IGR", StringComparison.OrdinalIgnoreCase) ||
+            brand.Contains("Istanbul", StringComparison.OrdinalIgnoreCase) ||
+            brand.Contains("Kuveyt", StringComparison.OrdinalIgnoreCase) ||
+            brand.Contains("Ahlatci", StringComparison.OrdinalIgnoreCase) ||
+            brand.Contains("AgaKulche", StringComparison.OrdinalIgnoreCase) ||
+            refiner.Contains("Nadir", StringComparison.OrdinalIgnoreCase) ||
+            refiner.Contains("IGR", StringComparison.OrdinalIgnoreCase) ||
+            refiner.Contains("Istanbul", StringComparison.OrdinalIgnoreCase) ||
+            refiner.Contains("Turkey", StringComparison.OrdinalIgnoreCase) ||
+            refiner.Contains("Turkish", StringComparison.OrdinalIgnoreCase) ||
+            refiner.Contains("Kuveyt", StringComparison.OrdinalIgnoreCase) ||
+            refiner.Contains("Ahlatci", StringComparison.OrdinalIgnoreCase) ||
+            serial.StartsWith("TR-", StringComparison.OrdinalIgnoreCase) ||
+            serial.StartsWith("TURK-", StringComparison.OrdinalIgnoreCase) ||
+            serial.StartsWith("TK-", StringComparison.OrdinalIgnoreCase) ||
+            serial.StartsWith("NAD-", StringComparison.OrdinalIgnoreCase) ||
+            serial.StartsWith("IGR-", StringComparison.OrdinalIgnoreCase) ||
+            serial.StartsWith("KT-", StringComparison.OrdinalIgnoreCase) ||
+            serial.Contains("-TR-", StringComparison.OrdinalIgnoreCase) ||
+            serial.Contains("-TURK-", StringComparison.OrdinalIgnoreCase))
+        {
+            return "TURKEY";
+        }
+
+        // 3. Fallback to vendor / supplier origin only if product origin is unspecified
+        if (vendorOrigin.Contains("Switzerland", StringComparison.OrdinalIgnoreCase) || vendorName.Contains("Valcambi", StringComparison.OrdinalIgnoreCase) || vendorName.Contains("PAMP", StringComparison.OrdinalIgnoreCase))
+        {
+            return "SWISS";
+        }
+        if (vendorOrigin.Contains("Turkey", StringComparison.OrdinalIgnoreCase) || vendorName.Contains("Nadir", StringComparison.OrdinalIgnoreCase) || vendorName.Contains("IGR", StringComparison.OrdinalIgnoreCase))
+        {
+            return "TURKEY";
+        }
+
+        return "SWISS";
     }
 
     // =========================================================================
@@ -1471,78 +2020,413 @@ public partial class PMIMSControllers : ControllerBase
         if (rangeEndExclusive.HasValue)
             holdings = holdings.Where(h => h.AllocationDate < rangeEndExclusive.Value);
 
+        var custodyItems = scopedItems.Where(i => i.OwnershipType == "CUSTOMER_OWNED" || i.StatusCode == "HELD_IN_CUSTODY").ToList();
+        foreach (var hItem in holdings.Where(h => h.Item != null).Select(h => h.Item!))
+        {
+            if (!custodyItems.Any(i => i.ItemId == hItem.ItemId))
+            {
+                custodyItems.Add(hItem);
+            }
+        }
+
         // ============================================================
-        // PURCHASE ORDER RECEIPT TRACKING
+        // Breakdown categories & Summation for all precious metals & owners:
+        // (KFH Turkey Offline, KFH Kuwait, Customers, Customs, Pending, Damage, and Transit)
         // ============================================================
-        var purchaseOrders = (await _repository.GetPurchaseOrdersAsync())
-            .AsEnumerable();
-        if (rangeStart.HasValue)
-            purchaseOrders = purchaseOrders.Where(p => p.CreatedAt >= rangeStart.Value);
-        if (rangeEndExclusive.HasValue)
-            purchaseOrders = purchaseOrders.Where(p => p.CreatedAt < rangeEndExclusive.Value);
-        var scopedPOs = purchaseOrders.ToList();
+        var turkeyItems = scopedItems.Where(i => i.OwnershipType == "TURKEY_OWNED" || i.OwnershipType == "PROPRIETARY" || i.OwnershipType == "KFH_TURKEY" || i.OwnershipType == "KFH_TURKEY_OFFLINE").ToList();
+        decimal turkeyWeightKg = WeightKg(turkeyItems);
+        int turkeyQty = turkeyItems.Count;
+
+        var kfhItems = scopedItems.Where(i => (i.OwnershipType == "KFH_OWNED" || i.OwnershipType == "VIP_OWNED" || i.OwnershipType == "KFH_KUWAIT") && i.StatusCode != "HELD_IN_CUSTODY").ToList();
+        decimal kfhWeightKg = WeightKg(kfhItems);
+        int kfhQty = kfhItems.Count;
+
+        var kfhOnlineItems = kfhItems.Where(i => (i.ChannelStatus == "ONLINE" || i.ChannelStatus == null) && i.OwnershipType != "VIP_OWNED").ToList();
+        decimal kfhOnlineWeightKg = WeightKg(kfhOnlineItems);
+        int kfhOnlineQty = kfhOnlineItems.Count;
+
+        var kfhOfflineItems = kfhItems.Where(i => i.ChannelStatus == "OFFLINE" || i.OwnershipType == "VIP_OWNED").ToList();
+        decimal kfhOfflineWeightKg = WeightKg(kfhOfflineItems);
+        int kfhOfflineQty = kfhOfflineItems.Count;
+
+        decimal vipWeightKg = kfhOfflineWeightKg;
+        int vipQty = kfhOfflineQty;
+
+        var customsItems = scopedItems.Where(i => i.OwnershipType == "CUSTOMS_OWNED" || i.OwnershipType == "CUSTOMS").ToList();
+        decimal customsWeightKg = WeightKg(customsItems);
+        int customsQty = customsItems.Count;
+
+        var transitItems = scopedItems.Where(i => i.StatusCode == "IN_TRANSFER").ToList();
+        decimal transitWeightKg = WeightKg(transitItems);
+        int transitQty = transitItems.Count;
+
+        var damagedItems = scopedItems.Where(i => i.IsDamaged || i.StatusCode == "QUARANTINED" || i.DamageApprovalStatus == "APPROVED" || i.DamageApprovalStatus == "PENDING_APPROVAL").ToList();
+        decimal damageWeightKg = WeightKg(damagedItems);
+        int damageQty = damagedItems.Count;
+
+        var pendingInvItems = scopedItems.Where(i => i.StatusCode == "PENDING_APPROVAL" || i.DamageApprovalStatus == "PENDING_APPROVAL").ToList();
+        var pendingTurkeyPurchases = (await _repository.GetPendingTurkeyPurchasesAsync())
+            .Where(p => p.StatusCode == "PENDING_APPROVAL").ToList();
+        decimal pendingTurkeyWeightGrams = pendingTurkeyPurchases.Sum(p => p.TotalWeightGrams);
+        int pendingTurkeyCount = pendingTurkeyPurchases.Sum(p => p.TotalItems);
+        decimal pendingWeightKg = Math.Round((pendingInvItems.Sum(i => i.Product?.Denomination?.WeightGrams ?? 0m) + pendingTurkeyWeightGrams) / 1000m, 3);
+        int pendingQty = pendingInvItems.Count + pendingTurkeyCount;
+
+        var allPreciousItems = scopedItems.Where(i =>
+            i.OwnershipType == "TURKEY_OWNED" ||
+            i.OwnershipType == "KFH_OWNED" ||
+            i.OwnershipType == "VIP_OWNED" ||
+            i.OwnershipType == "CUSTOMER_OWNED" ||
+            i.OwnershipType == "CUSTOMS_OWNED" ||
+            i.OwnershipType == "KFH_TURKEY" ||
+            i.OwnershipType == "KFH_KUWAIT" ||
+            i.OwnershipType == "CUSTOMS" ||
+            i.StatusCode == "IN_TRANSFER" ||
+            i.IsDamaged ||
+            i.StatusCode == "QUARANTINED" ||
+            i.StatusCode == "PENDING_APPROVAL" ||
+            i.StatusCode == "READY" ||
+            i.StatusCode == "RESERVED" ||
+            i.StatusCode == "HELD_IN_CUSTODY"
+        ).Distinct().ToList();
+
+        decimal totalPreciousWeightKg = Math.Round((allPreciousItems.Sum(i => i.Product?.Denomination?.WeightGrams ?? 0m) + pendingTurkeyWeightGrams) / 1000m, 3);
+        int totalPreciousQty = allPreciousItems.Count + pendingTurkeyCount;
+
+        var swissItems = scopedItems.Where(i => DeterminePreciousType(i) == "SWISS").ToList();
+        decimal swissWeightKg = WeightKg(swissItems);
+        int swissQty = swissItems.Count;
+
+        var turkeyGoldItems = scopedItems.Where(i => DeterminePreciousType(i) == "TURKEY").ToList();
+        decimal turkeyGoldWeightKg = WeightKg(turkeyGoldItems);
+        int turkeyGoldQty = turkeyGoldItems.Count;
+
+        var silverItems = scopedItems.Where(i => DeterminePreciousType(i) == "SILVER").ToList();
+        decimal silverWeightKg = WeightKg(silverItems);
+        int silverQty = silverItems.Count;
 
         return Ok(new
         {
+            total_precious_weight_kg = totalPreciousWeightKg,
+            total_precious_qty = totalPreciousQty,
+            swiss_gold_weight_kg = swissWeightKg,
+            swiss_gold_qty = swissQty,
+            turkey_gold_weight_kg = turkeyGoldWeightKg,
+            turkey_gold_qty = turkeyGoldQty,
+            silver_weight_kg = silverWeightKg,
+            silver_qty = silverQty,
+            damage_weight_kg = damageWeightKg,
+            damage_qty = damageQty,
+            transit_weight_kg = transitWeightKg,
+            transit_qty = transitQty,
+            pending_weight_kg = pendingWeightKg,
+            pending_qty = pendingQty,
+            turkey_weight_kg = turkeyWeightKg,
+            turkey_qty = turkeyQty,
+            kfh_turkey_offline_weight_kg = turkeyWeightKg,
+            kfh_turkey_offline_qty = turkeyQty,
+            kfh_weight_kg = kfhWeightKg,
+            kfh_qty = kfhQty,
+            kfh_kuwait_weight_kg = kfhWeightKg,
+            kfh_kuwait_qty = kfhQty,
+            customs_weight_kg = customsWeightKg,
+            customs_qty = customsQty,
+            vip_weight_kg = vipWeightKg,
+            vip_qty = vipQty,
+            total_precious = new
+            {
+                total_weight_kg = totalPreciousWeightKg,
+                total_weight_grams = Math.Round(totalPreciousWeightKg * 1000m, 1),
+                total_qty = totalPreciousQty,
+                swiss_gold_weight_kg = swissWeightKg,
+                swiss_gold_qty = swissQty,
+                turkey_gold_weight_kg = turkeyGoldWeightKg,
+                turkey_gold_qty = turkeyGoldQty,
+                silver_weight_kg = silverWeightKg,
+                silver_qty = silverQty,
+                turkey_weight_kg = turkeyWeightKg,
+                turkey_qty = turkeyQty,
+                kfh_turkey_offline_weight_kg = turkeyWeightKg,
+                kfh_turkey_offline_qty = turkeyQty,
+                kfh_weight_kg = kfhWeightKg,
+                kfh_qty = kfhQty,
+                kfh_kuwait_weight_kg = kfhWeightKg,
+                kfh_kuwait_qty = kfhQty,
+                customs_weight_kg = customsWeightKg,
+                customs_qty = customsQty,
+                customers_weight_kg = WeightKg(custodyItems),
+                customers_qty = custodyItems.Count,
+                kfh_online_weight_kg = kfhOnlineWeightKg,
+                kfh_online_qty = kfhOnlineQty,
+                kfh_offline_weight_kg = kfhOfflineWeightKg,
+                kfh_offline_qty = kfhOfflineQty,
+                vip_weight_kg = vipWeightKg,
+                vip_qty = vipQty,
+                transit_weight_kg = transitWeightKg,
+                transit_qty = transitQty,
+                damage_weight_kg = damageWeightKg,
+                damage_qty = damageQty,
+                pending_weight_kg = pendingWeightKg,
+                pending_qty = pendingQty
+            },
             total_gold_weight_kg = Math.Round(proprietaryBeforeTransferWeightGrams / 1000m, 3),
-            // Dropped the old `ready_qty` field: it used to be `i.StatusCode == "READY"` with
-            // no ownership check, which double-counted sold-but-still-custodied bars as
-            // available stock. Fixing that filter to require OwnershipType == KFH_OWNED made
-            // it numerically identical to `available_qty` below, so this was a duplicate
-            // dashboard card rather than a distinct metric -- see availableItems above.
             reserved_qty = scopedItems.Count(i => i.StatusCode == "RESERVED"),
             reserved_weight_kg = WeightKg(scopedItems.Where(i => i.StatusCode == "RESERVED").ToList()),
-            custody_qty = holdings.Count(),
-            custody_weight_kg = WeightKg(holdings.Select(h => h.Item).ToList()),
+            custody_qty = custodyItems.Count,
+            custody_weight_kg = WeightKg(custodyItems),
             main_vault_qty = mainVaultItems.Count,
             main_vault_weight_kg = WeightKg(mainVaultItems),
             sold_qty = soldItems.Count,
             sold_weight_kg = WeightKg(soldItems),
             available_qty = availableItems.Count,
             available_weight_kg = WeightKg(availableItems),
-            purchase_orders = new
+            items = scopedItems.Select(i =>
             {
-                total = scopedPOs.Count,
-                pending_approval = scopedPOs.Count(p => p.StatusCode == "PENDING_APPROVAL"),
-                approved = scopedPOs.Count(p => p.StatusCode == "APPROVED"),
-                partial_receipt = scopedPOs.Count(p => p.StatusCode == "PARTIAL_RECEIPT"),
-                fully_received = scopedPOs.Count(p => p.StatusCode == "RECEIVED")
-            },
-            purchase_order_list = scopedPOs.Select(p => new
-            {
-                po_id = p.PoId,
-                po_number = p.PoNumber,
-                vendor_name = p.Vendor?.VendorName ?? "Unknown",
-                status = p.StatusCode,
-                total_cost = p.TotalCost,
-                currency = p.Currency,
-                created_at = p.CreatedAt,
-                order_date = p.OrderDate,
-                expected_delivery = p.ExpectedDeliveryDate,
-                items = p.Items.Select(i => new
+                var pType = DeterminePreciousType(i);
+                var resolvedOrigin = !string.IsNullOrWhiteSpace(i.Product?.OriginCountry) && i.Product.OriginCountry != "Unknown"
+                    ? i.Product.OriginCountry
+                    : (pType == "TURKEY" ? "Turkey" : "Switzerland");
+                var resolvedBrand = !string.IsNullOrWhiteSpace(i.Product?.BrandName)
+                    ? i.Product.BrandName
+                    : (!string.IsNullOrWhiteSpace(i.Product?.Brand?.BrandName)
+                        ? i.Product.Brand.BrandName
+                        : (!string.IsNullOrWhiteSpace(i.RefinerName)
+                            ? i.RefinerName
+                            : (pType == "TURKEY" ? "Nadir Gold Refinery" : "Valcambi Suisse")));
+
+                return new
                 {
-                    product_id = i.ProductId,
-                    ordered_qty = i.OrderedQuantity,
-                    received_qty = i.ReceivedQuantity,
-                    product_name = i.Product?.ProductCode ?? "Unknown"
-                })
-            }),
-            items = scopedItems.Select(i => new
-            {
-                item_id = i.ItemId,
-                serial_number = i.SerialNumber,
-                metal = i.Product?.MetalType?.MetalName ?? "Unknown",
-                denomination = i.Product?.Denomination?.Label ?? "Unknown",
-                weight_grams = i.Product?.Denomination?.WeightGrams ?? 0m,
-                purity = i.Product?.Purity?.PurityValue ?? 0.9999m,
-                product_name = i.Product?.ProductCode ?? i.Product?.Denomination?.Label ?? "Gold Bar",
-                origin = i.Product?.OriginCountry ?? "Unknown",
-                location = i.Location?.Description ?? "Unknown",
-                location_id = i.LocationId,
-                status = i.StatusCode,
-                ownership = i.OwnershipType,
-                acquisition_date = i.Lot?.AcquisitionDate
+                    item_id = i.ItemId,
+                    serial_number = i.SerialNumber,
+                    metal = i.Product?.MetalType?.MetalName ?? (pType == "SILVER" ? "Silver" : "Gold"),
+                    denomination = i.Product?.Denomination?.Label ?? "Unknown",
+                    weight_grams = i.Product?.Denomination?.WeightGrams ?? 0m,
+                    purity = i.Product?.Purity?.PurityValue ?? 0.9999m,
+                    product_name = i.Product?.ProductCode ?? i.Product?.Denomination?.Label ?? "Gold Bar",
+                    product_code = i.Product?.ProductCode ?? "",
+                    brand_name = resolvedBrand,
+                    refiner_name = i.RefinerName ?? resolvedBrand,
+                    precious_type = pType,
+                    origin = resolvedOrigin,
+                    location = i.Location?.Description ?? "Unknown",
+                    location_id = i.LocationId,
+                    status = i.StatusCode,
+                    ownership = (i.OwnershipType == "VIP_OWNED" || (i.OwnershipType == "KFH_OWNED" && i.ChannelStatus == "OFFLINE")) ? "KFH_OWNED" : i.OwnershipType,
+                    channel_status = (i.ChannelStatus == "OFFLINE" || i.OwnershipType == "VIP_OWNED") ? "OFFLINE" : "ONLINE",
+                    channel_category = i.ChannelCategory ?? ((i.ChannelStatus == "OFFLINE" || i.OwnershipType == "VIP_OWNED") ? "VIP_EXCLUSIVE" : "RETAIL_ONLINE"),
+                    acquisition_date = i.Lot?.AcquisitionDate,
+                    is_damaged = i.IsDamaged,
+                    damage_status = i.DamageApprovalStatus ?? (i.IsDamaged ? "APPROVED" : "NONE"),
+                    damage_reason = i.DamageReason,
+                    damage_description = i.DamageDescription
+                };
             })
+        });
+    }
+
+    // =========================================================================
+    // INVENTORY HIERARCHY DASHBOARD (Card-based 4-Level Drill-Down in KG)
+    // Hierarchy: 1. Owner -> 2. Precious Metal Type -> 3. Location (incl. In-Transit Custody) -> 4. Denomination
+    // In-Transit Classification represents custody/movement, NOT ownership (retains actual owner).
+    // Owners: KFH Kuwait (KFH_OWNED), KFH Turkey Offline (TURKEY_OWNED), Customers (CUSTOMER_OWNED), Customs (CUSTOMS_OWNED)
+    // =========================================================================
+    [Authorize(Policy = "dashboard.read")]
+    [HttpGet("dashboard/inventory-hierarchy")]
+    public async Task<IActionResult> GetInventoryHierarchy([FromQuery] string? startDate, [FromQuery] string? endDate)
+    {
+        DateTime? rangeStart = ParseDateOrNull(startDate);
+        DateTime? rangeEndExclusive = ParseDateOrNull(endDate)?.Date.AddDays(1);
+
+        var allItems = (await _repository.GetItemsAsync()).AsEnumerable();
+        if (rangeStart.HasValue)
+            allItems = allItems.Where(i => i.Lot == null || i.Lot.AcquisitionDate >= rangeStart.Value);
+        if (rangeEndExclusive.HasValue)
+            allItems = allItems.Where(i => i.Lot == null || i.Lot.AcquisitionDate < rangeEndExclusive.Value);
+        
+        var scopedItems = allItems.ToList();
+        var transfers = (await _repository.GetBranchTransfersAsync())
+            .Where(t => t.StatusCode == "IN_TRANSIT" || t.StatusCode == "APPROVED")
+            .ToList();
+
+        // Map active transfers by ItemId
+        var activeTransferMap = transfers
+            .GroupBy(t => t.ItemId)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(t => t.CreatedAt).First());
+
+        static decimal GetItemWeightKg(InventoryItem item) =>
+            (item.Product?.Denomination?.WeightGrams ?? 0m) / 1000m;
+
+        static string ResolveOwnerCode(string? raw) => (raw ?? "").ToUpperInvariant() switch
+        {
+            "TURKEY_OWNED" or "PROPRIETARY" or "KFH_TURKEY" or "KFH_TURKEY_OFFLINE" => "TURKEY_OWNED",
+            "CUSTOMER_OWNED" or "HELD_IN_CUSTODY" or "CUSTOMERS" or "CUSTOMER" => "CUSTOMER_OWNED",
+            "CUSTOMS_OWNED" or "CUSTOMS" => "CUSTOMS_OWNED",
+            _ => "KFH_OWNED"
+        };
+
+        static string ResolveOwnerLabel(string code) => code switch
+        {
+            "TURKEY_OWNED" => "KFH Turkey Offline",
+            "CUSTOMER_OWNED" => "Customers",
+            "CUSTOMS_OWNED" => "Customs",
+            _ => "KFH Kuwait"
+        };
+
+        static string ResolveMetalType(InventoryItem item)
+        {
+            var metal = item.Product?.MetalType?.MetalName;
+            if (!string.IsNullOrWhiteSpace(metal)) return metal;
+            var pType = DeterminePreciousType(item);
+            if (pType == "SILVER") return "Silver";
+            return "Gold";
+        }
+
+        var ownerGroups = scopedItems
+            .GroupBy(i => ResolveOwnerCode(i.OwnershipType))
+            .Select(og =>
+            {
+                var ownerCode = og.Key;
+                var ownerLabel = ResolveOwnerLabel(ownerCode);
+                var ownerItems = og.ToList();
+                var ownerTotalWeightKg = Math.Round(ownerItems.Sum(GetItemWeightKg), 3);
+                var ownerTotalQty = ownerItems.Count;
+
+                var metalGroups = ownerItems
+                    .GroupBy(ResolveMetalType)
+                    .Select(mg =>
+                    {
+                        var metalName = mg.Key;
+                        var metalItems = mg.ToList();
+                        var metalTotalWeightKg = Math.Round(metalItems.Sum(GetItemWeightKg), 3);
+                        var metalTotalQty = metalItems.Count;
+
+                        var locationGroups = metalItems
+                            .GroupBy(i =>
+                            {
+                                bool isTransit = i.StatusCode == "IN_TRANSFER" || activeTransferMap.ContainsKey(i.ItemId);
+                                if (isTransit)
+                                {
+                                    activeTransferMap.TryGetValue(i.ItemId, out var tr);
+                                    var courier = !string.IsNullOrWhiteSpace(tr?.CourierInfo) ? tr.CourierInfo : "Authorized Armored Logistics";
+                                    var destBranch = tr?.DestinationBranch?.BranchName;
+                                    var destInfo = !string.IsNullOrWhiteSpace(destBranch) ? $" -> {destBranch}" : "";
+                                    return (IsTransit: true, Key: $"IN_TRANSIT:{courier}{destInfo}", Label: $"In Transit (Courier: {courier}{destInfo})", Courier: courier);
+                                }
+
+                                var vaultName = i.Location?.Vault?.VaultName;
+                                var desc = i.Location?.Description;
+                                var locLabel = !string.IsNullOrWhiteSpace(vaultName)
+                                    ? (!string.IsNullOrWhiteSpace(desc) ? $"{vaultName} - {desc}" : vaultName)
+                                    : (!string.IsNullOrWhiteSpace(desc) ? desc : "Main Vault Storage");
+
+                                return (IsTransit: false, Key: $"LOC:{i.LocationId ?? 0}:{locLabel}", Label: locLabel, Courier: (string?)null);
+                            })
+                            .Select(lg =>
+                            {
+                                var locInfo = lg.Key;
+                                var locItems = lg.ToList();
+                                var locTotalWeightKg = Math.Round(locItems.Sum(GetItemWeightKg), 3);
+                                var locTotalQty = locItems.Count;
+
+                                var denomGroups = locItems
+                                    .GroupBy(i => i.Product?.Denomination?.Label ?? $"{i.Product?.Denomination?.WeightGrams ?? 0}g Bar")
+                                    .Select(dg =>
+                                    {
+                                        var denomLabel = dg.Key;
+                                        var denomItems = dg.ToList();
+                                        var unitWeightGrams = denomItems.FirstOrDefault()?.Product?.Denomination?.WeightGrams ?? 0m;
+                                        var denomTotalWeightKg = Math.Round(denomItems.Sum(GetItemWeightKg), 3);
+                                        var denomTotalQty = denomItems.Count;
+
+                                        return new
+                                        {
+                                            denomination_label = denomLabel,
+                                            unit_weight_grams = unitWeightGrams,
+                                            bar_count = denomTotalQty,
+                                            total_weight_kg = denomTotalWeightKg,
+                                            items = denomItems.Select(item => new
+                                            {
+                                                item_id = item.ItemId,
+                                                serial_number = item.SerialNumber,
+                                                product_code = item.Product?.ProductCode ?? "",
+                                                metal_name = metalName,
+                                                weight_grams = item.Product?.Denomination?.WeightGrams ?? 0m,
+                                                weight_kg = Math.Round(GetItemWeightKg(item), 4),
+                                                purity = item.Product?.Purity?.PurityValue != null
+                                                    ? (item.Product.Purity.PurityValue <= 1.0m ? item.Product.Purity.PurityValue * 1000m : (item.Product.Purity.PurityValue <= 100.0m ? item.Product.Purity.PurityValue * 10m : item.Product.Purity.PurityValue))
+                                                    : 999.9m,
+                                                brand_name = item.Product?.BrandName ?? item.Product?.Brand?.BrandName ?? "",
+                                                status = item.StatusCode,
+                                                ownership_type = (item.OwnershipType == "VIP_OWNED" || (item.OwnershipType == "KFH_OWNED" && item.ChannelStatus == "OFFLINE")) ? "KFH_OWNED" : item.OwnershipType,
+                                                channel_status = (item.ChannelStatus == "OFFLINE" || item.OwnershipType == "VIP_OWNED") ? "OFFLINE" : "ONLINE",
+                                                channel_category = item.ChannelCategory ?? ((item.ChannelStatus == "OFFLINE" || item.OwnershipType == "VIP_OWNED") ? "VIP_EXCLUSIVE" : "RETAIL_ONLINE"),
+                                                is_in_transit = locInfo.IsTransit,
+                                                courier_info = locInfo.Courier,
+                                                location_label = locInfo.Label,
+                                                is_damaged = item.IsDamaged,
+                                                gdl_status = item.GoodDeliveryStatus
+                                            })
+                                        };
+                                    })
+                                    .OrderByDescending(d => d.unit_weight_grams)
+                                    .ToList();
+
+                                return new
+                                {
+                                    location_key = locInfo.Key,
+                                    location_label = locInfo.Label,
+                                    is_in_transit = locInfo.IsTransit,
+                                    courier_info = locInfo.Courier,
+                                    bar_count = locTotalQty,
+                                    total_weight_kg = locTotalWeightKg,
+                                    denominations = denomGroups
+                                };
+                            })
+                            .OrderBy(l => l.is_in_transit ? 1 : 0)
+                            .ThenByDescending(l => l.total_weight_kg)
+                            .ToList();
+
+                        return new
+                        {
+                            metal_name = metalName,
+                            bar_count = metalTotalQty,
+                            total_weight_kg = metalTotalWeightKg,
+                            locations = locationGroups
+                        };
+                    })
+                    .OrderByDescending(m => m.total_weight_kg)
+                    .ToList();
+
+                var inTransitItems = ownerItems.Where(i => i.StatusCode == "IN_TRANSFER" || activeTransferMap.ContainsKey(i.ItemId)).ToList();
+                var inTransitWeightKg = Math.Round(inTransitItems.Sum(GetItemWeightKg), 3);
+                var inTransitQty = inTransitItems.Count;
+
+                return new
+                {
+                    owner_code = ownerCode,
+                    owner_label = ownerLabel,
+                    bar_count = ownerTotalQty,
+                    total_weight_kg = ownerTotalWeightKg,
+                    in_transit_weight_kg = inTransitWeightKg,
+                    in_transit_bar_count = inTransitQty,
+                    metals = metalGroups
+                };
+            })
+            .OrderByDescending(o => o.total_weight_kg)
+            .ToList();
+
+        var grandTotalWeightKg = Math.Round(scopedItems.Sum(GetItemWeightKg), 3);
+        var grandTotalBars = scopedItems.Count;
+        var totalInTransitWeightKg = Math.Round(scopedItems.Where(i => i.StatusCode == "IN_TRANSFER" || activeTransferMap.ContainsKey(i.ItemId)).Sum(GetItemWeightKg), 3);
+        var totalInTransitBars = scopedItems.Count(i => i.StatusCode == "IN_TRANSFER" || activeTransferMap.ContainsKey(i.ItemId));
+
+        return Ok(new
+        {
+            total_weight_kg = grandTotalWeightKg,
+            total_bar_count = grandTotalBars,
+            total_in_transit_weight_kg = totalInTransitWeightKg,
+            total_in_transit_bar_count = totalInTransitBars,
+            hierarchy = ownerGroups
         });
     }
 
@@ -1613,8 +2497,8 @@ public partial class PMIMSControllers : ControllerBase
         "dashboard", "pending_actions", "spatial_map", "custody",
         "stocktake", "migration", "reports", "workflows", "settings", "user_admin",
         "vault_location", "master_data", "workflow_design", "intake",
-        "rules_engine", "monitoring", "barcode_qr_labeling",
-        "purchase_orders", "dispensing", "device_integration", "notifications"
+        "rules_engine", "monitoring", "barcode_qr_labeling", "qr_reprint",
+        "dispensing", "device_integration", "notifications"
     };
 
     // Reconstructs the caller's effective module permissions from the JWT "perm:*" claims.
@@ -1655,7 +2539,7 @@ public partial class PMIMSControllers : ControllerBase
         }
     }
 
-    [Authorize(Policy = "custody.write")]
+    [Authorize]
     [HttpPost("inventory/items/{id}/mark-damaged")]
     public async Task<IActionResult> MarkDamaged(int id, [FromBody] MarkDamagedRequest req)
     {
@@ -1672,7 +2556,7 @@ public partial class PMIMSControllers : ControllerBase
         }
     }
 
-    [Authorize(Policy = "custody.write")]
+    [Authorize]
     [HttpPost("inventory/items/{id}/damage-action")]
     public async Task<IActionResult> ProcessDamagedAction(int id, [FromBody] ProcessDamageActionRequest req)
     {
@@ -1689,12 +2573,65 @@ public partial class PMIMSControllers : ControllerBase
         }
     }
 
-    [Authorize(Policy = "custody.read")]
+    [Authorize]
     [HttpGet("inventory/damaged-items")]
     public async Task<IActionResult> GetDamagedBars()
     {
         var bars = await _repository.GetDamagedBarsAsync();
         return Ok(bars);
+    }
+
+    [Authorize(Policy = "custody.read")]
+    [HttpGet("inventory/items/{id:int}/movement-validation")]
+    public async Task<IActionResult> GetMovementValidationById(int id)
+    {
+        var items = await _repository.GetItemsAsync();
+        var item = items.FirstOrDefault(i => i.ItemId == id);
+        if (item == null) return NotFound(new { error = "Inventory item not found." });
+
+        bool canMove = !item.IsDamaged && item.StatusCode == "READY";
+        return Ok(new
+        {
+            item_id = item.ItemId,
+            serial_number = item.SerialNumber,
+            can_move = canMove,
+            is_damaged = item.IsDamaged,
+            damage_status = item.DamageApprovalStatus ?? (item.IsDamaged ? "APPROVED" : "NONE"),
+            damage_reason = item.DamageReason,
+            damage_description = item.DamageDescription,
+            status_code = item.StatusCode,
+            current_location_id = item.LocationId,
+            current_location = item.Location?.Description ?? "Unknown",
+            validation_message = item.IsDamaged
+                ? $"BLOCKED: Bar '{item.SerialNumber}' is marked as DAMAGED ({item.DamageReason ?? "DEFECT"}). Outbound movement from Main Vault is prohibited."
+                : (canMove ? "VALID: Bar is ready for outbound vault movement." : $"RESTRICTED: Bar status is '{item.StatusCode}'.")
+        });
+    }
+
+    [Authorize(Policy = "custody.read")]
+    [HttpGet("inventory/items/by-serial/{serialNumber}/movement-validation")]
+    public async Task<IActionResult> GetMovementValidationBySerial(string serialNumber)
+    {
+        var item = await _repository.GetItemBySerialNumberAsync(serialNumber);
+        if (item == null) return NotFound(new { error = $"Inventory item with serial '{serialNumber}' not found." });
+
+        bool canMove = !item.IsDamaged && item.StatusCode == "READY";
+        return Ok(new
+        {
+            item_id = item.ItemId,
+            serial_number = item.SerialNumber,
+            can_move = canMove,
+            is_damaged = item.IsDamaged,
+            damage_status = item.DamageApprovalStatus ?? (item.IsDamaged ? "APPROVED" : "NONE"),
+            damage_reason = item.DamageReason,
+            damage_description = item.DamageDescription,
+            status_code = item.StatusCode,
+            current_location_id = item.LocationId,
+            current_location = item.Location?.Description ?? "Unknown",
+            validation_message = item.IsDamaged
+                ? $"BLOCKED: Bar '{item.SerialNumber}' is marked as DAMAGED ({item.DamageReason ?? "DEFECT"}). Outbound movement from Main Vault is prohibited."
+                : (canMove ? "VALID: Bar is ready for outbound vault movement." : $"RESTRICTED: Bar status is '{item.StatusCode}'.")
+        });
     }
 
     [Authorize(Policy = "intake.write")]
@@ -1763,6 +2700,83 @@ public partial class PMIMSControllers : ControllerBase
     // =========================================================================
     // Home Delivery Endpoints (UC07)
     // =========================================================================
+    [Authorize(Policy = "intake.read")]
+    [HttpGet("gfs/home-delivery/incoming-orders")]
+    public async Task<IActionResult> GetIncomingGfsHomeDeliveryOrders()
+    {
+        // Retrieve incoming residential delivery requests dispatched from GFS
+        var products = await _repository.GetProductsAsync();
+        var gold100g = products.FirstOrDefault(p => p.Denomination?.WeightGrams == 100 && (p.MetalType?.MetalName == "Gold" || p.MetalType?.MetalName == "GOLD")) ?? products.FirstOrDefault();
+        var gold1kg = products.FirstOrDefault(p => p.Denomination?.WeightGrams == 1000 && (p.MetalType?.MetalName == "Gold" || p.MetalType?.MetalName == "GOLD")) ?? products.FirstOrDefault();
+        var gold50g = products.FirstOrDefault(p => p.Denomination?.WeightGrams == 50 && (p.MetalType?.MetalName == "Gold" || p.MetalType?.MetalName == "GOLD")) ?? products.FirstOrDefault();
+
+        var orders = new List<object>
+        {
+            new
+            {
+                gfs_order_id = "GFS-HD-2026-8801",
+                customer_name = "Abdullah Nasser Al-Sabah",
+                customer_civil_id = "290011501239",
+                customer_phone = "+965 99887766",
+                customer_account = "ACC-KFH-889901",
+                required_product_id = gold100g?.ProductId ?? 1,
+                required_product_name = $"{gold100g?.MetalType?.MetalName ?? "Gold"} {gold100g?.Denomination?.Label ?? "100g Bar"}",
+                required_weight_grams = gold100g?.Denomination?.WeightGrams ?? 100,
+                expected_serial_number = "AU-BAR-001",
+                governorate = "Capital",
+                area = "Shuwaikh Residential",
+                block = "2",
+                street = "Arabian Gulf St",
+                building_house = "Villa 14",
+                floor_flat = "Ground Floor",
+                special_instructions = "VIP Client - Hand delivery with Civil ID biometric check.",
+                order_date = DateTime.UtcNow.AddHours(-3).ToString("yyyy-MM-dd HH:mm")
+            },
+            new
+            {
+                gfs_order_id = "GFS-HD-2026-8802",
+                customer_name = "Fatima Mohammad Al-Khaled",
+                customer_civil_id = "295052203418",
+                customer_phone = "+965 97711223",
+                customer_account = "ACC-KFH-443322",
+                required_product_id = gold1kg?.ProductId ?? 2,
+                required_product_name = $"{gold1kg?.MetalType?.MetalName ?? "Gold"} {gold1kg?.Denomination?.Label ?? "1kg Bar"}",
+                required_weight_grams = gold1kg?.Denomination?.WeightGrams ?? 1000,
+                expected_serial_number = "KFH-AU-1KG-001",
+                governorate = "Hawalli",
+                area = "Jabriya",
+                block = "5",
+                street = "Street 105",
+                building_house = "Building 22",
+                floor_flat = "Apartment 4B",
+                special_instructions = "Call recipient 30 mins prior to arrival.",
+                order_date = DateTime.UtcNow.AddHours(-5).ToString("yyyy-MM-dd HH:mm")
+            },
+            new
+            {
+                gfs_order_id = "GFS-HD-2026-8803",
+                customer_name = "Meshari Jassem Al-Ghanim",
+                customer_civil_id = "288101402287",
+                customer_phone = "+965 94455667",
+                customer_account = "ACC-KFH-771199",
+                required_product_id = gold50g?.ProductId ?? 3,
+                required_product_name = $"{gold50g?.MetalType?.MetalName ?? "Gold"} {gold50g?.Denomination?.Label ?? "50g Bar"}",
+                required_weight_grams = gold50g?.Denomination?.WeightGrams ?? 50,
+                expected_serial_number = "AU-BAR-003",
+                governorate = "Farwaniya",
+                area = "Abdullah Al-Mubarak",
+                block = "1",
+                street = "Street 12",
+                building_house = "House 8",
+                floor_flat = null as string,
+                special_instructions = "Deliver strictly to customer in person.",
+                order_date = DateTime.UtcNow.AddHours(-8).ToString("yyyy-MM-dd HH:mm")
+            }
+        };
+
+        return Ok(orders);
+    }
+
     [Authorize(Policy = "intake.write")]
     [HttpPost("gfs/home-delivery")]
     public async Task<IActionResult> CreateHomeDelivery([FromBody] CreateHomeDeliveryApiRequest req)
@@ -1947,6 +2961,62 @@ public partial class PMIMSControllers : ControllerBase
         return Ok(alerts);
     }
 
+    [Authorize(Policy = "custody.write")]
+    [HttpPost("inventory/damaged/export/initiate")]
+    public async Task<IActionResult> InitiateDamagedExport([FromBody] InitiateDamagedExportRequest req)
+    {
+        try
+        {
+            string username = User.Identity?.Name ?? "system";
+            var result = await _repository.InitiateDamagedExportAsync(req.ItemId, username, req.Notes, req.VendorId, req.CustomsDeclarationNumber);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
+    [Authorize]
+    [HttpGet("inventory/damaged/export/pending")]
+    public async Task<IActionResult> GetPendingDamagedExports()
+    {
+        var list = await _repository.GetPendingDamagedExportsAsync();
+        return Ok(list);
+    }
+
+    [Authorize]
+    [HttpGet("inventory/damaged/export/history")]
+    public async Task<IActionResult> GetDamagedExportHistory()
+    {
+        var list = await _repository.GetDamagedExportHistoryAsync();
+        return Ok(list);
+    }
+
+    [Authorize(Policy = "custody.write")]
+    [HttpPost("inventory/damaged/export/{exportId}/handover")]
+    public async Task<IActionResult> HandoverDamagedExportToCourier(int exportId, [FromBody] HandoverDamagedExportRequest req)
+    {
+        try
+        {
+            string username = User.Identity?.Name ?? "system";
+            var result = await _repository.HandoverDamagedExportToCourierAsync(exportId, req.CourierCompany, req.CourierRep, req.TrackingNumber, req.SecuritySeal, username, req.Notes);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
+    [Authorize]
+    [HttpGet("inventory/bars/history/{serialNumber}")]
+    public async Task<IActionResult> GetBarHistoryBySerial(string serialNumber)
+    {
+        var history = await _repository.GetItemHistoryBySerialNumberAsync(serialNumber);
+        return Ok(history);
+    }
+
     private static string ComputeSha256(string input)
     {
         using var sha = System.Security.Cryptography.SHA256.Create();
@@ -1997,22 +3067,8 @@ public class ProcessThresholdActionRequest { public string Action { get; set; } 
 // Request and DTO payloads
 public class LoginRequest { public string Username { get; set; } = null!; public string Password { get; set; } = null!; }
 public class CreateLocationRequest { public string ZoneRoom { get; set; } = null!; public string ShelfRow { get; set; } = null!; public string SlotBin { get; set; } = null!; }
-public class CreatePORequest {
-    public string PoNumber { get; set; } = null!; public int VendorId { get; set; } public decimal TotalWeightGrams { get; set; } public decimal TotalCost { get; set; } public string Currency { get; set; } = "USD"; public string CreatedBy { get; set; } = null!; public List<POItemDTO> Items { get; set; } = new();
-    // Cost Tracking & Valuation -- purchase cost detail (supplier invoice + acquisition fees).
-    // All optional so an existing/simple client that doesn't know about them still works.
-    public string? SupplierInvoiceNumber { get; set; }
-    public DateTime? SupplierInvoiceDate { get; set; }
-    public decimal FreightCost { get; set; } = 0;
-    public decimal InsuranceCost { get; set; } = 0;
-    public decimal CustomsDutyCost { get; set; } = 0;
-    public decimal OtherFeesCost { get; set; } = 0;
-    public string? OtherFeesDescription { get; set; }
-}
-public class POItemDTO { public int product_id { get; set; } public int qty { get; set; } public decimal unit_cost { get; set; } }
 public class IntakeRequest
 {
-    public int? PoId { get; set; }
     public int? VendorId { get; set; }
     public string? ShipmentReference { get; set; }
     public string? DeliveryNoteNumber { get; set; }
@@ -2023,8 +3079,20 @@ public class IntakeRequest
     public string LotNumber { get; set; } = null!;
     public int LocationId { get; set; }
     public string ReceivedBy { get; set; } = null!;
-    public string OwnershipType { get; set; } = "KFH_OWNED"; // KFH_OWNED or TURKEY_OWNED
+    public string OwnershipType { get; set; } = "CUSTOMS_OWNED"; // CUSTOMS_OWNED, TURKEY_OWNED, KFH_OWNED
+    public string? CustomsDeclarationNumber { get; set; }
+    public decimal? CustomsDutyAmount { get; set; }
+    public decimal? PurchasingCost { get => CustomsDutyAmount; set => CustomsDutyAmount = value; }
+    public string? PortOfEntry { get; set; }
     public List<IntakeItemDTO> Items { get; set; } = new();
+    public List<ShipmentProductionCostInput>? ProductionCosts { get; set; }
+}
+
+public class ClearCustomsRequest
+{
+    public int PendingIntakeIdOrLotId { get; set; }
+    public string TargetOwnership { get; set; } = "KFH_OWNED";
+    public string? ClearanceNotes { get; set; }
 }
 
 public class TurkeyPurchaseRequest
@@ -2041,6 +3109,8 @@ public class IntakeItemDTO
     public int product_id { get; set; }
     public decimal? weight_grams { get; set; }
     public decimal? purity { get; set; }
+    public decimal? unit_cost { get; set; }
+    public decimal? purchasing_cost { get => unit_cost; set => unit_cost = value; }
     public bool is_damaged { get; set; } = false;
     public string? damage_reason { get; set; }
 
@@ -2065,9 +3135,64 @@ public class CustomerReceiptRequest
     public string LotNumber { get; set; } = null!;
     public int LocationId { get; set; }
     public string ReceivedBy { get; set; } = null!;
+    public bool TransferToMainVault { get; set; } = true;
+    public string? CourierInfo { get; set; }
+    public int? DestinationBranchId { get; set; }
     public List<IntakeItemDTO> Items { get; set; } = new();
 }
-public class TransferRequest { public int ItemId { get; set; } public int DestinationLocationId { get; set; } public string CourierInfo { get; set; } = null!; public string InitiatedBy { get; set; } = null!; }
+public class TransferRequest
+{
+    public int ItemId { get; set; }
+    public int DestinationLocationId { get; set; }
+    public string CourierInfo { get; set; } = null!;
+    public string InitiatedBy { get; set; } = null!;
+    public string? TransferType { get; set; }
+    public string? ReturnReason { get; set; }
+    public string? Notes { get; set; }
+}
+
+public class RelocateItemRequest
+{
+    [JsonPropertyName("item_id")]
+    public int ItemId { get; set; }
+
+    [JsonPropertyName("itemId")]
+    public int? ItemIdCamel { set { if (value.HasValue && value.Value > 0) ItemId = value.Value; } }
+
+    [JsonPropertyName("target_location_id")]
+    public int TargetLocationId { get; set; }
+
+    [JsonPropertyName("targetLocationId")]
+    public int? TargetLocationIdCamel { set { if (value.HasValue && value.Value > 0) TargetLocationId = value.Value; } }
+
+    [JsonPropertyName("serial_number")]
+    public string? SerialNumber { get; set; }
+
+    [JsonPropertyName("serialNumber")]
+    public string? SerialNumberCamel { set => SerialNumber = value ?? SerialNumber; }
+
+    [JsonPropertyName("notes")]
+    public string? Notes { get; set; }
+}
+
+public class BatchRelocateRequest
+{
+    [JsonPropertyName("item_ids")]
+    public List<int> ItemIds { get; set; } = new();
+
+    [JsonPropertyName("itemIds")]
+    public List<int>? ItemIdsCamel { set => ItemIds = value ?? ItemIds; }
+
+    [JsonPropertyName("target_location_id")]
+    public int TargetLocationId { get; set; }
+
+    [JsonPropertyName("targetLocationId")]
+    public int? TargetLocationIdCamel { set { if (value.HasValue && value.Value > 0) TargetLocationId = value.Value; } }
+
+    [JsonPropertyName("notes")]
+    public string? Notes { get; set; }
+}
+
 public class ReserveRequest { public int CustomerId { get; set; } public int ProductId { get; set; } public int BranchId { get; set; } public int ChannelId { get; set; } }
 public class PurchaseConfirmRequest { public Guid ReservationToken { get; set; } public int AccountId { get; set; } public decimal SalePrice { get; set; } public decimal MarkupAmount { get; set; } public string InvoiceNumber { get; set; } = null!; public string? CustodyAgreementNumber { get; set; } }
 public class WithdrawalRequestModel { public int HoldingId { get; set; } public int BranchId { get; set; } }
@@ -2173,11 +3298,23 @@ public class AddMemberRequest
 public class SaveReorderThresholdRequest
 {
     public int? ThresholdId { get; set; }
-    public int ProductId { get; set; }
-    public int VendorId { get; set; }
+    public string ThresholdType { get; set; } = "LOW_STOCK"; // LOW_STOCK, HIGH_STOCK, DAMAGED_HIGH_STOCK
+    public int? ProductId { get; set; }
+    public int? VendorId { get; set; }
+    public int? MetalTypeId { get; set; }
     public int MinStockQty { get; set; }
+    public int? MaxStockQty { get; set; }
+    public decimal? ThresholdWeightKg { get; set; }
     public int ReorderQty { get; set; }
     public bool IsActive { get; set; } = true;
+}
+
+public class GenerateDamagedExportManifestRequest
+{
+    public int MetalTypeId { get; set; } = 1;
+    public int? VendorId { get; set; }
+    public List<int> ItemIds { get; set; } = new();
+    public string? Notes { get; set; }
 }
 
 public class DraftPORequest
@@ -2209,6 +3346,9 @@ public class TransferWorkflowRequest
     public int DestinationBranchId { get; set; }
     public string CourierInfo { get; set; } = null!;
     public string InitiatedBy { get; set; } = null!;
+    public string? TransferType { get; set; }
+    public string? ReturnReason { get; set; }
+    public string? Notes { get; set; }
 }
 
 public class ReceiveTransferRequest
@@ -2224,3 +3364,45 @@ public class SaveBranchRequest
     public int VaultId { get; set; }
     public bool IsActive { get; set; } = true;
 }
+
+public class SaveVendorRequest
+{
+    public string VendorCode { get; set; } = null!;
+    public string VendorName { get; set; } = null!;
+    public string CountryOfOrigin { get; set; } = "Switzerland";
+    public bool IsShariaCompliant { get; set; } = true;
+    public string? ContactEmail { get; set; }
+}
+
+public class InitiateCustomsTransferRequest
+{
+    public int? LotId { get; set; }
+    public int? ItemId { get; set; }
+    public string TargetOwnership { get; set; } = "TURKEY_OWNED";
+    public string? ClearanceNotes { get; set; }
+    public string? CustomsDeclarationNumber { get; set; }
+    public decimal? CustomsDutyAmount { get; set; }
+    public decimal? PurchasingCost { get => CustomsDutyAmount; set => CustomsDutyAmount = value; }
+    public string? PortOfEntry { get; set; }
+}
+
+public class VerifyTransferQrRequest
+{
+    public string QrCode { get; set; } = null!;
+    public string? ScannedBy { get; set; }
+}
+
+public class InitiateTransferReceiptRequest
+{
+    public string ScannedQr { get; set; } = null!;
+    public string? Notes { get; set; }
+    public int? TargetLocationId { get; set; }
+}
+
+public class InitiateTransferReturnRequest
+{
+    public string ReturnReason { get; set; } = null!;
+    public string? Notes { get; set; }
+    public string? CourierInfo { get; set; }
+}
+

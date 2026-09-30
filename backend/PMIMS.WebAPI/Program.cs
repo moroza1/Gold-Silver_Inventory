@@ -6,7 +6,6 @@ using Microsoft.IdentityModel.Tokens;
 using PMIMS.Application;
 using PMIMS.Infrastructure;
 using PMIMS.WebAPI.Realtime;
-using Ledger.Gl.EfCore;   // plug-and-play General Ledger module DI extensions
 using Serilog;
 
 // Configure Serilog for file logging
@@ -84,26 +83,6 @@ try
     builder.Services.AddScoped<IAuditExportService, AuditExportService>();
     builder.Services.AddScoped<IEmailSenderService, EmailSenderService>();
     builder.Services.AddScoped<IMonitoringAdapter, GenericWebhookMonitoringAdapter>();
-    // Cost Tracking & Valuation -- Core Banking (IMAL) GL Integration (pushes purchase-order
-    // receipt landed-cost journal entries; see InventoryRepository.IntakeInventoryItemsAsync).
-    builder.Services.AddScoped<ICoreBankingLedgerService, CoreBankingGlAdapter>();
-
-    // Plug-and-play double-entry General Ledger module (Ledger.Gl + Ledger.Gl.EfCore).
-    // Registers the config (chart of accounts + posting rules), an EF-backed GeneralLedger,
-    // and an InventoryEventListener -- all injectable. The GL uses its own bounded-context
-    // GlDbContext against the SAME database as AppDbContext, so it never touches PMIMS'
-    // mappings. Post inventory transactions to it via the listener (see WIRING.md).
-    {
-        var glConfigPath = Path.Combine(AppContext.BaseDirectory, "Config", "gl-accounts.gold-silver.json");
-        builder.Services.AddLedgerGl(glConfigPath, opt =>
-        {
-            if (useSqlServer)
-                opt.UseSqlServer(dbConfig.GetValue<string>("SqlServerConnection") ?? "");
-            else
-                opt.UseSqlite(dbConfig.GetValue<string>("SqliteConnection") ?? "Data Source=pmims.db");
-        });
-    }
-
     // Item 7 extension -- immediate event-triggered notifications (transfer completed,
     // inventory discrepancy found), shared by ReconciliationService and PMIMSControllers.
     builder.Services.AddScoped<INotificationDispatchService, NotificationDispatchService>();
@@ -222,10 +201,6 @@ try
         // any-authenticated-user read (see comment at that endpoint), not a module-level one.
         Read("dashboard.read", "dashboard");
 
-        // Purchase Orders
-        Read("purchase_orders.read", "purchase_orders");
-        Write("purchase_orders.write", "purchase_orders");
-
         // Custody, stocktake, workflows and reports (operational modules)
         Read("custody.read", "custody");
         Write("custody.write", "custody");
@@ -275,9 +250,11 @@ try
         // Reports write
         Write("reports.write", "reports");
 
-        // Barcode/QR Code Tracking
+        // Barcode/QR Code Tracking & Controlled Reprinting
         Read("barcode_qr_labeling.read", "barcode_qr_labeling");
         Write("barcode_qr_labeling.write", "barcode_qr_labeling");
+        Read("qr_reprint.read", "qr_reprint");
+        Write("qr_reprint.write", "qr_reprint");
 
         // Settings module
         Read("settings.read", "settings");
@@ -312,14 +289,12 @@ try
             await DbSeeder.EnsureModulePermissionsAsync(context);
             Console.WriteLine("✅ Module permissions verified");
 
-            // Create the General Ledger tables (gl_journal_*, gl_config_versions) in the
-            // same database, seed the initial ACTIVE config version from the JSON file, and
-            // load it into the hot config provider. Dev/SQLite convenience; production SQL
-            // Server should use EF migrations for GlDbContext.
-            Console.WriteLine("🔄 Initializing General Ledger (schema + active config)...");
-            await app.Services.InitializeLedgerGlAsync("SYSTEM");
-            Console.WriteLine("✅ General Ledger initialized");
-        }
+            // Ensure all 6 core workflows have active Maker-Checker template definitions
+            Console.WriteLine("🔄 Ensuring workflow templates are up to date...");
+            await DbSeeder.EnsureWorkflowTemplatesAsync(context);
+            Console.WriteLine("✅ Workflow templates verified");
+
+                    }
         catch (Exception ex)
         {
             Console.WriteLine($"❌ Database error: {ex.Message}");

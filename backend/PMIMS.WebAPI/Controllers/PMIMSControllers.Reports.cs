@@ -34,16 +34,17 @@ public partial class PMIMSControllers
     // plus a total weight column). No dedicated GET existed for this on demand.
     [Authorize(Policy = "reports.read")]
     [HttpGet("reports/inventory-balance")]
-    public async Task<IActionResult> GetInventoryBalanceReport()
+    public async Task<IActionResult> GetInventoryBalanceReport([FromQuery] string? supplier = null)
     {
-        var (_, rows) = await BuildInventoryBalanceTableAsync();
+        var (_, rows) = await BuildInventoryBalanceTableAsync(supplier);
         return Ok(rows.Select(r => new
         {
             vault = r[0],
             metal_type = r[1],
             denomination = r[2],
-            ready_qty = r[3],
-            total_weight_grams = r[4]
+            supplier = r[3],
+            ready_qty = r[4],
+            total_weight_grams = r[5]
         }));
     }
 
@@ -148,7 +149,8 @@ public partial class PMIMSControllers
     [HttpGet("reports/export")]
     public async Task<IActionResult> ExportOfficialReport([FromQuery] string type, [FromQuery] string format,
         [FromQuery] string? startDate = null, [FromQuery] string? endDate = null,
-        [FromQuery] string? groupBy = null, [FromQuery] string? period = null, [FromQuery] string? bucket = null)
+        [FromQuery] string? groupBy = null, [FromQuery] string? period = null, [FromQuery] string? bucket = null,
+        [FromQuery] string? supplier = null)
     {
         (IReadOnlyList<string> headers, List<IReadOnlyList<string>> rows) table;
         string title;
@@ -159,11 +161,11 @@ public partial class PMIMSControllers
         switch (safeType)
         {
             case "inventory_balance":
-                table = await BuildInventoryBalanceTableAsync();
+                table = await BuildInventoryBalanceTableAsync(supplier);
                 title = "PMIMS Inventory Balance Report";
                 break;
             case "transactions":
-                table = await BuildTransactionLogTableAsync();
+                table = await BuildTransactionLogTableAsync(supplier);
                 title = "PMIMS Transaction Log Report";
                 break;
             case "reconciliation":
@@ -208,41 +210,59 @@ public partial class PMIMSControllers
         }
     }
 
-    private async Task<(IReadOnlyList<string> headers, List<IReadOnlyList<string>> rows)> BuildInventoryBalanceTableAsync()
+    private async Task<(IReadOnlyList<string> headers, List<IReadOnlyList<string>> rows)> BuildInventoryBalanceTableAsync(string? supplier = null)
     {
-        var headers = new[] { "Vault", "Metal Type", "Denomination", "Ready Qty", "Total Weight (g)" };
+        var headers = new[] { "Vault", "Metal Type", "Denomination", "Supplier", "Ready Qty", "Total Weight (g)" };
         var items = (await _repository.GetItemsAsync()).Where(i => i.StatusCode == "READY").ToList();
 
-        var rows = items
+        var grouped = items
             .GroupBy(i => new
             {
                 Vault = i.Location?.Vault?.VaultName ?? "Unknown",
                 Metal = i.Product?.MetalType?.MetalName ?? "Unknown",
                 Denom = i.Product?.Denomination?.Label ?? "Unknown",
+                Supplier = i.Lot?.Vendor?.VendorName ?? i.RefinerName ?? i.Product?.Brand?.BrandName ?? "NADIR",
                 WeightGrams = i.Product?.Denomination?.WeightGrams ?? 0m
-            })
-            .OrderBy(g => g.Key.Vault).ThenBy(g => g.Key.Metal).ThenBy(g => g.Key.Denom)
+            });
+
+        if (!string.IsNullOrWhiteSpace(supplier))
+        {
+            grouped = grouped.Where(g => g.Key.Supplier.Contains(supplier, StringComparison.OrdinalIgnoreCase));
+        }
+
+        var rows = grouped
+            .OrderBy(g => g.Key.Vault).ThenBy(g => g.Key.Metal).ThenBy(g => g.Key.Denom).ThenBy(g => g.Key.Supplier)
             .Select(g => (IReadOnlyList<string>)new[]
             {
-                g.Key.Vault, g.Key.Metal, g.Key.Denom, g.Count().ToString(), (g.Key.WeightGrams * g.Count()).ToString("N2")
+                g.Key.Vault, g.Key.Metal, g.Key.Denom, g.Key.Supplier, g.Count().ToString(), (g.Key.WeightGrams * g.Count()).ToString("N2")
             })
             .ToList();
 
         return (headers, rows);
     }
 
-    private async Task<(IReadOnlyList<string> headers, List<IReadOnlyList<string>> rows)> BuildTransactionLogTableAsync()
+    private async Task<(IReadOnlyList<string> headers, List<IReadOnlyList<string>> rows)> BuildTransactionLogTableAsync(string? supplier = null)
     {
         // Denomination (not MetalType) since GetTransactionsAsync's Include chain only loads
         // Item.Product.Denomination, not Item.Product.MetalType.
-        var headers = new[] { "Transaction #", "Type", "Serial Number", "Denomination", "Source", "Destination", "Initiated By", "Approved By", "Timestamp (UTC)" };
+        var headers = new[] { "Transaction #", "Type", "Serial Number", "Supplier", "Denomination", "Source", "Destination", "Initiated By", "Approved By", "Timestamp (UTC)" };
         var txs = (await _repository.GetTransactionsAsync()).ToList();
+
+        if (!string.IsNullOrWhiteSpace(supplier))
+        {
+            txs = txs.Where(t =>
+            {
+                var s = t.Item?.Lot?.Vendor?.VendorName ?? t.Item?.RefinerName ?? t.Item?.Product?.Brand?.BrandName ?? "";
+                return s.Contains(supplier, StringComparison.OrdinalIgnoreCase);
+            }).ToList();
+        }
 
         var rows = txs.Select(t => (IReadOnlyList<string>)new[]
         {
             t.TransactionNumber,
             t.TransactionType,
             t.Item?.SerialNumber ?? "",
+            t.Item?.Lot?.Vendor?.VendorName ?? t.Item?.RefinerName ?? t.Item?.Product?.Brand?.BrandName ?? "N/A",
             t.Item?.Product?.Denomination?.Label ?? "",
             $"{t.SourceLocation?.Vault?.VaultName ?? ""} {t.SourceLocation?.Description ?? ""}".Trim(),
             $"{t.DestinationLocation?.Vault?.VaultName ?? ""} {t.DestinationLocation?.Description ?? ""}".Trim(),
@@ -395,12 +415,27 @@ public partial class PMIMSControllers
             });
         }
 
+        // Damaged bar quarantines and pending damage reports
+        var damagedBars = (await _repository.GetItemsAsync()).Where(i => i.IsDamaged || i.DamageApprovalStatus == "PENDING_APPROVAL");
+        foreach (var d in damagedBars)
+        {
+            rows.Add(new[]
+            {
+                d.IsDamaged ? "DAMAGED_BAR_QUARANTINE" : "DAMAGED_BAR_PENDING_APPROVAL",
+                d.SerialNumber,
+                $"Reason: {d.DamageReason ?? "DEFECT"} | Desc: {d.DamageDescription ?? "N/A"} | Reported By: {d.DamageReportedBy ?? "SYSTEM"}",
+                d.IsDamaged ? "HIGH" : "MEDIUM",
+                d.DamageApprovedAt?.ToString("u") ?? d.InspectionDate?.ToString("u") ?? "",
+                d.DamageApprovalStatus ?? (d.IsDamaged ? "APPROVED" : "PENDING")
+            });
+        }
+
         return (headers, rows);
     }
 
     private async Task<(IReadOnlyList<string> headers, List<IReadOnlyList<string>> rows)> BuildCostAnalysisTableAsync(string groupBy)
     {
-        var headers = new[] { "Group", "Item Count", "Total Weight (g)", "Total Landed Cost", "Avg Unit Cost/g" };
+        var headers = new[] { "Group", "Item Count", "Total Weight (g)", "Total Landed Cost", "Production Cost/g" };
         var items = (await _repository.GetItemsAsync())
             .Where(i => i.StatusCode != "INACTIVE" && i.StatusCode != "WITHDRAWN" && i.Lot != null)
             .ToList();
@@ -442,7 +477,7 @@ public partial class PMIMSControllers
     // type/period = no variance line for it (nothing to compare against yet).
     private async Task<(IReadOnlyList<string> headers, List<IReadOnlyList<string>> rows)> BuildCostVarianceTableAsync(string? period)
     {
-        var headers = new[] { "Metal Type", "Period", "Budgeted Cost/g", "Actual Avg Cost/g", "Variance/g", "Variance %" };
+        var headers = new[] { "Metal Type", "Period", "Budgeted Cost/g", "Actual Production Cost/g", "Variance/g", "Variance %" };
         string effectivePeriod = string.IsNullOrWhiteSpace(period) ? System.DateTime.UtcNow.ToString("yyyy-MM") : period;
 
         var budgets = (await _repository.GetCostBudgetsAsync()).Where(b => b.Period == effectivePeriod).ToList();

@@ -102,11 +102,24 @@ public class BarcodeLabelDto
     public int ItemId { get; set; }
     public string SerialNumber { get; set; } = null!;
     public string ProductLabel { get; set; } = null!;
+    public string ProductType { get; set; } = string.Empty;
+    public string MetalName { get; set; } = "Gold";
+    public decimal WeightGrams { get; set; }
+    public decimal PurityValue { get; set; } = 999.9m;
+    public string? Denomination { get; set; }
+    public string? RefinerBrand { get; set; }
     public string Gtin14 { get; set; } = null!;
     public string? LotNumber { get; set; }
     public string OwnershipType { get; set; } = null!;
     public string StatusCode { get; set; } = null!;
     public string? LocationDescription { get; set; }
+    public bool IsDamaged { get; set; }
+    public string? DamageApprovalStatus { get; set; }
+    public string? DamageReason { get; set; }
+    public string? DamageDescription { get; set; }
+    public string? DamageReportedBy { get; set; }
+    public string? DamageApprovedBy { get; set; }
+    public DateTime? DamageApprovedAt { get; set; }
     // Machine-encoded content actually stored in the symbols (contains the raw FNC1
     // control character for the barcode's GS1-128 encoding).
     public string Gs1ElementString { get; set; } = null!;
@@ -114,6 +127,8 @@ public class BarcodeLabelDto
     public string Gs1HumanReadable { get; set; } = null!;
     public string BarcodeSvg { get; set; } = null!;
     public string QrCodeSvg { get; set; } = null!;
+    // Exact text encoded into the QR code symbol (Denomination, Serial No, Product Type e.g. Gold Swiss / Gold Turkey)
+    public string QrCodeContent { get; set; } = null!;
 }
 
 public class LotLabelSheetDto
@@ -125,11 +140,25 @@ public class LotLabelSheetDto
     public List<BarcodeLabelDto> Labels { get; set; } = new();
 }
 
+public class CustomBarcodeLabelRequest
+{
+    public string SerialNumber { get; set; } = null!;
+    public string MetalName { get; set; } = "Gold";
+    public decimal WeightGrams { get; set; } = 1000m;
+    public decimal PurityValue { get; set; } = 999.9m;
+    public string? DenominationLabel { get; set; }
+    public string? LotNumber { get; set; }
+    public string? RefinerBrand { get; set; }
+    public string OwnershipType { get; set; } = "KFH_OWNED";
+}
+
 public interface IBarcodeLabelService
 {
     Task<BarcodeLabelDto?> GenerateItemLabelAsync(string serialNumber);
     Task<BarcodeLabelDto?> GenerateItemLabelByIdAsync(int itemId);
     Task<LotLabelSheetDto?> GenerateLotLabelSheetAsync(string lotNumber);
+    Task<(bool valid, string? error, BarcodeLabelDto? label)> GenerateCustomLabelAsync(CustomBarcodeLabelRequest req);
+    Task<List<BarcodeLabelDto>> GenerateBulkLabelsAsync(IEnumerable<string> serialNumbers);
 }
 
 // ============================================================
@@ -186,4 +215,30 @@ public interface IMonitoringAdapter
     Task PushAsync(string eventType, string metricName, string metricValue, string severity, string serviceName = "PMIMS");
     Task<SlaMetricsSnapshot> GetSlaMetricsAsync();
     Task<DetailedHealthStatus> GetDetailedHealthAsync(string environment);
+}
+
+// ---- Shipment Production Cost & Serial Validation ----
+public class ShipmentProductionCostInput
+{
+    public int MetalTypeId { get; set; }
+    public string? MetalTypeName { get; set; }
+    public int DenominationId { get; set; }
+    public string? DenominationName { get; set; }
+    public decimal ProductionCostKwd { get; set; }
+}
+
+public class IntakeSerialValidationRequest
+{
+    public List<string> SerialNumbers { get; set; } = new();
+    public string SourceType { get; set; } = "SUPPLIER";
+    public int? ProductId { get; set; }
+}
+
+public class IntakeSerialValidationResult
+{
+    public bool IsValid { get; set; } = true;
+    public List<string> Errors { get; set; } = new();
+    public List<string> DuplicateSerials { get; set; } = new();
+    public List<string> ExistingInventorySerials { get; set; } = new();
+    public List<string> InFlightPendingSerials { get; set; } = new();
 }

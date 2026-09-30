@@ -170,7 +170,7 @@ public class FimServiceTests
         var fim = new FimService(db.Context);
 
         var user = await fim.AddUserAsync(new Dictionary<string, string> { { "username", "righty" }, { "email", "righty@kfh.com.kw" } }, "SYS");
-        db.Context.FimRights.Add(new FimRight { RightCode = "PO_CREATE", RightName = "Create POs", ModuleKey = "purchase_orders" });
+        db.Context.FimRights.Add(new FimRight { RightCode = "INTAKE_VERIFY", RightName = "Verify Intake", ModuleKey = "intake" });
         await db.Context.SaveChangesAsync();
         var right = await db.Context.FimRights.FirstAsync();
 

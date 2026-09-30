@@ -162,6 +162,34 @@ CREATE TABLE inventory_items (
     location_id INT FOREIGN KEY REFERENCES inventory_locations(location_id),
     ownership_type VARCHAR(30) NOT NULL, -- 'KFH_OWNED', 'CUSTOMER_OWNED'
     status_code VARCHAR(30) FOREIGN KEY REFERENCES status_codes(status_code),
+    channel_status VARCHAR(30) NOT NULL DEFAULT 'ONLINE',
+    channel_category VARCHAR(30) NOT NULL DEFAULT 'RETAIL_ONLINE',
+    refiner_name NVARCHAR(150) NULL,
+    refiner_lbma_id VARCHAR(50) NULL,
+    assay_certificate_number VARCHAR(100) NULL,
+    fineness_ppt DECIMAL(7,3) NULL,
+    hallmark_number VARCHAR(100) NULL,
+    good_delivery_status VARCHAR(30) NOT NULL DEFAULT 'NOT_ASSESSED',
+    customer_account_number VARCHAR(100) NULL,
+    customer_rim_number VARCHAR(100) NULL,
+    average_purchase_cost DECIMAL(18,4) NULL,
+    gfs_last_sync_at DATETIME2 NULL,
+    is_damaged BIT NOT NULL DEFAULT 0,
+    damage_reason NVARCHAR(500) NULL,
+    damage_description NVARCHAR(1000) NULL,
+    inspection_date DATETIME2 NULL,
+    damage_evidence_doc_id VARCHAR(200) NULL,
+    damage_approval_status VARCHAR(30) NOT NULL DEFAULT 'NONE',
+    damage_reported_by NVARCHAR(100) NULL,
+    damage_approved_by NVARCHAR(100) NULL,
+    damage_approved_at DATETIME2 NULL,
+    moci_assay_number VARCHAR(100) NULL,
+    moci_inspection_date DATETIME2 NULL,
+    production_cost_kwd DECIMAL(18,4) NULL,
+    replaced_by_item_id INT NULL,
+    replaces_item_id INT NULL,
+    replacement_date DATETIME2 NULL,
+    brand_id INT NULL,
     row_version ROWVERSION NOT NULL
 );
 
@@ -344,7 +372,7 @@ CREATE TABLE mismatch_cases (
 CREATE TABLE exchange_rates (
     rate_id INT IDENTITY(1,1) PRIMARY KEY,
     metal_type_id INT FOREIGN KEY REFERENCES metal_types(metal_type_id),
-    rate_source VARCHAR(50) NOT NULL, -- '360T', 'IMAL_FALLBACK'
+    rate_source VARCHAR(50) NOT NULL, -- '360T', 'PHOENIX_FALLBACK'
     bid_rate DECIMAL(18,6) NOT NULL,
     ask_rate DECIMAL(18,6) NOT NULL,
     captured_at DATETIME2 NOT NULL DEFAULT GETDATE()

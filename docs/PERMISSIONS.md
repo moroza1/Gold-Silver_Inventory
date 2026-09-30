@@ -44,6 +44,7 @@ Stored in `group_permissions(group_id, module_key, access_level)` (unique on `gr
 | `intake` | Receive/verify incoming shipments (Maker-Checker) |
 | `dispensing` | Gold Dispensing Machine (GDM) — view/operate dispense transactions |
 | `barcode_qr_labeling` | Barcode/QR Code Tracking (RFP Section 3) — generate GS1-128 + ISO/IEC 18004 labels per item/lot |
+| `qr_reprint` | Controlled QR & Barcode Reprinting (approval requests & reprint execution) |
 
 ### Administrative tier (manage / setup / governance)
 
@@ -131,6 +132,9 @@ frontend gate and the Maker role, which is the one described in `DbSeeder.cs` as
 | `GET /api/barcode/items/by-serial/{serialNumber}/label`, `/api/barcode/items/{itemId}/label` | `barcode_qr_labeling.read` | generate a single item's GS1-128 + QR label (computed on demand, nothing stored) |
 | `GET /api/barcode/lots/{lotNumber}/labels` | `barcode_qr_labeling.read` | generate a full label sheet for every item in a lot |
 | `POST /api/barcode/items/{itemId}/print-log` | `barcode_qr_labeling.write` | log a `ChainOfCustodyEvent` (`LABEL_PRINTED`) when a label is actually printed |
+| `POST /api/barcode/items/{itemId}/reprint` | `qr_reprint.write` | execute direct label reprint with mandatory reason & custody log |
+| `POST /api/barcode/reprint/initiate` | `qr_reprint.write` | submit reprint authorization request |
+| `GET /api/barcode/reprint/pending` | `qr_reprint.read` | view pending reprint requests |
 
 ## 5. Seeded role → module matrix
 
@@ -150,6 +154,7 @@ Demo users (password `Password123`): `treasury-maker`, `treasury-checker`,
 | workflows (act) | RO | RO | RO | F |
 | intake | F | RO | RO | F |
 | barcode_qr_labeling | F | RO | RO | F |
+| qr_reprint | RO | F | RO | F |
 | **vault_location** (manage) | — | — | — | F |
 | **master_data** (manage) | — | — | — | F |
 | **workflow_design** (manage) | — | — | — | F |

@@ -1,0 +1,565 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GOLD2 | System Blueprint</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --gold-primary: #D4AF37;
+            --gold-dark: #B8860B;
+            --gold-light: #F9E498;
+            --slate-900: #0f172a;
+            --slate-800: #1e293b;
+            --slate-700: #334155;
+            --slate-200: #e2e8f0;
+            --slate-100: #f1f5f9;
+            --cream: #fdfbf7;
+            --white: #ffffff;
+            --danger: #ef4444;
+            --info: #3b82f6;
+            --success: #10b981;
+            --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        * { box-sizing: border-box; }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--cream);
+            color: var(--slate-900);
+            margin: 0;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+        .sidebar {
+            width: 280px;
+            background-color: var(--slate-900);
+            color: var(--white);
+            display: flex;
+            flex-direction: column;
+            padding: 0;
+            box-shadow: 4px 0 10px rgba(0,0,0,0.1);
+            z-index: 100;
+        }
+        .sidebar-header {
+            padding: 30px 20px;
+            text-align: center;
+            border-bottom: 1px solid var(--slate-800);
+        }
+        .sidebar-header h1 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin: 0;
+            color: var(--gold-primary);
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+        .sidebar-header p {
+            font-size: 0.75rem;
+            color: var(--slate-200);
+            margin: 5px 0 0;
+            opacity: 0.7;
+        }
+        .nav-container {
+            flex: 1;
+            padding: 20px 15px;
+        }
+        .nav-item {
+            display: flex;
+            align-items: center;
+            padding: 12px 15px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: var(--transition);
+            color: var(--slate-200);
+            font-weight: 500;
+            font-size: 0.95rem;
+        }
+        .nav-item:hover {
+            background-color: var(--slate-800);
+            color: var(--gold-primary);
+        }
+        .nav-item.active {
+            background-color: var(--gold-primary);
+            color: var(--slate-900);
+        }
+        .nav-item svg {
+            margin-right: 12px;
+            width: 20px;
+            height: 20px;
+        }
+        .main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            position: relative;
+        }
+        .top-bar {
+            height: 70px;
+            background: var(--white);
+            border-bottom: 1px solid var(--slate-200);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 40px;
+            z-index: 10;
+        }
+        .top-bar h2 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin: 0;
+        }
+        .search-box {
+            position: relative;
+            width: 300px;
+        }
+        .search-box input {
+            width: 100%;
+            padding: 8px 12px 8px 35px;
+            border: 1px solid var(--slate-200);
+            border-radius: 20px;
+            font-size: 0.9rem;
+            outline: none;
+            transition: var(--transition);
+        }
+        .search-box input:focus {
+            border-color: var(--gold-primary);
+            box-shadow: 0 0 0 3px rgba(212, 175, 55, 0.2);
+        }
+        .search-box svg {
+            position: absolute;
+            left: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 16px;
+            height: 16px;
+            color: var(--slate-700);
+        }
+        .content-area {
+            flex: 1;
+            overflow-y: auto;
+            padding: 40px;
+            scroll-behavior: smooth;
+        }
+        .section {
+            display: none;
+            animation: fadeIn 0.4s ease-out;
+        }
+        .section.active {
+            display: block;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .diagram-canvas {
+            background: var(--white);
+            border-radius: 16px;
+            padding: 40px;
+            border: 1px solid var(--slate-200);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.05);
+            display: flex;
+            flex-wrap: wrap;
+            gap: 40px;
+            justify-content: center;
+            align-items: flex-start;
+        }
+        .table-node {
+            width: 220px;
+            background: var(--white);
+            border: 1px solid var(--slate-200);
+            border-radius: 12px;
+            overflow: hidden;
+            transition: var(--transition);
+            cursor: pointer;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.02);
+        }
+        .table-node:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 12px 20px rgba(0,0,0,0.1);
+            border-color: var(--gold-primary);
+        }
+        .table-node.highlight {
+            border: 2px solid var(--gold-primary);
+            box-shadow: 0 0 15px rgba(212, 175, 55, 0.3);
+        }
+        .table-node .header {
+            background: var(--slate-800);
+            color: var(--white);
+            padding: 12px;
+            font-weight: 600;
+            font-size: 0.9rem;
+            text-align: center;
+        }
+        .table-node.core .header {
+            background: var(--gold-primary);
+            color: var(--slate-900);
+        }
+        .table-node .fields {
+            padding: 10px;
+            font-size: 0.8rem;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .field {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+        .field:hover { background: var(--slate-100); }
+        .pk { color: var(--danger); font-weight: 700; font-size: 0.7rem; }
+        .fk { color: var(--info); font-style: italic; font-size: 0.7rem; }
+        .dict-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+            gap: 25px;
+        }
+        .dict-card {
+            background: var(--white);
+            border-radius: 12px;
+            border: 1px solid var(--slate-200);
+            overflow: hidden;
+            transition: var(--transition);
+        }
+        .dict-card:hover {
+            box-shadow: 0 8px 20px rgba(0,0,0,0.06);
+        }
+        .dict-card .card-head {
+            padding: 15px 20px;
+            background: var(--slate-100);
+            border-bottom: 1px solid var(--slate-200);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .dict-card .card-head h3 {
+            margin: 0;
+            font-size: 1rem;
+            color: var(--slate-900);
+        }
+        .dict-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+        }
+        .dict-table th {
+            text-align: left;
+            padding: 10px 20px;
+            background: var(--white);
+            color: var(--slate-700);
+            font-weight: 600;
+            border-bottom: 1px solid var(--slate-200);
+        }
+        .dict-table td {
+            padding: 10px 20px;
+            border-bottom: 1px solid var(--slate-100);
+            color: var(--slate-700);
+        }
+        .type-badge {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.75rem;
+            padding: 2px 6px;
+            border-radius: 4px;
+            background: var(--slate-100);
+            color: var(--slate-700);
+            border: 1px solid var(--slate-200);
+        }
+        .proc-container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .proc-card {
+            background: var(--white);
+            border-radius: 12px;
+            border: 1px solid var(--slate-200);
+            padding: 25px;
+            transition: var(--transition);
+            position: relative;
+        }
+        .proc-card:hover {
+            border-left: 6px solid var(--gold-primary);
+        }
+        .proc-card h3 {
+            margin: 0 0 15px 0;
+            font-size: 1.2rem;
+            color: var(--slate-900);
+            display: flex;
+            align-items: center;
+        }
+        .proc-card h3 svg {
+            margin-right: 12px;
+            color: var(--gold-primary);
+        }
+        .proc-desc {
+            color: var(--slate-700);
+            line-height: 1.6;
+            margin-bottom: 20px;
+        }
+        .logic-block {
+            background: var(--slate-900);
+            color: var(--gold-light);
+            padding: 20px;
+            border-radius: 8px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.9rem;
+            line-height: 1.5;
+            border-left: 4px solid var(--gold-primary);
+            position: relative;
+        }
+        .logic-block::before {
+            content: 'LOGIC';
+            position: absolute;
+            top: -10px;
+            right: 10px;
+            font-size: 0.6rem;
+            background: var(--gold-primary);
+            color: var(--slate-900);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: 700;
+        }
+        .tag {
+            font-size: 0.7rem;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            margin-left: 10px;
+        }
+        .tag-blue { background: #dbeafe; color: #1e40af; }
+        .tag-gold { background: #fef3c7; color: #92400e; }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <h1>GOLD2</h1>
+            <p>Inventory System Blueprint</p>
+        </div>
+        <div class="nav-container">
+            <div class="nav-item active" onclick="showSection('diagram', this)">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"></path></svg>
+                Visual Map
+            </div>
+            <div class="nav-item" onclick="showSection('dictionary', this)">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"></path></svg>
+                Data Dictionary
+            </div>
+            <div class="nav-item" onclick="showSection('procedures', this)">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                Business Logic
+            </div>
+            <div class="nav-item" onclick="showSection('queries', this)">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                Standard Queries
+            </div>
+        </div>
+    </div>
+    <div class="main">
+        <div class="top-bar">
+            <h2 id="page-title">Visual Map</h2>
+            <div class="search-box">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                <input type="text" id="search-input" placeholder="Search tables or fields..." oninput="filterDictionary()">
+            </div>
+        </div>
+        <div class="content-area">
+            <div id="diagram" class="section active">
+                <div class="diagram-canvas">
+                    <div class="table-node core" onclick="highlightTable('InventoryItem')">
+                        <div class="header">InventoryItem</div>
+                        <div class="fields">
+                            <div class="field"><span>ItemId</span><span class="pk">PK</span></div>
+                            <div class="field"><span>ProductId</span><span class="fk">FK</span></div>
+                            <div class="field"><span>LotId</span><span class="fk">FK</span></div>
+                            <div class="field"><span>LocationId</span><span class="fk">FK</span></div>
+                        </div>
+                    </div>
+                    <div class="table-node" onclick="highlightTable('MetalProduct')">
+                        <div class="header">MetalProduct</div>
+                        <div class="fields">
+                            <div class="field"><span>ProductId</span><span class="pk">PK</span></div>
+                            <div class="field"><span>MetalTypeId</span><span class="fk">FK</span></div>
+                            <div class="field"><span>BrandId</span><span class="fk">FK</span></div>
+                        </div>
+                    </div>
+                    <div class="table-node" onclick="highlightTable('MetalType')">
+                        <div class="header">MetalType</div>
+                        <div class="fields">
+                            <div class="field"><span>MetalTypeId</span><span class="pk">PK</span></div>
+                            <div class="field"><span>MetalName</span><span>-</span></div>
+                        </div>
+                    </div>
+                    <div class="table-node" onclick="highlightTable('MetalBrand')">
+                        <div class="header">MetalBrand</div>
+                        <div class="fields">
+                            <div class="field"><span>BrandId</span><span class="pk">PK</span></div>
+                            <div class="field"><span>BrandName</span><span>-</span></div>
+                        </div>
+                    </div>
+                    <div class="table-node" onclick="highlightTable('InventoryLocation')">
+                        <div class="header">InventoryLocation</div>
+                        <div class="fields">
+                            <div class="field"><span>LocationId</span><span class="pk">PK</span></div>
+                            <div class="field"><span>VaultId</span><span class="fk">FK</span></div>
+                            <div class="field"><span>BranchId</span><span class="fk">FK</span></div>
+                        </div>
+                    </div>
+                    <div class="table-node" onclick="highlightTable('Vault')">
+                        <div class="header">Vault</div>
+                        <div class="fields">
+                            <div class="field"><span>VaultId</span><span class="pk">PK</span></div>
+                            <div class="field"><span>VaultName</span><span>-</span></div>
+                        </div>
+                    </div>
+                    <div class="table-node" onclick="highlightTable('Branch')">
+                        <div class="header">Branch</div>
+                        <div class="fields">
+                            <div class="field"><span>BranchId</span><span class="pk">PK</span></div>
+                            <div class="field"><span>VaultId</span><span class="fk">FK</span></div>
+                        </div>
+                    </div>
+                    <div class="table-node" onclick="highlightTable('InventoryLot')">
+                        <div class="header">InventoryLot</div>
+                        <div class="fields">
+                            <div class="field"><span>LotId</span><span class="pk">PK</span></div>
+                            <div class="field"><span>PoId</span><span class="fk">FK</span></div>
+                        </div>
+                    </div>
+                    <div class="table-node" onclick="highlightTable('PurchaseOrder')">
+                        <div class="header">PurchaseOrder</div>
+                        <div class="fields">
+                            <div class="field"><span>PoId</span><span class="pk">PK</span></div>
+                            <div class="field"><span>VendorId</span><span class="fk">FK</span></div>
+                        </div>
+                    </div>
+                    <div class="table-node" onclick="highlightTable('gl_journal_entries')">
+                        <div class="header">gl_journal_entries</div>
+                        <div class="fields">
+                            <div class="field"><span>Id</span><span class="pk">PK</span></div>
+                            <div class="field"><span>EntryId</span><span>-</span></div>
+                        </div>
+                    </div>
+                    <div class="table-node" onclick="highlightTable('gl_journal_lines')">
+                        <div class="header">gl_journal_lines</div>
+                        <div class="fields">
+                            <div class="field"><span>Id</span><span class="pk">PK</span></div>
+                            <div class="field"><span>EntryId</span><span class="fk">FK</span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div id="dictionary" class="section">
+                <div class="dict-grid" id="dict-grid"></div>
+            </div>
+            <div id="procedures" class="section">
+                <div class="proc-container">
+                    <div class="proc-card">
+                        <h3><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg> Landed Cost Calculation</h3>
+                        <p class="proc-desc">Calculates the actual cost of acquiring metal including all import and shipping fees. This determines the Average Unit Cost for a Lot.</p>
+                        <div class="logic-block">LandedCost = TotalCost + FreightCost + InsuranceCost + CustomsDutyCost + OtherFees</div>
+                    </div>
+                    <div class="proc-card">
+                        <h3><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"></path></svg> General Ledger Double-Entry</h3>
+                        <p class="proc-desc">Every physical movement must be balanced by a financial posting to ensure accounting integrity.</p>
+                        <div class="logic-block">Step 1: Create gl_journal_entries record<br>Step 2: Create gl_journal_lines (Debit: Asset Account)<br>Step 3: Create gl_journal_lines (Credit: Liability/Cash Account)</div>
+                    </div>
+                    <div class="proc-card">
+                        <h3><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V//..."></path></svg> Chain of Custody Tracking</h3>
+                        <p class="proc-desc">Records every time a physical bar is moved from one location to another for auditing purposes.</p>
+                        <div class="logic-block">Trigger: UPDATE InventoryItem SET LocationId = @NewLoc<br>Action: INSERT INTO CustodyLog (ItemId, OldLoc, NewLoc, User, Time)</div>
+                    </div>
+                </div>
+            </div>
+            <div id="queries" class="section">
+                <div class="proc-container">
+                    <div class="proc-card">
+                        <h3><span class="tag tag-gold">Finance</span> Total Inventory Valuation</h3>
+                        <p class="proc-desc">Calculates the current book value of all on-hand precious metals.</p>
+                        <div class="logic-block">SELECT SUM(I.Weight * L.AverageUnitCost) as TotalValue FROM InventoryItem I JOIN InventoryLot L ON I.LotId = L.LotId WHERE I.StatusCode = 'READY'</div>
+                    </div>
+                    <div class="proc-card">
+                        <h3><span class="tag tag-blue">Audit</span> LBMA Compliance Gap</h3>
+                        <p class="proc-desc">Identifies bars that are missing mandatory LBMA certification data.</p>
+                        <div class="logic-block">SELECT SerialNumber, ProductCode FROM InventoryItem WHERE RefinerName IS NULL OR FinenessPpt IS NULL</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script>
+        const dbSchema = {
+            'MetalType': { fields: [['MetalTypeId', 'PK', 'Unique ID'], ['MetalName', 'Text', 'Name of the metal']], color: 'gold' },
+            'MetalPurityLevel': { fields: [['PurityId', 'PK', 'Unique ID'], ['PurityValue', 'Currency', 'Fineness percentage'], ['Description', 'Text', 'Purity label']], color: 'gold' },
+            'MetalDenomination': { fields: [['DenominationId', 'PK', 'Unique ID'], ['WeightGrams', 'Currency', 'Weight in g'], ['WeightOunces', 'Currency', 'Weight in oz'], ['Label', 'Text', 'Display name'], ['MetalTypeId', 'FK', 'Link to MetalType']], color: 'gold' },
+            'MetalBrand': { fields: [['BrandId', 'PK', 'Unique ID'], ['BrandCode', 'Text', 'Company code'], ['BrandName', 'Text', 'Full brand name'], ['IsLbmaCertified', 'Bit', 'LBMA Status']], color: 'gold' },
+            'MetalProduct': { fields: [['ProductId', 'PK', 'Unique ID'], ['ProductCode', 'Text', 'SKU'], ['MetalTypeId', 'FK', 'Link to Type'], ['DenominationId', 'FK', 'Link to Denom'], ['PurityId', 'FK', 'Link to Purity'], ['BrandId', 'FK', 'Link to Brand']], color: 'gold' },
+            'Vault': { fields: [['VaultId', 'PK', 'Unique ID'], ['VaultName', 'Text', 'Name of the vault'], ['MaxWeightCapacityKg', 'Currency', 'Max limit']], color: 'slate' },
+            'Branch': { fields: [['BranchId', 'PK', 'Unique ID'], ['BranchCode', 'Text', 'Code'], ['VaultId', 'FK', 'Link to Vault']], color: 'slate' },
+            'InventoryLocation': { fields: [['LocationId', 'PK', 'Unique ID'], ['VaultId', 'FK', 'Link to Vault'], ['BranchId', 'FK', 'Link to Branch'], ['ZoneRoom', 'Text', 'Room ID'], ['ShelfRow', 'Text', 'Shelf ID'], ['SlotBin', 'Text', 'Bin ID']], color: 'slate' },
+            'Vendor': { fields: [['VendorId', 'PK', 'Unique ID'], ['VendorName', 'Text', 'Supplier Name'], ['ContactEmail', 'Text', 'Email']], color: 'slate' },
+            'PurchaseOrder': { fields: [['PoId', 'PK', 'Unique ID'], ['PoNumber', 'Text', 'PO Ref'], ['VendorId', 'FK', 'Link to Vendor'], ['TotalCost', 'Currency', 'Total Value']], color: 'slate' },
+            'POItem': { fields: [['PoItemId', 'PK', 'Unique ID'], ['PoId', 'FK', 'Link to PO'], ['ProductId', 'FK', 'Link to Product'], ['OrderedQuantity', 'Int', 'Qty'], ['UnitCost', 'Currency', 'Cost per unit']], color: 'slate' },
+            'InventoryLot': { fields: [['LotId', 'PK', 'Unique ID'], ['LotNumber', 'Text', 'Lot Ref'], ['PoId', 'FK', 'Link to PO'], ['AverageUnitCost', 'Currency', 'Valuation']], color: 'slate' },
+            'InventoryItem': { fields: [['ItemId', 'PK', 'Unique ID'], ['SerialNumber', 'Text', 'Unique Bar ID'], ['ProductId', 'FK', 'Link to Product'], ['LotId', 'FK', 'Link to Lot'], ['LocationId', 'FK', 'Link to Loc'], ['StatusCode', 'Text', 'Status']], color: 'core' },
+            'gl_journal_entries': { fields: [['Id', 'PK', 'Unique ID'], ['EntryId', 'Text', 'GUID'], ['SourceType', 'Text', 'Event Type']], color: 'slate' },
+            'gl_journal_lines': { fields: [['Id', 'PK', 'Unique ID'], ['EntryId', 'FK', 'Link to Entry'], ['AccountCode', 'Text', 'GL Code'], ['Amount', 'Currency', 'Value']], color: 'slate' }
+        };
+        function initDictionary() {
+            const grid = document.getElementById('dict-grid');
+            grid.innerHTML = '';
+            for (const [tableName, data] of Object.entries(dbSchema)) {
+                const card = document.createElement('div');
+                card.className = 'dict-card';
+                card.id = `dict-${tableName}`;
+                let rows = '';
+                data.fields.forEach(([field, type, desc]) => {
+                    rows += `<tr><td>${field}</td><td><span class="type-badge">${type}</span></td><td>${desc}</td></tr>`;
+                });
+                card.innerHTML = `<div class="card-head"><h3>${tableName}</h3><span class="tag ${data.color === 'core' ? 'tag-gold' : 'tag-blue'}">${data.color}</span></div><table class="dict-table"><thead><tr><th>Field</th><th>Type</th><th>Purpose</th></tr></thead><tbody>${rows}</tbody></table>`;
+                grid.appendChild(card);
+            }
+        }
+        function showSection(sectionId, element) {
+            document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+            document.getElementById(sectionId).classList.add('active');
+            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+            element.classList.add('active');
+            const titles = { 'diagram': 'Visual Map', 'dictionary': 'Data Dictionary', 'procedures': 'Business Logic', 'queries': 'Standard Queries' };
+            document.getElementById('page-title').innerText = titles[sectionId];
+        }
+        function highlightTable(tableName) {
+            document.querySelectorAll('.table-node').forEach(n => n.classList.remove('highlight'));
+            const node = Array.from(document.querySelectorAll('.table-node')).find(n => n.innerText.includes(tableName));
+            if(node) node.classList.add('highlight');
+            showSection('dictionary', document.querySelector('.nav-item:nth-child(2)'));
+            setTimeout(() => {
+                document.querySelectorAll('.dict-card').forEach(c => c.style.borderColor = 'var(--slate-200)');
+                const card = document.getElementById(`dict-${tableName}`);
+                if(card) {
+                    card.style.borderColor = 'var(--gold-primary)';
+                    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            }, 100);
+        }
+        function filterDictionary() {
+            const query = document.getElementById('search-input').value.toLowerCase();
+            document.querySelectorAll('.dict-card').forEach(card => {
+                const text = card.innerText.toLowerCase();
+                card.style.display = text.includes(query) ? 'block' : 'none';
+            });
+        }
+        window.onload = () => { initDictionary(); };
+    </script>
+</body>
+</html>

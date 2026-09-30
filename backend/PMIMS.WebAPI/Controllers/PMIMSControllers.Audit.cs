@@ -87,4 +87,36 @@ public partial class PMIMSControllers
                 return BadRequest(new { error = "format must be one of: csv, xlsx, pdf." });
         }
     }
+
+    [AllowAnonymous]
+    [HttpPost("audit/client-error")]
+    public async Task<IActionResult> LogClientError([FromBody] ClientErrorLogDto req)
+    {
+        var username = req.Username ?? User.Identity?.Name ?? "ANONYMOUS";
+        var ip = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "0.0.0.0";
+        var desc = $"[CLIENT_ERROR] Incident: {req.IncidentId ?? "N/A"} | Screen: {req.Screen ?? "Unknown"} | Function: {req.FunctionName ?? "Unknown"} | Role: {req.UserRole ?? "N/A"} | Error: {req.ErrorMessage} | Status: {req.HttpStatus?.ToString() ?? "N/A"} | Details: {req.Details ?? "None"}";
+        await _repository.SaveAuditLogAsync(
+            username: username,
+            ipAddress: ip,
+            moduleName: req.Module ?? "CLIENT_EXCEPTION",
+            actionDescription: desc,
+            entityType: "CLIENT_INCIDENT",
+            entityId: req.IncidentId ?? req.FunctionName ?? "N/A"
+        );
+        return Ok(new { success = true, incident_id = req.IncidentId });
+    }
+}
+
+public class ClientErrorLogDto
+{
+    public string? IncidentId { get; set; }
+    public string? Screen { get; set; }
+    public string? FunctionName { get; set; }
+    public string? Module { get; set; }
+    public string? ErrorMessage { get; set; }
+    public string? Details { get; set; }
+    public string? Username { get; set; }
+    public string? UserRole { get; set; }
+    public int? HttpStatus { get; set; }
+    public string? Timestamp { get; set; }
 }

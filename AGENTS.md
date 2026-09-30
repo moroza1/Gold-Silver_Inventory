@@ -199,7 +199,8 @@ A module key must be wired in **four** places to be consistent:
   `pending_actions.{read,write}`, `vault_location.{read,write}`, `master_data.{read,write}`,
   `workflow_design.{read,write}`, `intake.{read,write}`, `dashboard.read`,
   `rules_engine.{read,write}`, `notifications.{read,write}`, `monitoring.{read,write}`,
-  `dispensing.{read,write}`, `device_integration.{read,write}`. Note `workflows.write`
+  `dispensing.{read,write}`, `device_integration.{read,write}`,
+  `barcode_qr_labeling.{read,write}`, `qr_reprint.{read,write}`. Note `workflows.write`
   deliberately does **not** exist — approving/rejecting a workflow instance
   (`POST /api/workflows/instances/{id}/action`) is gated by `pending_actions.write`, because
   that's the module Checker/Reconciliation actually hold `FULL` on (`workflows` itself is
