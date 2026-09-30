@@ -287,13 +287,16 @@ const Translations: Record<string, Record<string, string>> = {
     header_timezone: "GMT+3 (Kuwait)",
     kpi_total_precious: "Total Precious Metals (All Stock)",
     kpi_damage: "Damaged & Quarantined Stock",
-    kpi_prop_gold: "Turkey Offline",
-    kpi_sync: "Turkey / Inbound Consignment",
-    kpi_ready: "Ready for Sale (Transferred to KFH)",
-    kpi_ready_sub: "Transferred to KFH & cleared in vault",
+    kpi_prop_gold: "KFH Turkey Offline",
+    kpi_kfh_owned: "KFH Kuwait",
+    kpi_customers: "Customers",
+    kpi_customs: "Customs (Bonded)",
+    kpi_sync: "KFH Turkey Offline Consignment",
+    kpi_ready: "KFH Kuwait (Ready for Sale)",
+    kpi_ready_sub: "Owned by KFH Kuwait & cleared in vault",
     kpi_reserved: "Reserved Checkout Locks",
     kpi_reserved_sub: "active checkout sessions",
-    kpi_custody: "Client Custody Stock",
+    kpi_custody: "Customers Custody",
     kpi_custody_sub: "Customer gold held in vaults",
     exec_table_title: "Active Inventory Registry",
     exec_table_subtitle: "Detailed physical serial tracker from the ledger table",
@@ -599,14 +602,17 @@ const Translations: Record<string, Record<string, string>> = {
     header_timezone: "توقيت الكويت (GMT+3)",
     kpi_total_precious: "إجمالي المعادن الثمينة (كافة المخزون)",
     kpi_damage: "المخزون التالف والمعزول",
-    kpi_prop_gold: "مخزون تركيا (أوفلاين)",
-    kpi_sync: "مخزون تركيا قبل الشراء والنقل",
-    kpi_ready: "جاهز للبيع (تم النقل لـ KFH)",
-    kpi_ready_sub: "تم نقله لملكية بيتك وجاهز بالخزينة",
+    kpi_prop_gold: "بيتك تركيا (أوفلاين)",
+    kpi_kfh_owned: "بيتك الكويت",
+    kpi_customers: "العملاء",
+    kpi_customs: "الجمارك (تحت التخليص)",
+    kpi_sync: "أمانات بيتك تركيا (أوفلاين)",
+    kpi_ready: "جاهز للبيع (بيتك الكويت)",
+    kpi_ready_sub: "مملوك لبيتك الكويت ومتاح بالخزينة",
     kpi_reserved: "حجوزات شراء معلقة",
     kpi_reserved_sub: "جلسات شراء نشطة حالياً",
-    kpi_custody: "مخزون أمانات العملاء",
-    kpi_custody_sub: "ذهب العملاء المحفوظ بالخزائن",
+    kpi_custody: "أمانات العملاء",
+    kpi_custody_sub: "معادن العملاء المحفوظة بالخزائن",
     exec_table_title: "سجل المخزون النشط والمادي",
     exec_table_subtitle: "متبع الأرقام التسلسلية المادية المفصل من جدول الأستاذ",
     th_serial: "الرقم التسلسلي",
@@ -1038,7 +1044,7 @@ export default function App() {
     items: any[];
   } | null>(null);
   const [loadingExecBoard, setLoadingExecBoard] = useState(false);
-  const [selectedExecKpi, setSelectedExecKpi] = useState<'TOTAL_PRECIOUS' | 'PROPRIETARY_GOLD' | 'READY_SALE' | 'VIP_STOCK' | 'RESERVED' | 'CUSTODY' | 'DAMAGED'>('TOTAL_PRECIOUS');
+  const [selectedExecKpi, setSelectedExecKpi] = useState<'TOTAL_PRECIOUS' | 'PROPRIETARY_GOLD' | 'READY_SALE' | 'VIP_STOCK' | 'RESERVED' | 'CUSTODY' | 'CUSTOMS' | 'DAMAGED'>('TOTAL_PRECIOUS');
   const [execPreciousFilter, setExecPreciousFilter] = useState<'ALL' | 'SWISS' | 'TURKEY' | 'SILVER'>('ALL');
   const [execKfhChannelFilter, setExecKfhChannelFilter] = useState<'ALL' | 'ONLINE' | 'OFFLINE'>('ALL');
 
@@ -2712,10 +2718,10 @@ const [migrationApproved, setMigrationApproved] = useState(false);
       '100 Gram Bar': 'سبيكة 100 جرام',
       '1 Kilogram Bar': 'سبيكة 1 كيلوجرام',
       '1 Ounce Bar': 'سبيكة 1 أونصة',
-      'KFH_OWNED': 'بيت التمويل الكويتي',
-      'TURKEY_OWNED': 'أمانات تركيا',
-      'CUSTOMER_OWNED': 'أمانات العملاء',
-      'CUSTOMS_OWNED': 'أمانات الجمارك (تحت التخليص)'
+      'KFH_OWNED': 'بيتك الكويت',
+      'TURKEY_OWNED': 'بيتك تركيا (أوفلاين)',
+      'CUSTOMER_OWNED': 'العملاء',
+      'CUSTOMS_OWNED': 'الجمارك (تحت التخليص)'
     };
     return dbMap[val] || val;
   };
@@ -6842,25 +6848,83 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     return Translations[currentLang]?.[key] || key;
   };
 
-  // Helper to classify an item into SWISS, TURKEY, or SILVER
+  // Helper to classify an item into SWISS, TURKEY, or SILVER (Physical metal origin, NOT owner)
   const classifyPrecious = (item: any): 'SWISS' | 'TURKEY' | 'SILVER' => {
+    // 1. Check Silver first
     const pType = (item?.precious_type || '').toUpperCase();
-    if (pType === 'SILVER') return 'SILVER';
-    if (pType === 'TURKEY') return 'TURKEY';
-    if (pType === 'SWISS') return 'SWISS';
-
-    const metal = (item?.metal || '').toLowerCase();
+    const metal = (item?.metal || item?.metal_name || '').toLowerCase();
     const prod = (item?.product_name || item?.product_code || '').toLowerCase();
-    if (metal === 'silver' || prod.includes('silver') || prod.startsWith('ag-')) {
+    if (pType === 'SILVER' || metal === 'silver' || prod.includes('silver') || prod.startsWith('ag-')) {
       return 'SILVER';
     }
 
-    const origin = (item?.origin || '').toLowerCase();
-    const brand = (item?.brand_name || '').toLowerCase();
-    const owner = (item?.ownership || '').toLowerCase();
+    // 2. Check Turkey indicators (explicit type, origin, brand, refiner, serial, vendor) - DO NOT conflate ownership with gold type!
+    const origin = (item?.origin || item?.origin_country || item?.country_of_origin || '').toLowerCase();
+    const brand = (item?.brand_name || item?.brand || '').toLowerCase();
+    const refiner = (item?.refiner_name || item?.refiner || '').toLowerCase();
+    const serial = (item?.serial_number || item?.serial || '').toUpperCase();
+    const vendor = (item?.vendor_name || item?.vendor_code || item?.supplier || '').toLowerCase();
 
-    if (origin.includes('turk') || prod.includes('turk') || brand.includes('nadir') || brand.includes('igr') || owner.includes('turkey')) {
+    if (
+      pType === 'TURKEY' ||
+      origin.includes('turk') ||
+      origin === 'tr' ||
+      prod.includes('turk') ||
+      brand.includes('nadir') ||
+      brand.includes('igr') ||
+      brand.includes('istanbul') ||
+      brand.includes('kuveyt') ||
+      brand.includes('ahlatci') ||
+      brand.includes('agakulche') ||
+      refiner.includes('nadir') ||
+      refiner.includes('igr') ||
+      refiner.includes('istanbul') ||
+      refiner.includes('turk') ||
+      refiner.includes('kuveyt') ||
+      refiner.includes('ahlatci') ||
+      vendor.includes('nadir') ||
+      vendor.includes('turk') ||
+      vendor.includes('igr') ||
+      serial.startsWith('TR-') ||
+      serial.startsWith('TURK-') ||
+      serial.startsWith('TK-') ||
+      serial.startsWith('NAD-') ||
+      serial.startsWith('IGR-') ||
+      serial.startsWith('KT-') ||
+      serial.includes('-TR-') ||
+      serial.includes('-TURK-')
+    ) {
       return 'TURKEY';
+    }
+
+    if (pType === 'SWISS') return 'SWISS';
+
+    // 3. Check Swiss indicators
+    if (
+      origin.includes('switz') ||
+      origin.includes('swiss') ||
+      prod.includes('swiss') ||
+      prod.includes('swis') ||
+      brand.includes('valcambi') ||
+      brand.includes('pamp') ||
+      brand.includes('argor') ||
+      brand.includes('suisse') ||
+      brand.includes('metalor') ||
+      refiner.includes('valcambi') ||
+      refiner.includes('pamp') ||
+      refiner.includes('argor') ||
+      refiner.includes('suisse') ||
+      refiner.includes('swiss') ||
+      vendor.includes('valcambi') ||
+      vendor.includes('swiss') ||
+      vendor.includes('pamp') ||
+      serial.startsWith('VAL-') ||
+      serial.startsWith('PAMP-') ||
+      serial.startsWith('ARG-') ||
+      serial.startsWith('CH-') ||
+      serial.startsWith('SWISS-')
+    ) {
+      return 'SWISS';
     }
 
     return 'SWISS';
@@ -6874,12 +6938,15 @@ const [migrationApproved, setMigrationApproved] = useState(false);
         i.ownership === 'TURKEY_OWNED' ||
         i.ownership === 'KFH_OWNED' ||
         i.ownership === 'VIP_OWNED' ||
+        i.ownership === 'CUSTOMER_OWNED' ||
+        i.ownership === 'CUSTOMS_OWNED' ||
         i.status === 'IN_TRANSFER' ||
         i.is_damaged ||
         i.status === 'QUARANTINED' ||
         i.status === 'PENDING_APPROVAL' ||
         i.status === 'READY' ||
-        i.status === 'RESERVED'
+        i.status === 'RESERVED' ||
+        i.status === 'HELD_IN_CUSTODY'
       );
     } else if (selectedExecKpi === 'DAMAGED') {
       return execBoard.items.filter((i: any) =>
@@ -6889,10 +6956,12 @@ const [migrationApproved, setMigrationApproved] = useState(false);
         i.damage_status === 'PENDING_APPROVAL'
       );
     } else if (selectedExecKpi === 'PROPRIETARY_GOLD') {
-      return execBoard.items.filter((i: any) => i.metal === 'Gold' && (i.ownership === 'TURKEY_OWNED' || i.ownership === 'PROPRIETARY'));
+      // 🇹🇷 KFH Turkey Offline
+      return execBoard.items.filter((i: any) => i.ownership === 'TURKEY_OWNED' || i.ownership === 'PROPRIETARY' || i.ownership === 'KFH_TURKEY' || i.ownership === 'KFH_TURKEY_OFFLINE');
     } else if (selectedExecKpi === 'READY_SALE') {
+      // 🇰🇼 KFH Kuwait
       return execBoard.items.filter((i: any) => {
-        const isKfh = i.ownership === 'KFH_OWNED' || i.ownership === 'PROPRIETARY' || i.ownership === 'VIP_OWNED';
+        const isKfh = i.ownership === 'KFH_OWNED' || i.ownership === 'PROPRIETARY' || i.ownership === 'VIP_OWNED' || i.ownership === 'KFH_KUWAIT';
         if (!isKfh) return false;
         if (execKfhChannelFilter === 'ONLINE') {
           return (i.channel_status === 'ONLINE' || !i.channel_status) && i.status === 'READY';
@@ -6909,7 +6978,11 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     } else if (selectedExecKpi === 'RESERVED') {
       return execBoard.items.filter((i: any) => i.status === 'RESERVED');
     } else if (selectedExecKpi === 'CUSTODY') {
-      return execBoard.items.filter((i: any) => i.ownership === 'CUSTOMER_OWNED' || i.status === 'HELD_IN_CUSTODY');
+      // 👥 Customers
+      return execBoard.items.filter((i: any) => i.ownership === 'CUSTOMER_OWNED' || i.ownership === 'CUSTOMERS' || i.status === 'HELD_IN_CUSTODY');
+    } else if (selectedExecKpi === 'CUSTOMS') {
+      // 🛃 Customs
+      return execBoard.items.filter((i: any) => i.ownership === 'CUSTOMS_OWNED' || i.ownership === 'CUSTOMS');
     }
     return [];
   }, [execBoard?.items, selectedExecKpi, execKfhChannelFilter]);
@@ -7946,9 +8019,20 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       const isKfh = owner.owner_code === 'KFH_OWNED';
                       const isTurkey = owner.owner_code === 'TURKEY_OWNED';
                       const isCustomer = owner.owner_code === 'CUSTOMER_OWNED';
+                      const isCustoms = owner.owner_code === 'CUSTOMS_OWNED';
 
-                      const themeColor = isKfh ? 'var(--kfh-green)' : isTurkey ? '#D4AF37' : '#3b82f6';
-                      const icon = isKfh ? 'fa-building-columns' : isTurkey ? 'fa-coins' : 'fa-user-shield';
+                      const themeColor = isKfh ? 'var(--kfh-green)' : isTurkey ? '#D4AF37' : isCustomer ? '#3b82f6' : '#F59E0B';
+                      const icon = isKfh ? 'fa-building-columns' : isTurkey ? 'fa-coins' : isCustomer ? 'fa-user-shield' : 'fa-passport';
+
+                      const displayTitle = isKfh
+                        ? (currentLang === 'en' ? 'KFH Kuwait' : 'بيتك الكويت')
+                        : isTurkey
+                        ? (currentLang === 'en' ? 'KFH Turkey Offline' : 'بيتك تركيا (أوفلاين)')
+                        : isCustomer
+                        ? (currentLang === 'en' ? 'Customers' : 'العملاء')
+                        : isCustoms
+                        ? (currentLang === 'en' ? 'Customs (Bonded)' : 'الجمارك (تحت التخليص)')
+                        : (owner.owner_label || owner.owner_code);
 
                       return (
                         <div
@@ -7967,7 +8051,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                               <i className={`fa-solid ${icon}`} style={{ color: themeColor, fontSize: '18px' }}></i>
                               <span className="kpi-title" style={{ color: themeColor, fontWeight: 700, fontSize: '14px' }}>
-                                {owner.owner_label}
+                                {displayTitle}
                               </span>
                             </div>
                             <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: 'rgba(255,255,255,0.08)', color: 'var(--text-muted)', fontWeight: 'bold' }}>
@@ -8571,14 +8655,17 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                 </span>
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '8px', fontSize: '10px' }}>
-                <span style={{ padding: '2px 6px', borderRadius: '4px', background: 'rgba(212, 175, 55, 0.15)', color: '#D4AF37', border: '1px solid rgba(212, 175, 55, 0.3)' }} title="Turkey Consignment">
-                  TR: {(execBoard?.turkey_weight_kg ?? 0).toFixed(1)}kg ({execBoard?.turkey_qty ?? 0})
+                <span style={{ padding: '2px 6px', borderRadius: '4px', background: 'rgba(212, 175, 55, 0.15)', color: '#D4AF37', border: '1px solid rgba(212, 175, 55, 0.3)' }} title="KFH Turkey Offline">
+                  🇹🇷 TR: {(execBoard?.total_precious?.kfh_turkey_offline_weight_kg ?? execBoard?.turkey_weight_kg ?? 0).toFixed(1)}kg ({execBoard?.total_precious?.kfh_turkey_offline_qty ?? execBoard?.turkey_qty ?? 0})
                 </span>
-                <span style={{ padding: '2px 6px', borderRadius: '4px', background: 'rgba(0, 155, 78, 0.15)', color: 'var(--kfh-green)', border: '1px solid rgba(0, 155, 78, 0.3)' }} title="KFH Owned">
-                  KFH: {(execBoard?.kfh_weight_kg ?? 0).toFixed(1)}kg ({execBoard?.kfh_qty ?? 0})
+                <span style={{ padding: '2px 6px', borderRadius: '4px', background: 'rgba(0, 155, 78, 0.15)', color: 'var(--kfh-green)', border: '1px solid rgba(0, 155, 78, 0.3)' }} title="KFH Kuwait">
+                  🇰🇼 KFH: {(execBoard?.total_precious?.kfh_kuwait_weight_kg ?? execBoard?.kfh_weight_kg ?? 0).toFixed(1)}kg ({execBoard?.total_precious?.kfh_kuwait_qty ?? execBoard?.kfh_qty ?? 0})
                 </span>
-                <span style={{ padding: '2px 6px', borderRadius: '4px', background: 'rgba(99, 102, 241, 0.15)', color: '#6366f1', border: '1px solid rgba(99, 102, 241, 0.3)' }} title="VIP Exclusive Reserve">
-                  VIP: {(execBoard?.vip_weight_kg ?? 0).toFixed(1)}kg ({execBoard?.vip_qty ?? 0})
+                <span style={{ padding: '2px 6px', borderRadius: '4px', background: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', border: '1px solid rgba(59, 130, 246, 0.3)' }} title="Customers">
+                  👥 Cust: {(execBoard?.total_precious?.customers_weight_kg ?? execBoard?.custody_weight_kg ?? 0).toFixed(1)}kg ({execBoard?.total_precious?.customers_qty ?? execBoard?.custody_qty ?? 0})
+                </span>
+                <span style={{ padding: '2px 6px', borderRadius: '4px', background: 'rgba(245, 158, 11, 0.15)', color: '#F59E0B', border: '1px solid rgba(245, 158, 11, 0.3)' }} title="Customs">
+                  🛃 Customs: {(execBoard?.total_precious?.customs_weight_kg ?? execBoard?.customs_weight_kg ?? 0).toFixed(1)}kg ({execBoard?.total_precious?.customs_qty ?? execBoard?.customs_qty ?? 0})
                 </span>
                 <span style={{ padding: '2px 6px', borderRadius: '4px', background: 'rgba(147, 51, 234, 0.15)', color: '#c084fc', border: '1px solid rgba(147, 51, 234, 0.3)' }} title="In Transit">
                   Transit: {(execBoard?.transit_weight_kg ?? 0).toFixed(1)}kg ({execBoard?.transit_qty ?? 0})
@@ -8586,13 +8673,13 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                 <span style={{ padding: '2px 6px', borderRadius: '4px', background: 'rgba(239, 68, 68, 0.15)', color: 'var(--accent-red)', border: '1px solid rgba(239, 68, 68, 0.3)' }} title="Damaged Stock">
                   Damage: {(execBoard?.damage_weight_kg ?? 0).toFixed(1)}kg ({execBoard?.damage_qty ?? 0})
                 </span>
-                <span style={{ padding: '2px 6px', borderRadius: '4px', background: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', border: '1px solid rgba(59, 130, 246, 0.3)' }} title="Pending Approval">
+                <span style={{ padding: '2px 6px', borderRadius: '4px', background: 'rgba(100, 116, 139, 0.15)', color: '#94a3b8', border: '1px solid rgba(100, 116, 139, 0.3)' }} title="Pending Approval">
                   Pending: {(execBoard?.pending_weight_kg ?? 0).toFixed(1)}kg ({execBoard?.pending_qty ?? 0})
                 </span>
               </div>
             </div>
 
-            {/* 2. PROPRIETARY TURKEY STOCK */}
+            {/* 2. KFH TURKEY OFFLINE OWNER CARD */}
             <div
               className="glass-card kpi-card"
               onClick={() => { setSelectedExecKpi('PROPRIETARY_GOLD'); setExecPreciousFilter('ALL'); }}
@@ -8606,20 +8693,23 @@ const [migrationApproved, setMigrationApproved] = useState(false);
               }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span className="kpi-title">{t('kpi_prop_gold')}</span>
+                <span className="kpi-title" style={{ color: '#D4AF37', fontWeight: 700 }}>
+                  <i className="fa-solid fa-coins" style={{ marginRight: '6px' }}></i>
+                  {currentLang === 'en' ? 'KFH Turkey Offline' : 'بيتك تركيا (أوفلاين)'}
+                </span>
                 {selectedExecKpi === 'PROPRIETARY_GOLD' && (
                   <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: '#D4AF37', color: '#000', fontWeight: 'bold' }}>
                     <i className="fa-solid fa-chart-pie"></i> {currentLang === 'en' ? 'Active' : 'نشط'}
                   </span>
                 )}
               </div>
-              <span className="kpi-value gold-txt">{(execBoard?.total_gold_weight_kg ?? 0).toFixed(3)} KG</span>
+              <span className="kpi-value gold-txt">{(execBoard?.total_precious?.kfh_turkey_offline_weight_kg ?? execBoard?.turkey_weight_kg ?? 0).toFixed(3)} KG</span>
               <span className="kpi-sub" style={{ color: 'var(--accent-green)' }}>
-                <i className="fa-solid fa-scale-balanced"></i> {((execBoard?.total_gold_weight_kg ?? 0) * 1000).toLocaleString()} g • <i className="fa-solid fa-hand-pointer"></i> {currentLang === 'en' ? 'Click to view bar quantities' : 'انقر لعرض كميات السبائك'}
+                <i className="fa-solid fa-scale-balanced"></i> {((execBoard?.total_precious?.kfh_turkey_offline_weight_kg ?? execBoard?.turkey_weight_kg ?? 0) * 1000).toLocaleString()} g • {execBoard?.total_precious?.kfh_turkey_offline_qty ?? execBoard?.turkey_qty ?? 0} {currentLang === 'en' ? 'Bars (Consignment)' : 'سبيكة (أمانات)'} • <i className="fa-solid fa-hand-pointer"></i> {currentLang === 'en' ? 'Click to view' : 'انقر للعرض'}
               </span>
             </div>
 
-            {/* 3. KFH OWNED TOTAL STOCK (ONLINE + OFFLINE) */}
+            {/* 3. KFH KUWAIT OWNER CARD (ONLINE + OFFLINE) */}
             <div
               className="glass-card kpi-card"
               onClick={() => { setSelectedExecKpi('READY_SALE'); setExecPreciousFilter('ALL'); }}
@@ -8633,9 +8723,9 @@ const [migrationApproved, setMigrationApproved] = useState(false);
               }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span className="kpi-title" style={{ color: 'var(--kfh-green)' }}>
+                <span className="kpi-title" style={{ color: 'var(--kfh-green)', fontWeight: 700 }}>
                   <i className="fa-solid fa-building-columns" style={{ marginRight: '6px' }}></i>
-                  {currentLang === 'en' ? 'KFH Owned Gold (Total)' : 'مخزون بيتك (الإجمالي)'}
+                  {currentLang === 'en' ? 'KFH Kuwait' : 'بيتك الكويت'}
                 </span>
                 {selectedExecKpi === 'READY_SALE' && (
                   <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: 'var(--kfh-green)', color: '#fff', fontWeight: 'bold' }}>
@@ -8643,7 +8733,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                   </span>
                 )}
               </div>
-              <span className="kpi-value" style={{ color: 'var(--kfh-green)' }}>{(execBoard?.total_precious?.kfh_weight_kg ?? execBoard?.kfh_weight_kg ?? 0).toFixed(3)} KG</span>
+              <span className="kpi-value" style={{ color: 'var(--kfh-green)' }}>{(execBoard?.total_precious?.kfh_kuwait_weight_kg ?? execBoard?.kfh_weight_kg ?? 0).toFixed(3)} KG</span>
               <div style={{ marginTop: '6px', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                 <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: 'rgba(0,155,78,0.15)', color: 'var(--kfh-green)', border: '1px solid rgba(0,155,78,0.3)', fontWeight: 600 }}>
                   🌐 {currentLang === 'en' ? 'Online:' : 'أونلاين:'} <strong>{(execBoard?.total_precious?.kfh_online_weight_kg ?? 0).toFixed(1)}kg</strong> ({execBoard?.total_precious?.kfh_online_qty ?? 0})
@@ -8653,11 +8743,71 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                 </span>
               </div>
               <span className="kpi-sub" style={{ color: 'var(--text-muted)', marginTop: '4px' }}>
-                <i className="fa-solid fa-hand-pointer"></i> {currentLang === 'en' ? 'Click to view & filter online/offline channels' : 'انقر لعرض وتصفية قنوات الأونلاين والأوفلاين'}
+                <i className="fa-solid fa-hand-pointer"></i> {currentLang === 'en' ? 'Click to view & filter' : 'انقر للعرض والتصفية'}
               </span>
             </div>
 
-            {/* 4. RESERVED CHECKOUT LOCKS */}
+            {/* 4. CUSTOMERS OWNER CARD */}
+            <div
+              className="glass-card kpi-card"
+              onClick={() => { setSelectedExecKpi('CUSTODY'); setExecPreciousFilter('ALL'); }}
+              style={{
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                border: selectedExecKpi === 'CUSTODY' ? '2px solid var(--accent-blue)' : '1px solid var(--surface-border)',
+                background: selectedExecKpi === 'CUSTODY' ? 'rgba(59, 130, 246, 0.08)' : undefined,
+                boxShadow: selectedExecKpi === 'CUSTODY' ? '0 0 16px rgba(59, 130, 246, 0.25)' : undefined,
+                transform: selectedExecKpi === 'CUSTODY' ? 'translateY(-2px)' : undefined
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span className="kpi-title" style={{ color: 'var(--accent-blue)', fontWeight: 700 }}>
+                  <i className="fa-solid fa-user-shield" style={{ marginRight: '6px' }}></i>
+                  {currentLang === 'en' ? 'Customers' : 'العملاء'}
+                </span>
+                {selectedExecKpi === 'CUSTODY' && (
+                  <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: 'var(--accent-blue)', color: '#fff', fontWeight: 'bold' }}>
+                    <i className="fa-solid fa-chart-pie"></i> {currentLang === 'en' ? 'Active' : 'نشط'}
+                  </span>
+                )}
+              </div>
+              <span className="kpi-value" style={{ color: 'var(--accent-blue)' }}>{(execBoard?.total_precious?.customers_weight_kg ?? execBoard?.custody_weight_kg ?? 0).toFixed(3)} KG</span>
+              <span className="kpi-sub">
+                {((execBoard?.total_precious?.customers_weight_kg ?? execBoard?.custody_weight_kg ?? 0) * 1000).toLocaleString()} g • {execBoard?.total_precious?.customers_qty ?? execBoard?.custody_qty ?? 0} {currentLang === 'en' ? 'Bars in Custody' : 'سبيكة أمانات'} • <i className="fa-solid fa-hand-pointer"></i> {currentLang === 'en' ? 'Click to view' : 'انقر للعرض'}
+              </span>
+            </div>
+
+            {/* 5. CUSTOMS OWNER CARD */}
+            <div
+              className="glass-card kpi-card"
+              onClick={() => { setSelectedExecKpi('CUSTOMS'); setExecPreciousFilter('ALL'); }}
+              style={{
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                border: selectedExecKpi === 'CUSTOMS' ? '2px solid #F59E0B' : '1px solid var(--surface-border)',
+                background: selectedExecKpi === 'CUSTOMS' ? 'rgba(245, 158, 11, 0.08)' : undefined,
+                boxShadow: selectedExecKpi === 'CUSTOMS' ? '0 0 16px rgba(245, 158, 11, 0.25)' : undefined,
+                transform: selectedExecKpi === 'CUSTOMS' ? 'translateY(-2px)' : undefined
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span className="kpi-title" style={{ color: '#F59E0B', fontWeight: 700 }}>
+                  <i className="fa-solid fa-passport" style={{ marginRight: '6px' }}></i>
+                  {currentLang === 'en' ? 'Customs (Bonded)' : 'الجمارك (تحت التخليص)'}
+                </span>
+                {selectedExecKpi === 'CUSTOMS' && (
+                  <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: '#F59E0B', color: '#000', fontWeight: 'bold' }}>
+                    <i className="fa-solid fa-chart-pie"></i> {currentLang === 'en' ? 'Active' : 'نشط'}
+                  </span>
+                )}
+              </div>
+              <span className="kpi-value" style={{ color: '#F59E0B' }}>{(execBoard?.total_precious?.customs_weight_kg ?? execBoard?.customs_weight_kg ?? 0).toFixed(3)} KG</span>
+              <span className="kpi-sub" style={{ color: '#F59E0B' }}>
+                <i className="fa-solid fa-box-open"></i> {((execBoard?.total_precious?.customs_weight_kg ?? execBoard?.customs_weight_kg ?? 0) * 1000).toLocaleString()} g • {execBoard?.total_precious?.customs_qty ?? execBoard?.customs_qty ?? 0} {currentLang === 'en' ? 'Bonded Bars' : 'سبائك بالجمارك'} • <i className="fa-solid fa-hand-pointer"></i> {currentLang === 'en' ? 'Click to view' : 'انقر للعرض'}
+              </span>
+            </div>
+
+            {/* 6. RESERVED CHECKOUT LOCKS */}
             <div
               className="glass-card kpi-card"
               onClick={() => { setSelectedExecKpi('RESERVED'); setExecPreciousFilter('ALL'); }}
@@ -8684,34 +8834,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
               </span>
             </div>
 
-            {/* 5. CUSTOMER CUSTODY */}
-            <div
-              className="glass-card kpi-card"
-              onClick={() => { setSelectedExecKpi('CUSTODY'); setExecPreciousFilter('ALL'); }}
-              style={{
-                cursor: 'pointer',
-                transition: 'all 0.2s ease',
-                border: selectedExecKpi === 'CUSTODY' ? '2px solid var(--accent-blue)' : '1px solid var(--surface-border)',
-                background: selectedExecKpi === 'CUSTODY' ? 'rgba(59, 130, 246, 0.08)' : undefined,
-                boxShadow: selectedExecKpi === 'CUSTODY' ? '0 0 16px rgba(59, 130, 246, 0.25)' : undefined,
-                transform: selectedExecKpi === 'CUSTODY' ? 'translateY(-2px)' : undefined
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span className="kpi-title">{t('kpi_custody')}</span>
-                {selectedExecKpi === 'CUSTODY' && (
-                  <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: 'var(--accent-blue)', color: '#fff', fontWeight: 'bold' }}>
-                    <i className="fa-solid fa-chart-pie"></i> {currentLang === 'en' ? 'Active' : 'نشط'}
-                  </span>
-                )}
-              </div>
-              <span className="kpi-value" style={{ color: 'var(--accent-blue)' }}>{(execBoard?.custody_weight_kg ?? 0).toFixed(3)} KG</span>
-              <span className="kpi-sub">
-                {((execBoard?.custody_weight_kg ?? 0) * 1000).toLocaleString()} g • <i className="fa-solid fa-hand-pointer"></i> {currentLang === 'en' ? 'Click to view' : 'انقر للعرض'}
-              </span>
-            </div>
-
-            {/* 6. DAMAGED & QUARANTINED STOCK CARD */}
+            {/* 7. DAMAGED & QUARANTINED STOCK CARD */}
             <div
               className="glass-card kpi-card"
               onClick={() => { setSelectedExecKpi('DAMAGED'); setExecPreciousFilter('ALL'); }}
@@ -8906,12 +9029,14 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     : selectedExecKpi === 'DAMAGED'
                     ? (currentLang === 'en' ? 'Damaged & Quarantined Stock — Quantity Breakdown by Bar Type' : 'المخزون التالف والمعزول — تفصيل الكميات حسب نوع السبيكة')
                     : selectedExecKpi === 'PROPRIETARY_GOLD'
-                    ? (currentLang === 'en' ? 'Turkey Offline — Quantity Breakdown by Bar Type' : 'مخزون تركيا (أوفلاين) — تفصيل الكميات المتاحة حسب نوع السبيكة')
+                    ? (currentLang === 'en' ? 'KFH Turkey Offline — Quantity Breakdown by Bar Type' : 'بيتك تركيا (أوفلاين) — تفصيل الكميات المتاحة حسب نوع السبيكة')
                     : selectedExecKpi === 'READY_SALE'
-                    ? (currentLang === 'en' ? 'KFH Owned Stock (Total) — Quantity Breakdown by Bar Type' : 'مخزون ملك بيتك (الإجمالي) — تفصيل الكميات حسب نوع السبيكة')
+                    ? (currentLang === 'en' ? 'KFH Kuwait (Total) — Quantity Breakdown by Bar Type' : 'بيتك الكويت (الإجمالي) — تفصيل الكميات حسب نوع السبيكة')
                     : selectedExecKpi === 'RESERVED'
                     ? (currentLang === 'en' ? 'Reserved Stock — Quantity Breakdown by Bar Type' : 'الطلبات المحجوزة — تفصيل الكميات حسب نوع السبيكة')
-                    : (currentLang === 'en' ? 'Customer Custody — Quantity Breakdown by Bar Type' : 'أمانات العملاء — تفصيل الكميات حسب نوع السبيكة')}
+                    : selectedExecKpi === 'CUSTOMS'
+                    ? (currentLang === 'en' ? 'Customs (Bonded) — Quantity Breakdown by Bar Type' : 'الجمارك (تحت التخليص) — تفصيل الكميات حسب نوع السبيكة')
+                    : (currentLang === 'en' ? 'Customers Custody — Quantity Breakdown by Bar Type' : 'أمانات العملاء — تفصيل الكميات حسب نوع السبيكة')}
                 </h3>
                 <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: '6px 0 0 0' }}>
                   <i className="fa-solid fa-shield-halved" style={{ color: 'var(--kfh-green)' }}></i>{' '}
@@ -9481,7 +9606,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                   }}
                 >
                   <i className="fa-solid fa-passport"></i>
-                  {currentLang === 'en' ? 'Transfer Customs to Turkey (Maker-Checker)' : 'تحويل الجمارك إلى تركيا (صانع/معتمد)'}
+                  {currentLang === 'en' ? 'Transfer Customs to KFH Turkey Offline (Maker-Checker)' : 'تحويل الجمارك إلى بيتك تركيا (أوفلاين) (صانع/معتمد)'}
                 </button>
               )}
             </div>
@@ -9508,7 +9633,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       <div className="glass-card" style={{ padding: '14px', borderLeft: `4px solid ${intakeOwnershipType === 'TURKEY_OWNED' ? '#E11D48' : intakeOwnershipType === 'CUSTOMS_OWNED' ? '#D97706' : 'var(--kfh-green)'}` }}>
                         <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Shipment Owner' : 'جهة ملكية الشحنة'}</div>
                         <div style={{ fontSize: '16px', fontWeight: 'bold', marginTop: '4px', color: intakeOwnershipType === 'TURKEY_OWNED' ? '#E11D48' : intakeOwnershipType === 'CUSTOMS_OWNED' ? '#D97706' : 'var(--kfh-green)' }}>
-                          {intakeOwnershipType === 'TURKEY_OWNED' ? '🇹🇷 Turkey' : intakeOwnershipType === 'CUSTOMS_OWNED' ? '🛃 Customs (Bonded)' : '🇰🇼 Kuwait'}
+                          {intakeOwnershipType === 'TURKEY_OWNED' ? (currentLang === 'en' ? '🇹🇷 KFH Turkey Offline' : '🇹🇷 بيتك تركيا (أوفلاين)') : intakeOwnershipType === 'CUSTOMS_OWNED' ? (currentLang === 'en' ? '🛃 Customs (Bonded)' : '🛃 الجمارك (تحت التخليص)') : (currentLang === 'en' ? '🇰🇼 KFH Kuwait' : '🇰🇼 بيتك الكويت')}
                         </div>
                       </div>
 

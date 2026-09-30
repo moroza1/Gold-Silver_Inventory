@@ -1828,11 +1828,14 @@ public partial class PMIMSControllers : ControllerBase
         // Breakdown categories & Summation for all precious metals:
         // (Turkey, KFH, Pending, Damage, and Transit)
         // ============================================================
-        var turkeyItems = scopedItems.Where(i => i.OwnershipType == "TURKEY_OWNED").ToList();
+        // Breakdown categories & Summation for all precious metals & owners:
+        // (KFH Turkey Offline, KFH Kuwait, Customers, Customs, Pending, Damage, and Transit)
+        // ============================================================
+        var turkeyItems = scopedItems.Where(i => i.OwnershipType == "TURKEY_OWNED" || i.OwnershipType == "PROPRIETARY" || i.OwnershipType == "KFH_TURKEY" || i.OwnershipType == "KFH_TURKEY_OFFLINE").ToList();
         decimal turkeyWeightKg = WeightKg(turkeyItems);
         int turkeyQty = turkeyItems.Count;
 
-        var kfhItems = scopedItems.Where(i => i.OwnershipType == "KFH_OWNED" || i.OwnershipType == "VIP_OWNED").ToList();
+        var kfhItems = scopedItems.Where(i => (i.OwnershipType == "KFH_OWNED" || i.OwnershipType == "VIP_OWNED" || i.OwnershipType == "KFH_KUWAIT") && i.StatusCode != "HELD_IN_CUSTODY").ToList();
         decimal kfhWeightKg = WeightKg(kfhItems);
         int kfhQty = kfhItems.Count;
 
@@ -1846,6 +1849,10 @@ public partial class PMIMSControllers : ControllerBase
 
         decimal vipWeightKg = kfhOfflineWeightKg;
         int vipQty = kfhOfflineQty;
+
+        var customsItems = scopedItems.Where(i => i.OwnershipType == "CUSTOMS_OWNED" || i.OwnershipType == "CUSTOMS").ToList();
+        decimal customsWeightKg = WeightKg(customsItems);
+        int customsQty = customsItems.Count;
 
         var transitItems = scopedItems.Where(i => i.StatusCode == "IN_TRANSFER").ToList();
         decimal transitWeightKg = WeightKg(transitItems);
@@ -1868,6 +1875,10 @@ public partial class PMIMSControllers : ControllerBase
             i.OwnershipType == "KFH_OWNED" ||
             i.OwnershipType == "VIP_OWNED" ||
             i.OwnershipType == "CUSTOMER_OWNED" ||
+            i.OwnershipType == "CUSTOMS_OWNED" ||
+            i.OwnershipType == "KFH_TURKEY" ||
+            i.OwnershipType == "KFH_KUWAIT" ||
+            i.OwnershipType == "CUSTOMS" ||
             i.StatusCode == "IN_TRANSFER" ||
             i.IsDamaged ||
             i.StatusCode == "QUARANTINED" ||
@@ -1893,13 +1904,41 @@ public partial class PMIMSControllers : ControllerBase
 
             var origin = i.Product?.OriginCountry ?? "";
             var brand = i.Product?.BrandName ?? i.Product?.Brand?.BrandName ?? "";
-            var owner = i.OwnershipType ?? "";
+            var refiner = i.RefinerName ?? "";
+            var serial = i.SerialNumber ?? "";
+            var vendorName = i.Lot?.Vendor?.VendorName ?? "";
+            var vendorCode = i.Lot?.Vendor?.VendorCode ?? "";
+            var vendorOrigin = i.Lot?.Vendor?.CountryOfOrigin ?? "";
 
             if (origin.Contains("Turkey", StringComparison.OrdinalIgnoreCase) ||
+                origin.Equals("TR", StringComparison.OrdinalIgnoreCase) ||
                 code.Contains("TURK", StringComparison.OrdinalIgnoreCase) ||
                 brand.Contains("Nadir", StringComparison.OrdinalIgnoreCase) ||
                 brand.Contains("IGR", StringComparison.OrdinalIgnoreCase) ||
-                owner.Equals("TURKEY_OWNED", StringComparison.OrdinalIgnoreCase))
+                brand.Contains("Istanbul", StringComparison.OrdinalIgnoreCase) ||
+                brand.Contains("Kuveyt", StringComparison.OrdinalIgnoreCase) ||
+                brand.Contains("Ahlatci", StringComparison.OrdinalIgnoreCase) ||
+                refiner.Contains("Nadir", StringComparison.OrdinalIgnoreCase) ||
+                refiner.Contains("IGR", StringComparison.OrdinalIgnoreCase) ||
+                refiner.Contains("Istanbul", StringComparison.OrdinalIgnoreCase) ||
+                refiner.Contains("Turkey", StringComparison.OrdinalIgnoreCase) ||
+                refiner.Contains("Turkish", StringComparison.OrdinalIgnoreCase) ||
+                refiner.Contains("Kuveyt", StringComparison.OrdinalIgnoreCase) ||
+                refiner.Contains("Ahlatci", StringComparison.OrdinalIgnoreCase) ||
+                vendorName.Contains("Nadir", StringComparison.OrdinalIgnoreCase) ||
+                vendorName.Contains("Turkey", StringComparison.OrdinalIgnoreCase) ||
+                vendorName.Contains("IGR", StringComparison.OrdinalIgnoreCase) ||
+                vendorCode.Contains("TURK", StringComparison.OrdinalIgnoreCase) ||
+                vendorCode.Contains("NAD", StringComparison.OrdinalIgnoreCase) ||
+                vendorOrigin.Contains("Turkey", StringComparison.OrdinalIgnoreCase) ||
+                serial.StartsWith("TR-", StringComparison.OrdinalIgnoreCase) ||
+                serial.StartsWith("TURK-", StringComparison.OrdinalIgnoreCase) ||
+                serial.StartsWith("TK-", StringComparison.OrdinalIgnoreCase) ||
+                serial.StartsWith("NAD-", StringComparison.OrdinalIgnoreCase) ||
+                serial.StartsWith("IGR-", StringComparison.OrdinalIgnoreCase) ||
+                serial.StartsWith("KT-", StringComparison.OrdinalIgnoreCase) ||
+                serial.Contains("-TR-", StringComparison.OrdinalIgnoreCase) ||
+                serial.Contains("-TURK-", StringComparison.OrdinalIgnoreCase))
             {
                 return "TURKEY";
             }
@@ -1919,8 +1958,14 @@ public partial class PMIMSControllers : ControllerBase
             pending_qty = pendingQty,
             turkey_weight_kg = turkeyWeightKg,
             turkey_qty = turkeyQty,
+            kfh_turkey_offline_weight_kg = turkeyWeightKg,
+            kfh_turkey_offline_qty = turkeyQty,
             kfh_weight_kg = kfhWeightKg,
             kfh_qty = kfhQty,
+            kfh_kuwait_weight_kg = kfhWeightKg,
+            kfh_kuwait_qty = kfhQty,
+            customs_weight_kg = customsWeightKg,
+            customs_qty = customsQty,
             vip_weight_kg = vipWeightKg,
             vip_qty = vipQty,
             total_precious = new
@@ -1930,8 +1975,16 @@ public partial class PMIMSControllers : ControllerBase
                 total_qty = totalPreciousQty,
                 turkey_weight_kg = turkeyWeightKg,
                 turkey_qty = turkeyQty,
+                kfh_turkey_offline_weight_kg = turkeyWeightKg,
+                kfh_turkey_offline_qty = turkeyQty,
                 kfh_weight_kg = kfhWeightKg,
                 kfh_qty = kfhQty,
+                kfh_kuwait_weight_kg = kfhWeightKg,
+                kfh_kuwait_qty = kfhQty,
+                customs_weight_kg = customsWeightKg,
+                customs_qty = customsQty,
+                customers_weight_kg = WeightKg(custodyItems),
+                customers_qty = custodyItems.Count,
                 kfh_online_weight_kg = kfhOnlineWeightKg,
                 kfh_online_qty = kfhOnlineQty,
                 kfh_offline_weight_kg = kfhOfflineWeightKg,
@@ -1956,30 +2009,46 @@ public partial class PMIMSControllers : ControllerBase
             sold_weight_kg = WeightKg(soldItems),
             available_qty = availableItems.Count,
             available_weight_kg = WeightKg(availableItems),
-            items = scopedItems.Select(i => new
+            items = scopedItems.Select(i =>
             {
-                item_id = i.ItemId,
-                serial_number = i.SerialNumber,
-                metal = i.Product?.MetalType?.MetalName ?? "Unknown",
-                denomination = i.Product?.Denomination?.Label ?? "Unknown",
-                weight_grams = i.Product?.Denomination?.WeightGrams ?? 0m,
-                purity = i.Product?.Purity?.PurityValue ?? 0.9999m,
-                product_name = i.Product?.ProductCode ?? i.Product?.Denomination?.Label ?? "Gold Bar",
-                product_code = i.Product?.ProductCode ?? "",
-                brand_name = i.Product?.BrandName ?? i.Product?.Brand?.BrandName ?? "",
-                precious_type = DeterminePreciousType(i),
-                origin = i.Product?.OriginCountry ?? "Unknown",
-                location = i.Location?.Description ?? "Unknown",
-                location_id = i.LocationId,
-                status = i.StatusCode,
-                ownership = (i.OwnershipType == "VIP_OWNED" || (i.OwnershipType == "KFH_OWNED" && i.ChannelStatus == "OFFLINE")) ? "KFH_OWNED" : i.OwnershipType,
-                channel_status = (i.ChannelStatus == "OFFLINE" || i.OwnershipType == "VIP_OWNED") ? "OFFLINE" : "ONLINE",
-                channel_category = i.ChannelCategory ?? ((i.ChannelStatus == "OFFLINE" || i.OwnershipType == "VIP_OWNED") ? "VIP_EXCLUSIVE" : "RETAIL_ONLINE"),
-                acquisition_date = i.Lot?.AcquisitionDate,
-                is_damaged = i.IsDamaged,
-                damage_status = i.DamageApprovalStatus ?? (i.IsDamaged ? "APPROVED" : "NONE"),
-                damage_reason = i.DamageReason,
-                damage_description = i.DamageDescription
+                var pType = DeterminePreciousType(i);
+                var resolvedOrigin = !string.IsNullOrWhiteSpace(i.Product?.OriginCountry) && i.Product.OriginCountry != "Unknown"
+                    ? i.Product.OriginCountry
+                    : (pType == "TURKEY" ? "Turkey" : "Switzerland");
+                var resolvedBrand = !string.IsNullOrWhiteSpace(i.Product?.BrandName)
+                    ? i.Product.BrandName
+                    : (!string.IsNullOrWhiteSpace(i.Product?.Brand?.BrandName)
+                        ? i.Product.Brand.BrandName
+                        : (!string.IsNullOrWhiteSpace(i.RefinerName)
+                            ? i.RefinerName
+                            : (pType == "TURKEY" ? "Nadir Gold Refinery" : "Valcambi Suisse")));
+
+                return new
+                {
+                    item_id = i.ItemId,
+                    serial_number = i.SerialNumber,
+                    metal = i.Product?.MetalType?.MetalName ?? (pType == "SILVER" ? "Silver" : "Gold"),
+                    denomination = i.Product?.Denomination?.Label ?? "Unknown",
+                    weight_grams = i.Product?.Denomination?.WeightGrams ?? 0m,
+                    purity = i.Product?.Purity?.PurityValue ?? 0.9999m,
+                    product_name = i.Product?.ProductCode ?? i.Product?.Denomination?.Label ?? "Gold Bar",
+                    product_code = i.Product?.ProductCode ?? "",
+                    brand_name = resolvedBrand,
+                    refiner_name = i.RefinerName ?? resolvedBrand,
+                    precious_type = pType,
+                    origin = resolvedOrigin,
+                    location = i.Location?.Description ?? "Unknown",
+                    location_id = i.LocationId,
+                    status = i.StatusCode,
+                    ownership = (i.OwnershipType == "VIP_OWNED" || (i.OwnershipType == "KFH_OWNED" && i.ChannelStatus == "OFFLINE")) ? "KFH_OWNED" : i.OwnershipType,
+                    channel_status = (i.ChannelStatus == "OFFLINE" || i.OwnershipType == "VIP_OWNED") ? "OFFLINE" : "ONLINE",
+                    channel_category = i.ChannelCategory ?? ((i.ChannelStatus == "OFFLINE" || i.OwnershipType == "VIP_OWNED") ? "VIP_EXCLUSIVE" : "RETAIL_ONLINE"),
+                    acquisition_date = i.Lot?.AcquisitionDate,
+                    is_damaged = i.IsDamaged,
+                    damage_status = i.DamageApprovalStatus ?? (i.IsDamaged ? "APPROVED" : "NONE"),
+                    damage_reason = i.DamageReason,
+                    damage_description = i.DamageDescription
+                };
             })
         });
     }
@@ -1988,6 +2057,7 @@ public partial class PMIMSControllers : ControllerBase
     // INVENTORY HIERARCHY DASHBOARD (Card-based 4-Level Drill-Down in KG)
     // Hierarchy: 1. Owner -> 2. Precious Metal Type -> 3. Location (incl. In-Transit Custody) -> 4. Denomination
     // In-Transit Classification represents custody/movement, NOT ownership (retains actual owner).
+    // Owners: KFH Kuwait (KFH_OWNED), KFH Turkey Offline (TURKEY_OWNED), Customers (CUSTOMER_OWNED), Customs (CUSTOMS_OWNED)
     // =========================================================================
     [Authorize(Policy = "dashboard.read")]
     [HttpGet("dashboard/inventory-hierarchy")]
@@ -2015,18 +2085,20 @@ public partial class PMIMSControllers : ControllerBase
         static decimal GetItemWeightKg(InventoryItem item) =>
             (item.Product?.Denomination?.WeightGrams ?? 0m) / 1000m;
 
-        static string ResolveOwnerCode(string? raw) => raw switch
+        static string ResolveOwnerCode(string? raw) => (raw ?? "").ToUpperInvariant() switch
         {
-            "TURKEY_OWNED" or "PROPRIETARY" => "TURKEY_OWNED",
-            "CUSTOMER_OWNED" or "HELD_IN_CUSTODY" => "CUSTOMER_OWNED",
+            "TURKEY_OWNED" or "PROPRIETARY" or "KFH_TURKEY" or "KFH_TURKEY_OFFLINE" => "TURKEY_OWNED",
+            "CUSTOMER_OWNED" or "HELD_IN_CUSTODY" or "CUSTOMERS" or "CUSTOMER" => "CUSTOMER_OWNED",
+            "CUSTOMS_OWNED" or "CUSTOMS" => "CUSTOMS_OWNED",
             _ => "KFH_OWNED"
         };
 
         static string ResolveOwnerLabel(string code) => code switch
         {
-            "TURKEY_OWNED" => "Turkey Consignment (KT Gold)",
-            "CUSTOMER_OWNED" => "Customer Custody (Safekeeping)",
-            _ => "KFH Proprietary Stock"
+            "TURKEY_OWNED" => "KFH Turkey Offline",
+            "CUSTOMER_OWNED" => "Customers",
+            "CUSTOMS_OWNED" => "Customs",
+            _ => "KFH Kuwait"
         };
 
         static string ResolveMetalType(InventoryItem item)

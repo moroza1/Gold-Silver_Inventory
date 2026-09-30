@@ -204,6 +204,21 @@ export const SerialToolsModal: React.FC<SerialToolsModalProps> = ({
       }
     });
 
+    // Resolve matching product based on selected denomination weight and selected brand origin
+    const selectedBrand = (brands || []).find((b: any) => b.brand_name === selectedBrandName);
+    const bNameLower = (selectedBrandName || '').toLowerCase();
+    const bCountryLower = (selectedBrand?.country_of_origin || '').toLowerCase();
+    const isTurkishBrand = bNameLower.includes('nadir') || bNameLower.includes('igr') || bNameLower.includes('istanbul') || bNameLower.includes('turk') || bNameLower.includes('kuveyt') || bNameLower.includes('ahlatci') || bCountryLower.includes('turk') || prefix.toUpperCase().startsWith('TR-');
+    
+    let targetProductId = selectedProductId;
+    if (isTurkishBrand) {
+      const turkeyProd = products.find((p: any) => (p.weight_grams === weightGrams || p.denomination_weight === weightGrams) && (p.origin_country === 'Turkey' || p.product_code?.includes('TURK') || p.origin === 'Turkey'));
+      if (turkeyProd) targetProductId = turkeyProd.product_id;
+    } else {
+      const swissProd = products.find((p: any) => (p.weight_grams === weightGrams || p.denomination_weight === weightGrams) && (p.origin_country === 'Switzerland' || p.product_code?.includes('SWISS') || p.origin === 'Switzerland'));
+      if (swissProd) targetProductId = swissProd.product_id;
+    }
+
     const generatedSet = new Set<string>();
     const items: GeneratedSerialItem[] = [];
 
@@ -249,7 +264,7 @@ export const SerialToolsModal: React.FC<SerialToolsModalProps> = ({
 
       items.push({
         serial,
-        product_id: selectedProductId,
+        product_id: targetProductId,
         weight_grams: weightGrams,
         purity: 999.9,
         refiner_name: selectedBrandName
@@ -258,7 +273,7 @@ export const SerialToolsModal: React.FC<SerialToolsModalProps> = ({
 
     const costNum = parsedCost;
     if (onUpdatePurchasingCost) {
-      onUpdatePurchasingCost(selectedProductId, costNum);
+      onUpdatePurchasingCost(targetProductId, costNum);
     }
 
     onAddSerials(items, costNum);

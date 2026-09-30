@@ -911,6 +911,9 @@ public static class DbSeeder
                 // 3. Ensure all default workflow templates and Maker-Checker steps exist
                 await EnsureWorkflowTemplatesAsync(context);
 
+                // 3b. Ensure complete catalog of Swiss and Turkey products across all denominations
+                await EnsureProductsAsync(context);
+
                 // 4. Ensure default reorder thresholds exist if empty
                 if (!await context.ReorderThresholds.AnyAsync())
                 {
@@ -1051,6 +1054,108 @@ public static class DbSeeder
         catch (Exception ex)
         {
             Console.WriteLine($"⚠️ Schema update check warning: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Ensures complete catalog of Swiss and Turkey products across all denominations exists.
+    /// </summary>
+    public static async Task EnsureProductsAsync(AppDbContext context)
+    {
+        var gold = await context.MetalTypes.FirstOrDefaultAsync(m => m.MetalName == "Gold");
+        var silver = await context.MetalTypes.FirstOrDefaultAsync(m => m.MetalName == "Silver");
+        if (gold == null || silver == null) return;
+
+        var p9999 = await context.MetalPurityLevels.FirstOrDefaultAsync(p => p.PurityValue == 99.99m)
+                 ?? await context.MetalPurityLevels.FirstOrDefaultAsync();
+        var p9990 = await context.MetalPurityLevels.FirstOrDefaultAsync(p => p.PurityValue == 99.90m)
+                 ?? p9999;
+        if (p9999 == null) return;
+
+        var bValcambi = await context.Brands.FirstOrDefaultAsync(b => b.BrandCode == "VALCAMBI");
+        var bNadir = await context.Brands.FirstOrDefaultAsync(b => b.BrandCode == "NADIR");
+        var bPamp = await context.Brands.FirstOrDefaultAsync(b => b.BrandCode == "PAMP");
+        var bKfh = await context.Brands.FirstOrDefaultAsync(b => b.BrandCode == "KFH_MINT");
+
+        var denoms = await context.MetalDenominations.ToListAsync();
+        var d1kg = denoms.FirstOrDefault(d => d.WeightGrams == 1000m && d.MetalTypeId == gold.MetalTypeId);
+        var d100g = denoms.FirstOrDefault(d => d.WeightGrams == 100m && d.MetalTypeId == gold.MetalTypeId);
+        var d50g = denoms.FirstOrDefault(d => d.WeightGrams == 50m && d.MetalTypeId == gold.MetalTypeId);
+        var d25g = denoms.FirstOrDefault(d => d.WeightGrams == 25m && d.MetalTypeId == gold.MetalTypeId);
+        var d10g = denoms.FirstOrDefault(d => d.WeightGrams == 10m && d.MetalTypeId == gold.MetalTypeId);
+        var d5g = denoms.FirstOrDefault(d => d.WeightGrams == 5m && d.MetalTypeId == gold.MetalTypeId);
+        var d1g = denoms.FirstOrDefault(d => d.WeightGrams == 1m && d.MetalTypeId == gold.MetalTypeId);
+        var d1oz = denoms.FirstOrDefault(d => d.MetalTypeId == silver.MetalTypeId);
+
+        var existingCodes = (await context.MetalProducts.Select(p => p.ProductCode).ToListAsync())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var productsToAdd = new List<MetalProduct>();
+
+        void AddIfMissing(string code, int metalTypeId, int? denomId, int purityId, string origin, int? brandId, string? brandName)
+        {
+            if (denomId.HasValue && !existingCodes.Contains(code))
+            {
+                productsToAdd.Add(new MetalProduct
+                {
+                    ProductCode = code,
+                    MetalTypeId = metalTypeId,
+                    DenominationId = denomId.Value,
+                    PurityId = purityId,
+                    OriginCountry = origin,
+                    BrandId = brandId,
+                    BrandName = brandName,
+                    IsActive = true
+                });
+                existingCodes.Add(code);
+            }
+        }
+
+        if (d1kg != null)
+        {
+            AddIfMissing("AU-1KG-SWISS", gold.MetalTypeId, d1kg.DenominationId, p9999.PurityId, "Switzerland", bValcambi?.BrandId, bValcambi?.BrandName);
+            AddIfMissing("AU-1KG-TURK", gold.MetalTypeId, d1kg.DenominationId, p9999.PurityId, "Turkey", bNadir?.BrandId, bNadir?.BrandName);
+        }
+        if (d100g != null)
+        {
+            AddIfMissing("AU-100G-SWISS", gold.MetalTypeId, d100g.DenominationId, p9999.PurityId, "Switzerland", bValcambi?.BrandId, bValcambi?.BrandName);
+            AddIfMissing("AU-100G-TURK", gold.MetalTypeId, d100g.DenominationId, p9999.PurityId, "Turkey", bNadir?.BrandId, bNadir?.BrandName);
+        }
+        if (d50g != null)
+        {
+            AddIfMissing("AU-50G-SWISS", gold.MetalTypeId, d50g.DenominationId, p9999.PurityId, "Switzerland", bPamp?.BrandId, bPamp?.BrandName);
+            AddIfMissing("AU-50G-TURK", gold.MetalTypeId, d50g.DenominationId, p9999.PurityId, "Turkey", bNadir?.BrandId, bNadir?.BrandName);
+        }
+        if (d25g != null)
+        {
+            AddIfMissing("AU-25G-SWISS", gold.MetalTypeId, d25g.DenominationId, p9999.PurityId, "Switzerland", bValcambi?.BrandId, bValcambi?.BrandName);
+            AddIfMissing("AU-25G-TURK", gold.MetalTypeId, d25g.DenominationId, p9999.PurityId, "Turkey", bNadir?.BrandId, bNadir?.BrandName);
+        }
+        if (d10g != null)
+        {
+            AddIfMissing("AU-10G-SWISS", gold.MetalTypeId, d10g.DenominationId, p9999.PurityId, "Switzerland", bValcambi?.BrandId, bValcambi?.BrandName);
+            AddIfMissing("AU-10G-TURK", gold.MetalTypeId, d10g.DenominationId, p9999.PurityId, "Turkey", bNadir?.BrandId, bNadir?.BrandName);
+        }
+        if (d5g != null)
+        {
+            AddIfMissing("AU-5G-SWISS", gold.MetalTypeId, d5g.DenominationId, p9999.PurityId, "Switzerland", bValcambi?.BrandId, bValcambi?.BrandName);
+            AddIfMissing("AU-5G-TURK", gold.MetalTypeId, d5g.DenominationId, p9999.PurityId, "Turkey", bNadir?.BrandId, bNadir?.BrandName);
+        }
+        if (d1g != null)
+        {
+            AddIfMissing("AU-1G-SWISS", gold.MetalTypeId, d1g.DenominationId, p9999.PurityId, "Switzerland", bKfh?.BrandId, bKfh?.BrandName);
+            AddIfMissing("AU-1G-TURK", gold.MetalTypeId, d1g.DenominationId, p9999.PurityId, "Turkey", bNadir?.BrandId, bNadir?.BrandName);
+        }
+        if (d1oz != null)
+        {
+            AddIfMissing("AG-1OZ-TURK", silver.MetalTypeId, d1oz.DenominationId, (p9990 ?? p9999).PurityId, "Turkey", bNadir?.BrandId, bNadir?.BrandName);
+            AddIfMissing("AG-1OZ-SWISS", silver.MetalTypeId, d1oz.DenominationId, (p9990 ?? p9999).PurityId, "Switzerland", bValcambi?.BrandId, bValcambi?.BrandName);
+        }
+
+        if (productsToAdd.Count > 0)
+        {
+            context.MetalProducts.AddRange(productsToAdd);
+            await context.SaveChangesAsync();
         }
     }
 
@@ -1478,16 +1583,24 @@ public static class DbSeeder
         context.Brands.AddRange(bValcambi, bPamp, bArgor, bNadir, bIgr, bEmirates, bPerth, bKfh);
         await context.SaveChangesAsync();
 
-        // 6. Products
+        // 6. Products (Complete catalog covering both Swiss and Turkey precious metals across denominations)
         var p1 = new MetalProduct { ProductCode = "AU-1KG-SWISS", MetalTypeId = gold.MetalTypeId, DenominationId = d1kg.DenominationId, PurityId = p9999.PurityId, OriginCountry = "Switzerland", BrandId = bValcambi.BrandId, BrandName = bValcambi.BrandName };
+        var p1Turk = new MetalProduct { ProductCode = "AU-1KG-TURK", MetalTypeId = gold.MetalTypeId, DenominationId = d1kg.DenominationId, PurityId = p9999.PurityId, OriginCountry = "Turkey", BrandId = bNadir.BrandId, BrandName = bNadir.BrandName };
+        var p2Swiss = new MetalProduct { ProductCode = "AU-100G-SWISS", MetalTypeId = gold.MetalTypeId, DenominationId = d100g.DenominationId, PurityId = p9999.PurityId, OriginCountry = "Switzerland", BrandId = bValcambi.BrandId, BrandName = bValcambi.BrandName };
         var p2 = new MetalProduct { ProductCode = "AU-100G-TURK", MetalTypeId = gold.MetalTypeId, DenominationId = d100g.DenominationId, PurityId = p9999.PurityId, OriginCountry = "Turkey", BrandId = bNadir.BrandId, BrandName = bNadir.BrandName };
         var p3 = new MetalProduct { ProductCode = "AU-10G-SWISS", MetalTypeId = gold.MetalTypeId, DenominationId = d10g.DenominationId, PurityId = p9999.PurityId, OriginCountry = "Switzerland", BrandId = bValcambi.BrandId, BrandName = bValcambi.BrandName };
+        var p3Turk = new MetalProduct { ProductCode = "AU-10G-TURK", MetalTypeId = gold.MetalTypeId, DenominationId = d10g.DenominationId, PurityId = p9999.PurityId, OriginCountry = "Turkey", BrandId = bNadir.BrandId, BrandName = bNadir.BrandName };
         var p4 = new MetalProduct { ProductCode = "AG-1OZ-TURK", MetalTypeId = silver.MetalTypeId, DenominationId = d1oz.DenominationId, PurityId = p9990.PurityId, OriginCountry = "Turkey", BrandId = bNadir.BrandId, BrandName = bNadir.BrandName };
+        var p4Swiss = new MetalProduct { ProductCode = "AG-1OZ-SWISS", MetalTypeId = silver.MetalTypeId, DenominationId = d1oz.DenominationId, PurityId = p9990.PurityId, OriginCountry = "Switzerland", BrandId = bValcambi.BrandId, BrandName = bValcambi.BrandName };
         var p5 = new MetalProduct { ProductCode = "AU-50G-SWISS", MetalTypeId = gold.MetalTypeId, DenominationId = d50g.DenominationId, PurityId = p9999.PurityId, OriginCountry = "Switzerland", BrandId = bPamp.BrandId, BrandName = bPamp.BrandName };
+        var p5Turk = new MetalProduct { ProductCode = "AU-50G-TURK", MetalTypeId = gold.MetalTypeId, DenominationId = d50g.DenominationId, PurityId = p9999.PurityId, OriginCountry = "Turkey", BrandId = bNadir.BrandId, BrandName = bNadir.BrandName };
         var p6 = new MetalProduct { ProductCode = "AU-25G-SWISS", MetalTypeId = gold.MetalTypeId, DenominationId = d25g.DenominationId, PurityId = p9999.PurityId, OriginCountry = "Switzerland", BrandId = bValcambi.BrandId, BrandName = bValcambi.BrandName };
+        var p6Turk = new MetalProduct { ProductCode = "AU-25G-TURK", MetalTypeId = gold.MetalTypeId, DenominationId = d25g.DenominationId, PurityId = p9999.PurityId, OriginCountry = "Turkey", BrandId = bNadir.BrandId, BrandName = bNadir.BrandName };
         var p7 = new MetalProduct { ProductCode = "AU-5G-SWISS", MetalTypeId = gold.MetalTypeId, DenominationId = d5g.DenominationId, PurityId = p9999.PurityId, OriginCountry = "Switzerland", BrandId = bValcambi.BrandId, BrandName = bValcambi.BrandName };
+        var p7Turk = new MetalProduct { ProductCode = "AU-5G-TURK", MetalTypeId = gold.MetalTypeId, DenominationId = d5g.DenominationId, PurityId = p9999.PurityId, OriginCountry = "Turkey", BrandId = bNadir.BrandId, BrandName = bNadir.BrandName };
         var p8 = new MetalProduct { ProductCode = "AU-1G-SWISS", MetalTypeId = gold.MetalTypeId, DenominationId = d1g.DenominationId, PurityId = p9999.PurityId, OriginCountry = "Switzerland", BrandId = bKfh.BrandId, BrandName = bKfh.BrandName };
-        context.MetalProducts.AddRange(p1, p2, p3, p4, p5, p6, p7, p8);
+        var p8Turk = new MetalProduct { ProductCode = "AU-1G-TURK", MetalTypeId = gold.MetalTypeId, DenominationId = d1g.DenominationId, PurityId = p9999.PurityId, OriginCountry = "Turkey", BrandId = bNadir.BrandId, BrandName = bNadir.BrandName };
+        context.MetalProducts.AddRange(p1, p1Turk, p2Swiss, p2, p3, p3Turk, p4, p4Swiss, p5, p5Turk, p6, p6Turk, p7, p7Turk, p8, p8Turk);
 
         // 7. Vendors
         var v1 = new Vendor { VendorCode = "VAL-SWISS", VendorName = "Valcambi Suisse", CountryOfOrigin = "Switzerland", IsShariaCompliant = true, ContactEmail = "compliance@valcambi.ch" };

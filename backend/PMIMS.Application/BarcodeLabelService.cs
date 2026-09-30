@@ -238,30 +238,32 @@ public class BarcodeLabelService : IBarcodeLabelService
 
         // 2. Serial number convention
         var sn = item.SerialNumber?.ToUpperInvariant() ?? "";
-        if (sn.StartsWith("TR-") || sn.Contains("-TURK-") || sn.Contains("-TR-"))
+        if (sn.StartsWith("TR-") || sn.StartsWith("TURK-") || sn.StartsWith("TK-") || sn.StartsWith("NAD-") || sn.StartsWith("IGR-") || sn.StartsWith("KT-") || sn.Contains("-TURK-") || sn.Contains("-TR-"))
             return "Turkey";
+        if (sn.StartsWith("VAL-") || sn.StartsWith("PAMP-") || sn.StartsWith("ARG-") || sn.StartsWith("CH-") || sn.StartsWith("SWISS-") || sn.StartsWith("SUISSE-"))
+            return "Swiss";
 
         // 3. Product code tags
         var pCode = item.Product?.ProductCode?.ToUpperInvariant() ?? "";
-        if (pCode.Contains("TURK")) return "Turkey";
-        if (pCode.Contains("SWISS") || pCode.Contains("SWIS")) return "Swiss";
+        if (pCode.Contains("TURK") || pCode.Contains("-TR-") || pCode.Contains("NADIR") || pCode.Contains("IGR")) return "Turkey";
+        if (pCode.Contains("SWISS") || pCode.Contains("SWIS") || pCode.Contains("VAL") || pCode.Contains("PAMP") || pCode.Contains("ARGOR")) return "Swiss";
 
         // 4. Product OriginCountry
         var origin = item.Product?.OriginCountry?.Trim();
         if (!string.IsNullOrWhiteSpace(origin))
         {
-            if (origin.Equals("Switzerland", StringComparison.OrdinalIgnoreCase) || origin.Equals("CH", StringComparison.OrdinalIgnoreCase))
+            if (origin.Equals("Switzerland", StringComparison.OrdinalIgnoreCase) || origin.Equals("CH", StringComparison.OrdinalIgnoreCase) || origin.Equals("Swiss", StringComparison.OrdinalIgnoreCase))
                 return "Swiss";
-            if (origin.Equals("Turkey", StringComparison.OrdinalIgnoreCase) || origin.Equals("TR", StringComparison.OrdinalIgnoreCase))
+            if (origin.Equals("Turkey", StringComparison.OrdinalIgnoreCase) || origin.Equals("TR", StringComparison.OrdinalIgnoreCase) || origin.Equals("Turkish", StringComparison.OrdinalIgnoreCase))
                 return "Turkey";
             return origin;
         }
 
-        // 5. Refiner brand or vendor
-        var brand = (item.Product?.BrandName ?? item.Product?.Brand?.BrandName ?? item.Lot?.Vendor?.VendorName ?? "").ToUpperInvariant();
-        if (brand.Contains("NADIR") || brand.Contains("TURK") || brand.Contains("IGR"))
+        // 5. Refiner brand, item RefinerName or vendor
+        var brand = (item.Product?.BrandName ?? item.Product?.Brand?.BrandName ?? item.RefinerName ?? item.Lot?.Vendor?.VendorName ?? "").ToUpperInvariant();
+        if (brand.Contains("NADIR") || brand.Contains("TURK") || brand.Contains("IGR") || brand.Contains("ISTANBUL") || brand.Contains("KUVEYT") || brand.Contains("AHLATCI"))
             return "Turkey";
-        if (brand.Contains("VALCAMBI") || brand.Contains("PAMP") || brand.Contains("ARGOR") || brand.Contains("SUISSE") || brand.Contains("SWISS"))
+        if (brand.Contains("VALCAMBI") || brand.Contains("PAMP") || brand.Contains("ARGOR") || brand.Contains("SUISSE") || brand.Contains("SWISS") || brand.Contains("METALOR"))
             return "Swiss";
 
         var vendorOrigin = item.Lot?.Vendor?.CountryOfOrigin?.Trim();
@@ -279,12 +281,11 @@ public class BarcodeLabelService : IBarcodeLabelService
     public static string ResolveCustomOrigin(CustomBarcodeLabelRequest req)
     {
         var brand = (req.RefinerBrand ?? "").ToUpperInvariant();
-        var own = (req.OwnershipType ?? "").ToUpperInvariant();
         var sn = (req.SerialNumber ?? "").ToUpperInvariant();
 
-        if (own.Contains("TURK") || sn.StartsWith("TR-") || brand.Contains("NADIR") || brand.Contains("TURK") || brand.Contains("IGR"))
+        if (sn.StartsWith("TR-") || sn.StartsWith("TURK-") || sn.StartsWith("NAD-") || sn.StartsWith("IGR-") || sn.StartsWith("TK-") || sn.StartsWith("KT-") || brand.Contains("NADIR") || brand.Contains("TURK") || brand.Contains("IGR") || brand.Contains("ISTANBUL") || brand.Contains("KUVEYT") || brand.Contains("AHLATCI"))
             return "Turkey";
-        if (brand.Contains("VALCAMBI") || brand.Contains("PAMP") || brand.Contains("ARGOR") || brand.Contains("SUISSE") || brand.Contains("SWISS"))
+        if (brand.Contains("VALCAMBI") || brand.Contains("PAMP") || brand.Contains("ARGOR") || brand.Contains("SUISSE") || brand.Contains("SWISS") || brand.Contains("METALOR") || sn.StartsWith("VAL-") || sn.StartsWith("PAMP-") || sn.StartsWith("ARG-") || sn.StartsWith("CH-") || sn.StartsWith("SWISS-"))
             return "Swiss";
 
         return "Swiss";

@@ -271,38 +271,70 @@ public class InventoryRepository : IInventoryRepository
                 string serial = element.GetProperty("serial").GetString() ?? "";
                 int productId = element.GetProperty("product_id").GetInt32();
 
-                // If explicit weight_grams is provided, ensure ProductId matches the exact denomination weight
+                string? refinerName = element.TryGetProperty("refiner_name", out var rn) ? rn.GetString() : null;
+                string? refinerLbmaId = element.TryGetProperty("refiner_lbma_id", out var rl) ? rl.GetString() : null;
+                string? assayCert = element.TryGetProperty("assay_certificate_number", out var ac) ? ac.GetString() : null;
+
+                // Check if item has Turkey origin/refiner/serial indicators and align product accordingly
+                bool isTurkishBar = (!string.IsNullOrWhiteSpace(refinerName) && (refinerName.Contains("Nadir", StringComparison.OrdinalIgnoreCase) || refinerName.Contains("IGR", StringComparison.OrdinalIgnoreCase) || refinerName.Contains("Istanbul", StringComparison.OrdinalIgnoreCase) || refinerName.Contains("Turkey", StringComparison.OrdinalIgnoreCase) || refinerName.Contains("Turkish", StringComparison.OrdinalIgnoreCase) || refinerName.Contains("Kuveyt", StringComparison.OrdinalIgnoreCase) || refinerName.Contains("Ahlatci", StringComparison.OrdinalIgnoreCase)))
+                    || serial.StartsWith("TR-", StringComparison.OrdinalIgnoreCase)
+                    || serial.StartsWith("TURK-", StringComparison.OrdinalIgnoreCase)
+                    || serial.StartsWith("TK-", StringComparison.OrdinalIgnoreCase)
+                    || serial.StartsWith("NAD-", StringComparison.OrdinalIgnoreCase)
+                    || serial.StartsWith("IGR-", StringComparison.OrdinalIgnoreCase)
+                    || serial.StartsWith("KT-", StringComparison.OrdinalIgnoreCase)
+                    || serial.Contains("-TR-", StringComparison.OrdinalIgnoreCase)
+                    || serial.Contains("-TURK-", StringComparison.OrdinalIgnoreCase)
+                    || (lot?.Vendor != null && (lot.Vendor.CountryOfOrigin?.Contains("Turkey", StringComparison.OrdinalIgnoreCase) == true || lot.Vendor.VendorCode?.Contains("TURK", StringComparison.OrdinalIgnoreCase) == true || lot.Vendor.VendorName?.Contains("Nadir", StringComparison.OrdinalIgnoreCase) == true));
+
+                // If explicit weight_grams is provided, ensure ProductId matches the exact denomination weight and origin
                 if (element.TryGetProperty("weight_grams", out var wgProp) && wgProp.ValueKind is JsonValueKind.Number)
                 {
                     decimal declaredWeight = wgProp.GetDecimal();
                     if (declaredWeight > 0)
                     {
                         var currProd = await _dbContext.MetalProducts.Include(p => p.Denomination).FirstOrDefaultAsync(p => p.ProductId == productId);
-                        if (currProd == null || currProd.Denomination?.WeightGrams != declaredWeight)
+                        if (currProd == null || currProd.Denomination?.WeightGrams != declaredWeight || (isTurkishBar && currProd.OriginCountry == "Switzerland"))
                         {
                             var matchingProd = await _dbContext.MetalProducts
                                 .Include(p => p.Denomination)
-                                .FirstOrDefaultAsync(p => p.MetalTypeId == (currProd != null ? currProd.MetalTypeId : 1) && p.Denomination!.WeightGrams == declaredWeight);
+                                .FirstOrDefaultAsync(p => p.MetalTypeId == (currProd != null ? currProd.MetalTypeId : 1)
+                                    && p.Denomination!.WeightGrams == declaredWeight
+                                    && (isTurkishBar ? (p.OriginCountry == "Turkey" || p.ProductCode.Contains("TURK")) : (p.OriginCountry != "Turkey")));
+
                             if (matchingProd != null)
                             {
                                 productId = matchingProd.ProductId;
                             }
                             else
                             {
+                                string targetOrigin = isTurkishBar ? "Turkey" : (currProd?.OriginCountry ?? "Switzerland");
+                                var targetBrand = isTurkishBar ? await _dbContext.Brands.FirstOrDefaultAsync(b => b.BrandCode == "NADIR") : null;
                                 string denomLabel = declaredWeight >= 1000 ? $"{declaredWeight / 1000m} Kilogram Bar" : $"{declaredWeight} Gram Bar";
-                                var newProd = await CreateDenominationProductAsync(denomLabel, "Gold", declaredWeight, currProd?.OriginCountry ?? "Switzerland", currProd?.BrandId);
+                                var newProd = await CreateDenominationProductAsync(denomLabel, "Gold", declaredWeight, targetOrigin, targetBrand?.BrandId ?? currProd?.BrandId);
                                 productId = newProd.ProductId;
                             }
                         }
                     }
                 }
+                else if (isTurkishBar)
+                {
+                    var currProd = await _dbContext.MetalProducts.Include(p => p.Denomination).FirstOrDefaultAsync(p => p.ProductId == productId);
+                    if (currProd != null && currProd.OriginCountry == "Switzerland")
+                    {
+                        var turkeyProd = await _dbContext.MetalProducts
+                            .Include(p => p.Denomination)
+                            .FirstOrDefaultAsync(p => p.MetalTypeId == currProd.MetalTypeId
+                                && p.DenominationId == currProd.DenominationId
+                                && (p.OriginCountry == "Turkey" || p.ProductCode.Contains("TURK")));
+                        if (turkeyProd != null)
+                        {
+                            productId = turkeyProd.ProductId;
+                        }
+                    }
+                }
 
                 affectedProducts.Add(productId);
-
-                // LBMA & Purity attributes
-                string? refinerName = element.TryGetProperty("refiner_name", out var rn) ? rn.GetString() : null;
-                string? refinerLbmaId = element.TryGetProperty("refiner_lbma_id", out var rl) ? rl.GetString() : null;
-                string? assayCert = element.TryGetProperty("assay_certificate_number", out var ac) ? ac.GetString() : null;
                 decimal? fineness = element.TryGetProperty("fineness_ppt", out var fp) && fp.ValueKind is JsonValueKind.Number 
                     ? fp.GetDecimal() 
                     : (element.TryGetProperty("purity", out var pu) && pu.ValueKind is JsonValueKind.Number ? pu.GetDecimal() : (decimal?)null);
@@ -1313,9 +1345,14 @@ public class InventoryRepository : IInventoryRepository
         return true;
     }
 
-    // Lot.Vendor added for the Reporting Requirements Gap Analysis's Item 8 cost-analysis
-    // rollup (cost by vendor) -- purely additive eager-load, no existing caller is affected.
-    public async Task<IEnumerable<InventoryItem>> GetItemsAsync() => await _dbContext.InventoryItems.Include(i => i.Product).ThenInclude(p => p!.MetalType).Include(i => i.Product).ThenInclude(p => p!.Denomination).Include(i => i.Location).ThenInclude(l => l!.Vault).Include(i => i.Lot).ThenInclude(l => l!.Vendor).ToListAsync();
+    public async Task<IEnumerable<InventoryItem>> GetItemsAsync() => await _dbContext.InventoryItems
+        .Include(i => i.Product).ThenInclude(p => p!.MetalType)
+        .Include(i => i.Product).ThenInclude(p => p!.Denomination)
+        .Include(i => i.Product).ThenInclude(p => p!.Purity)
+        .Include(i => i.Product).ThenInclude(p => p!.Brand)
+        .Include(i => i.Location).ThenInclude(l => l!.Vault)
+        .Include(i => i.Lot).ThenInclude(l => l!.Vendor)
+        .ToListAsync();
     public async Task<IEnumerable<CustomerHolding>> GetCustomerHoldingsAsync(int customerId) => await _dbContext.CustomerHoldings.Include(h => h.Customer).Include(h => h.Account).Include(h => h.Item).ThenInclude(i => i!.Product).Where(h => h.CustomerId == customerId).ToListAsync();
     public async Task<IEnumerable<CustomerHolding>> GetAllCustomerHoldingsAsync() => await _dbContext.CustomerHoldings.Include(h => h.Customer).Include(h => h.Account).Include(h => h.Item).ThenInclude(i => i!.Product).ThenInclude(p => p!.Denomination).Include(h => h.Item).ThenInclude(i => i!.Product).ThenInclude(p => p!.Purity).Include(h => h.Item).ThenInclude(i => i!.Product).ThenInclude(p => p!.MetalType).Include(h => h.Item).ThenInclude(i => i!.Location).ThenInclude(l => l!.Vault).ToListAsync();
     public async Task<IEnumerable<InventoryTransaction>> GetTransactionsAsync() => await _dbContext.InventoryTransactions.Include(t => t.Item).ThenInclude(i => i!.Product).ThenInclude(p => p!.Denomination).Include(t => t.SourceLocation).ThenInclude(l => l!.Vault).Include(t => t.DestinationLocation).ThenInclude(l => l!.Vault).OrderByDescending(t => t.TransactionTimestamp).ToListAsync();
