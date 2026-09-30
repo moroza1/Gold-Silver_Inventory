@@ -585,6 +585,38 @@ tr:hover td {
   background-color: #94A3B8;
 }
 
+.slot-node.dragging {
+  opacity: 0.4;
+  transform: scale(0.9);
+  border: 2px dashed #D4AF37;
+}
+
+.slot-node.drop-target-hover {
+  background-color: rgba(0, 155, 78, 0.45) !important;
+  box-shadow: 0 0 10px #009B4E !important;
+  transform: scale(1.15);
+  border: 2px solid #009B4E !important;
+  z-index: 10;
+}
+
+.slot-node.selected-source {
+  border: 2px solid #F59E0B !important;
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.6) !important;
+  animation: pulse-source 1.5s infinite;
+}
+
+.slot-node.selected-target {
+  background-color: #009B4E !important;
+  box-shadow: 0 0 12px rgba(0, 155, 78, 0.8) !important;
+  border: 2px solid #fff !important;
+}
+
+@keyframes pulse-source {
+  0% { transform: scale(1); box-shadow: 0 0 6px rgba(245, 158, 11, 0.4); }
+  50% { transform: scale(1.08); box-shadow: 0 0 14px rgba(245, 158, 11, 0.9); }
+  100% { transform: scale(1); box-shadow: 0 0 6px rgba(245, 158, 11, 0.4); }
+}
+
 /* 2. Excel Upload Zone */
 .excel-upload-zone {
   border: 2px dashed #CBD5E0;

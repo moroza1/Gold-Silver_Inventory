@@ -37,6 +37,7 @@ public interface IInventoryRepository
     Task<IEnumerable<InventoryLocation>> GetLocationsAsync();
     Task<InventoryLocation> AddLocationAsync(int vaultId, int? branchId, string zoneRoom, string shelfRow, string slotBin);
     Task<bool> DeleteLocationAsync(int locationId);
+    Task<(bool success, string message, InventoryItem? item)> RelocateInventoryItemAsync(int itemId, int targetLocationId, string movedBy, string? notes = null);
     Task<IEnumerable<InventoryItem>> GetItemsAsync();
     Task<IEnumerable<CustomerHolding>> GetCustomerHoldingsAsync(int customerId);
     Task<IEnumerable<CustomerHolding>> GetAllCustomerHoldingsAsync();

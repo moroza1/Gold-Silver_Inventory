@@ -15,6 +15,7 @@ using PMIMS.Domain;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace PMIMS.WebAPI.Controllers;
 
@@ -350,6 +351,92 @@ public partial class PMIMSControllers : ControllerBase
             var success = await _repository.DeleteLocationAsync(id);
             if (!success) return NotFound();
             return Ok(new { message = "Location removed successfully." });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
+    [Authorize(Policy = "spatial_map.write")]
+    [HttpPost("vault/relocate")]
+    [HttpPost("catalog/locations/relocate")]
+    public async Task<IActionResult> RelocateItem([FromBody] RelocateItemRequest req)
+    {
+        try
+        {
+            int itemId = req.ItemId;
+            if (itemId <= 0 && !string.IsNullOrWhiteSpace(req.SerialNumber))
+            {
+                var allItems = await _repository.GetItemsAsync();
+                var matched = allItems.FirstOrDefault(i => string.Equals(i.SerialNumber, req.SerialNumber?.Trim(), StringComparison.OrdinalIgnoreCase));
+                if (matched != null) itemId = matched.ItemId;
+            }
+
+            if (itemId <= 0 || req.TargetLocationId <= 0)
+            {
+                return BadRequest(new { error = "Valid ItemId and TargetLocationId are required." });
+            }
+
+            var username = User.Identity?.Name ?? "SYSTEM";
+            var (success, message, item) = await _repository.RelocateInventoryItemAsync(itemId, req.TargetLocationId, username, req.Notes);
+            if (!success)
+            {
+                return BadRequest(new { error = message });
+            }
+
+            return Ok(new
+            {
+                success = true,
+                message,
+                item_id = item?.ItemId,
+                serial_number = item?.SerialNumber,
+                target_location_id = req.TargetLocationId,
+                target_location_context = item?.Location?.Description
+            });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
+    [Authorize(Policy = "spatial_map.write")]
+    [HttpPost("vault/batch-relocate")]
+    public async Task<IActionResult> BatchRelocateItems([FromBody] BatchRelocateRequest req)
+    {
+        try
+        {
+            if (req.ItemIds == null || req.ItemIds.Count == 0 || req.TargetLocationId <= 0)
+            {
+                return BadRequest(new { error = "Valid ItemIds list and TargetLocationId are required." });
+            }
+
+            var username = User.Identity?.Name ?? "SYSTEM";
+            var results = new List<object>();
+            var errors = new List<string>();
+
+            foreach (var itemId in req.ItemIds)
+            {
+                var (success, message, item) = await _repository.RelocateInventoryItemAsync(itemId, req.TargetLocationId, username, req.Notes);
+                if (success)
+                {
+                    results.Add(new { item_id = itemId, serial_number = item?.SerialNumber, success = true, message });
+                }
+                else
+                {
+                    errors.Add($"Item #{itemId}: {message}");
+                }
+            }
+
+            return Ok(new
+            {
+                success = errors.Count == 0,
+                relocated_count = results.Count,
+                errors_count = errors.Count,
+                results,
+                errors
+            });
         }
         catch (Exception ex)
         {
@@ -1034,7 +1121,7 @@ public partial class PMIMSControllers : ControllerBase
 
     [Authorize(Policy = "reports.read")]
     [HttpGet("reports/holdings")]
-    public async Task<IActionResult> GetHoldingsReport()
+    public async Task<IActionResult> GetHoldingsReport([FromQuery] string? supplier = null)
     {
         var holdings = (await _repository.GetAllCustomerHoldingsAsync()).ToList();
         var holdingItemIds = holdings.Select(h => h.ItemId).ToHashSet();
@@ -1055,6 +1142,7 @@ public partial class PMIMSControllers : ControllerBase
                 metal_name = h.Item?.Product?.MetalType?.MetalName,
                 weight_grams = h.Item?.Product?.Denomination?.WeightGrams,
                 purity_value = h.Item?.Product?.Purity?.PurityValue,
+                supplier_name = h.Item?.Lot?.Vendor?.VendorName ?? h.Item?.RefinerName ?? h.Item?.Product?.Brand?.BrandName ?? "N/A",
                 vault_name = h.Item?.Location?.Vault?.VaultName,
                 location_description = h.Item?.Location?.Description,
                 status_code = h.StatusCode,
@@ -1073,6 +1161,7 @@ public partial class PMIMSControllers : ControllerBase
                 metal_name = item.Product?.MetalType?.MetalName,
                 weight_grams = item.Product?.Denomination?.WeightGrams,
                 purity_value = item.Product?.Purity?.PurityValue,
+                supplier_name = item.Lot?.Vendor?.VendorName ?? item.RefinerName ?? item.Product?.Brand?.BrandName ?? "N/A",
                 vault_name = item.Location?.Vault?.VaultName,
                 location_description = item.Location?.Description,
                 status_code = item.StatusCode,
@@ -1080,21 +1169,31 @@ public partial class PMIMSControllers : ControllerBase
             });
         }
 
+        if (!string.IsNullOrWhiteSpace(supplier))
+        {
+            list = list.Where(h =>
+            {
+                var s = (string?)h.GetType().GetProperty("supplier_name")?.GetValue(h) ?? "";
+                return s.Contains(supplier, StringComparison.OrdinalIgnoreCase);
+            }).ToList();
+        }
+
         return Ok(list);
     }
 
     [Authorize(Policy = "reports.read")]
     [HttpGet("reports/transactions")]
-    public async Task<IActionResult> GetTransactionsReport()
+    public async Task<IActionResult> GetTransactionsReport([FromQuery] string? supplier = null)
     {
         var txs = await _repository.GetTransactionsAsync();
-        return Ok(txs.Select(t => new
+        var mapped = txs.Select(t => new
         {
             transaction_id = t.TransactionId,
             transaction_number = t.TransactionNumber,
             serial_number = t.Item?.SerialNumber,
             metal_name = t.Item?.Product?.MetalType?.MetalName,
             weight_grams = t.Item?.Product?.Denomination?.WeightGrams,
+            supplier_name = t.Item?.Lot?.Vendor?.VendorName ?? t.Item?.RefinerName ?? t.Item?.Product?.Brand?.BrandName ?? "N/A",
             transaction_type = t.TransactionType,
             source_vault = t.SourceLocation?.Vault?.VaultName,
             source_location = t.SourceLocation?.Description,
@@ -1105,7 +1204,14 @@ public partial class PMIMSControllers : ControllerBase
             initiated_by = t.InitiatedBy,
             approved_by = t.ApprovedBy,
             timestamp = t.TransactionTimestamp
-        }));
+        });
+
+        if (!string.IsNullOrWhiteSpace(supplier))
+        {
+            mapped = mapped.Where(t => t.supplier_name.Contains(supplier, StringComparison.OrdinalIgnoreCase));
+        }
+
+        return Ok(mapped);
     }
 
     // Assembles one movement's full traceability picture: the ledger row, its matched
@@ -1133,7 +1239,7 @@ public partial class PMIMSControllers : ControllerBase
 
     [Authorize(Policy = "reports.read")]
     [HttpGet("reports/valuation")]
-    public async Task<IActionResult> GetValuationReport([FromQuery] string method = "AVERAGE")
+    public async Task<IActionResult> GetValuationReport([FromQuery] string method = "AVERAGE", [FromQuery] string? supplier = null)
     {
         var items = await _repository.GetItemsAsync();
         var goldRate = await _rateFeed.GetLiveRatesAsync("Gold");
@@ -1211,6 +1317,8 @@ public partial class PMIMSControllers : ControllerBase
                     denomination = item.Product?.Denomination?.Label,
                     weight_grams = weight,
                     purity = item.Product?.Purity?.PurityValue,
+                    supplier_name = item.Lot?.Vendor?.VendorName ?? item.RefinerName ?? item.Product?.Brand?.BrandName ?? "NADIR",
+                    vendor_code = item.Lot?.Vendor?.VendorCode ?? "",
                     location = item.Location?.Description ?? "Unknown",
                     status_code = item.StatusCode,
                     ownership_type = item.OwnershipType,
@@ -1224,6 +1332,15 @@ public partial class PMIMSControllers : ControllerBase
                     unrealized_pnl = Math.Round(unrealizedPnl, 2)
                 });
             }
+        }
+
+        if (!string.IsNullOrWhiteSpace(supplier))
+        {
+            valuationList = valuationList.Where(v =>
+            {
+                var s = (string?)v.GetType().GetProperty("supplier_name")?.GetValue(v) ?? "";
+                return s.Contains(supplier, StringComparison.OrdinalIgnoreCase);
+            }).ToList();
         }
 
         return Ok(valuationList);
@@ -1762,6 +1879,96 @@ public partial class PMIMSControllers : ControllerBase
         });
     }
 
+    public static string DeterminePreciousType(InventoryItem i)
+    {
+        var metal = i.Product?.MetalType?.MetalName ?? "";
+        var code = i.Product?.ProductCode ?? "";
+        if (metal.Equals("Silver", StringComparison.OrdinalIgnoreCase) ||
+            code.StartsWith("AG-", StringComparison.OrdinalIgnoreCase) ||
+            code.Contains("SILVER", StringComparison.OrdinalIgnoreCase))
+        {
+            return "SILVER";
+        }
+
+        var origin = i.Product?.OriginCountry ?? "";
+        var brand = i.Product?.BrandName ?? i.Product?.Brand?.BrandName ?? "";
+        var refiner = i.RefinerName ?? "";
+        var serial = i.SerialNumber ?? "";
+        var vendorName = i.Lot?.Vendor?.VendorName ?? "";
+        var vendorCode = i.Lot?.Vendor?.VendorCode ?? "";
+        var vendorOrigin = i.Lot?.Vendor?.CountryOfOrigin ?? "";
+
+        // 1. Explicit Swiss product code, country of origin, brand, or serial prefix
+        if (code.Contains("SWISS", StringComparison.OrdinalIgnoreCase) ||
+            code.EndsWith("-CH", StringComparison.OrdinalIgnoreCase) ||
+            code.Contains("-CH-", StringComparison.OrdinalIgnoreCase) ||
+            origin.Contains("Switzerland", StringComparison.OrdinalIgnoreCase) ||
+            origin.Equals("CH", StringComparison.OrdinalIgnoreCase) ||
+            origin.Contains("Swiss", StringComparison.OrdinalIgnoreCase) ||
+            brand.Contains("Valcambi", StringComparison.OrdinalIgnoreCase) ||
+            brand.Contains("PAMP", StringComparison.OrdinalIgnoreCase) ||
+            brand.Contains("Argor", StringComparison.OrdinalIgnoreCase) ||
+            brand.Contains("Suisse", StringComparison.OrdinalIgnoreCase) ||
+            brand.Contains("Metalor", StringComparison.OrdinalIgnoreCase) ||
+            brand.Contains("KFH Custom Mint", StringComparison.OrdinalIgnoreCase) ||
+            refiner.Contains("Valcambi", StringComparison.OrdinalIgnoreCase) ||
+            refiner.Contains("PAMP", StringComparison.OrdinalIgnoreCase) ||
+            refiner.Contains("Argor", StringComparison.OrdinalIgnoreCase) ||
+            refiner.Contains("Suisse", StringComparison.OrdinalIgnoreCase) ||
+            refiner.Contains("Swiss", StringComparison.OrdinalIgnoreCase) ||
+            serial.StartsWith("VAL-", StringComparison.OrdinalIgnoreCase) ||
+            serial.StartsWith("PAMP-", StringComparison.OrdinalIgnoreCase) ||
+            serial.StartsWith("ARG-", StringComparison.OrdinalIgnoreCase) ||
+            serial.StartsWith("CH-", StringComparison.OrdinalIgnoreCase) ||
+            serial.StartsWith("SWISS-", StringComparison.OrdinalIgnoreCase))
+        {
+            return "SWISS";
+        }
+
+        // 2. Explicit Turkey product code, country of origin, brand, or serial prefix
+        if (code.Contains("TURK", StringComparison.OrdinalIgnoreCase) ||
+            code.EndsWith("-TR", StringComparison.OrdinalIgnoreCase) ||
+            code.Contains("-TR-", StringComparison.OrdinalIgnoreCase) ||
+            origin.Contains("Turkey", StringComparison.OrdinalIgnoreCase) ||
+            origin.Equals("TR", StringComparison.OrdinalIgnoreCase) ||
+            brand.Contains("Nadir", StringComparison.OrdinalIgnoreCase) ||
+            brand.Contains("IGR", StringComparison.OrdinalIgnoreCase) ||
+            brand.Contains("Istanbul", StringComparison.OrdinalIgnoreCase) ||
+            brand.Contains("Kuveyt", StringComparison.OrdinalIgnoreCase) ||
+            brand.Contains("Ahlatci", StringComparison.OrdinalIgnoreCase) ||
+            brand.Contains("AgaKulche", StringComparison.OrdinalIgnoreCase) ||
+            refiner.Contains("Nadir", StringComparison.OrdinalIgnoreCase) ||
+            refiner.Contains("IGR", StringComparison.OrdinalIgnoreCase) ||
+            refiner.Contains("Istanbul", StringComparison.OrdinalIgnoreCase) ||
+            refiner.Contains("Turkey", StringComparison.OrdinalIgnoreCase) ||
+            refiner.Contains("Turkish", StringComparison.OrdinalIgnoreCase) ||
+            refiner.Contains("Kuveyt", StringComparison.OrdinalIgnoreCase) ||
+            refiner.Contains("Ahlatci", StringComparison.OrdinalIgnoreCase) ||
+            serial.StartsWith("TR-", StringComparison.OrdinalIgnoreCase) ||
+            serial.StartsWith("TURK-", StringComparison.OrdinalIgnoreCase) ||
+            serial.StartsWith("TK-", StringComparison.OrdinalIgnoreCase) ||
+            serial.StartsWith("NAD-", StringComparison.OrdinalIgnoreCase) ||
+            serial.StartsWith("IGR-", StringComparison.OrdinalIgnoreCase) ||
+            serial.StartsWith("KT-", StringComparison.OrdinalIgnoreCase) ||
+            serial.Contains("-TR-", StringComparison.OrdinalIgnoreCase) ||
+            serial.Contains("-TURK-", StringComparison.OrdinalIgnoreCase))
+        {
+            return "TURKEY";
+        }
+
+        // 3. Fallback to vendor / supplier origin only if product origin is unspecified
+        if (vendorOrigin.Contains("Switzerland", StringComparison.OrdinalIgnoreCase) || vendorName.Contains("Valcambi", StringComparison.OrdinalIgnoreCase) || vendorName.Contains("PAMP", StringComparison.OrdinalIgnoreCase))
+        {
+            return "SWISS";
+        }
+        if (vendorOrigin.Contains("Turkey", StringComparison.OrdinalIgnoreCase) || vendorName.Contains("Nadir", StringComparison.OrdinalIgnoreCase) || vendorName.Contains("IGR", StringComparison.OrdinalIgnoreCase))
+        {
+            return "TURKEY";
+        }
+
+        return "SWISS";
+    }
+
     // =========================================================================
     // EXECUTIVE BOARD DASHBOARD ("Executive Board")
     // =========================================================================
@@ -1822,11 +2029,6 @@ public partial class PMIMSControllers : ControllerBase
             }
         }
 
-
-
-        // ============================================================
-        // Breakdown categories & Summation for all precious metals:
-        // (Turkey, KFH, Pending, Damage, and Transit)
         // ============================================================
         // Breakdown categories & Summation for all precious metals & owners:
         // (KFH Turkey Offline, KFH Kuwait, Customers, Customs, Pending, Damage, and Transit)
@@ -1891,65 +2093,28 @@ public partial class PMIMSControllers : ControllerBase
         decimal totalPreciousWeightKg = Math.Round((allPreciousItems.Sum(i => i.Product?.Denomination?.WeightGrams ?? 0m) + pendingTurkeyWeightGrams) / 1000m, 3);
         int totalPreciousQty = allPreciousItems.Count + pendingTurkeyCount;
 
-        static string DeterminePreciousType(InventoryItem i)
-        {
-            var metal = i.Product?.MetalType?.MetalName ?? "";
-            var code = i.Product?.ProductCode ?? "";
-            if (metal.Equals("Silver", StringComparison.OrdinalIgnoreCase) ||
-                code.StartsWith("AG-", StringComparison.OrdinalIgnoreCase) ||
-                code.Contains("SILVER", StringComparison.OrdinalIgnoreCase))
-            {
-                return "SILVER";
-            }
+        var swissItems = scopedItems.Where(i => DeterminePreciousType(i) == "SWISS").ToList();
+        decimal swissWeightKg = WeightKg(swissItems);
+        int swissQty = swissItems.Count;
 
-            var origin = i.Product?.OriginCountry ?? "";
-            var brand = i.Product?.BrandName ?? i.Product?.Brand?.BrandName ?? "";
-            var refiner = i.RefinerName ?? "";
-            var serial = i.SerialNumber ?? "";
-            var vendorName = i.Lot?.Vendor?.VendorName ?? "";
-            var vendorCode = i.Lot?.Vendor?.VendorCode ?? "";
-            var vendorOrigin = i.Lot?.Vendor?.CountryOfOrigin ?? "";
+        var turkeyGoldItems = scopedItems.Where(i => DeterminePreciousType(i) == "TURKEY").ToList();
+        decimal turkeyGoldWeightKg = WeightKg(turkeyGoldItems);
+        int turkeyGoldQty = turkeyGoldItems.Count;
 
-            if (origin.Contains("Turkey", StringComparison.OrdinalIgnoreCase) ||
-                origin.Equals("TR", StringComparison.OrdinalIgnoreCase) ||
-                code.Contains("TURK", StringComparison.OrdinalIgnoreCase) ||
-                brand.Contains("Nadir", StringComparison.OrdinalIgnoreCase) ||
-                brand.Contains("IGR", StringComparison.OrdinalIgnoreCase) ||
-                brand.Contains("Istanbul", StringComparison.OrdinalIgnoreCase) ||
-                brand.Contains("Kuveyt", StringComparison.OrdinalIgnoreCase) ||
-                brand.Contains("Ahlatci", StringComparison.OrdinalIgnoreCase) ||
-                refiner.Contains("Nadir", StringComparison.OrdinalIgnoreCase) ||
-                refiner.Contains("IGR", StringComparison.OrdinalIgnoreCase) ||
-                refiner.Contains("Istanbul", StringComparison.OrdinalIgnoreCase) ||
-                refiner.Contains("Turkey", StringComparison.OrdinalIgnoreCase) ||
-                refiner.Contains("Turkish", StringComparison.OrdinalIgnoreCase) ||
-                refiner.Contains("Kuveyt", StringComparison.OrdinalIgnoreCase) ||
-                refiner.Contains("Ahlatci", StringComparison.OrdinalIgnoreCase) ||
-                vendorName.Contains("Nadir", StringComparison.OrdinalIgnoreCase) ||
-                vendorName.Contains("Turkey", StringComparison.OrdinalIgnoreCase) ||
-                vendorName.Contains("IGR", StringComparison.OrdinalIgnoreCase) ||
-                vendorCode.Contains("TURK", StringComparison.OrdinalIgnoreCase) ||
-                vendorCode.Contains("NAD", StringComparison.OrdinalIgnoreCase) ||
-                vendorOrigin.Contains("Turkey", StringComparison.OrdinalIgnoreCase) ||
-                serial.StartsWith("TR-", StringComparison.OrdinalIgnoreCase) ||
-                serial.StartsWith("TURK-", StringComparison.OrdinalIgnoreCase) ||
-                serial.StartsWith("TK-", StringComparison.OrdinalIgnoreCase) ||
-                serial.StartsWith("NAD-", StringComparison.OrdinalIgnoreCase) ||
-                serial.StartsWith("IGR-", StringComparison.OrdinalIgnoreCase) ||
-                serial.StartsWith("KT-", StringComparison.OrdinalIgnoreCase) ||
-                serial.Contains("-TR-", StringComparison.OrdinalIgnoreCase) ||
-                serial.Contains("-TURK-", StringComparison.OrdinalIgnoreCase))
-            {
-                return "TURKEY";
-            }
-
-            return "SWISS";
-        }
+        var silverItems = scopedItems.Where(i => DeterminePreciousType(i) == "SILVER").ToList();
+        decimal silverWeightKg = WeightKg(silverItems);
+        int silverQty = silverItems.Count;
 
         return Ok(new
         {
             total_precious_weight_kg = totalPreciousWeightKg,
             total_precious_qty = totalPreciousQty,
+            swiss_gold_weight_kg = swissWeightKg,
+            swiss_gold_qty = swissQty,
+            turkey_gold_weight_kg = turkeyGoldWeightKg,
+            turkey_gold_qty = turkeyGoldQty,
+            silver_weight_kg = silverWeightKg,
+            silver_qty = silverQty,
             damage_weight_kg = damageWeightKg,
             damage_qty = damageQty,
             transit_weight_kg = transitWeightKg,
@@ -1973,6 +2138,12 @@ public partial class PMIMSControllers : ControllerBase
                 total_weight_kg = totalPreciousWeightKg,
                 total_weight_grams = Math.Round(totalPreciousWeightKg * 1000m, 1),
                 total_qty = totalPreciousQty,
+                swiss_gold_weight_kg = swissWeightKg,
+                swiss_gold_qty = swissQty,
+                turkey_gold_weight_kg = turkeyGoldWeightKg,
+                turkey_gold_qty = turkeyGoldQty,
+                silver_weight_kg = silverWeightKg,
+                silver_qty = silverQty,
                 turkey_weight_kg = turkeyWeightKg,
                 turkey_qty = turkeyQty,
                 kfh_turkey_offline_weight_kg = turkeyWeightKg,
@@ -2103,13 +2274,10 @@ public partial class PMIMSControllers : ControllerBase
 
         static string ResolveMetalType(InventoryItem item)
         {
-            var metalName = item.Product?.MetalType?.MetalName;
-            if (!string.IsNullOrWhiteSpace(metalName)) return metalName.Trim();
-            var code = item.Product?.ProductCode ?? "";
-            if (code.StartsWith("AG-", StringComparison.OrdinalIgnoreCase) || code.Contains("SILVER", StringComparison.OrdinalIgnoreCase))
-                return "Silver";
-            if (code.StartsWith("PT-", StringComparison.OrdinalIgnoreCase) || code.Contains("PLATINUM", StringComparison.OrdinalIgnoreCase))
-                return "Platinum";
+            var metal = item.Product?.MetalType?.MetalName;
+            if (!string.IsNullOrWhiteSpace(metal)) return metal;
+            var pType = DeterminePreciousType(item);
+            if (pType == "SILVER") return "Silver";
             return "Gold";
         }
 
@@ -2982,6 +3150,49 @@ public class TransferRequest
     public string? ReturnReason { get; set; }
     public string? Notes { get; set; }
 }
+
+public class RelocateItemRequest
+{
+    [JsonPropertyName("item_id")]
+    public int ItemId { get; set; }
+
+    [JsonPropertyName("itemId")]
+    public int? ItemIdCamel { set { if (value.HasValue && value.Value > 0) ItemId = value.Value; } }
+
+    [JsonPropertyName("target_location_id")]
+    public int TargetLocationId { get; set; }
+
+    [JsonPropertyName("targetLocationId")]
+    public int? TargetLocationIdCamel { set { if (value.HasValue && value.Value > 0) TargetLocationId = value.Value; } }
+
+    [JsonPropertyName("serial_number")]
+    public string? SerialNumber { get; set; }
+
+    [JsonPropertyName("serialNumber")]
+    public string? SerialNumberCamel { set => SerialNumber = value ?? SerialNumber; }
+
+    [JsonPropertyName("notes")]
+    public string? Notes { get; set; }
+}
+
+public class BatchRelocateRequest
+{
+    [JsonPropertyName("item_ids")]
+    public List<int> ItemIds { get; set; } = new();
+
+    [JsonPropertyName("itemIds")]
+    public List<int>? ItemIdsCamel { set => ItemIds = value ?? ItemIds; }
+
+    [JsonPropertyName("target_location_id")]
+    public int TargetLocationId { get; set; }
+
+    [JsonPropertyName("targetLocationId")]
+    public int? TargetLocationIdCamel { set { if (value.HasValue && value.Value > 0) TargetLocationId = value.Value; } }
+
+    [JsonPropertyName("notes")]
+    public string? Notes { get; set; }
+}
+
 public class ReserveRequest { public int CustomerId { get; set; } public int ProductId { get; set; } public int BranchId { get; set; } public int ChannelId { get; set; } }
 public class PurchaseConfirmRequest { public Guid ReservationToken { get; set; } public int AccountId { get; set; } public decimal SalePrice { get; set; } public decimal MarkupAmount { get; set; } public string InvoiceNumber { get; set; } = null!; public string? CustodyAgreementNumber { get; set; } }
 public class WithdrawalRequestModel { public int HoldingId { get; set; } public int BranchId { get; set; } }

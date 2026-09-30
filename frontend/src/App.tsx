@@ -979,6 +979,7 @@ export default function App() {
   const [loadingReport, setLoadingReport] = useState(false);
   const [filterMetal, setFilterMetal] = useState('');
   const [filterVault, setFilterVault] = useState('');
+  const [filterSupplier, setFilterSupplier] = useState('');
   const [valuationMethod, setValuationMethod] = useState('AVERAGE');
 
   // Enhanced Audit Trail search/filter/pagination/drill-down state -- self-service
@@ -1218,10 +1219,19 @@ export default function App() {
   const [newShelfRow, setNewShelfRow] = useState('Shelf Row 4');
   const [newSlotBin, setNewSlotBin] = useState('Slot 1');
 
-  // Spatial vault mapping states
+  // Spatial vault mapping & relocation states
   const [locations, setLocations] = useState<any[]>([]);
   const [selectedShelf, setSelectedShelf] = useState<any>(null);
+  const [selectedSlot, setSelectedSlot] = useState<any>(null);
   const [selectedBar, setSelectedBar] = useState<any>(null);
+  const [movingBar, setMovingBar] = useState<any>(null);
+  const [relocateModalOpen, setRelocateModalOpen] = useState(false);
+  const [targetShelfId, setTargetShelfId] = useState<number | null>(null);
+  const [targetLocationId, setTargetLocationId] = useState<number | null>(null);
+  const [relocateNotes, setRelocateNotes] = useState('');
+  const [relocatingLoading, setRelocatingLoading] = useState(false);
+  const [draggedBar, setDraggedBar] = useState<any>(null);
+  const [dragOverLocationId, setDragOverLocationId] = useState<number | null>(null);
 
   // Custody states
   const [custodySearchId, setCustodySearchId] = useState('');
@@ -3031,10 +3041,12 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     if (!window.confirm(currentLang === 'en' ? 'Are you sure you want to delete this coordinate slot?' : 'هل أنت متأكد من رغبتك في حذف هذا الموقع الإحداثي؟')) return;
     try {
       const res = await fetch(`${API_BASE}/catalog/locations/${id}`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {}
       });
       if (res.ok) {
         alert(currentLang === 'en' ? 'Location deleted successfully.' : 'تم حذف الموقع الإحداثي بنجاح.');
+        setSelectedSlot(null);
         setSelectedShelf(null);
         fetchLocations();
       } else {
@@ -3042,6 +3054,105 @@ const [migrationApproved, setMigrationApproved] = useState(false);
       }
     } catch (e) {
       alert('Error deleting location.');
+    }
+  };
+
+  const openRelocateModal = (bar: any, defaultTargetLocId?: number) => {
+    if (!bar) return;
+    const resolvedItem = inventoryList.find((i: any) => 
+      (bar.item_id && i.item_id === bar.item_id) || 
+      (bar.ItemId && (i.item_id === bar.ItemId || i.ItemId === bar.ItemId)) ||
+      (bar.serial_number && (i.serial_number === bar.serial_number || i.SerialNumber === bar.serial_number))
+    ) || bar;
+    
+    const itmId = Number(resolvedItem.item_id || resolvedItem.ItemId || resolvedItem.id || bar.item_id || bar.ItemId || bar.id || 0);
+    const movingObj = { ...resolvedItem, item_id: itmId };
+    
+    setMovingBar(movingObj);
+    setTargetLocationId(defaultTargetLocId || null);
+    setRelocateNotes('');
+    
+    // Find current shelf of this bar
+    const barLocId = movingObj.location_id || movingObj.LocationId;
+    const currentLoc = locations.find((loc: any) => loc.slots.some((s: any) => s.location_id === barLocId));
+    if (currentLoc) {
+      setTargetShelfId(currentLoc.id);
+    } else if (locations.length > 0) {
+      setTargetShelfId(locations[0].id);
+    }
+    
+    setRelocateModalOpen(true);
+  };
+
+  const handleRelocateBar = async (itemId: number, targetLocId: number, notes?: string) => {
+    const validItemId = Number(itemId || (movingBar ? (movingBar.item_id || movingBar.ItemId || movingBar.id) : 0));
+    const validTargetLocId = Number(targetLocId || targetLocationId || 0);
+
+    if (!validItemId || !validTargetLocId) {
+      alert(currentLang === 'en' ? 'Please select a bar and a target destination slot.' : 'يرجى تحديد السبيكة والخانة المستهدفة.');
+      return;
+    }
+
+    setRelocatingLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/vault/relocate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {})
+        },
+        body: JSON.stringify({
+          item_id: validItemId,
+          itemId: validItemId,
+          target_location_id: validTargetLocId,
+          targetLocationId: validTargetLocId,
+          serial_number: movingBar?.serial_number || movingBar?.SerialNumber,
+          notes: notes || 'Vault Spatial Map interactive relocation'
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        alert(currentLang === 'en' 
+          ? `✅ ${data.message || 'Bar relocated successfully in the vault ledger!'}` 
+          : `✅ ${data.message || 'تم نقل السبيكة بنجاح وتحديث موقعها في سجلات الخزينة!'}`);
+        
+        setRelocateModalOpen(false);
+        setMovingBar(null);
+        setTargetLocationId(null);
+        setDraggedBar(null);
+        setDragOverLocationId(null);
+
+        // Refresh locations, inventory registry, and executive board
+        await Promise.all([
+          fetchLocations(),
+          fetchInventory(),
+          fetchExecutiveBoard()
+        ]);
+
+        // If a shelf or slot was open, refresh or close it
+        setSelectedSlot(null);
+        if (selectedShelf) {
+          const updatedShelf = locations.find((l: any) => l.id === selectedShelf.id);
+          if (updatedShelf) setSelectedShelf(updatedShelf);
+        }
+
+        // If a bar was selected, refresh its details
+        if (selectedBar && selectedBar.item_id === itemId) {
+          setSelectedBar((prev: any) => prev ? { 
+            ...prev, 
+            location_id: targetLocId, 
+            location_context: data.target_location_context || prev.location_context 
+          } : null);
+        }
+      } else {
+        const errText = await describeApiError(res, currentLang, 'Failed to relocate bar', 'فشل نقل السبيكة');
+        alert(`❌ ${errText}`);
+      }
+    } catch (e: any) {
+      alert(currentLang === 'en' ? `Error relocating bar: ${e?.message || e}` : `خطأ أثناء نقل السبيكة: ${e?.message || e}`);
+    } finally {
+      setRelocatingLoading(false);
     }
   };
 
@@ -6592,7 +6703,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     alert("Migration complete. Excel staged data successfully merged into active ledger.");
   };
 
-  const fetchReport = async (type: string, method?: string) => {
+  const fetchReport = async (type: string, method?: string, supplier?: string) => {
     setLoadingReport(true);
     try {
       let endpoint = '';
@@ -6609,11 +6720,15 @@ const [migrationApproved, setMigrationApproved] = useState(false);
 
       // Reconciliation differences live under /api/reconciliation, not /api/reports.
       const activeMethod = method || valuationMethod;
+      const activeSupplier = supplier !== undefined ? supplier : filterSupplier;
+      const params = new URLSearchParams();
+      if (type === 'valuation' && activeMethod) params.set('method', activeMethod);
+      if (activeSupplier) params.set('supplier', activeSupplier);
+
+      const qs = params.toString() ? `?${params.toString()}` : '';
       const url = type === 'reconciliation'
         ? `${API_BASE}/reconciliation/discrepancies`
-        : type === 'valuation'
-          ? `${API_BASE}/reports/valuation?method=${activeMethod}`
-          : `${API_BASE}/reports/${endpoint}`;
+        : `${API_BASE}/reports/${endpoint}${qs}`;
       const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
@@ -6662,16 +6777,18 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     let csvContent = "\uFEFF"; 
     
     if (reportType === 'valuation') {
-      csvContent += "Serial Number,Metal,Denomination,Weight (Grams),Location / Coordinates,Ownership,Quality / Damage,Damage Reason,Cost Basis (USD)\n";
+      csvContent += "Serial Number,Metal,Denomination,Weight (Grams),Supplier / Refiner,Location / Coordinates,Ownership,Quality / Damage,Damage Reason,Cost Basis (USD)\n";
       reportData
         .filter(i => !filterMetal || i.metal_name === filterMetal)
         .filter(i => !filterVault || i.ownership_type === filterVault)
+        .filter(i => !filterSupplier || (i.supplier_name || i.supplier || i.brand || '').toLowerCase().includes(filterSupplier.toLowerCase()))
         .forEach(row => {
           const quality = row.is_damaged 
             ? "DAMAGED" 
             : (row.damage_status === 'PENDING_APPROVAL' ? "Pending Review" : "Pristine");
           const damageReason = (row.damage_reason || '').replace(/"/g, '""');
-          csvContent += `"${row.serial_number}","${row.metal_name}","${row.denomination}",${row.weight_grams},"${row.location}","${row.ownership_type}","${quality}","${damageReason}",${row.cost_basis}\n`;
+          const supplier = (row.supplier_name || row.supplier || row.brand || 'NADIR').replace(/"/g, '""');
+          csvContent += `"${row.serial_number}","${row.metal_name}","${row.denomination}",${row.weight_grams},"${supplier}","${row.location}","${row.ownership_type}","${quality}","${damageReason}",${row.cost_basis}\n`;
         });
     } else if (reportType === 'occupancy') {
       csvContent += "Vault,Zone / Room,Total Slots,Occupied Slots,Occupancy Rate (%)\n";
@@ -6685,18 +6802,24 @@ const [migrationApproved, setMigrationApproved] = useState(false);
         csvContent += `"${new Date(row.timestamp).toLocaleString()}","${row.username}","${row.moduleName}","${(row.actionDescription || '').replace(/"/g, '""')}","${entity}","${row.tamperStatus || 'Verified'}"\n`;
       });
     } else if (reportType === 'transactions') {
-      csvContent += "Transaction Number,Serial Number,Transaction Type,Source,Destination,Ownership,Initiated By,Approved By,Timestamp\n";
-      reportData.forEach(row => {
-        const ownershipStr = row.source_ownership === row.destination_ownership || !row.destination_ownership
-          ? (row.destination_ownership || row.source_ownership)
-          : `${row.source_ownership} -> ${row.destination_ownership}`;
-        csvContent += `"${row.transaction_number}","${row.serial_number}","${row.transaction_type}","${row.source_vault || ''} ${row.source_location ? '(' + row.source_location + ')' : ''}","${row.destination_vault || ''} ${row.destination_location ? '(' + row.destination_location + ')' : ''}","${ownershipStr}","${row.initiated_by}","${row.approved_by || ''}","${new Date(row.timestamp).toLocaleString()}"\n`;
-      });
+      csvContent += "Transaction Number,Serial Number,Supplier / Refiner,Transaction Type,Source,Destination,Ownership,Initiated By,Approved By,Timestamp\n";
+      reportData
+        .filter(i => !filterSupplier || (i.supplier_name || i.supplier || '').toLowerCase().includes(filterSupplier.toLowerCase()))
+        .forEach(row => {
+          const ownershipStr = row.source_ownership === row.destination_ownership || !row.destination_ownership
+            ? (row.destination_ownership || row.source_ownership)
+            : `${row.source_ownership} -> ${row.destination_ownership}`;
+          const supplier = (row.supplier_name || row.supplier || 'NADIR').replace(/"/g, '""');
+          csvContent += `"${row.transaction_number}","${row.serial_number}","${supplier}","${row.transaction_type}","${row.source_vault || ''} ${row.source_location ? '(' + row.source_location + ')' : ''}","${row.destination_vault || ''} ${row.destination_location ? '(' + row.destination_location + ')' : ''}","${ownershipStr}","${row.initiated_by}","${row.approved_by || ''}","${new Date(row.timestamp).toLocaleString()}"\n`;
+        });
     } else if (reportType === 'inventory_balance') {
-      csvContent += "Vault,Metal Type,Denomination,Ready Qty,Total Weight (g)\n";
-      reportData.forEach(row => {
-        csvContent += `"${row.vault}","${row.metal_type}","${row.denomination}",${row.ready_qty},${row.total_weight_grams}\n`;
-      });
+      csvContent += "Vault,Metal Type,Denomination,Supplier,Ready Qty,Total Weight (g)\n";
+      reportData
+        .filter(i => !filterSupplier || (i.supplier || i.supplier_name || '').toLowerCase().includes(filterSupplier.toLowerCase()))
+        .forEach(row => {
+          const supplier = (row.supplier || row.supplier_name || 'NADIR').replace(/"/g, '""');
+          csvContent += `"${row.vault}","${row.metal_type}","${row.denomination}","${supplier}",${row.ready_qty},${row.total_weight_grams}\n`;
+        });
     } else if (reportType === 'reconciliation') {
       csvContent += "Case ID,Serial Number,Denomination,Expected Location,Mismatch Location,Reason Code,Resolved By,Resolved At\n";
       reportData.forEach(row => {
@@ -6780,9 +6903,9 @@ const [migrationApproved, setMigrationApproved] = useState(false);
 
   // Dispatches to the right loader for the selected report type -- audit uses its
   // own search/pagination endpoint, everything else keeps using fetchReport.
-  const loadReport = (type: string, method?: string) => {
+  const loadReport = (type: string, method?: string, supplier?: string) => {
     if (type === 'audit') fetchAuditLogs(1);
-    else fetchReport(type, method);
+    else fetchReport(type, method, supplier);
   };
 
   const fetchAuditLogDetail = async (logId: number) => {
@@ -6837,7 +6960,9 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   // Gap Analysis's KPI/Exceptions/Cost Analysis/Cost Variance/Movement reports, all of
   // which are wired into the same GET /api/reports/export?type=...&format=... endpoint.
   const handleExportOfficialReport = (reportKind: 'inventory_balance' | 'transactions' | 'reconciliation' | 'kpis' | 'exceptions' | 'cost_analysis' | 'cost_variance' | 'movements', format: 'csv' | 'xlsx' | 'pdf') => {
-    downloadBlob(`${API_BASE}/reports/export?type=${reportKind}&format=${format}`, `${reportKind}_report.${format}`);
+    let qs = `type=${reportKind}&format=${format}`;
+    if (filterSupplier) qs += `&supplier=${encodeURIComponent(filterSupplier)}`;
+    downloadBlob(`${API_BASE}/reports/export?${qs}`, `${reportKind}_report.${format}`);
   };
 
   const toggleLanguage = () => {
@@ -6858,18 +6983,47 @@ const [migrationApproved, setMigrationApproved] = useState(false);
       return 'SILVER';
     }
 
-    // 2. Check Turkey indicators (explicit type, origin, brand, refiner, serial, vendor) - DO NOT conflate ownership with gold type!
     const origin = (item?.origin || item?.origin_country || item?.country_of_origin || '').toLowerCase();
     const brand = (item?.brand_name || item?.brand || '').toLowerCase();
     const refiner = (item?.refiner_name || item?.refiner || '').toLowerCase();
     const serial = (item?.serial_number || item?.serial || '').toUpperCase();
-    const vendor = (item?.vendor_name || item?.vendor_code || item?.supplier || '').toLowerCase();
 
+    // 2. Check explicit Swiss indicators (Product code, Country of Origin, Swiss Mint Brands, Serials)
+    if (
+      pType === 'SWISS' ||
+      origin.includes('switz') ||
+      origin.includes('swiss') ||
+      origin === 'ch' ||
+      prod.includes('swiss') ||
+      prod.includes('swis') ||
+      prod.includes('-ch') ||
+      brand.includes('valcambi') ||
+      brand.includes('pamp') ||
+      brand.includes('argor') ||
+      brand.includes('suisse') ||
+      brand.includes('metalor') ||
+      brand.includes('kfh custom mint') ||
+      refiner.includes('valcambi') ||
+      refiner.includes('pamp') ||
+      refiner.includes('argor') ||
+      refiner.includes('suisse') ||
+      refiner.includes('swiss') ||
+      serial.startsWith('VAL-') ||
+      serial.startsWith('PAMP-') ||
+      serial.startsWith('ARG-') ||
+      serial.startsWith('CH-') ||
+      serial.startsWith('SWISS-')
+    ) {
+      return 'SWISS';
+    }
+
+    // 3. Check explicit Turkey indicators (Product code, Country of Origin, Turkey Refiners, Serials)
     if (
       pType === 'TURKEY' ||
       origin.includes('turk') ||
       origin === 'tr' ||
       prod.includes('turk') ||
+      prod.includes('-tr') ||
       brand.includes('nadir') ||
       brand.includes('igr') ||
       brand.includes('istanbul') ||
@@ -6882,9 +7036,6 @@ const [migrationApproved, setMigrationApproved] = useState(false);
       refiner.includes('turk') ||
       refiner.includes('kuveyt') ||
       refiner.includes('ahlatci') ||
-      vendor.includes('nadir') ||
-      vendor.includes('turk') ||
-      vendor.includes('igr') ||
       serial.startsWith('TR-') ||
       serial.startsWith('TURK-') ||
       serial.startsWith('TK-') ||
@@ -6897,34 +7048,13 @@ const [migrationApproved, setMigrationApproved] = useState(false);
       return 'TURKEY';
     }
 
-    if (pType === 'SWISS') return 'SWISS';
-
-    // 3. Check Swiss indicators
-    if (
-      origin.includes('switz') ||
-      origin.includes('swiss') ||
-      prod.includes('swiss') ||
-      prod.includes('swis') ||
-      brand.includes('valcambi') ||
-      brand.includes('pamp') ||
-      brand.includes('argor') ||
-      brand.includes('suisse') ||
-      brand.includes('metalor') ||
-      refiner.includes('valcambi') ||
-      refiner.includes('pamp') ||
-      refiner.includes('argor') ||
-      refiner.includes('suisse') ||
-      refiner.includes('swiss') ||
-      vendor.includes('valcambi') ||
-      vendor.includes('swiss') ||
-      vendor.includes('pamp') ||
-      serial.startsWith('VAL-') ||
-      serial.startsWith('PAMP-') ||
-      serial.startsWith('ARG-') ||
-      serial.startsWith('CH-') ||
-      serial.startsWith('SWISS-')
-    ) {
+    // 4. Fallback by vendor origin if product is unspecified
+    const vendor = (item?.vendor_name || item?.vendor_code || item?.supplier || '').toLowerCase();
+    if (vendor.includes('valcambi') || vendor.includes('pamp') || vendor.includes('swiss') || vendor.includes('switz')) {
       return 'SWISS';
+    }
+    if (vendor.includes('nadir') || vendor.includes('turk') || vendor.includes('igr')) {
+      return 'TURKEY';
     }
 
     return 'SWISS';
@@ -8654,12 +8784,23 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                   <i className="fa-solid fa-scale-balanced"></i> {((execBoard?.total_precious_weight_kg ?? 0) * 1000).toLocaleString()} g • {execBoard?.total_precious_qty ?? 0} {currentLang === 'en' ? 'Bars Total' : 'سبيكة إجمالاً'}
                 </span>
               </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '8px', fontSize: '10px' }}>
-                <span style={{ padding: '2px 6px', borderRadius: '4px', background: 'rgba(212, 175, 55, 0.15)', color: '#D4AF37', border: '1px solid rgba(212, 175, 55, 0.3)' }} title="KFH Turkey Offline">
-                  🇹🇷 TR: {(execBoard?.total_precious?.kfh_turkey_offline_weight_kg ?? execBoard?.turkey_weight_kg ?? 0).toFixed(1)}kg ({execBoard?.total_precious?.kfh_turkey_offline_qty ?? execBoard?.turkey_qty ?? 0})
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', marginTop: '8px', fontSize: '11px' }}>
+                <span style={{ padding: '3px 8px', borderRadius: '4px', background: 'rgba(212, 175, 55, 0.2)', color: '#D4AF37', border: '1px solid rgba(212, 175, 55, 0.4)', fontWeight: 700 }} title="Swiss Gold Bars">
+                  🇨🇭 {currentLang === 'en' ? 'Swiss Gold:' : 'ذهب سويسري:'} {(execBoard?.swiss_gold_weight_kg ?? execBoard?.total_precious?.swiss_gold_weight_kg ?? 0).toFixed(3)}kg ({execBoard?.swiss_gold_qty ?? execBoard?.total_precious?.swiss_gold_qty ?? 0})
                 </span>
+                <span style={{ padding: '3px 8px', borderRadius: '4px', background: 'rgba(245, 158, 11, 0.2)', color: 'var(--accent-orange)', border: '1px solid rgba(245, 158, 11, 0.4)', fontWeight: 700 }} title="Turkey Gold Bars">
+                  🇹🇷 {currentLang === 'en' ? 'Turkey Gold:' : 'ذهب تركي:'} {(execBoard?.turkey_gold_weight_kg ?? execBoard?.total_precious?.turkey_gold_weight_kg ?? 0).toFixed(3)}kg ({execBoard?.turkey_gold_qty ?? execBoard?.total_precious?.turkey_gold_qty ?? 0})
+                </span>
+                <span style={{ padding: '3px 8px', borderRadius: '4px', background: 'rgba(148, 163, 184, 0.2)', color: '#cbd5e1', border: '1px solid rgba(148, 163, 184, 0.4)', fontWeight: 700 }} title="Silver Bars">
+                  ⚪ {currentLang === 'en' ? 'Silver:' : 'فضة:'} {(execBoard?.silver_weight_kg ?? execBoard?.total_precious?.silver_weight_kg ?? 0).toFixed(3)}kg ({execBoard?.silver_qty ?? execBoard?.total_precious?.silver_qty ?? 0})
+                </span>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '6px', fontSize: '10px' }}>
                 <span style={{ padding: '2px 6px', borderRadius: '4px', background: 'rgba(0, 155, 78, 0.15)', color: 'var(--kfh-green)', border: '1px solid rgba(0, 155, 78, 0.3)' }} title="KFH Kuwait">
                   🇰🇼 KFH: {(execBoard?.total_precious?.kfh_kuwait_weight_kg ?? execBoard?.kfh_weight_kg ?? 0).toFixed(1)}kg ({execBoard?.total_precious?.kfh_kuwait_qty ?? execBoard?.kfh_qty ?? 0})
+                </span>
+                <span style={{ padding: '2px 6px', borderRadius: '4px', background: 'rgba(212, 175, 55, 0.15)', color: '#D4AF37', border: '1px solid rgba(212, 175, 55, 0.3)' }} title="KFH Turkey Offline Consignment">
+                  🇹🇷 Consignment: {(execBoard?.total_precious?.kfh_turkey_offline_weight_kg ?? execBoard?.turkey_weight_kg ?? 0).toFixed(1)}kg ({execBoard?.total_precious?.kfh_turkey_offline_qty ?? execBoard?.turkey_qty ?? 0})
                 </span>
                 <span style={{ padding: '2px 6px', borderRadius: '4px', background: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', border: '1px solid rgba(59, 130, 246, 0.3)' }} title="Customers">
                   👥 Cust: {(execBoard?.total_precious?.customers_weight_kg ?? execBoard?.custody_weight_kg ?? 0).toFixed(1)}kg ({execBoard?.total_precious?.customers_qty ?? execBoard?.custody_qty ?? 0})
@@ -15053,23 +15194,61 @@ const [migrationApproved, setMigrationApproved] = useState(false);
         <section className={`screen-viewport ${activeTab === 'screen-spatial' ? 'active' : ''}`}>
           <div className="split-grid-3">
             <div className="glass-card" style={{ gridColumn: 'span 3' }}>
-              <h3>{t('spatial_title')}</h3>
-              <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>{t('spatial_subtitle')}</p>
-              
-              
-              {/* Legend of slot status colors */}
-              <div style={{ display: 'flex', gap: '20px', marginBottom: '20px', padding: '12px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', border: '1px solid var(--surface-border)', width: 'fit-content' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px' }}>
-                  <div className="slot-node" style={{ cursor: 'default', pointerEvents: 'none', margin: 0, width: '22px', flexShrink: 0 }}></div>
-                  <span style={{ fontWeight: '500' }}>{currentLang === 'en' ? 'Empty Slot' : 'خانة فارغة'}</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', marginBottom: '16px' }}>
+                <div>
+                  <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <i className="fa-solid fa-warehouse" style={{ color: 'var(--kfh-green)' }}></i>
+                    {t('spatial_title')}
+                  </h3>
+                  <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: '4px 0 0 0' }}>{t('spatial_subtitle')}</p>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px' }}>
-                  <div className="slot-node occupied-gold" style={{ cursor: 'default', pointerEvents: 'none', margin: 0, width: '22px', flexShrink: 0 }}></div>
-                  <span style={{ fontWeight: '500' }}>{currentLang === 'en' ? 'Occupied with Gold' : 'ممتلئة بالذهب'}</span>
+
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  {canModify('spatial_map') && (
+                    <button
+                      className="btn"
+                      style={{ background: 'linear-gradient(135deg, #D97706 0%, #B45309 100%)', color: '#fff', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px', borderRadius: '8px', border: 'none', cursor: 'pointer' }}
+                      onClick={() => {
+                        const readyItem = inventoryList.find((i: any) => i.status !== 'WITHDRAWN' && i.status !== 'INACTIVE') || inventoryList[0];
+                        if (readyItem) {
+                          openRelocateModal(readyItem);
+                        } else {
+                          alert(currentLang === 'en' ? 'No active bars available to relocate.' : 'لا توجد سبائك نشطة متاحة للنقل.');
+                        }
+                      }}
+                    >
+                      <i className="fa-solid fa-arrows-up-down-left-right"></i>
+                      {currentLang === 'en' ? 'Relocate Bar Coordinate' : 'نقل إحداثيات سبيكة'}
+                    </button>
+                  )}
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px' }}>
-                  <div className="slot-node occupied-silver" style={{ cursor: 'default', pointerEvents: 'none', margin: 0, width: '22px', flexShrink: 0 }}></div>
-                  <span style={{ fontWeight: '500' }}>{currentLang === 'en' ? 'Occupied with Silver' : 'ممتلئة بالفضة'}</span>
+              </div>
+              
+              {/* Informative interactive helper bar */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', marginBottom: '20px', padding: '12px 16px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', border: '1px solid var(--surface-border)' }}>
+                {/* Legend of slot status colors */}
+                <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px' }}>
+                    <div className="slot-node" style={{ cursor: 'default', pointerEvents: 'none', margin: 0, width: '22px', flexShrink: 0 }}></div>
+                    <span style={{ fontWeight: '500' }}>{currentLang === 'en' ? 'Empty Slot' : 'خانة فارغة'}</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px' }}>
+                    <div className="slot-node occupied-gold" style={{ cursor: 'default', pointerEvents: 'none', margin: 0, width: '22px', flexShrink: 0 }}></div>
+                    <span style={{ fontWeight: '500' }}>{currentLang === 'en' ? 'Occupied (Gold)' : 'ممتلئة (ذهب)'}</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px' }}>
+                    <div className="slot-node occupied-silver" style={{ cursor: 'default', pointerEvents: 'none', margin: 0, width: '22px', flexShrink: 0 }}></div>
+                    <span style={{ fontWeight: '500' }}>{currentLang === 'en' ? 'Occupied (Silver)' : 'ممتلئة (فضة)'}</span>
+                  </div>
+                </div>
+
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <i className="fa-solid fa-hand-pointer" style={{ color: 'var(--accent-gold)' }}></i>
+                  <span>
+                    {currentLang === 'en' 
+                      ? 'Tip: Drag any bar to an empty slot or click a shelf to relocate bars interactively.' 
+                      : 'إرشاد: اسحب أي سبيكة إلى خانة فارغة أو انقر على الرف لنقل السبائك بشكل تفاعلي.'}
+                  </span>
                 </div>
               </div>
 
@@ -15083,14 +15262,27 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     <div key={idx} className="shelf-box" onClick={() => {
                       setSelectedShelf(loc);
                     }}>
-                      <div className="shelf-header">
+                      <div 
+                        className="shelf-header" 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedShelf(loc);
+                        }}
+                        style={{ cursor: 'pointer' }}
+                        title={currentLang === 'en' ? 'Click to view full shelf overview' : 'انقر لعرض كامل الرف'}
+                      >
                         <h4>{translateDb(loc.name.replace('Shelf Row', 'الرف صف'))}</h4>
-                        <span className="occupancy-percentage">{loc.occupancy}%</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span className="occupancy-percentage">{loc.occupancy}%</span>
+                          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                            <i className="fa-solid fa-layer-group"></i> {currentLang === 'en' ? 'Shelf' : 'الرف'}
+                          </span>
+                        </div>
                       </div>
                       <div className="shelf-slots-grid" style={{ gridTemplateColumns: `repeat(${loc.slots.length}, 1fr)` }}>
                         {[...loc.slots]
                           .map((slot: any) => {
-                            const itemsInSlot = inventoryList.filter((i: any) => i.location_id === slot.location_id);
+                            const itemsInSlot = inventoryList.filter((i: any) => i.location_id === slot.location_id && i.status !== 'WITHDRAWN' && i.status !== 'INACTIVE');
                             const serialText = itemsInSlot.map((i: any) => i.serial_number).join(', ') || '';
                             return { slot, itemsInSlot, serialText };
                           })
@@ -15100,24 +15292,61 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                             const barItem = (itemsInSlot && itemsInSlot.length > 0) ? itemsInSlot[0] : null;
                             const isOccupied = slot.occupied || hasBar;
                             const slotMetal = String(barItem?.metal || slot.metal_type || slot.type || 'gold').toLowerCase();
-                            const slotText = `${slot.slot_bin}: ${serialText || (isOccupied ? `${slot.item_count || 1} bars` : (currentLang === 'en' ? 'Empty' : 'فارغ'))}`;
+                            const slotText = `${slot.slot_bin}: ${serialText || (isOccupied ? `${slot.item_count || 1} bars` : (currentLang === 'en' ? 'Empty (Click to view slot)' : 'فارغ (انقر لعرض الخانة)'))}`;
+                            const isDragTarget = dragOverLocationId === slot.location_id;
+                            const isSelectedSource = movingBar && barItem && movingBar.item_id === barItem.item_id;
+
                             return (
                               <div
                                 key={sIdx}
-                                className={`slot-node ${isOccupied ? (slotMetal.includes('silver') ? 'occupied-silver' : 'occupied-gold') : ''}`}
+                                className={`slot-node ${isOccupied ? (slotMetal.includes('silver') ? 'occupied-silver' : 'occupied-gold') : ''} ${isDragTarget ? 'drop-target-hover' : ''} ${isSelectedSource ? 'selected-source' : ''}`}
                                 title={slotText}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setSelectedShelf(loc);
+                                draggable={canModify('spatial_map') && hasBar}
+                                onDragStart={(e) => {
                                   if (hasBar && barItem) {
-                                    setSelectedBar({
-                                      ...barItem,
-                                      slot_bin: slot.slot_bin,
-                                      location_context: `${loc.name} > ${slot.slot_bin}`
-                                    });
+                                    e.dataTransfer.setData('text/plain', String(barItem.item_id));
+                                    setDraggedBar(barItem);
                                   }
                                 }}
-                                style={{ position: 'relative', cursor: 'pointer' }}
+                                onDragEnd={() => {
+                                  setDraggedBar(null);
+                                  setDragOverLocationId(null);
+                                }}
+                                onDragOver={(e) => {
+                                  e.preventDefault();
+                                  e.dataTransfer.dropEffect = 'move';
+                                  if (dragOverLocationId !== slot.location_id) {
+                                    setDragOverLocationId(slot.location_id);
+                                  }
+                                }}
+                                onDragLeave={() => {
+                                  if (dragOverLocationId === slot.location_id) {
+                                    setDragOverLocationId(null);
+                                  }
+                                }}
+                                onDrop={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  setDragOverLocationId(null);
+                                  const itemIdStr = e.dataTransfer.getData('text/plain');
+                                  const itmId = Number(itemIdStr) || (draggedBar ? (draggedBar.item_id || draggedBar.ItemId) : null);
+                                  if (itmId) {
+                                    const sourceItem = inventoryList.find((x: any) => x.item_id === itmId) || draggedBar;
+                                    if (sourceItem) {
+                                      openRelocateModal(sourceItem, slot.location_id);
+                                    }
+                                  }
+                                }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  // Show ONLY available serial and denomination in THIS slot
+                                  setSelectedSlot({
+                                    shelf: loc,
+                                    slot: slot,
+                                    items: itemsInSlot
+                                  });
+                                }}
+                                style={{ position: 'relative', cursor: hasBar ? 'grab' : 'pointer' }}
                               />
                             );
                           })}
@@ -15130,9 +15359,10 @@ const [migrationApproved, setMigrationApproved] = useState(false);
 
           </div>
 
+          {/* SHELF DETAIL MODAL */}
           {selectedShelf && (
             <div className="modal-overlay active" onClick={() => setSelectedShelf(null)}>
-              <div className="glass-card modal-content-box" onClick={e => e.stopPropagation()} style={{ maxWidth: '650px', width: '90%' }}>
+              <div className="glass-card modal-content-box" onClick={e => e.stopPropagation()} style={{ maxWidth: '750px', width: '92%' }}>
                 <div className="modal-header">
                   <h3>{t('modal_shelf_title')}: {translateDb(selectedShelf.name)}</h3>
                   <span className="modal-close-btn" onClick={() => setSelectedShelf(null)}>&times;</span>
@@ -15144,13 +15374,13 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                         <th>{currentLang === 'en' ? 'Slot / Bin' : 'الخانة / الدرج'}</th>
                         <th>{currentLang === 'en' ? 'Bar Serial Number' : 'الرقم التسلسلي'}</th>
                         <th>{currentLang === 'en' ? 'Denomination Details' : 'تفاصيل الوزن والعيار'}</th>
-                        <th style={{ width: '160px', textAlign: 'center' }}>{currentLang === 'en' ? 'Action' : 'العمليات'}</th>
+                        <th style={{ width: '220px', textAlign: 'center' }}>{currentLang === 'en' ? 'Action' : 'العمليات'}</th>
                       </tr>
                     </thead>
                     <tbody>
                       {selectedShelf.slots
                         .map((slot: any) => {
-                          const itemsInSlot = inventoryList.filter((i: any) => i.location_id === slot.location_id);
+                          const itemsInSlot = inventoryList.filter((i: any) => i.location_id === slot.location_id && i.status !== 'WITHDRAWN' && i.status !== 'INACTIVE');
                           const serialText = itemsInSlot.map((i: any) => i.serial_number).join(', ') || '';
                           const detailsText = itemsInSlot.map((i: any) => `${i.metal} - ${i.denomination}`).join(', ') || (slot.occupied ? `${slot.item_count || 1} bars` : '-');
                           return { slot, itemsInSlot, serialText, detailsText };
@@ -15168,7 +15398,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                                 backgroundColor: isRowSelected ? 'rgba(168, 85, 247, 0.15)' : '' 
                               }}
                               onClick={() => {
-                                if (hasBar) {
+                                if (hasBar && barItem) {
                                   setSelectedBar({
                                     ...barItem,
                                     slot_bin: slot.slot_bin,
@@ -15178,32 +15408,44 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                               }}
                             >
                               <td style={{ position: 'relative' }}>
-                                {slot.slot_bin}
-                                {hasBar && (
-                                  <span style={{ position: 'absolute', opacity: 0, left: 0, top: 0, width: '100%', height: '100%', cursor: 'pointer' }}>
-                                    {slot.slot_bin}: {serialText}
-                                  </span>
-                                )}
+                                <strong>{slot.slot_bin}</strong>
                               </td>
                               <td><strong>{serialText || (currentLang === 'en' ? 'Empty' : 'فارغ')}</strong></td>
                               <td>{detailsText}</td>
                               <td style={{ textAlign: 'center' }}>
                                 <div style={{ display: 'flex', gap: '6px', justifyContent: 'center', alignItems: 'center' }}>
-                                  {hasBar && (
-                                    <button 
-                                      className="btn btn-primary"
-                                      style={{ padding: '4px 8px', fontSize: '11px' }}
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setSelectedBar({
-                                          ...barItem,
-                                          slot_bin: slot.slot_bin,
-                                          location_context: `${selectedShelf.name} > ${slot.slot_bin}`
-                                        });
-                                      }}
-                                    >
-                                      <i className="fa-solid fa-eye"></i> {currentLang === 'en' ? 'View' : 'عرض'}
-                                    </button>
+                                  {hasBar && barItem && (
+                                    <>
+                                      <button 
+                                        className="btn btn-primary"
+                                        style={{ padding: '4px 8px', fontSize: '11px' }}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setSelectedBar({
+                                            ...barItem,
+                                            slot_bin: slot.slot_bin,
+                                            location_context: `${selectedShelf.name} > ${slot.slot_bin}`
+                                          });
+                                        }}
+                                        title={currentLang === 'en' ? 'View Details' : 'عرض التفاصيل'}
+                                      >
+                                        <i className="fa-solid fa-eye"></i> {currentLang === 'en' ? 'View' : 'عرض'}
+                                      </button>
+
+                                      {canModify('spatial_map') && (
+                                        <button 
+                                          className="btn"
+                                          style={{ padding: '4px 8px', fontSize: '11px', background: 'linear-gradient(135deg, #D97706 0%, #B45309 100%)', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            openRelocateModal(barItem);
+                                          }}
+                                          title={currentLang === 'en' ? 'Move Bar to Another Location' : 'نقل السبيكة إلى موقع آخر'}
+                                        >
+                                          <i className="fa-solid fa-arrows-up-down-left-right"></i> {currentLang === 'en' ? 'Move' : 'نقل'}
+                                        </button>
+                                      )}
+                                    </>
                                   )}
                                   <button 
                                     className="btn btn-danger"
@@ -15212,6 +15454,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                                       e.stopPropagation();
                                       handleDeleteLocation(slot.location_id);
                                     }}
+                                    title={currentLang === 'en' ? 'Delete Slot' : 'حذف الخانة'}
                                   >
                                     <i className="fa-solid fa-trash-can"></i> {currentLang === 'en' ? 'Delete' : 'حذف'}
                                   </button>
@@ -15247,7 +15490,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       </div>
                       <div>
                         <strong style={{ color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Status:' : 'الحالة:'}</strong>{' '}
-                        <span className={`badge badge-${selectedBar.status.toLowerCase()}`}>{translateDb(selectedBar.status)}</span>
+                        <span className={`badge badge-${selectedBar.status?.toLowerCase()}`}>{translateDb(selectedBar.status)}</span>
                       </div>
                       <div>
                         <strong style={{ color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Ownership:' : 'الملكية:'}</strong>{' '}
@@ -15271,9 +15514,23 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                           <span style={{ fontWeight: '600' }}>{(selectedBar.production_cost_kwd || selectedBar.average_purchase_cost).toFixed(3)} KWD</span>
                         </div>
                       )}
-                      <div style={{ gridColumn: 'span 2', marginTop: '4px', paddingTop: '8px', borderTop: '1px solid rgba(255, 255, 255, 0.05)' }}>
-                        <strong style={{ color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Location Context:' : 'سياق الموقع:'}</strong>{' '}
-                        <span style={{ color: 'var(--text-primary)', fontWeight: '500' }}>{selectedBar.location_context || selectedBar.location}</span>
+                      <div style={{ gridColumn: 'span 2', marginTop: '4px', paddingTop: '8px', borderTop: '1px solid rgba(255, 255, 255, 0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                        <div>
+                          <strong style={{ color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Location Context:' : 'سياق الموقع:'}</strong>{' '}
+                          <span style={{ color: 'var(--text-primary)', fontWeight: '500' }}>{selectedBar.location_context || selectedBar.location}</span>
+                        </div>
+
+                        {canModify('spatial_map') && (
+                          <button
+                            type="button"
+                            className="btn"
+                            style={{ background: 'linear-gradient(135deg, #D97706 0%, #B45309 100%)', color: '#fff', fontSize: '11px', padding: '6px 12px', borderRadius: '6px', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
+                            onClick={() => openRelocateModal(selectedBar)}
+                          >
+                            <i className="fa-solid fa-arrows-up-down-left-right"></i>
+                            {currentLang === 'en' ? 'Move to Another Location' : 'نقل إلى موقع آخر'}
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -15326,6 +15583,479 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                       <i className="fa-solid fa-plus"></i> {currentLang === 'en' ? 'Add Slot' : 'إضافة خانة'}
                     </button>
                   </div>
+                </div>
+              </div>
+            </div>
+          )}
+          {/* SLOT DETAIL MODAL (SHOWS ONLY AVAILABLE SERIAL AND DENOMINATION IN THIS SLOT) */}
+          {selectedSlot && (
+            <div className="modal-overlay active" onClick={() => setSelectedSlot(null)}>
+              <div className="glass-card modal-content-box" onClick={e => e.stopPropagation()} style={{ maxWidth: '640px', width: '92%', padding: '24px' }}>
+                <div className="modal-header" style={{ borderBottom: '1px solid var(--surface-border)', paddingBottom: '14px', marginBottom: '16px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div style={{ 
+                      width: '36px', 
+                      height: '36px', 
+                      borderRadius: '8px', 
+                      background: selectedSlot.items?.length > 0 ? 'linear-gradient(135deg, #D4AF37 0%, #AA7C11 100%)' : 'rgba(255, 255, 255, 0.06)', 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      justifyContent: 'center',
+                      color: selectedSlot.items?.length > 0 ? '#000' : 'var(--text-muted)',
+                      fontSize: '16px'
+                    }}>
+                      <i className={`fa-solid ${selectedSlot.items?.length > 0 ? 'fa-cubes-stacked' : 'fa-inbox'}`}></i>
+                    </div>
+                    <div>
+                      <h3 style={{ margin: 0, fontSize: '18px', color: 'var(--text-primary)' }}>
+                        {currentLang === 'en' ? 'Slot Inventory Details' : 'تفاصيل محتويات الخانة'}
+                      </h3>
+                      <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                        {translateDb(selectedSlot.shelf.name)} &rsaquo; <strong>{selectedSlot.slot.slot_bin}</strong>
+                      </div>
+                    </div>
+                  </div>
+                  <span className="modal-close-btn" onClick={() => setSelectedSlot(null)}>&times;</span>
+                </div>
+
+                {/* COORDINATE LOCATION BANNER */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', padding: '12px', background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--surface-border)', borderRadius: '8px', marginBottom: '18px' }}>
+                  <div>
+                    <div style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>{currentLang === 'en' ? 'Shelf Row' : 'صف الرف'}</div>
+                    <div style={{ fontSize: '13px', fontWeight: 'bold', color: 'var(--text-primary)', marginTop: '2px' }}>{translateDb(selectedSlot.shelf.name)}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>{currentLang === 'en' ? 'Slot Bin' : 'الخانة / الدرج'}</div>
+                    <div style={{ fontSize: '13px', fontWeight: 'bold', color: 'var(--accent-gold)', marginTop: '2px' }}>{selectedSlot.slot.slot_bin}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>{currentLang === 'en' ? 'Available Items' : 'العدد المتاح'}</div>
+                    <div style={{ fontSize: '13px', fontWeight: 'bold', color: selectedSlot.items?.length > 0 ? 'var(--kfh-green)' : 'var(--text-muted)', marginTop: '2px' }}>
+                      {selectedSlot.items?.length > 0 
+                        ? `${selectedSlot.items.length} ${currentLang === 'en' ? 'Bar(s)' : 'سبيكة'}` 
+                        : (currentLang === 'en' ? 'Empty' : 'فارغ')}
+                    </div>
+                  </div>
+                </div>
+
+                {/* SHOWING ONLY THE SERIAL AND DENOMINATION IN THIS SLOT */}
+                {selectedSlot.items?.length === 0 ? (
+                  <div style={{ padding: '32px 20px', textAlign: 'center', background: 'rgba(255, 255, 255, 0.01)', border: '1px dashed var(--surface-border)', borderRadius: '8px', marginBottom: '18px' }}>
+                    <i className="fa-regular fa-folder-open" style={{ fontSize: '32px', color: 'var(--text-muted)', marginBottom: '12px', display: 'block' }}></i>
+                    <h4 style={{ margin: '0 0 6px 0', fontSize: '15px', color: 'var(--text-primary)' }}>
+                      {currentLang === 'en' ? 'No Bars in this Slot' : 'لا توجد سبائك في هذه الخانة'}
+                    </h4>
+                    <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-muted)' }}>
+                      {currentLang === 'en' ? 'This slot coordinate is currently empty and available for placement.' : 'هذا الموقع فارغ ومتاح حالياً لنقل أو إيداع السبائك إليه.'}
+                    </p>
+
+                    {canModify('spatial_map') && (
+                      <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', marginTop: '16px' }}>
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          style={{ fontSize: '12px', padding: '6px 14px' }}
+                          onClick={() => {
+                            const readyItem = inventoryList.find((i: any) => i.status !== 'WITHDRAWN' && i.status !== 'INACTIVE') || inventoryList[0];
+                            if (readyItem) {
+                              const targetSlotLocId = selectedSlot.slot.location_id;
+                              setSelectedSlot(null);
+                              openRelocateModal(readyItem, targetSlotLocId);
+                            } else {
+                              alert(currentLang === 'en' ? 'No active bars available to relocate.' : 'لا توجد سبائك نشطة متاحة للنقل.');
+                            }
+                          }}
+                        >
+                          <i className="fa-solid fa-arrows-up-down-left-right"></i> {currentLang === 'en' ? 'Relocate a Bar Here' : 'نقل سبيكة إلى هنا'}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-danger"
+                          style={{ fontSize: '12px', padding: '6px 14px' }}
+                          onClick={() => {
+                            const locId = selectedSlot.slot.location_id;
+                            setSelectedSlot(null);
+                            handleDeleteLocation(locId);
+                          }}
+                        >
+                          <i className="fa-solid fa-trash-can"></i> {currentLang === 'en' ? 'Delete Slot' : 'حذف الخانة'}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '18px' }}>
+                    {selectedSlot.items.map((item: any, iIdx: number) => {
+                      const metalType = String(item.metal || 'Gold').toLowerCase();
+                      const isGold = metalType.includes('gold');
+                      const isSilver = metalType.includes('silver');
+
+                      return (
+                        <div 
+                          key={item.item_id || iIdx}
+                          style={{
+                            padding: '16px',
+                            borderRadius: '8px',
+                            background: isGold 
+                              ? 'linear-gradient(135deg, rgba(212, 175, 55, 0.08) 0%, rgba(170, 124, 17, 0.04) 100%)' 
+                              : isSilver 
+                              ? 'linear-gradient(135deg, rgba(148, 163, 184, 0.1) 0%, rgba(100, 116, 139, 0.05) 100%)'
+                              : 'rgba(255, 255, 255, 0.03)',
+                            border: isGold ? '1px solid rgba(212, 175, 55, 0.3)' : '1px solid rgba(148, 163, 184, 0.3)',
+                            boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+                          }}
+                        >
+                          {/* TOP BAR: SERIAL & STATUS */}
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '12px', paddingBottom: '10px', borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <i className={`fa-solid ${isGold ? 'fa-coins' : 'fa-cube'}`} style={{ color: isGold ? 'var(--accent-gold)' : '#94a3b8', fontSize: '18px' }}></i>
+                              <div>
+                                <div style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>{currentLang === 'en' ? 'Serial Number' : 'الرقم التسلسلي'}</div>
+                                <div style={{ fontSize: '16px', fontWeight: 800, color: isGold ? 'var(--accent-gold)' : '#e2e8f0', letterSpacing: '0.5px', fontFamily: 'monospace' }}>
+                                  {item.serial_number}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                              <span className={`badge badge-${item.status?.toLowerCase() || 'ready'}`} style={{ fontSize: '11px', padding: '4px 8px' }}>
+                                {translateDb(item.status || 'READY')}
+                              </span>
+                              <span style={{ fontSize: '10px', padding: '3px 8px', borderRadius: '4px', background: 'rgba(255,255,255,0.06)', color: 'var(--text-secondary)', border: '1px solid rgba(255,255,255,0.1)' }}>
+                                {translateDb(item.ownership || 'KFH_OWNED')}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* DETAILS: DENOMINATION, METAL, WEIGHT, PURITY */}
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px', fontSize: '13px', marginBottom: '14px' }}>
+                            <div style={{ padding: '8px 10px', background: 'rgba(0,0,0,0.15)', borderRadius: '6px' }}>
+                              <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Denomination & Purity' : 'الوزن والعيار'}</div>
+                              <div style={{ fontWeight: 700, color: 'var(--text-primary)', marginTop: '2px', fontSize: '14px' }}>
+                                {translateDb(item.denomination)} • {item.purity || '999.9'}
+                              </div>
+                            </div>
+
+                            <div style={{ padding: '8px 10px', background: 'rgba(0,0,0,0.15)', borderRadius: '6px' }}>
+                              <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Metal / Brand' : 'المعدن / المصفاة'}</div>
+                              <div style={{ fontWeight: 700, color: 'var(--text-primary)', marginTop: '2px', fontSize: '14px' }}>
+                                {translateDb(item.metal)} ({translateDb(item.origin || item.brand || 'NADIR')})
+                              </div>
+                            </div>
+
+                            {item.customer_account_number && (
+                              <div style={{ padding: '8px 10px', background: 'rgba(0,0,0,0.15)', borderRadius: '6px' }}>
+                                <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Customer Account' : 'حساب العميل'}</div>
+                                <div style={{ fontWeight: 600, color: 'var(--accent-gold)', marginTop: '2px' }}>
+                                  {item.customer_account_number} {item.customer_rim_number ? `(${item.customer_rim_number})` : ''}
+                                </div>
+                              </div>
+                            )}
+
+                            {(item.production_cost_kwd || item.average_purchase_cost) && (
+                              <div style={{ padding: '8px 10px', background: 'rgba(0,0,0,0.15)', borderRadius: '6px' }}>
+                                <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{currentLang === 'en' ? 'Unit Cost' : 'تكلفة الوحدة'}</div>
+                                <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginTop: '2px' }}>
+                                  {(item.production_cost_kwd || item.average_purchase_cost).toFixed(3)} KWD
+                                </div>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* ACTION BUTTONS */}
+                          <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', flexWrap: 'wrap', paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                            {canModify('spatial_map') && (
+                              <button
+                                type="button"
+                                className="btn"
+                                style={{
+                                  padding: '6px 12px',
+                                  fontSize: '12px',
+                                  background: 'linear-gradient(135deg, #D97706 0%, #B45309 100%)',
+                                  color: '#fff',
+                                  border: 'none',
+                                  borderRadius: '6px',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '6px',
+                                  fontWeight: 600
+                                }}
+                                onClick={() => {
+                                  const barToMove = {
+                                    ...item,
+                                    slot_bin: selectedSlot.slot.slot_bin,
+                                    location_context: `${selectedSlot.shelf.name} > ${selectedSlot.slot.slot_bin}`
+                                  };
+                                  setSelectedSlot(null);
+                                  openRelocateModal(barToMove);
+                                }}
+                              >
+                                <i className="fa-solid fa-arrows-up-down-left-right"></i>
+                                {currentLang === 'en' ? 'Move / Relocate Bar' : 'نقل السبيكة'}
+                              </button>
+                            )}
+
+                            <button
+                              type="button"
+                              className="btn btn-secondary"
+                              style={{ padding: '6px 12px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}
+                              onClick={() => {
+                                const barToView = {
+                                  ...item,
+                                  slot_bin: selectedSlot.slot.slot_bin,
+                                  location_context: `${selectedSlot.shelf.name} > ${selectedSlot.slot.slot_bin}`
+                                };
+                                const shelfToOpen = selectedSlot.shelf;
+                                setSelectedSlot(null);
+                                setSelectedBar(barToView);
+                                setSelectedShelf(shelfToOpen);
+                              }}
+                            >
+                              <i className="fa-solid fa-circle-info"></i>
+                              {currentLang === 'en' ? 'Full Bar Details' : 'كامل تفاصيل السبيكة'}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* MODAL FOOTER */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '12px', borderTop: '1px solid var(--surface-border)' }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}
+                    onClick={() => {
+                      const shelfToOpen = selectedSlot.shelf;
+                      setSelectedSlot(null);
+                      setSelectedShelf(shelfToOpen);
+                    }}
+                  >
+                    <i className="fa-solid fa-layer-group"></i>
+                    {currentLang === 'en' ? 'Open Entire Shelf Row' : 'عرض كامل صف الرف'}
+                  </button>
+
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    style={{ fontSize: '12px' }}
+                    onClick={() => setSelectedSlot(null)}
+                  >
+                    {currentLang === 'en' ? 'Close' : 'إغلاق'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* INTERACTIVE RELOCATE BAR MODAL */}
+          {relocateModalOpen && movingBar && (
+            <div className="modal-overlay active" onClick={() => !relocatingLoading && setRelocateModalOpen(false)}>
+              <div className="glass-card modal-content-box" onClick={e => e.stopPropagation()} style={{ maxWidth: '750px', width: '95%', padding: '24px' }}>
+                <div className="modal-header" style={{ borderBottom: '1px solid var(--surface-border)', paddingBottom: '12px', marginBottom: '16px' }}>
+                  <h3 style={{ margin: 0, color: 'var(--kfh-green)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <i className="fa-solid fa-arrows-up-down-left-right"></i>
+                    {currentLang === 'en' ? 'Relocate Bar Coordinate' : 'نقل إحداثيات السبيكة في الخزينة'}
+                  </h3>
+                  <span className="modal-close-btn" onClick={() => !relocatingLoading && setRelocateModalOpen(false)}>&times;</span>
+                </div>
+
+                {/* CURRENT BAR SUMMARY */}
+                <div style={{ padding: '12px 16px', background: 'rgba(212, 175, 55, 0.08)', border: '1px solid rgba(212, 175, 55, 0.3)', borderRadius: '8px', marginBottom: '18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                  <div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                      {currentLang === 'en' ? 'Selected Bar to Relocate:' : 'السبيكة المحددة للنقل:'}
+                    </div>
+                    <div style={{ fontSize: '16px', fontWeight: 800, color: 'var(--accent-gold)' }}>
+                      {movingBar.serial_number || movingBar.SerialNumber}
+                    </div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-primary)', marginTop: '2px' }}>
+                      {translateDb(movingBar.metal || 'Gold')} • {translateDb(movingBar.denomination || '100g')} • {translateDb(movingBar.ownership || 'KFH_OWNED')}
+                    </div>
+                  </div>
+
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                      {currentLang === 'en' ? 'Current Physical Location:' : 'الموقع الحالي:'}
+                    </div>
+                    <span style={{ fontSize: '12px', fontWeight: 700, padding: '3px 8px', borderRadius: '4px', background: 'rgba(239, 68, 68, 0.15)', color: 'var(--accent-red)', border: '1px solid rgba(239, 68, 68, 0.3)', display: 'inline-block', marginTop: '3px' }}>
+                      <i className="fa-solid fa-location-dot"></i> {movingBar.location_context || movingBar.location || `#${movingBar.location_id}`}
+                    </span>
+                  </div>
+                </div>
+
+                {/* TARGET SHELF SELECTOR */}
+                <div style={{ marginBottom: '16px' }}>
+                  <label style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)', display: 'block', marginBottom: '8px' }}>
+                    {currentLang === 'en' ? '1. Select Destination Shelf Row:' : '1. اختر صف الرف المستهدف:'}
+                  </label>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '8px' }}>
+                    {locations.map((loc: any) => {
+                      const isSelected = targetShelfId === loc.id;
+                      return (
+                        <div
+                          key={loc.id}
+                          onClick={() => {
+                            setTargetShelfId(loc.id);
+                            // Auto select first empty slot in this shelf if any
+                            const firstEmpty = loc.slots.find((s: any) => {
+                              const occupied = s.occupied || inventoryList.some((i: any) => i.location_id === s.location_id && i.status !== 'WITHDRAWN' && i.status !== 'INACTIVE');
+                              return !occupied;
+                            });
+                            if (firstEmpty) setTargetLocationId(firstEmpty.location_id);
+                          }}
+                          style={{
+                            padding: '10px 12px',
+                            borderRadius: '8px',
+                            cursor: 'pointer',
+                            transition: 'all 0.2s ease',
+                            border: isSelected ? '2px solid var(--kfh-green)' : '1px solid var(--surface-border)',
+                            background: isSelected ? 'rgba(0, 155, 78, 0.12)' : 'rgba(255, 255, 255, 0.02)',
+                            boxShadow: isSelected ? '0 0 8px rgba(0, 155, 78, 0.3)' : undefined
+                          }}
+                        >
+                          <div style={{ fontSize: '12px', fontWeight: 700, color: isSelected ? 'var(--kfh-green)' : 'var(--text-primary)' }}>
+                            {translateDb(loc.name.replace('Shelf Row', 'الرف صف'))}
+                          </div>
+                          <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                            {loc.occupancy}% {currentLang === 'en' ? 'Occupied' : 'إشغال'} ({loc.slots.length} {currentLang === 'en' ? 'slots' : 'خانة'})
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* TARGET SLOT SELECTOR GRID */}
+                {(() => {
+                  const activeShelf = locations.find((l: any) => l.id === targetShelfId) || locations[0];
+                  if (!activeShelf) return null;
+
+                  return (
+                    <div style={{ marginBottom: '16px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <label style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                          {currentLang === 'en' ? '2. Select Destination Slot Bin:' : '2. اختر الخانة / الدرج المستهدف:'}
+                        </label>
+                        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                          {translateDb(activeShelf.name)}
+                        </span>
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))', gap: '8px', maxHeight: '180px', overflowY: 'auto', padding: '4px' }}>
+                        {activeShelf.slots
+                          .sort((a: any, b: any) => a.slot_bin.localeCompare(b.slot_bin, undefined, { numeric: true, sensitivity: 'base' }))
+                          .map((slot: any) => {
+                            const itemsInSlot = inventoryList.filter((i: any) => i.location_id === slot.location_id && i.status !== 'WITHDRAWN' && i.status !== 'INACTIVE');
+                            const isOccupied = slot.occupied || itemsInSlot.length > 0;
+                            const isCurrentBarSlot = movingBar && movingBar.location_id === slot.location_id;
+                            const isTargetSelected = targetLocationId === slot.location_id;
+                            const occupiedSerial = itemsInSlot.map((i: any) => i.serial_number).join(', ');
+
+                            return (
+                              <div
+                                key={slot.location_id}
+                                onClick={() => {
+                                  if (!isCurrentBarSlot) {
+                                    setTargetLocationId(slot.location_id);
+                                  }
+                                }}
+                                style={{
+                                  padding: '10px 8px',
+                                  borderRadius: '6px',
+                                  textAlign: 'center',
+                                  cursor: isCurrentBarSlot ? 'not-allowed' : 'pointer',
+                                  transition: 'all 0.2s ease',
+                                  border: isTargetSelected
+                                    ? '2px solid #009B4E'
+                                    : isCurrentBarSlot
+                                    ? '1px dashed #ef4444'
+                                    : isOccupied
+                                    ? '1px solid rgba(212, 175, 55, 0.4)'
+                                    : '1px solid rgba(0, 155, 78, 0.4)',
+                                  background: isTargetSelected
+                                    ? 'rgba(0, 155, 78, 0.25)'
+                                    : isCurrentBarSlot
+                                    ? 'rgba(239, 68, 68, 0.08)'
+                                    : isOccupied
+                                    ? 'rgba(212, 175, 55, 0.08)'
+                                    : 'rgba(0, 155, 78, 0.05)',
+                                  opacity: isCurrentBarSlot ? 0.6 : 1
+                                }}
+                              >
+                                <div style={{ fontSize: '12px', fontWeight: 800, color: isTargetSelected ? '#009B4E' : 'var(--text-primary)' }}>
+                                  {slot.slot_bin}
+                                </div>
+                                <div style={{ fontSize: '10px', marginTop: '3px' }}>
+                                  {isCurrentBarSlot ? (
+                                    <span style={{ color: 'var(--accent-red)', fontWeight: 600 }}>{currentLang === 'en' ? 'Current' : 'الموقع الحالي'}</span>
+                                  ) : isTargetSelected ? (
+                                    <span style={{ color: '#009B4E', fontWeight: 700 }}>✓ {currentLang === 'en' ? 'Selected' : 'محدد'}</span>
+                                  ) : isOccupied ? (
+                                    <span style={{ color: 'var(--accent-gold)', fontWeight: 500 }} title={occupiedSerial}>
+                                      {currentLang === 'en' ? 'Occupied' : 'مشغول'}
+                                    </span>
+                                  ) : (
+                                    <span style={{ color: 'var(--kfh-green)', fontWeight: 600 }}>
+                                      {currentLang === 'en' ? 'Empty' : 'فارغ'}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* OPTIONAL NOTES */}
+                <div style={{ marginBottom: '18px' }}>
+                  <label style={{ fontSize: '12px', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+                    {currentLang === 'en' ? 'Relocation Reason / Audit Notes (Optional):' : 'سبب النقل / ملاحظات التدقيق (اختياري):'}
+                  </label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder={currentLang === 'en' ? 'e.g. Vault optimization / inventory re-arrangement' : 'مثال: إعادة ترتيب المخزون / تحسين المساحة'}
+                    value={relocateNotes}
+                    onChange={e => setRelocateNotes(e.target.value)}
+                  />
+                </div>
+
+                {/* ACTIONS */}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', borderTop: '1px solid var(--surface-border)', paddingTop: '14px' }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => setRelocateModalOpen(false)}
+                    disabled={relocatingLoading}
+                  >
+                    {currentLang === 'en' ? 'Cancel' : 'إلغاء'}
+                  </button>
+
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={!targetLocationId || (movingBar && targetLocationId === movingBar.location_id) || relocatingLoading}
+                    onClick={() => handleRelocateBar(movingBar.item_id || movingBar.ItemId, targetLocationId!, relocateNotes)}
+                    style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    {relocatingLoading ? (
+                      <>
+                        <i className="fa-solid fa-spinner fa-spin"></i>
+                        {currentLang === 'en' ? 'Relocating in Ledger...' : 'جاري تسجيل النقل...'}
+                      </>
+                    ) : (
+                      <>
+                        <i className="fa-solid fa-check"></i>
+                        {currentLang === 'en' ? 'Confirm & Move Bar' : 'تأكيد ونقل السبيكة'}
+                      </>
+                    )}
+                  </button>
                 </div>
               </div>
             </div>
@@ -15937,13 +16667,37 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                   </div>
                   <div className="form-group" style={{ marginBottom: 0, minWidth: '150px' }}>
                     <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', fontWeight: '600' }}>{currentLang === 'en' ? 'Valuation Method' : 'طريقة التقييم'}</label>
-                    <select value={valuationMethod} onChange={e => { setValuationMethod(e.target.value); loadReport('valuation', e.target.value); }} style={{ width: '100%', padding: '10px', borderRadius: '8px', background: 'var(--bg-secondary)', border: '1px solid var(--surface-border)', color: '#000' }}>
+                    <select value={valuationMethod} onChange={e => { setValuationMethod(e.target.value); loadReport('valuation', e.target.value, filterSupplier); }} style={{ width: '100%', padding: '10px', borderRadius: '8px', background: 'var(--bg-secondary)', border: '1px solid var(--surface-border)', color: '#000' }}>
                       <option value="AVERAGE">{currentLang === 'en' ? 'Production Cost' : 'تكلفة الإنتاج'}</option>
                       <option value="FIFO">{currentLang === 'en' ? 'FIFO (First-In First-Out)' : 'الوارد أولاً يصرف أولاً'}</option>
                       <option value="LIFO">{currentLang === 'en' ? 'LIFO (Last-In First-Out)' : 'الوارد أخيراً يصرف أولاً'}</option>
                     </select>
                   </div>
                 </>
+              )}
+
+              {(reportType === 'valuation' || reportType === 'transactions' || reportType === 'inventory_balance' || reportType === 'occupancy') && (
+                <div className="form-group" style={{ marginBottom: 0, minWidth: '160px' }}>
+                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', fontWeight: '600' }}>{t('th_supplier')}</label>
+                  <select
+                    value={filterSupplier}
+                    onChange={e => {
+                      const val = e.target.value;
+                      setFilterSupplier(val);
+                      loadReport(reportType, valuationMethod, val);
+                    }}
+                    style={{ width: '100%', padding: '10px', borderRadius: '8px', background: 'var(--bg-secondary)', border: '1px solid var(--surface-border)', color: '#000' }}
+                  >
+                    <option value="">{currentLang === 'en' ? 'All Suppliers' : 'كافة الموردين'}</option>
+                    {Array.from(new Set([
+                      ...suppliersList.map((s: any) => s.vendor_name).filter(Boolean),
+                      ...reportData.map((r: any) => r.supplier_name || r.supplier || r.brand).filter(Boolean),
+                      'Nadir Gold Refinery', 'Valcambi Suisse', 'Argor-Heraeus', 'Istanbul Gold Refinery', 'PAMP Suisse'
+                    ])).sort().map((sup: string) => (
+                      <option key={sup} value={sup}>{sup}</option>
+                    ))}
+                  </select>
+                </div>
               )}
             </div>
 
@@ -15993,6 +16747,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                             <th>{t('th_metal')}</th>
                             <th>{t('th_denom')}</th>
                             <th>{t('th_weight_grams')}</th>
+                            <th>{t('th_supplier')}</th>
                             <th>{t('th_coords')}</th>
                             <th>{t('th_ownership')}</th>
                             <th>{currentLang === 'en' ? 'Quality / Damage' : 'حالة الجودة / التلف'}</th>
@@ -16003,12 +16758,14 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                           {reportData
                             .filter(i => !filterMetal || i.metal_name === filterMetal)
                             .filter(i => !filterVault || i.ownership_type === filterVault)
+                            .filter(i => !filterSupplier || (i.supplier_name || i.supplier || i.brand || '').toLowerCase().includes(filterSupplier.toLowerCase()))
                             .map((row, idx) => (
                               <tr key={idx}>
                                 <td><strong>{row.serial_number}</strong></td>
                                 <td>{translateDb(row.metal_name)}</td>
                                 <td>{translateDb(row.denomination)}</td>
                                 <td>{row.weight_grams}g</td>
+                                <td><strong>{translateDb(row.supplier_name || row.supplier || row.brand || 'NADIR')}</strong></td>
                                 <td>{translateDb(row.location)}</td>
                                 <td>{translateDb(row.ownership_type)}</td>
                                 <td>
@@ -16104,6 +16861,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                           <tr>
                             <th>{t('th_tx_num')}</th>
                             <th>{t('th_serial')}</th>
+                            <th>{t('th_supplier')}</th>
                             <th>{t('th_tx_type')}</th>
                             <th>{t('th_source_loc')}</th>
                             <th>{t('th_dest_loc')}</th>
@@ -16115,10 +16873,13 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                           </tr>
                         </thead>
                         <tbody>
-                          {reportData.map((row, idx) => (
+                          {reportData
+                            .filter(row => !filterSupplier || (row.supplier_name || row.supplier || '').toLowerCase().includes(filterSupplier.toLowerCase()))
+                            .map((row, idx) => (
                             <tr key={idx}>
                               <td><span style={{ fontSize: '11px', fontFamily: 'monospace' }}>{row.transaction_number?.substring(0, 8)}...</span></td>
                               <td><strong>{row.serial_number}</strong></td>
+                              <td><strong>{translateDb(row.supplier_name || row.supplier || 'NADIR')}</strong></td>
                               <td><span className="badge">{translateDb(row.transaction_type)}</span></td>
                               <td>{translateDb(row.source_vault || 'N/A')} {row.source_location ? `(${translateDb(row.source_location)})` : ''}</td>
                               <td>{translateDb(row.destination_vault || 'N/A')} {row.destination_location ? `(${translateDb(row.destination_location)})` : ''}</td>
@@ -16156,16 +16917,20 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                             <th>{t('th_vault')}</th>
                             <th>{t('th_metal')}</th>
                             <th>{t('th_denom')}</th>
+                            <th>{t('th_supplier')}</th>
                             <th>{t('th_ready_qty')}</th>
                             <th>{t('th_total_weight_g')}</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {reportData.map((row, idx) => (
+                          {reportData
+                            .filter(row => !filterSupplier || (row.supplier || row.supplier_name || '').toLowerCase().includes(filterSupplier.toLowerCase()))
+                            .map((row, idx) => (
                             <tr key={idx}>
                               <td>{translateDb(row.vault)}</td>
                               <td>{translateDb(row.metal_type)}</td>
                               <td>{row.denomination}</td>
+                              <td><strong>{translateDb(row.supplier || row.supplier_name || 'NADIR')}</strong></td>
                               <td><strong>{row.ready_qty}</strong></td>
                               <td>{row.total_weight_grams}</td>
                             </tr>
@@ -16413,6 +17178,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '13px', marginBottom: '18px' }}>
                 <div><strong>{currentLang === 'en' ? 'Type' : 'النوع'}:</strong> <span className="badge">{translateDb(transactionTrace.transaction?.transaction_type)}</span></div>
                 <div><strong>{currentLang === 'en' ? 'Serial' : 'الرقم التسلسلي'}:</strong> {transactionTrace.transaction?.serial_number || '—'}</div>
+                <div><strong>{currentLang === 'en' ? 'Supplier / Brand' : 'المورد / المصفاة'}:</strong> {translateDb(transactionTrace.transaction?.supplier_name || 'NADIR')}</div>
                 <div><strong>{currentLang === 'en' ? 'From' : 'من'}:</strong> {translateDb(transactionTrace.transaction?.source_vault || 'N/A')} {transactionTrace.transaction?.source_location ? `(${translateDb(transactionTrace.transaction.source_location)})` : ''}</div>
                 <div><strong>{currentLang === 'en' ? 'To' : 'إلى'}:</strong> {translateDb(transactionTrace.transaction?.destination_vault || 'N/A')} {transactionTrace.transaction?.destination_location ? `(${translateDb(transactionTrace.transaction.destination_location)})` : ''}</div>
                 <div><strong>{currentLang === 'en' ? 'Ownership' : 'الملكية'}:</strong> {transactionTrace.transaction?.source_ownership} → {transactionTrace.transaction?.destination_ownership}</div>

@@ -1430,7 +1430,7 @@ public static class DbSeeder
     {
         ["Treasury Operations (Maker)"] = new()
         {
-            {"dashboard","READ_ONLY"}, {"pending_actions","READ_WRITE"}, {"spatial_map","READ_ONLY"},
+            {"dashboard","READ_ONLY"}, {"pending_actions","READ_WRITE"}, {"spatial_map","READ_WRITE"},
             {"custody","READ_ONLY"}, {"stocktake","READ_ONLY"}, {"migration","HIDDEN"}, {"reports","READ_ONLY"},
             {"workflows","READ_ONLY"}, {"settings","HIDDEN"}, {"user_admin","HIDDEN"}, {"vault_location","HIDDEN"},
             {"master_data","HIDDEN"}, {"workflow_design","READ_ONLY"}, {"intake","FULL"}, {"rules_engine","HIDDEN"},
@@ -1457,7 +1457,7 @@ public static class DbSeeder
         },
         ["Senior Treasury Manager"] = new()
         {
-            {"dashboard","FULL"}, {"pending_actions","FULL"}, {"spatial_map","READ_ONLY"},
+            {"dashboard","FULL"}, {"pending_actions","FULL"}, {"spatial_map","FULL"},
             {"custody","FULL"}, {"stocktake","READ_ONLY"}, {"migration","HIDDEN"}, {"reports","FULL"},
             {"workflows","FULL"}, {"settings","READ_ONLY"}, {"user_admin","READ_ONLY"}, {"vault_location","READ_ONLY"},
             {"master_data","READ_ONLY"}, {"workflow_design","READ_ONLY"}, {"intake","READ_ONLY"}, {"rules_engine","READ_ONLY"},

@@ -1345,6 +1345,85 @@ public class InventoryRepository : IInventoryRepository
         return true;
     }
 
+    public async Task<(bool success, string message, InventoryItem? item)> RelocateInventoryItemAsync(int itemId, int targetLocationId, string movedBy, string? notes = null)
+    {
+        var item = await _dbContext.InventoryItems
+            .Include(i => i.Location).ThenInclude(l => l!.Vault)
+            .Include(i => i.Product).ThenInclude(p => p!.MetalType)
+            .Include(i => i.Product).ThenInclude(p => p!.Denomination)
+            .FirstOrDefaultAsync(i => i.ItemId == itemId);
+
+        if (item == null)
+        {
+            return (false, "Inventory item not found.", null);
+        }
+
+        if (item.StatusCode == "WITHDRAWN" || item.StatusCode == "INACTIVE")
+        {
+            return (false, $"Cannot relocate bar '{item.SerialNumber}' with status {item.StatusCode}.", item);
+        }
+
+        var destLoc = await _dbContext.InventoryLocations
+            .Include(l => l.Vault)
+            .FirstOrDefaultAsync(l => l.LocationId == targetLocationId);
+
+        if (destLoc == null)
+        {
+            return (false, "Destination location coordinate not found.", item);
+        }
+
+        if (item.LocationId == targetLocationId)
+        {
+            return (false, $"Bar '{item.SerialNumber}' is already stored at destination location {destLoc.Description}.", item);
+        }
+
+        int? sourceLocationId = item.LocationId;
+        string sourceLocDesc = item.Location?.Description ?? (sourceLocationId.HasValue ? $"Location #{sourceLocationId}" : "Unassigned");
+        string destLocDesc = destLoc.Description ?? $"{destLoc.Vault?.VaultName} {destLoc.ZoneRoom} - {destLoc.ShelfRow} > {destLoc.SlotBin}";
+
+        // Update item location in DB
+        item.LocationId = targetLocationId;
+
+        // Record Inventory Transaction
+        var tx = new InventoryTransaction
+        {
+            TransactionNumber = $"RELOC-{Guid.NewGuid().ToString("N")[..8].ToUpper()}",
+            ItemId = item.ItemId,
+            TransactionType = "RELOCATION",
+            SourceLocationId = sourceLocationId,
+            DestinationLocationId = targetLocationId,
+            SourceOwnership = item.OwnershipType,
+            DestinationOwnership = item.OwnershipType,
+            InitiatedBy = movedBy,
+            ApprovedBy = movedBy,
+            TransactionTimestamp = DateTime.UtcNow
+        };
+        _dbContext.InventoryTransactions.Add(tx);
+
+        // Record Chain of Custody Event
+        var custodyEvent = new ChainOfCustodyEvent
+        {
+            ItemId = item.ItemId,
+            EventType = "TRANSFERRED",
+            LocationId = targetLocationId,
+            RecordedBy = movedBy,
+            RecordedAt = DateTime.UtcNow,
+            ReferenceNumber = tx.TransactionNumber,
+            Notes = string.IsNullOrWhiteSpace(notes)
+                ? $"Internal vault relocation from {sourceLocDesc} to {destLocDesc}"
+                : notes
+        };
+        _dbContext.ChainOfCustodyEvents.Add(custodyEvent);
+        await _dbContext.SaveChangesAsync();
+
+        // Record Audit Log
+        await SaveAuditLogAsync(movedBy, "127.0.0.1", "VAULT_SPATIAL_MAP",
+            $"Relocated bar '{item.SerialNumber}' ({item.Product?.MetalType?.MetalName} {item.Product?.Denomination?.Label}) from {sourceLocDesc} to {destLocDesc}",
+            null, "InventoryItem", item.ItemId.ToString());
+
+        return (true, $"Bar {item.SerialNumber} successfully moved to {destLocDesc}.", item);
+    }
+
     public async Task<IEnumerable<InventoryItem>> GetItemsAsync() => await _dbContext.InventoryItems
         .Include(i => i.Product).ThenInclude(p => p!.MetalType)
         .Include(i => i.Product).ThenInclude(p => p!.Denomination)
@@ -1354,8 +1433,8 @@ public class InventoryRepository : IInventoryRepository
         .Include(i => i.Lot).ThenInclude(l => l!.Vendor)
         .ToListAsync();
     public async Task<IEnumerable<CustomerHolding>> GetCustomerHoldingsAsync(int customerId) => await _dbContext.CustomerHoldings.Include(h => h.Customer).Include(h => h.Account).Include(h => h.Item).ThenInclude(i => i!.Product).Where(h => h.CustomerId == customerId).ToListAsync();
-    public async Task<IEnumerable<CustomerHolding>> GetAllCustomerHoldingsAsync() => await _dbContext.CustomerHoldings.Include(h => h.Customer).Include(h => h.Account).Include(h => h.Item).ThenInclude(i => i!.Product).ThenInclude(p => p!.Denomination).Include(h => h.Item).ThenInclude(i => i!.Product).ThenInclude(p => p!.Purity).Include(h => h.Item).ThenInclude(i => i!.Product).ThenInclude(p => p!.MetalType).Include(h => h.Item).ThenInclude(i => i!.Location).ThenInclude(l => l!.Vault).ToListAsync();
-    public async Task<IEnumerable<InventoryTransaction>> GetTransactionsAsync() => await _dbContext.InventoryTransactions.Include(t => t.Item).ThenInclude(i => i!.Product).ThenInclude(p => p!.Denomination).Include(t => t.SourceLocation).ThenInclude(l => l!.Vault).Include(t => t.DestinationLocation).ThenInclude(l => l!.Vault).OrderByDescending(t => t.TransactionTimestamp).ToListAsync();
+    public async Task<IEnumerable<CustomerHolding>> GetAllCustomerHoldingsAsync() => await _dbContext.CustomerHoldings.Include(h => h.Customer).Include(h => h.Account).Include(h => h.Item).ThenInclude(i => i!.Product).ThenInclude(p => p!.Denomination).Include(h => h.Item).ThenInclude(i => i!.Product).ThenInclude(p => p!.Purity).Include(h => h.Item).ThenInclude(i => i!.Product).ThenInclude(p => p!.MetalType).Include(h => h.Item).ThenInclude(i => i!.Product).ThenInclude(p => p!.Brand).Include(h => h.Item).ThenInclude(i => i!.Lot).ThenInclude(l => l!.Vendor).Include(h => h.Item).ThenInclude(i => i!.Location).ThenInclude(l => l!.Vault).ToListAsync();
+    public async Task<IEnumerable<InventoryTransaction>> GetTransactionsAsync() => await _dbContext.InventoryTransactions.Include(t => t.Item).ThenInclude(i => i!.Product).ThenInclude(p => p!.Denomination).Include(t => t.Item).ThenInclude(i => i!.Product).ThenInclude(p => p!.MetalType).Include(t => t.Item).ThenInclude(i => i!.Product).ThenInclude(p => p!.Brand).Include(t => t.Item).ThenInclude(i => i!.Lot).ThenInclude(l => l!.Vendor).Include(t => t.SourceLocation).ThenInclude(l => l!.Vault).Include(t => t.DestinationLocation).ThenInclude(l => l!.Vault).OrderByDescending(t => t.TransactionTimestamp).ToListAsync();
     public async Task<IEnumerable<StocktakeSession>> GetStocktakeSessionsAsync() => await _dbContext.StocktakeSessions.Include(s => s.Vault).ToListAsync();
     public async Task<IEnumerable<MismatchCase>> GetMismatchCasesAsync() => await _dbContext.MismatchCases.Include(c => c.ReconItem).ThenInclude(r => r!.Item).ThenInclude(i => i!.Product).ThenInclude(p => p!.Denomination).Include(c => c.ReconItem).ThenInclude(r => r!.Item).ThenInclude(i => i!.Location).ToListAsync();
     public async Task<IEnumerable<AuditLog>> GetAuditLogsAsync() => await _dbContext.AuditLogs.OrderByDescending(a => a.Timestamp).ToListAsync();
@@ -4705,6 +4784,8 @@ public class InventoryRepository : IInventoryRepository
         var tx = await _dbContext.InventoryTransactions
             .Include(t => t.Item).ThenInclude(i => i!.Product).ThenInclude(p => p!.MetalType)
             .Include(t => t.Item).ThenInclude(i => i!.Product).ThenInclude(p => p!.Denomination)
+            .Include(t => t.Item).ThenInclude(i => i!.Product).ThenInclude(p => p!.Brand)
+            .Include(t => t.Item).ThenInclude(i => i!.Lot).ThenInclude(l => l!.Vendor)
             .Include(t => t.SourceLocation).ThenInclude(l => l!.Vault)
             .Include(t => t.DestinationLocation).ThenInclude(l => l!.Vault)
             .FirstOrDefaultAsync(t => t.TransactionId == transactionId);
@@ -4748,6 +4829,7 @@ public class InventoryRepository : IInventoryRepository
                 serial_number = tx.Item?.SerialNumber,
                 metal_name = tx.Item?.Product?.MetalType?.MetalName,
                 denomination = tx.Item?.Product?.Denomination?.Label,
+                supplier_name = tx.Item?.Lot?.Vendor?.VendorName ?? tx.Item?.RefinerName ?? tx.Item?.Product?.Brand?.BrandName ?? "N/A",
                 source_vault = tx.SourceLocation?.Vault?.VaultName,
                 source_location = tx.SourceLocation?.Description,
                 destination_vault = tx.DestinationLocation?.Vault?.VaultName,

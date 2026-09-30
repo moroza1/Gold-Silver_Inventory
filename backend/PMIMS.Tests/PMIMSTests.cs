@@ -2090,6 +2090,59 @@ public class PMIMSTests
     }
 
     [Fact]
+    public async Task TestVaultRelocation_MovesItemAndRecordsLedgerAndCustodyEvent()
+    {
+        using var setup = CreateContext();
+        await SeedBasicDataAsync(setup.Context);
+
+        var testItem = new InventoryItem
+        {
+            ItemId = 101,
+            SerialNumber = "AU-RELOC-TEST-001",
+            ProductId = 1,
+            LotId = 1,
+            LocationId = 1,
+            OwnershipType = "KFH_OWNED",
+            StatusCode = "READY",
+            GoodDeliveryStatus = "GDL_LISTED",
+            RowVersion = new byte[] { 1, 2, 3 }
+        };
+        setup.Context.InventoryItems.Add(testItem);
+        await setup.Context.SaveChangesAsync();
+
+        var repo = new InventoryRepository(setup.Context);
+
+        // Verify initial location of item #101
+        var item = await setup.Context.InventoryItems.FindAsync(101);
+        Assert.NotNull(item);
+        Assert.Equal(1, item.LocationId);
+
+        // Relocate item #101 from location #1 to location #2
+        var (success, message, relocatedItem) = await repo.RelocateInventoryItemAsync(101, 2, "treasury-maker", "Moving to Shelf 2");
+        Assert.True(success);
+        Assert.NotNull(relocatedItem);
+        Assert.Equal(2, relocatedItem.LocationId);
+
+        // Verify persisted in DB
+        var reloaded = await setup.Context.InventoryItems.FindAsync(101);
+        Assert.NotNull(reloaded);
+        Assert.Equal(2, reloaded.LocationId);
+
+        // Verify InventoryTransaction created
+        var tx = setup.Context.InventoryTransactions.FirstOrDefault(t => t.ItemId == 101 && t.TransactionType == "RELOCATION");
+        Assert.NotNull(tx);
+        Assert.Equal(1, tx.SourceLocationId);
+        Assert.Equal(2, tx.DestinationLocationId);
+        Assert.Equal("treasury-maker", tx.InitiatedBy);
+
+        // Verify ChainOfCustodyEvent created
+        var coc = setup.Context.ChainOfCustodyEvents.FirstOrDefault(c => c.ItemId == 101 && c.EventType == "TRANSFERRED" && c.LocationId == 2);
+        Assert.NotNull(coc);
+        Assert.Equal("treasury-maker", coc.RecordedBy);
+        Assert.Contains("Moving to Shelf 2", coc.Notes);
+    }
+
+    [Fact]
     public async Task TestCustomsOwnerIntakeStage_CreatesCustomsOwnedItems_AndClearsToKfhOwned()
     {
         using var setup = CreateContext();
