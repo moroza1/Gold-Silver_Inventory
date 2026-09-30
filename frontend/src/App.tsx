@@ -1684,6 +1684,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
   const [selectedWfInstance, setSelectedWfInstance] = useState<any>(null);
   const [showWfDetailsModal, setShowWfDetailsModal] = useState(false);
   const [modalComments, setModalComments] = useState('');
+  const [isProcessingWfAction, setIsProcessingWfAction] = useState(false);
 
   // "My Activity" personal dashboard state -- own approval history + own pending queue.
   const [myActivity, setMyActivity] = useState<{
@@ -2628,6 +2629,7 @@ const [migrationApproved, setMigrationApproved] = useState(false);
         fetchReorderThresholds();
         fetchPendingThresholdChanges();
         fetchLowStockAlerts();
+        fetchPendingIntakes();
       } else {
         alert(await describeApiError(res, currentLang, 'Failed to process action', 'فشل تنفيذ الإجراء'));
       }
@@ -6183,22 +6185,24 @@ const [migrationApproved, setMigrationApproved] = useState(false);
     // 3. Client-side duplicate check against in-flight pending intakes
     for (const bar of intakeBars) {
       const sUpper = bar.serial.trim().toUpperCase();
-      const existingInPending = (pendingIntakesList || []).find((pi: any) => {
-        if (!pi.serials_json) return false;
-        try {
-          const parsed = typeof pi.serials_json === 'string' ? JSON.parse(pi.serials_json) : pi.serials_json;
-          if (Array.isArray(parsed)) {
-            return parsed.some((item: any) => (item.serial || item.serial_number)?.toUpperCase() === sUpper);
-          }
-        } catch { }
-        return false;
-      });
+      const existingInPending = (pendingIntakesList || [])
+        .filter((pi: any) => pi.status_code !== 'REJECTED' && pi.status_code !== 'APPROVED' && pi.status_code !== 'CANCELLED' && pi.status_code !== 'COMPLETED')
+        .find((pi: any) => {
+          if (!pi.serials_json) return false;
+          try {
+            const parsed = typeof pi.serials_json === 'string' ? JSON.parse(pi.serials_json) : pi.serials_json;
+            if (Array.isArray(parsed)) {
+              return parsed.some((item: any) => (item.serial || item.serial_number)?.toUpperCase() === sUpper);
+            }
+          } catch { }
+          return false;
+        });
       if (existingInPending) {
         showDiagnosticError({
           titleEn: 'Serial Pending in In-Flight Request',
           titleAr: 'الرقم التسلسلي قيد الاعتماد في طلب آخر',
           message: currentLang === 'en'
-            ? `Serial number "${bar.serial.trim()}" is already pending approval in another intake request (Pending ID: #${existingInPending.pending_id || existingInPending.id || ''}). Submission blocked.`
+            ? `Serial number "${bar.serial.trim()}" is already pending approval in another intake request (Ref: ${existingInPending.shipment_reference || existingInPending.delivery_note || `#${existingInPending.pending_id || ''}`}). Submission blocked.`
             : `الرقم التسلسلي "${bar.serial.trim()}" قيد الاعتماد بالفعل في طلب استلام شحنة آخر. تم إيقاف الإرسال.`,
           functionName: 'handleSubmitUC03Intake',
           screenName: screenLabel,
@@ -9859,7 +9863,9 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                           const sUpper = bar.serial.trim().toUpperCase();
                           const isDuplicateInBatch = sUpper !== '' && intakeBars.filter(b => b.serial.trim().toUpperCase() === sUpper).length > 1;
                           const isDuplicateInInventory = sUpper !== '' && inventoryList.some((i: any) => i.serial_number?.toUpperCase() === sUpper && i.status !== 'EXPORTED');
-                          const isDuplicateInPending = sUpper !== '' && (pendingIntakesList || []).some((pi: any) => {
+                          const isDuplicateInPending = sUpper !== '' && (pendingIntakesList || [])
+                            .filter((pi: any) => pi.status_code !== 'REJECTED' && pi.status_code !== 'APPROVED' && pi.status_code !== 'CANCELLED' && pi.status_code !== 'COMPLETED')
+                            .some((pi: any) => {
                             if (!pi.serials_json) return false;
                             try {
                               const parsed = typeof pi.serials_json === 'string' ? JSON.parse(pi.serials_json) : pi.serials_json;
@@ -10007,7 +10013,9 @@ const [migrationApproved, setMigrationApproved] = useState(false);
                     if (!sUpper) return false;
                     const inBatch = intakeBars.filter(b => b.serial.trim().toUpperCase() === sUpper).length > 1;
                     const inInv = inventoryList.some((i: any) => i.serial_number?.toUpperCase() === sUpper && i.status !== 'EXPORTED');
-                    const inPending = (pendingIntakesList || []).some((pi: any) => {
+                    const inPending = (pendingIntakesList || [])
+                      .filter((pi: any) => pi.status_code !== 'REJECTED' && pi.status_code !== 'APPROVED' && pi.status_code !== 'CANCELLED' && pi.status_code !== 'COMPLETED')
+                      .some((pi: any) => {
                       if (!pi.serials_json) return false;
                       try {
                         const parsed = typeof pi.serials_json === 'string' ? JSON.parse(pi.serials_json) : pi.serials_json;
@@ -21662,15 +21670,20 @@ const [migrationApproved, setMigrationApproved] = useState(false);
           selectedVendorId={intakeVendorId}
           currentLang={currentLang}
           existingSerials={[
-            ...intakeBars.map(b => b.serial.trim()),
-            ...inventoryList.filter((i: any) => i.status !== 'EXPORTED').map((i: any) => (i.serial_number || '').trim()),
-            ...(pendingIntakesList || []).flatMap((pi: any) => {
-              if (!pi.serials_json) return [];
-              try {
-                const parsed = typeof pi.serials_json === 'string' ? JSON.parse(pi.serials_json) : pi.serials_json;
-                return Array.isArray(parsed) ? parsed.map((item: any) => (item.serial || item.serial_number || '').trim()) : [];
-              } catch { return []; }
-            })
+            ...intakeBars.map(b => ({ serial: b.serial.trim(), source: 'table' as const })),
+            ...inventoryList.filter((i: any) => i.status !== 'EXPORTED').map((i: any) => ({ serial: (i.serial_number || '').trim(), source: 'inventory' as const })),
+            ...(pendingIntakesList || [])
+              .filter((pi: any) => pi.status_code !== 'REJECTED' && pi.status_code !== 'APPROVED' && pi.status_code !== 'CANCELLED' && pi.status_code !== 'COMPLETED')
+              .flatMap((pi: any) => {
+                if (!pi.serials_json) return [];
+                try {
+                  const parsed = typeof pi.serials_json === 'string' ? JSON.parse(pi.serials_json) : pi.serials_json;
+                  const refNo = pi.shipment_reference || pi.delivery_note || (pi.pending_id ? `#${pi.pending_id}` : '');
+                  return Array.isArray(parsed)
+                    ? parsed.map((item: any) => ({ serial: (item.serial || item.serial_number || '').trim(), source: 'pending' as const, ref: refNo }))
+                    : [];
+                } catch { return []; }
+              })
           ]}
           denominationPurchasingCosts={denominationPurchasingCosts}
           onUpdatePurchasingCost={(productId: number, cost: number) => {

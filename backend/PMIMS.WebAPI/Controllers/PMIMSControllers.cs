@@ -595,7 +595,8 @@ public partial class PMIMSControllers : ControllerBase
     public async Task<IActionResult> GetPendingIntakes()
     {
         var list = await _repository.GetPendingIntakesAsync();
-        return Ok(list.Select(pi => new {
+        var activePending = list.Where(pi => pi.StatusCode != "REJECTED" && pi.StatusCode != "APPROVED" && pi.StatusCode != "CANCELLED" && pi.StatusCode != "COMPLETED");
+        return Ok(activePending.Select(pi => new {
             pending_id = pi.PendingIntakeId,
             lot_number = pi.LotNumber,
             source_type = pi.SourceType,

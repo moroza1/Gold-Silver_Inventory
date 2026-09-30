@@ -57,6 +57,12 @@ export const getSupplierAffiliatedBrands = (
   return matching.length > 0 ? matching : brands;
 };
 
+interface ExistingSerialDetail {
+  serial: string;
+  source: 'table' | 'inventory' | 'pending' | 'existing';
+  ref?: string;
+}
+
 interface SerialToolsModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -66,7 +72,7 @@ interface SerialToolsModalProps {
   suppliers?: any[];
   selectedVendorId?: number;
   currentLang: string;
-  existingSerials?: string[];
+  existingSerials?: (string | ExistingSerialDetail)[];
   denominationPurchasingCosts?: { [productId: number]: number };
   onUpdatePurchasingCost?: (productId: number, cost: number) => void;
 }
@@ -187,7 +193,17 @@ export const SerialToolsModal: React.FC<SerialToolsModalProps> = ({
       return;
     }
 
-    const existingSet = new Set((existingSerials || []).map(s => s.trim().toUpperCase()));
+    const existingMap = new Map<string, { source: string; ref?: string }>();
+    (existingSerials || []).forEach(item => {
+      if (typeof item === 'string') {
+        const trimmed = item.trim().toUpperCase();
+        if (trimmed) existingMap.set(trimmed, { source: 'existing' });
+      } else if (item && item.serial) {
+        const trimmed = item.serial.trim().toUpperCase();
+        if (trimmed) existingMap.set(trimmed, { source: item.source || 'existing', ref: item.ref });
+      }
+    });
+
     const generatedSet = new Set<string>();
     const items: GeneratedSerialItem[] = [];
 
@@ -204,10 +220,30 @@ export const SerialToolsModal: React.FC<SerialToolsModalProps> = ({
       }
       generatedSet.add(upperSerial);
 
-      if (existingSet.has(upperSerial)) {
+      const dup = existingMap.get(upperSerial);
+      if (dup) {
+        let reason = '';
+        if (dup.source === 'table') {
+          reason = currentLang === 'en'
+            ? `is already listed in the current manifest table on your screen. Click "Remove All" or delete that row first.`
+            : `موجود بالفعل في جدول كشف الشحنة على شاشتك. اضغط "حذف الكل" أو احذف السطر أولاً.`;
+        } else if (dup.source === 'pending') {
+          reason = currentLang === 'en'
+            ? `is already part of an in-flight pending intake request ${dup.ref ? `(Ref: ${dup.ref})` : ''} awaiting Checker approval.`
+            : `مسجل في طلب شحنة قيد الاعتماد ${dup.ref ? `(المرجع: ${dup.ref})` : ''} بانتظار موافقة المدقق.`;
+        } else if (dup.source === 'inventory') {
+          reason = currentLang === 'en'
+            ? `already exists in active vault inventory.`
+            : `مسجل بالفعل في مخزون الخزينة النشط.`;
+        } else {
+          reason = currentLang === 'en'
+            ? `already exists in shipment manifest / records.`
+            : `موجود بالفعل في كشف الشحنة أو السجلات.`;
+        }
+
         alert(currentLang === 'en'
-          ? `Cannot add range: Serial number "${serial}" already exists in the shipment manifest. Duplicate serial numbers are not allowed across all products.`
-          : `لا يمكن إضافة النطاق: الرقم التسلسلي "${serial}" موجود بالفعل في كشف الشحنة. لا يُسمح بتكرار الأرقام التسلسلية لأي فئة.`);
+          ? `Cannot add range: Serial number "${serial}" ${reason}`
+          : `لا يمكن إضافة النطاق: الرقم التسلسلي "${serial}" ${reason}`);
         return;
       }
 
@@ -244,7 +280,7 @@ export const SerialToolsModal: React.FC<SerialToolsModalProps> = ({
       zIndex: 9999,
       padding: '20px'
     }}>
-      <div className="glass-card" style={{ width: '100%', maxWidth: '600px', padding: '24px', position: 'relative' }}>
+      <div className="glass-card" style={{ width: '100%', maxWidth: '760px', maxHeight: '92vh', overflowY: 'auto', padding: '24px', position: 'relative' }}>
         
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--surface-border)', paddingBottom: '12px', marginBottom: '18px' }}>
@@ -270,10 +306,10 @@ export const SerialToolsModal: React.FC<SerialToolsModalProps> = ({
           </p>
 
           {/* Form Fields */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
             
             {/* Column 1: Serial Specification */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', minWidth: 0 }}>
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Serial Prefix' : 'بادئة الرقم التسلسلي'}</label>
                 <input
@@ -341,14 +377,14 @@ export const SerialToolsModal: React.FC<SerialToolsModalProps> = ({
             </div>
 
             {/* Column 2: Metal / Product Specification & Purchasing Value */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', minWidth: 0 }}>
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label style={{ fontSize: '12px', fontWeight: 600 }}>{currentLang === 'en' ? 'Product / Denomination' : 'نوع المنتج / الفئة'}</label>
                 <select
                   className="form-control"
                   value={selectedProductId}
                   onChange={e => setSelectedProductId(parseInt(e.target.value))}
-                  style={{ fontSize: '12px' }}
+                  style={{ fontSize: '12px', width: '100%' }}
                 >
                   {products.map((p: any) => (
                     <option key={p.product_id} value={p.product_id}>
@@ -359,11 +395,11 @@ export const SerialToolsModal: React.FC<SerialToolsModalProps> = ({
               </div>
 
               <div className="form-group" style={{ marginBottom: 0 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '3px' }}>
-                  <label style={{ fontSize: '12px', fontWeight: 600, margin: 0 }}>
-                    {currentLang === 'en' ? 'Refiner / Brand' : 'المصفاة / الماركة'}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '3px', flexWrap: 'wrap', gap: '4px' }}>
+                  <label style={{ fontSize: '12px', fontWeight: 600, margin: 0, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '4px' }}>
+                    <span>{currentLang === 'en' ? 'Refiner / Brand' : 'المصفاة / الماركة'}</span>
                     {currentVendor && !showAllBrands && (
-                      <span style={{ fontSize: '10px', color: 'var(--kfh-green)', fontWeight: 'bold', marginLeft: '5px' }}>
+                      <span style={{ fontSize: '11px', color: 'var(--kfh-green)', fontWeight: 'bold' }}>
                         ({currentVendor.name || currentVendor.vendor_name})
                       </span>
                     )}
@@ -379,7 +415,8 @@ export const SerialToolsModal: React.FC<SerialToolsModalProps> = ({
                         fontSize: '11px',
                         cursor: 'pointer',
                         padding: 0,
-                        textDecoration: 'underline'
+                        textDecoration: 'underline',
+                        whiteSpace: 'nowrap'
                       }}
                     >
                       {showAllBrands
@@ -392,7 +429,7 @@ export const SerialToolsModal: React.FC<SerialToolsModalProps> = ({
                   className="form-control"
                   value={selectedBrandName}
                   onChange={e => setSelectedBrandName(e.target.value)}
-                  style={{ fontSize: '12px' }}
+                  style={{ fontSize: '12px', width: '100%' }}
                 >
                   {displayedBrands.map((b: any) => (
                     <option key={b.brand_id} value={b.brand_name}>
@@ -404,9 +441,11 @@ export const SerialToolsModal: React.FC<SerialToolsModalProps> = ({
 
               {/* Production Cost / Value per Denomination */}
               <div className="form-group" style={{ marginBottom: 0 }}>
-                <label style={{ fontSize: '12px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <i className="fa-solid fa-coins" style={{ color: 'var(--accent-gold)' }}></i>
-                  {currentLang === 'en' ? 'Production Cost / Value (KWD)' : 'تكلفة الإنتاج للفئة (د.ك)'}
+                <label style={{ fontSize: '12px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                    <i className="fa-solid fa-coins" style={{ color: 'var(--accent-gold)' }}></i>
+                    {currentLang === 'en' ? 'Production Cost / Value (KWD)' : 'تكلفة الإنتاج للفئة (د.ك)'}
+                  </span>
                   <span style={{ color: '#EF4444', fontWeight: 'bold' }}>*</span>
                 </label>
                 <div style={{ position: 'relative' }}>
@@ -422,17 +461,18 @@ export const SerialToolsModal: React.FC<SerialToolsModalProps> = ({
                       fontSize: '13px',
                       fontWeight: 'bold',
                       color: 'var(--kfh-green)',
-                      borderColor: !isValidCost && purchasingCost.trim() !== '' ? '#EF4444' : undefined
+                      borderColor: !isValidCost && purchasingCost.trim() !== '' ? '#EF4444' : undefined,
+                      width: '100%'
                     }}
                   />
                 </div>
                 {!isValidCost ? (
-                  <span style={{ fontSize: '11px', color: '#EF4444', marginTop: '3px', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 600 }}>
-                    <i className="fa-solid fa-circle-exclamation"></i>
-                    {currentLang === 'en' ? 'Production cost > 0 is mandatory to add bars.' : 'تكلفة الإنتاج أكبر من 0 إلزامية لإضافة السبائك.'}
+                  <span style={{ fontSize: '11px', color: '#EF4444', marginTop: '4px', display: 'flex', alignItems: 'flex-start', gap: '6px', fontWeight: 600, lineHeight: 1.35, wordBreak: 'break-word' }}>
+                    <i className="fa-solid fa-circle-exclamation" style={{ marginTop: '2px', flexShrink: 0 }}></i>
+                    <span>{currentLang === 'en' ? 'Production cost > 0 is mandatory to add bars.' : 'تكلفة الإنتاج أكبر من 0 إلزامية لإضافة السبائك.'}</span>
                   </span>
                 ) : (
-                  <span style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px', display: 'block' }}>
+                  <span style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px', display: 'block', lineHeight: 1.35 }}>
                     {currentLang === 'en' ? 'Production cost per bar for this denomination in this shipment' : 'تكلفة الإنتاج للسبيكة الواحدة لهذه الفئة في هذه الشحنة'}
                   </span>
                 )}
